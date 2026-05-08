@@ -1,0 +1,37 @@
+{
+  "name": "lingji-ai",
+  "version": "1.0.0",
+  "description": "AI-powered job search pipeline for the Chinese market",
+  "scripts": {
+    "doctor": "node doctor.mjs",
+    "verify": "node verify-pipeline.mjs",
+    "normalize": "node normalize-statuses.mjs",
+    "dedup": "node dedup-tracker.mjs",
+    "merge": "node merge-tracker.mjs",
+    "pdf": "node generate-pdf.mjs",
+    "sync-check": "node cv-sync-check.mjs",
+    "liveness": "node check-liveness.mjs",
+    "scan": "node scan.mjs"
+  },
+  "keywords": [
+    "ai",
+    "job-search",
+    "deepseek",
+    "career",
+    "china"
+  ],
+  "author": "筝筝纸鸢",
+  "homepage": "",
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "better-sqlite3": "^12.9.0",
+    "dotenv": "^16.4.5",
+    "js-yaml": "^4.1.1",
+    "playwright": "^1.58.1"
+  }
+}

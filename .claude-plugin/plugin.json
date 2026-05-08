@@ -1,0 +1,15 @@
+{
+  "name": "lingji-ai",
+  "version": "1.0.0",
+  "description": "筝筝纸鸢 — AI 求职助手",
+  "author": {
+    "name": "筝筝纸鸢"
+  },
+  "skills": [".claude/skills/"],
+  "permissions": {
+    "allow": [
+      "Bash(node:*)",
+      "WebSearch"
+    ]
+  }
+}

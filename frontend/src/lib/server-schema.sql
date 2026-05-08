@@ -1,0 +1,126 @@
+-- Zhiyuan SQLite Schema
+-- Single source of truth for all job search data
+
+CREATE TABLE IF NOT EXISTS applications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  num INTEGER NOT NULL DEFAULT 0,
+  date TEXT NOT NULL DEFAULT '',
+  company TEXT NOT NULL DEFAULT '',
+  role TEXT NOT NULL DEFAULT '',
+  score REAL NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'Evaluated',
+  pdf_generated INTEGER NOT NULL DEFAULT 0,
+  report_path TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(company, role)
+);
+
+CREATE TABLE IF NOT EXISTS reports (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  report_num INTEGER NOT NULL UNIQUE,
+  date TEXT NOT NULL DEFAULT '',
+  company TEXT NOT NULL DEFAULT '',
+  role TEXT NOT NULL DEFAULT '',
+  archetype TEXT NOT NULL DEFAULT '',
+  overall_score REAL NOT NULL DEFAULT 0,
+  legitimacy TEXT NOT NULL DEFAULT '',
+  blocks_json TEXT NOT NULL DEFAULT '{}',
+  keywords_json TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS jds (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  company TEXT NOT NULL DEFAULT '',
+  role TEXT NOT NULL DEFAULT '',
+  source_type TEXT NOT NULL DEFAULT 'paste',
+  source_url TEXT,
+  body TEXT NOT NULL DEFAULT '',
+  keywords_json TEXT NOT NULL DEFAULT '[]',
+  report_id INTEGER REFERENCES reports(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS profiles (
+  id INTEGER PRIMARY KEY DEFAULT 1,
+  data_json TEXT NOT NULL DEFAULT '{}',
+  goals_json TEXT NOT NULL DEFAULT '{}',
+  history_json TEXT NOT NULL DEFAULT '[]',
+  last_updated TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS profile_signals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  source TEXT NOT NULL DEFAULT 'dingwei',
+  signal_type TEXT NOT NULL,
+  content_json TEXT NOT NULL DEFAULT '{}',
+  session_id TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_profile_signals_type ON profile_signals(signal_type);
+CREATE INDEX IF NOT EXISTS idx_profile_signals_created ON profile_signals(created_at);
+
+-- Reference Resumes (user-uploaded exemplary resumes for AI-assisted optimization)
+CREATE TABLE IF NOT EXISTS reference_resumes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT 'paste',
+  sections_json TEXT NOT NULL DEFAULT '[]',
+  raw_text TEXT NOT NULL DEFAULT '',
+  tags TEXT NOT NULL DEFAULT '[]',
+  notes TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- FTS5 full-text index for reference resumes
+CREATE VIRTUAL TABLE IF NOT EXISTS reference_resumes_fts USING fts5(
+  raw_text,
+  content='reference_resumes',
+  content_rowid='id',
+  tokenize='unicode61'
+);
+
+-- Triggers to keep FTS5 index in sync
+CREATE TRIGGER IF NOT EXISTS ref_resumes_ai AFTER INSERT ON reference_resumes BEGIN
+  INSERT INTO reference_resumes_fts(rowid, raw_text) VALUES (new.id, new.raw_text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS ref_resumes_ad AFTER DELETE ON reference_resumes BEGIN
+  INSERT INTO reference_resumes_fts(reference_resumes_fts, rowid, raw_text) VALUES ('delete', old.id, old.raw_text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS ref_resumes_au AFTER UPDATE ON reference_resumes BEGIN
+  INSERT INTO reference_resumes_fts(reference_resumes_fts, rowid, raw_text) VALUES ('delete', old.id, old.raw_text);
+  INSERT INTO reference_resumes_fts(rowid, raw_text) VALUES (new.id, new.raw_text);
+END;
+
+-- Optimization preference tracking (accept/reject events)
+CREATE TABLE IF NOT EXISTS optimization_preferences (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  section_id TEXT NOT NULL,
+  variant_type TEXT NOT NULL,
+  action TEXT NOT NULL,
+  original_text TEXT,
+  optimized_text TEXT,
+  operation TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_opt_prefs_created ON optimization_preferences(created_at);
+
+-- News Cache for homepage industry/company news feed
+CREATE TABLE IF NOT EXISTS news_cache (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  source TEXT NOT NULL,
+  source_name TEXT,
+  title TEXT NOT NULL,
+  summary TEXT,
+  url TEXT,
+  published_at TEXT,
+  cached_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_news_cache_source ON news_cache(source);
+CREATE INDEX IF NOT EXISTS idx_news_cache_cached ON news_cache(cached_at);

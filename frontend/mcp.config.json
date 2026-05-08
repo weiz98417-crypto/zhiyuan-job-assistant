@@ -1,0 +1,23 @@
+{
+  "servers": {
+    "serpapi": {
+      "package": "@serpapi/mcp-server",
+      "env": {
+        "SERPAPI_API_KEY": "env:SERPAPI_API_KEY"
+      },
+      "optional": true
+    },
+    "baidu-map": {
+      "package": "@baidumap/mcp-server-baidu-map",
+      "env": {
+        "BAIDU_MAP_API_KEY": "env:BAIDU_MAP_API_KEY"
+      },
+      "optional": true
+    },
+    "mcp-jobs": {
+      "package": "@iflow-mcp/mergedao-mcp-jobs",
+      "env": {},
+      "optional": true
+    }
+  }
+}
