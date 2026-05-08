@@ -91,33 +91,34 @@ npm run dev
 ## Project Structure
 
 ```
-zhiyuan/
-├── frontend/                    # Next.js frontend application
+├── frontend/                    # Next.js 前端应用
 │   ├── src/
 │   │   ├── app/
-│   │   │   ├── agent/           # Agent chat page
-│   │   │   ├── cv/              # CV optimization + editing
-│   │   │   ├── evaluate/        # JD evaluation
-│   │   │   ├── tracker/         # Application tracker
-│   │   │   ├── interview/       # Interview preparation
-│   │   │   ├── compare/         # Offer comparison
-│   │   │   ├── discover/        # Job discovery
-│   │   │   ├── explore/         # Explore/chat
-│   │   │   ├── profile/         # Career profile (求职画像)
-│   │   │   ├── settings/        # Personal settings
-│   │   │   ├── analytics/       # Pipeline analytics
-│   │   │   └── api/             # 40+ API routes
-│   │   ├── components/          # Shared UI components
-│   │   └── lib/                 # Core libraries
-│   │       ├── agent/           # Agent system (registry, orchestrator, knowledge, tools)
-│   │       ├── judge-engine.ts  # CV optimization prompt pipeline
-│   │       └── server-db.ts     # SQLite data layer
-├── modes/                       # AI prompt modes (zh/ for Chinese)
-├── config/                      # User configuration
-├── templates/                   # CV HTML templates
-├── data/                        # Application data (SQLite)
-├── reports/                     # Evaluation reports
-└── openspec/                    # OpenSpec design artifacts
+│   │   │   ├── agent/           # Agent 对话页
+│   │   │   ├── cv/              # 简历优化 + 编辑页
+│   │   │   ├── evaluate/        # JD 评估页
+│   │   │   ├── tracker/         # 投递追踪页
+│   │   │   ├── interview/       # 面试准备页
+│   │   │   ├── compare/         # Offer 对比页
+│   │   │   ├── discover/        # 职位发现页
+│   │   │   ├── explore/         # 探索对话页
+│   │   │   ├── profile/         # 求职画像页
+│   │   │   ├── settings/        # 个人设置页
+│   │   │   ├── analytics/       # 数据分析页
+│   │   │   └── api/             # 40+ API 路由
+│   │   ├── components/          # 共享 UI 组件
+│   │   └── lib/                 # 核心库
+│   │       ├── agent/           # Agent 系统
+│   │       ├── judge-engine.ts  # 简历优化 Prompt 流水线
+│   │       └── server-db.ts     # SQLite 数据层
+├── modes/                       # AI 提示词模式
+├── config/                      # 用户配置文件
+├── templates/                   # CV HTML 模板
+├── scripts/                     # 批处理与验证脚本 (*.mjs)
+├── dashboard/                   # Go 终端看板
+├── data/                        # 应用数据 (SQLite)
+├── reports/                     # 评估报告
+└── openspec/                    # 设计文档
 ```
 
 ## Disclaimer

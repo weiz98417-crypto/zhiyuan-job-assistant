@@ -122,7 +122,6 @@ npm run dev
 ## 项目结构
 
 ```
-zhiyuan/
 ├── frontend/                    # Next.js 前端应用
 │   ├── src/
 │   │   ├── app/
@@ -144,11 +143,13 @@ zhiyuan/
 │   │       ├── judge-engine.ts  # 简历优化 Prompt 流水线
 │   │       └── server-db.ts     # SQLite 数据层
 ├── modes/                       # AI 提示词模式（zh/ 中文模式）
-├── config/                      # 用户配置
+├── config/                      # 用户配置文件
 ├── templates/                   # CV HTML 模板
+├── scripts/                     # 批处理与验证脚本 (*.mjs)
+├── dashboard/                   # Go 终端看板
 ├── data/                        # 应用数据（SQLite）
 ├── reports/                     # 评估报告
-└── openspec/                    # OpenSpec 设计文档
+└── openspec/                    # 设计文档
 ```
 
 ## 免责声明
