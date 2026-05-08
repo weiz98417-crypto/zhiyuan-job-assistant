@@ -1,6 +1,20 @@
 # 筝筝纸鸢 (Zhiyuan) — AI Job Search Assistant
 
-> **Acknowledgement**: This project is based on the open-source project [career-ops](https://github.com/bengous/career-ops). We have carried out extensive localization for the Chinese job market and significant feature enhancements including an interactive frontend dashboard, AI resume optimization judge engine, agent-based multi-agent architecture, and role-specific writing guides. We are grateful to the original author for making career-ops open source.
+## 🙏 Acknowledgement
+
+This project began as a fork of **[career-ops](https://github.com/bengous/career-ops)** by [Ben Gou's](https://github.com/bengous) — a brilliant open-source AI job search system. The original career-ops laid the foundation: CLI-based pipeline automation, multi-mode evaluation agents, batch processing, and the core philosophy of "AI should help candidates choose companies, not just the other way around."
+
+We built on that foundation and added:
+
+- **Interactive frontend dashboard** (Next.js 16 + React 19) replacing the CLI-only interface
+- **AI resume optimization judge engine** with 4-dimension priority model (Operation × Effort × JD × Reference)
+- **8 role-specific writing templates** auto-detected from career profile
+- **Agent multi-agent architecture** with intent routing, knowledge injection, and tool orchestration
+- **SQLite server-side persistence** for profile, applications, reports, and preferences
+- **China-specific localization**: 五险一金, 税前/税后, 公积金, 试用期, JD signal detection for Chinese hiring culture
+- **40+ REST API endpoints** powering the frontend
+
+Thank you to Ben and all career-ops contributors for making this possible. Standing on the shoulders of open source.
 
 <p align="center">
   <img src="https://img.shields.io/badge/DeepSeek_V4_Pro-4B6BFB?style=flat&logo=deepseek&logoColor=white" alt="DeepSeek V4 Pro">

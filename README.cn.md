@@ -1,6 +1,20 @@
 # 筝筝纸鸢 (Zhiyuan) — AI 求职助手
 
-> **致谢**：本项目基于开源项目 [career-ops](https://github.com/bengous/career-ops)，进行了大量本土化改造与功能增强，包括交互式前端看板、AI 简历优化评判引擎、Agent 多智能体架构、岗位写作模版系统等。感谢原作者将 career-ops 开源。
+## 🙏 致谢
+
+本项目起源于 **[career-ops](https://github.com/bengous/career-ops)** —— 由 [Ben Gou's](https://github.com/bengous) 开发的一个出色的开源 AI 求职系统。原版 career-ops 奠定了基石：CLI 管道自动化、多模式评估 Agent、批处理能力，以及「AI 应该帮候选人挑选公司，而不是反过来」的核心理念。
+
+我们在其基础上做了大量改造与增强：
+
+- **交互式前端看板**（Next.js 16 + React 19），替代纯 CLI 操作
+- **AI 简历优化评判引擎**，四维优先级模型（Operation × Effort × JD × Reference）
+- **8 套岗位写作模版**，从求职画像自动匹配
+- **Agent 多智能体架构**，意图路由 + 知识注入 + 工具编排
+- **SQLite 服务端持久化**，统一管理画像、投递、报告、偏好数据
+- **中国求职市场深度适配**：五险一金、税前/税后、公积金、试用期、JD 信号词检测
+- **40+ REST API 端点**，支撑前端全部功能
+
+感谢 Ben 和所有 career-ops 贡献者。站在开源的肩膀上。
 
 <p align="center">
   <img src="https://img.shields.io/badge/DeepSeek_V4_Pro-4B6BFB?style=flat&logo=deepseek&logoColor=white" alt="DeepSeek V4 Pro">
