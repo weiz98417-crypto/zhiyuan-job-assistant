@@ -1,6 +1,6 @@
-# 12 — Analytics 分析页完整功能拆解
+# 12 -- Analytics 分析页完整功能拆解
 
-> 页面: `frontend/src/app/analytics/page.tsx` (566 行) | 核心算法: `lib/analytics.ts`
+> 页面: `src/app/analytics/page.tsx` (约 566 行) | 核心算法: `lib/analytics.ts` | API: `/api/analytics/*` x 2 | 数据: SQLite (via API)
 
 ---
 
@@ -8,13 +8,33 @@
 
 | # | 功能 | 实现 | 数据源 |
 |---|------|------|--------|
-| 1 | 漏斗图 | `computeFunnel()` | IndexedDB + 状态归一化 |
-| 2 | 分数分布 | 前端分组统计 | IndexedDB |
-| 3 | 周趋势图 | `generateWeeklyData()` | IndexedDB + Date.now() |
-| 4 | 跟进分析 | `analyzeFollowUps()` + `computeUrgency()` | IndexedDB + 日期计算 |
-| 5 | 转化率指标 | 阶段间除法 | IndexedDB |
+| 1 | 漏斗图 | `computeFunnel()` | SQLite applications 表 + 状态归一化 |
+| 2 | 分数分布 | 前端分组统计 | SQLite |
+| 3 | 周趋势图 | `generateWeeklyData()` | SQLite + Date.now() |
+| 4 | 跟进分析 | `analyzeFollowUps()` + `computeUrgency()` | SQLite + 日期计算 |
+| 5 | 转化率指标 | 阶段间除法 | SQLite |
 | 6 | 时间区间切换 | `timeRange: "4w"/"8w"/"all"` | 前端状态 |
-| 7 | AI 洞察 | DeepSeek 生成建议 | 触发条件：数据>5条 + 手动 |
+| 7 | AI 洞察 | DeepSeek 生成建议 | 触发条件：数据 > 5 条 + 手动 |
+| 8 | Pipeline 健康检查 | `/api/analytics/health-check` + `check_pipeline_health` 工具 | DeepSeek 分析 SQLite 数据 |
+| 9 | 周报生成 | `/api/analytics/weekly-report` | DeepSeek + SQLite 聚合 |
+
+---
+
+## 数据架构
+
+```
+Analytics 页面
+├─ 数据加载: 前端通过 Dexie wrapper 读取本地缓存
+│   └─ 唯一数据源: SQLite (后端 scripts/db-write.mjs 写入)
+├─ 指标计算: 纯前端 (lib/analytics.ts)
+│   ├─ computeFunnel()     -- 漏斗分析
+│   ├─ analyzeFollowUps()  -- 跟进建议
+│   └─ computeUrgency()    -- 紧急性评级
+├─ AI 洞察: POST /api/analytics/health-check
+│   └─ DeepSeek 分析 Pipeline 健康状况 → green/yellow/red/gray
+└─ 周报: POST /api/analytics/weekly-report
+    └─ DeepSeek 生成结构化周报
+```
 
 ---
 
@@ -53,7 +73,7 @@ export function computeFunnel(statuses: string[], stageOrder = FUNNEL_STAGES): F
 
 ### 2. 分数分布
 
-前端纯计算，按分数区间分组：
+前端纯计算，按分数区间分组（数据来自 SQLite reports 表）：
 
 | 区间 | 含义 |
 |------|------|
@@ -109,16 +129,16 @@ function computeUrgency(status, daysSinceApp, daysSinceLastFollowup, followupCou
 
 | 等级 | 含义 | 触发条件示例 |
 |------|------|-------------|
-| `urgent` | 立即处理 | 公司已回复且<7天未跟进 |
-| `overdue` | 已超时 | 投递>7天无回复且未跟进 |
+| `urgent` | 立即处理 | 公司已回复且 < 7 天未跟进 |
+| `overdue` | 已超时 | 投递 > 7 天无回复且未跟进 |
 | `waiting` | 等待中 | 投递后正常等待期 |
-| `cold` | 已冷却 | 评估>14天未投递或跟进已达上限 |
+| `cold` | 已冷却 | 评估 > 14 天未投递或跟进已达上限 |
 
 ### 5. 转化率指标
 
-两个基础指标：
-- 评估→投递转化率 = applied/evaluated
-- 投递→面试转化率 = interview/applied
+两个基础指标（数据来自 SQLite）：
+- 评估 → 投递转化率 = applied / evaluated
+- 投递 → 面试转化率 = interview / applied
 
 显示当前值 + 环比变化。
 
@@ -139,4 +159,80 @@ const [timeRange, setTimeRange] = useState<"4w" | "8w" | "all">("8w");
 - 平均分数
 - 最近一周活动
 
-生成 3-5 条针对性建议，如"投递转化率偏低(30%), 建议提高评估分数≥4.0才投递的阈值"。
+生成 3-5 条针对性建议，如"投递转化率偏低(30%), 建议提高评估分数>=4.0才投递的阈值"。
+
+### 8. Pipeline 健康检查 (`/api/analytics/health-check`)
+
+**Agent 工具**: `check_pipeline_health` (query 类工具，`src/lib/agent/tools/query/check-pipeline-health.ts`)
+
+**API 端点**: `POST /api/analytics/health-check`
+
+两种调用路径：
+- **Agent 对话中**: 通过 `check_pipeline_health` 工具 → 读取 SQLite applications 表 → 返回 overdue 列表 + 健康度
+- **Analytics 页面**: 通过 `/api/analytics/health-check` API → DeepSeek 深度分析
+
+**API 输入**：
+```json
+{
+  "pipeline": {
+    "applications": [
+      { "company": "...", "role": "...", "status": "...", "daysSinceApplied": 5, "daysSinceLastActivity": 2 }
+    ]
+  },
+  "thresholds": {
+    "evalWarningPct": 70,
+    "evalDangerPct": 80,
+    "zeroReplyCount": 5,
+    "staleDays": 14
+  }
+}
+```
+
+**API 输出**：
+```json
+{
+  "success": true,
+  "data": {
+    "status": "green",     // green | yellow | red | gray
+    "score": 80,           // 0-100
+    "issues": ["3 份申请超过 14 天无回复，建议跟进"],
+    "suggestions": ["建议暂停新投递，集中跟进现有 Pipeline"]
+  }
+}
+```
+
+**检查维度**：
+- 漏斗分布：各阶段分布是否健康
+- 转化率：投递 → 回复 → 面试的转化是否正常
+- 停滞风险：是否有长期未更新的申请
+- 方向集中度：是否过度集中在某一类岗位
+
+**告警阈值**：
+- 初筛阶段占比 >= 70% → 黄色警告
+- 初筛阶段占比 >= 80% → 红色告警
+- 某方向连续 5+ 次零回复 → 红色告警
+- 申请超过 14 天无活动 → 停滞
+
+### 9. 周报生成 (`/api/analytics/weekly-report`)
+
+`POST /api/analytics/weekly-report` -- DeepSeek 生成结构化周报：
+
+- 本周新增投递数
+- 本周新增面试数
+- 转化率变化趋势
+- 跟进建议
+- 下周行动计划
+
+---
+
+## 前端渲染组件
+
+| 组件 | 功能 | 位置 |
+|------|------|------|
+| 漏斗可视化 | 横向柱状图 + 转化率标签 | 内联渲染 |
+| 分数分布 | 分组柱状条 + 百分比 | 内联渲染 |
+| 周趋势图 | 三线数据表（投递/面试/Offer） | 内联渲染 |
+| 跟进列表 | 按紧急性分组 + 操作按钮 | 内联渲染 |
+| 健康检查面板 | green/yellow/red/gray 配色 + issues 列表 | 内联渲染 |
+| 时间区间切换 | 3 按钮切换组 | 页面顶部 |
+| AI 洞察面板 | 可折叠建议列表 | 内联渲染 |
