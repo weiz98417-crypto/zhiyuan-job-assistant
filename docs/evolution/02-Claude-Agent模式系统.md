@@ -1,129 +1,113 @@
 # 02 — Agent 模式系统
 
-> 所属阶段：Phase 0-1 · 架构核心
+> 当前状态：Web 优先，CLI 可选
 
 ---
 
 ## 1. 概述
 
-筝筝纸鸢采用**混合 Agent 架构**——两套系统共存，各司其职：
+筝筝纸鸢的 Agent 系统经历了两个阶段：
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                 Agent 模式系统 (双轨)                 │
-│                                                     │
-│  ┌─────────────────────┐  ┌──────────────────────┐  │
-│  │  Claude Mode 文件    │  │  TypeScript Agent     │  │
-│  │  (modes/*.md)       │  │  (src/lib/agent/)     │  │
-│  │                     │  │                       │  │
-│  │  · JD 评估           │  │  · 27 工具执行        │  │
-│  │  · 风险检测           │  │  · 5 子 Agent 路由    │  │
-│  │  · PDF 生成           │  │  · ReAct 循环         │  │
-│  │  · 脚本工具链         │  │  · 3 层记忆           │  │
-│  │                     │  │  · 模型降级链          │  │
-│  │  给 Claude Code CLI  │  │  给 Web 前端          │  │
-│  │  用                  │  │  用                   │  │
-│  └─────────────────────┘  └──────────────────────┘  │
-└─────────────────────────────────────────────────────┘
+阶段 1 (2026-05-09 前)              阶段 2 (当前)
+─────────────────────────           ─────────────────────
+Claude Mode 文件 唯一智能层          TypeScript Agent 主力
+                                    Claude Mode 文件 降为 CLI 备选
+需要 Claude Code CLI                 浏览器打开即用
+Markdown = Prompt                    TypeScript ReAct Loop
+改 Prompt = 改文件                   改代码 = 改工具
 ```
 
-- **Claude Mode 文件**：项目最早的智能层，Markdown 即 Prompt，CLI 环境中运行
-- **TypeScript Agent**：Web 前端新增的智能层，服务端 ReAct 循环 + 原生函数调用
+**现在的真实情况：用户打开 `http://localhost:3000/agent`，浏览器里直接对话，完全不需要 Claude Code CLI。**
 
-两者不是替代关系——Claude Mode 文件仍然是 JD 评估脚本、风险扫描脚本、PDF 生成的指令来源。TypeScript Agent 包了一层 Web 可用的壳。
+Claude Mode 文件（`modes/zh/*.md`）保留的原因是：
+1. 它们是评分引擎的"规范文档"——定义了 A-G 7 维怎么打分、风险怎么分类
+2. `scripts/scan-risks.mjs` 等脚本仍然被 TypeScript Agent 的 API 路由调用
+3. 有用户偏好 CLI 工作流时仍可用
 
 ---
 
-## 2. Claude Mode 文件系统
-
-### 设计哲学
-
-无框架引擎——Markdown 文件直接作为 LLM 系统提示词。改 Prompt 不需要改代码。
-
-### Mode 路由机制
-
-```
-用户输入 (CLI / CLAUDE.md)
-    │
-    ▼
-CLAUDE.md (根路由器)
-    │
-    ├── 粘贴 JD/URL  ────→ modes/zh/jianzhi.md (中文评估)
-    │                     ├── jianzhi-risk.md (风险检测)
-    │                     ├── A-G 7维评分
-    │                     └── validate-output + db-write
-    │
-    ├── Offer 评估 ──────→ modes/oferta.md / modes/zh/jianzhi.md
-    ├── 比较 Offers ─────→ modes/ofertas.md
-    ├── 面试准备 ────────→ modes/interview-prep.md
-    ├── 扫描门户 ────────→ modes/scan.md
-    ├── 批量处理 ────────→ modes/pipeline.md
-    ├── PDF 生成 ────────→ modes/zh/pdf.md
-    ├── 求职画像 ────────→ modes/zh/dingwei.md
-    └── 投递追踪 ────────→ modes/tracker.md (通过 scripts)
-```
-
-### 核心文件
-
-| 文件 | 用途 |
-|------|------|
-| `CLAUDE.md` | 根路由，定义所有 Skill 入口 |
-| `modes/zh/jianzhi.md` | 中文 JD 评估 Mode（A-G 7 维） |
-| `modes/zh/jianzhi-risk.md` | 风险检测 Mode（评估前先跑） |
-| `modes/zh/risk-intel.md` | 风险知识库（YAML 格式，30 条黑话 + 10 骗术模式 + 46 薪资基准） |
-| `modes/zh/_shared.md` | 共享评分引擎定义 |
-| `modes/zh/_profile.md` | 用户画像与 Archetype |
-| `modes/oferta.md` | Offer 评估 Mode |
-| `modes/pipeline.md` | 管道处理 Mode |
-| `DATA_CONTRACT.md` | 用户层/系统层数据分界规则 |
-| `risk-intel-triggers.yml` | 31 条正则触发词（给 scan-risks.mjs 用） |
-| `templates/states.yml` | 投递状态规范定义 |
-
----
-
-## 3. TypeScript Agent 系统
+## 2. TypeScript Agent 系统（主力）
 
 ### 架构分层
 
 ```
-页面 (src/app/agent/page.tsx)
-    │
+浏览器 (src/app/agent/page.tsx)
+    │  SSE 流式连接
     ▼
 编排器 (src/lib/agent/orchestrator/index.ts)
-    ├── classifyIntent() → 意图分类 → Agent 选择
-    ├── AgentPromptContext 组装（画像 + 记忆 + 知识）
+    ├── classifyIntent() → 意图分类 → 5 子 Agent 择一
+    ├── AgentPromptContext 组装（画像 + 3 层记忆 + 知识）
     └── agentLoopClient() / agentLoopServer()
     │
     ▼
 Agent Loop (src/lib/agent/loop/)
-    ├── callLLM() → DeepSeek V4 → GLM-4 → Qwen-Long
-    ├── Native function calling → 27 工具
+    ├── callLLM() → DeepSeek V4 → GLM-4 → Qwen-Long (模型降级)
+    ├── Native function calling → 27 TypeScript 工具
     └── Quality gate → checkResultQuality → self-healing
     │
     ▼
 工具注册表 (src/lib/agent/tools/)
-    ├── registry.register("tool_name", definition)
     ├── registry.execute("tool_name", params)
     └── formatResult() → LLM 上下文注入
 ```
 
 ### 5 个子 Agent
 
-| Agent ID | 名称 | 工具白名单 | 触发模式 |
+| Agent ID | 名称 | 工具白名单 | 触发条件 |
 |----------|------|-----------|---------|
-| `general` | 通用助手 | 全部工具 | `.*` (兜底) |
-| `evaluate` | JD 评估 | evaluate_jd_full, analyze_jd_risks, decode_terms, get_profile | 评估/分析 JD |
-| `resume` | 简历优化 | optimize_resume_section, save_resume_section, generate_cv, import_resume, ats_check | 简历/优化/CV |
-| `interview` | 面试教练 | prepare_interview_full, start_interview_session, get_profile | 面试/准备/练习 |
-| `profile` | 求职画像 | mine_profile, self_positioning, get_profile_insights, detect_skill_gaps | 定位/画像/方向 |
+| `general` | 通用助手 | 全部 27 工具 | 兜底（`.*`） |
+| `evaluate` | JD 评估 | evaluate_jd_full, analyze_jd_risks, decode_terms | 评估/分析 JD |
+| `resume` | 简历优化 | optimize_resume_section, save_resume_section, ats_check | 简历/优化/CV |
+| `interview` | 面试教练 | prepare_interview_full, start_interview_session | 面试/准备 |
+| `profile` | 求职画像 | mine_profile, self_positioning, detect_skill_gaps | 定位/画像 |
+
+---
+
+## 3. Claude Mode 文件系统（CLI 备选 / 规范文档）
+
+### 定位
+
+Mode 文件现在扮演两个角色：
+- **规范文档**：定义评分维度、风险分类、评估流程的业务规则
+- **CLI 备选**：如果用户在 Claude Code 中直接跑，仍然能工作
+
+### 核心文件
+
+| 文件 | 角色 |
+|------|------|
+| `CLAUDE.md` | Claude Code 的 Skill 路由入口（CLI 用） |
+| `modes/zh/jianzhi.md` | JD 评估流程定义（规范文档） |
+| `modes/zh/jianzhi-risk.md` | 风险检测流程定义 |
+| `modes/zh/risk-intel.md` | 风险知识库：30 条黑话 + 10 种骗术模式 + 46 薪资基准 |
+| `modes/zh/_shared.md` | 评分引擎规范 |
+| `modes/zh/_profile.md` | 用户画像模板 |
+| `modes/oferta.md` | Offer 评估规范 |
+| `DATA_CONTRACT.md` | 用户层/系统层数据分界规则 |
+| `templates/states.yml` | 投递状态规范定义 |
+
+### Mode 路由（CLI 路径）
+
+```
+CLI 用户 (Claude Code)
+    │
+    ▼
+CLAUDE.md (根路由器)
+    ├── 粘贴 JD/URL  → modes/zh/jianzhi.md → A-G 评估
+    ├── Offer 评估   → modes/oferta.md
+    ├── 面试准备     → modes/interview-prep.md
+    ├── 扫描门户     → modes/scan.md
+    ├── PDF 生成     → modes/zh/pdf.md
+    └── 管道处理     → modes/pipeline.md
+```
 
 ---
 
 ## 4. 评分引擎
 
-### 评分维度定义
+### 评分维度（A-G 7 维）
 
-评分引擎在两个系统中并存：Claude Mode 文件定义规则，TypeScript 工具执行计算。
+评分引擎的业务规则定义在 Claude Mode 文件中，执行在 TypeScript 工具中：
 
 | 维度 | 权重 | 评估内容 |
 |------|------|---------|
@@ -147,36 +131,16 @@ Agent Loop (src/lib/agent/loop/)
 
 ---
 
-## 5. 双重风险检测
+## 5. Web 路径 vs CLI 路径
 
-风险检测在两个系统中都有实现：
+| 场景 | Web (TypeScript Agent) | CLI (Claude Mode) |
+|------|----------------------|-------------------|
+| JD 评估 | evaluate_jd_full 工具 → 浏览器展示 | CLI 直接跑 jianzhi.md |
+| 风险扫描 | /api/agent/scan-risks → scan-risks.mjs | CLI 直接跑 scan-risks.mjs |
+| CV 优化 | optimize_resume_section → 流式选方案 | - （CLI 无此功能） |
+| PDF 导出 | /api/cv/generate-pdf → 下载 | CLI Playwright 渲染 |
+| 面试模拟 | interview engine 状态机 → 实时评分 | - （CLI 无此功能） |
+| 投递追踪 | search_applications 工具 → 表格展示 | CLI 读 SQLite |
+| 求职画像 | get_profile_insights → 卡片展示 | CLI 读 YAML |
 
-```
-JD 文本
-    │
-    ├──[Claude Mode 路径]──→ modes/zh/jianzhi-risk.md
-    │                       └── scan-risks.mjs (正则 + 词典)
-    │
-    └──[TypeScript 路径]──→ /api/agent/scan-risks
-                            └── scan-risks.mjs (3 层检测)
-                                ├── Layer 1: 正则匹配 (31 条)
-                                ├── Layer 2: 词典字面匹配 (30 条黑话)
-                                └── Layer 3: 骗术模式检测 (10 种)
-```
-
-详见 [风险识别引擎](./04-风险识别引擎.md)
-
----
-
-## 6. 双轨协作：谁做什么
-
-| 场景 | Claude Mode 文件 | TypeScript Agent |
-|------|-----------------|------------------|
-| CLI 下评估 JD | ✅ 主力 | - |
-| Web 上评估 JD | 提供评估指令给 evaluate-agent | ✅ 执行工具 + SSE 流式 |
-| 风险扫描 | 定义检测模式 | ✅ 调 scan-risks + 格式化 |
-| CV 优化 | 定义优化策略 | ✅ 调 optimize_resume_section |
-| PDF 生成 | ✅ Playwright 渲染 | 提供 API 端点 |
-| 面试模拟 | 定义题目风格 | ✅ 引擎 + 状态机 + 评分 |
-| 管道管理 | ✅ 读写数据 | 提供 DB 写入 API |
-| 门户扫描 | ✅ 执行扫描 | 提供 API 端点 |
+**结论：Web 是完整产品，CLI 是开发者备选。**
