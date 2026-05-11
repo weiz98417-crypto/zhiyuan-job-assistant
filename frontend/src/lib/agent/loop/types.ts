@@ -23,8 +23,10 @@ export type SSEEvent =
   | { type: "thinking_content"; content: string }
   | { type: "tool_call"; name: string; params: Record<string, unknown> }
   | { type: "tool_result"; name: string; result: string; success: boolean }
+  | { type: "tool_error"; name: string; error: string; recoverable: boolean }
   | { type: "result_quality"; quality: "good" | "empty" | "irrelevant" }
   | { type: "text"; content: string }
+  | { type: "tool_calls"; tool_calls: Array<{ id: string; name: string; arguments: string }> }
   | { type: "done" };
 
 export interface LoopContext {

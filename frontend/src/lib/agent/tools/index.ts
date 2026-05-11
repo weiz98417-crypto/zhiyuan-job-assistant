@@ -7,6 +7,11 @@ import { getProfile } from "./query/get-profile";
 import { getRecentActivity } from "./query/get-recent-activity";
 import { getRecommendations } from "./query/get-recommendations";
 import { getPipelineStatus } from "./query/get-pipeline-status";
+import { decodeBlackMarketTerms } from "./query/decode-terms";
+import { checkPipelineHealth } from "./query/check-pipeline-health";
+import { getProfileInsights } from "./query/get-profile-insights";
+import { detectSkillGaps } from "./query/detect-skill-gaps";
+import { checkATS } from "./query/ats-check";
 
 // Action tools
 import { evaluateJD } from "./action/evaluate-jd";
@@ -18,6 +23,14 @@ import { fetchJDContent } from "./action/fetch-jd-content";
 import { exportFile } from "./action/export-file";
 import { importResume } from "./action/import-resume";
 import { mineProfile } from "./action/mine-profile";
+import { evaluateJDFull } from "./action/evaluate-jd-full";
+import { analyzeJDRisks } from "./action/analyze-jd-risks";
+import { selfPositioning } from "./action/self-positioning";
+import { prepareInterviewFull } from "./action/prepare-interview-full";
+import { compareOffersDeep } from "./action/compare-offers-deep";
+import { startInterviewSession } from "./action/start-interview-session";
+import { optimizeResumeSection } from "./action/optimize-resume-section";
+import { saveResumeSection } from "./action/save-resume-section";
 
 // Interview tools
 import { generateInterviewQuestions, scoreInterviewAnswer } from "./interview-tools";
@@ -40,6 +53,11 @@ registry.register(getProfile);
 registry.register(getRecentActivity);
 registry.register(getRecommendations);
 registry.register(getPipelineStatus);
+registry.register(decodeBlackMarketTerms);
+registry.register(checkPipelineHealth);
+registry.register(getProfileInsights);
+registry.register(detectSkillGaps);
+registry.register(checkATS);
 
 // Action tools
 registry.register(evaluateJD);
@@ -51,6 +69,14 @@ registry.register(fetchJDContent);
 registry.register(exportFile);
 registry.register(importResume);
 registry.register(mineProfile);
+registry.register(evaluateJDFull);
+registry.register(analyzeJDRisks);
+registry.register(selfPositioning);
+registry.register(prepareInterviewFull);
+registry.register(compareOffersDeep);
+registry.register(startInterviewSession);
+registry.register(optimizeResumeSection);
+registry.register(saveResumeSection);
 
 // Interview tools
 registry.register(generateInterviewQuestions);
@@ -64,6 +90,18 @@ registry.register(getDirections);
 registry.register(searchJobs);
 
 /* ── Backward-compatible exports ── */
+
+/**
+ * Populate agent.tools arrays from the ToolRegistry based on agent.toolNames.
+ * Called once at startup after all tools and agents are registered.
+ */
+export function populateAgentTools(agents: Array<{ tools: ToolDefinition[]; toolNames?: string[] }>): void {
+  for (const agent of agents) {
+    if (agent.tools.length > 0) continue; // Already populated (e.g., interview-agent)
+    const names = agent.toolNames?.length ? agent.toolNames : registry.getAll().map((t) => t.name);
+    agent.tools = names.map((n) => registry.get(n)).filter(Boolean) as ToolDefinition[];
+  }
+}
 
 export { registry, ToolRegistry };
 export type { ToolDefinition, ToolResult };

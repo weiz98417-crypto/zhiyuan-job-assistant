@@ -11,7 +11,7 @@ import { DEFAULT_SUGGESTIONS } from "@/components/agent/SuggestionChips";
 import type { SuggestionChip } from "@/components/agent/SuggestionChips";
 import { logInteraction } from "@/lib/agent/memory";
 import { migrateExploreToAgent } from "@/lib/agent/migrate";
-import { agentLoopClient } from "@/lib/agent/loop/client-runner";
+import { agentLoopClient } from "@/lib/agent/loop/client-runner"; // legacy fallback
 import { orchestrate } from "@/lib/agent/orchestrator";
 import type { AgentDefinition } from "@/lib/agent/registry/types";
 import { triggerProfileUpdate } from "@/lib/profile-update";
@@ -84,6 +84,7 @@ function AgentPageInner() {
   const [phase, setPhase] = useState<AgentPhase>(null);
   const [executingTool, setExecutingTool] = useState<string | undefined>(undefined);
   const [thinkingContent, setThinkingContent] = useState<string>("");
+  const [startTime, setStartTime] = useState<number | undefined>(undefined);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<number | null>(null);
   const [undoToast, setUndoToast] = useState<{ id: number; title: string } | null>(null);
@@ -150,7 +151,7 @@ function AgentPageInner() {
       }
       setMounted(true);
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, []);
 
   const sendMessage = useCallback(
@@ -424,6 +425,7 @@ function AgentPageInner() {
       setPhase(null);
       setExecutingTool(undefined);
       setThinkingContent("");
+      setStartTime(undefined);
       const controller = new AbortController();
       abortRef.current = controller;
 
@@ -438,7 +440,7 @@ function AgentPageInner() {
           ? (await getSession(currentSessionId))?.memoryDigest
           : undefined;
 
-        const { agent, systemPrompt, toolWhitelist } = await orchestrate(content, {
+        const { agent, systemPrompt, toolWhitelist, tools } = await orchestrate(content, {
           sessionId: currentSessionId,
           messages: sessionMessages,
           memoryDigest,
@@ -446,74 +448,41 @@ function AgentPageInner() {
 
         setActiveAgent(agent);
 
-        const msgList = updated.map((m) => ({
-          role: m.role,
-          content: m.content,
-        }));
-
         let toolResultInfo: { name: string; result: string; success: boolean } | null = null;
         let assistantText = "";
 
+        const msgList = updated.map((m) => ({ role: m.role, content: m.content }));
+
+        let firstEvent = true;
         for await (const event of agentLoopClient(
-          systemPrompt,
-          msgList,
-          undefined,
-          controller.signal,
-          undefined,
-          toolWhitelist.length > 0 ? toolWhitelist : undefined,
+          systemPrompt, msgList, undefined, controller.signal, undefined,
+          toolWhitelist.length > 0 ? toolWhitelist : undefined, tools,
         )) {
+          if (firstEvent) { setStartTime(Date.now()); firstEvent = false; }
           switch (event.type) {
-            case "phase":
-              setPhase(event.phase);
-              break;
-
-            case "thinking_content":
-              setThinkingContent(event.content);
-              break;
-
-            case "tool_call":
-              setExecutingTool(event.name);
-              break;
-
+            case "phase": setPhase(event.phase); break;
+            case "thinking_content": setThinkingContent(event.content); break;
+            case "tool_call": setExecutingTool(event.name); break;
             case "tool_result":
-              toolResultInfo = {
-                name: event.name,
-                result: event.result,
-                success: event.success,
-              };
-              // Insert tool message card in real-time
-              setMessages((prev) => {
-                const copy = [...prev];
-                const toolMsg: AgentMessage = {
-                  role: "tool",
-                  content: event.result,
-                  toolName: event.name,
-                  toolResult: event.result,
-                  timestamp: new Date().toISOString(),
-                };
-                // Insert before the last element (assistant placeholder)
-                copy.splice(copy.length - 1, 0, toolMsg);
-                return copy;
-              });
-              break;
-
-            case "result_quality":
-              // Quality feedback — if bad, UI shows retry is coming
-              if (event.quality !== "good") {
-                console.log(`[agent] search result quality: ${event.quality}, will retry`);
+              toolResultInfo = { name: event.name, result: event.result, success: event.success };
+              console.log("[agent] tool_result received:", event.name, "success:", event.success, "result:", event.result?.slice(0, 100));
+              // Skip display for conversational tools — LLM presents results naturally
+              const showAsCard = !["optimize_resume_section", "save_resume_section"].includes(event.name);
+              if (showAsCard) {
+                setMessages((prev) => {
+                  const copy = [...prev];
+                  const toolMsg: AgentMessage = { role: "tool", content: event.result, toolResult: event.result, toolName: event.name, timestamp: new Date().toISOString() };
+                  const lastIdx = copy.length - 1;
+                  if (copy[lastIdx]?.role === "tool" && copy[lastIdx]?.toolName === event.name) copy[lastIdx] = toolMsg;
+                  else copy.push(toolMsg);
+                  return copy;
+                });
               }
               break;
-
-            case "text":
-              assistantText += event.content;
-              streamContentRef.current = assistantText;
-              break;
-
-            case "done":
-              // handled after loop
-              break;
-
-
+            case "tool_error": console.warn(`[agent] tool error: ${event.name} recoverable=${event.recoverable} — ${event.error}`); break;
+            case "result_quality": break;
+            case "text": assistantText += event.content; streamContentRef.current = assistantText; break;
+            case "done": break;
           }
         }
 
@@ -842,6 +811,7 @@ function AgentPageInner() {
           executingTool={executingTool}
           thinkingContent={thinkingContent}
           activeAgentId={activeAgent?.id}
+          startTime={startTime}
           suggestions={activeAgent?.suggestions?.length ? activeAgent.suggestions.map(s => ({ icon: null as unknown as React.ReactNode, label: s.label, prompt: s.prompt })) : DEFAULT_SUGGESTIONS}
           onSend={sendMessage}
           emptyState={null}

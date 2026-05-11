@@ -6,12 +6,14 @@ Procesa URLs de ofertas acumuladas en `data/pipeline.md`. El usuario agrega URLs
 
 1. **Leer** `data/pipeline.md` → buscar items `- [ ]` en la sección "Pendientes"
 2. **Para cada URL pendiente**:
-   a. Calcular siguiente `REPORT_NUM` secuencial (leer `reports/`, tomar el número más alto + 1)
+   a. Calcular REPORT_NUM atómicamente: `node scripts/next-report-num.mjs`
    b. **Extraer JD** usando Playwright (browser_navigate + browser_snapshot) → WebFetch → WebSearch
    c. Si la URL no es accesible → marcar como `- [!]` con nota y continuar
-   d. **Ejecutar auto-pipeline completo**: Evaluación A-F → Report .md → PDF (si score >= 3.0) → Tracker
+   d. **Ejecutar auto-pipeline completo**: Evaluación A-G → Report .md → validate → db-write → PDF (si score >= 3.0)
    e. **Mover de "Pendientes" a "Procesadas"**: `- [x] #NNN | URL | Empresa | Rol | Score/5 | PDF ✅/❌`
-3. **Si hay 3+ URLs pendientes**, lanzar agentes en paralelo (Agent tool con `run_in_background`) para maximizar velocidad.
+3. **Orden de procesamiento — SIEMPRE serial para URLs que requieren Playwright:**
+   a. Primero: URLs con API detectable (Greenhouse, Ashby, Lever) → procesar con `node scan.mjs` (HTTP paralelo seguro)
+   b. Después: URLs que requieren Playwright → procesar UNA POR UNA (NUNCA en paralelo)
 4. **Al terminar**, mostrar tabla resumen:
 
 ```
@@ -42,11 +44,9 @@ Procesa URLs de ofertas acumuladas en `data/pipeline.md`. El usuario agrega URLs
 - **PDF**: Si la URL apunta a un PDF, leerlo directamente con Read tool
 - **`local:` prefix**: Leer el archivo local. Ejemplo: `local:jds/linkedin-pm-ai.md` → leer `jds/linkedin-pm-ai.md`
 
-## Numeración automática
+## Numeración automática (atómica)
 
-1. Listar todos los archivos en `reports/`
-2. Extraer el número del prefijo (e.g., `142-medispend...` → 142)
-3. Nuevo número = máximo encontrado + 1
+Ejecutar `node scripts/next-report-num.mjs` para obtener el siguiente número de reporte. Este script usa bloqueo atómico a nivel de sistema de archivos — seguro para uso concurrente.
 
 ## Sincronización de fuentes
 

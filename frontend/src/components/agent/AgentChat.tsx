@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import { motion } from "framer-motion";
 import { Send, Loader2, Check, CheckCircle, X, ChevronDown, ChevronUp, Brain, RefreshCw, Plus, FileText, BookOpen, Trash2, Briefcase } from "lucide-react";
 import { WarmButton, ScoreBadge } from "@/components/design";
@@ -32,6 +32,8 @@ interface AgentChatProps {
   thinkingContent?: string;
   /** Current active agent ID for UI labeling */
   activeAgentId?: string;
+  /** Timestamp when current agent run started (for elapsed timer) */
+  startTime?: number;
 
   suggestions?: SuggestionChip[];
   onSend: (content: string, images?: string[]) => Promise<void>;
@@ -161,19 +163,56 @@ function ThinkingDots() {
   );
 }
 
-/* ── Executing indicator ── */
+/* ── Agent status bar (Claude Code-style) ── */
 
-function ExecutingIndicator({ toolName }: { toolName?: string }) {
+const PHASE_LABELS: Record<string, { emoji: string; label: string }> = {
+  understanding: { emoji: "🧠", label: "识别中" },
+  reflecting: { emoji: "🔄", label: "分析中" },
+  executing: { emoji: "🔧", label: "执行中" },
+  verifying: { emoji: "🔍", label: "验证中" },
+  responding: { emoji: "✏️", label: "输出中" },
+};
+
+function AgentStatusBar({
+  phase,
+  toolName,
+  startTime,
+  tokenCount,
+}: {
+  phase: AgentPhase;
+  toolName?: string;
+  startTime?: number;
+  tokenCount?: number;
+}) {
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    if (!startTime) return;
+    setElapsed(Math.floor((Date.now() - startTime) / 1000));
+    const interval = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startTime) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [startTime]);
+
+  if (!phase || phase === "done") return null;
+
+  const phaseInfo = PHASE_LABELS[phase] || { emoji: "⏳", label: "处理中" };
   const display = toolName ? getToolDisplay(toolName) : null;
+
+  const parts: string[] = [];
+  parts.push(`${phaseInfo.emoji} ${phaseInfo.label}`);
+  if (display && phase === "executing") parts.push(`· ${display.emoji} ${display.label}`);
+  if (startTime && elapsed > 0) parts.push(`⏱ ${elapsed}s`);
+  if (tokenCount && tokenCount > 0) {
+    const k = (tokenCount / 1000).toFixed(1);
+    parts.push(`↓ ${k}k tokens`);
+  }
+
   return (
-    <div className="flex items-center gap-2 text-[var(--color-muted)] text-sm">
-      <Loader2 size={14} className="animate-spin text-[var(--color-primary)]" />
-      <span>调用工具搜索</span>
-      {display && (
-        <span className="text-xs text-[var(--color-text-soft)] bg-[var(--color-primary-muted)] px-1.5 py-0.5 rounded">
-          {display.emoji} {display.label}
-        </span>
-      )}
+    <div className="flex items-center gap-2 text-xs text-[var(--color-muted)] font-mono select-none">
+      <Loader2 size={12} className="animate-spin text-[var(--color-primary)]" />
+      <span>{parts.join("  ")}</span>
     </div>
   );
 }
@@ -228,19 +267,27 @@ function ReportMessage({ content }: { content: string }) {
 }
 
 function mdToHtml(md: string): string {
-  // Extract and replace markdown tables first before other transformations
+  // Extract and replace markdown tables before other transformations
   const tableRegex = /^(\|.+\|\n)+\|[-| :]+\|\n(\|.+\|\n?)+/gm;
   let html = md;
+  const tableClass = "w-full my-3 border-collapse text-sm rounded-[var(--radius-sm)] overflow-hidden";
+  const thClass = "px-3 py-2 text-left font-semibold text-[var(--color-text)] bg-[var(--color-primary-muted)] border-b border-[var(--color-divider)]";
+  const tdClass = "px-3 py-2 border-b border-[var(--color-divider)] text-[var(--color-text-soft)]";
+  const trEvenClass = "bg-[var(--color-bg)]";
+
   html = html.replace(tableRegex, (tableBlock) => {
     const rows = tableBlock.trim().split("\n").filter((l) => l.startsWith("|") && !l.match(/^\|[-| :]+\|$/));
     if (rows.length === 0) return tableBlock;
-    const cells = rows.map((row) =>
-      row.split("|").filter((c, i, arr) => i > 0 && i < arr.length - 1 || (i === 0 && c.trim()) || (i === arr.length - 1 && c.trim()))
-          .map((c) => `<td class='px-2 py-1 border border-[var(--color-divider)] text-xs'>${c.trim()}</td>`).join("")
-    );
-    const firstRow = cells[0]?.replace(/<td/g, "<th class='bg-[var(--color-bg)] font-medium'").replace(/\/td>/g, "/th>") || "";
-    const bodyRows = cells.slice(1).map((r) => `<tr>${r}</tr>`).join("");
-    return `<table class='w-full my-2 border-collapse text-xs'><thead><tr>${firstRow}</tr></thead><tbody>${bodyRows}</tbody></table>`;
+    const cells = rows.map((row, ri) => {
+      const cols = row.split("|").filter((c, i, arr) => i > 0 && i < arr.length - 1 || (i === 0 && c.trim()) || (i === arr.length - 1 && c.trim()));
+      const isHeader = ri === 0;
+      const tag = isHeader ? "th" : "td";
+      const cls = isHeader ? thClass : tdClass;
+      return cols.map((c) => `<${tag} class='${cls}'>${c.trim()}</${tag}>`).join("");
+    });
+    const headerRow = `<tr>${cells[0]}</tr>`;
+    const bodyRows = cells.slice(1).map((r, i) => `<tr class='${i % 2 === 0 ? "" : trEvenClass}'>${r}</tr>`).join("");
+    return `<table class='${tableClass}'><thead>${headerRow}</thead><tbody>${bodyRows}</tbody></table>`;
   });
 
   return html
@@ -261,20 +308,12 @@ function mdToHtml(md: string): string {
 /* ── Animated stream text: replaces ⏳ with pulsing spinner ── */
 
 function AnimatedStreamText({ text }: { text: string }) {
-  const parts = text.split("⏳");
+  const html = mdToHtml(text);
   return (
-    <div className="whitespace-pre-wrap break-words cursor-default">
-      {parts.map((part, i) => (
-        <span key={i}>
-          {part}
-          {i < parts.length - 1 && (
-            <span className="inline-block w-4 h-4 align-middle mx-0.5">
-              <span className="inline-block w-3 h-3 rounded-full border-2 border-[var(--color-primary)] border-t-transparent animate-spin" />
-            </span>
-          )}
-        </span>
-      ))}
-    </div>
+    <div
+      className="stream-container text-sm leading-relaxed cursor-default [&_strong]:text-[var(--color-text)] [&_li]:my-0.5"
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
   );
 }
 
@@ -399,6 +438,7 @@ function MessageBubble({
   executingTool,
   thinkingContent,
   activeAgentId,
+  startTime,
 }: {
   msg: AgentMessage;
   isStreaming: boolean;
@@ -407,6 +447,7 @@ function MessageBubble({
   executingTool?: string;
   thinkingContent?: string;
   activeAgentId?: string;
+  startTime?: number;
 }) {
   const isUser = msg.role === "user";
 
@@ -439,46 +480,39 @@ function MessageBubble({
   function renderStreamContent() {
     if (!showStream) return null;
 
-    switch (phase) {
-      case "understanding":
-        return (
-          <div className="flex items-center gap-2 text-[var(--color-muted)] text-sm">
-            <Brain size={14} className="text-[var(--color-primary)] opacity-60" />
-            <span>{activeAgentId && activeAgentId !== "general" ? `路由到 ${activeAgentId === "interview" ? "面试教练" : activeAgentId === "evaluate" ? "JD 评估" : activeAgentId === "profile" ? "求职画像" : activeAgentId === "resume" ? "简历优化" : activeAgentId}` : "识别中"}</span>
-            <span className="inline-flex gap-0.5">
-              <span className="w-1 h-1 rounded-full bg-[var(--color-primary)] animate-bounce [animation-delay:0ms]" />
-              <span className="w-1 h-1 rounded-full bg-[var(--color-primary)] animate-bounce [animation-delay:150ms]" />
-              <span className="w-1 h-1 rounded-full bg-[var(--color-primary)] animate-bounce [animation-delay:300ms]" />
-            </span>
-          </div>
-        );
-      case "executing":
-        return <ExecutingIndicator toolName={executingTool} />;
-      case "verifying":
-        return (
-          <div className="flex items-center gap-2 text-[var(--color-muted)] text-sm">
-            <CheckCircle size={14} className="text-[var(--color-warning)]" />
-            <span>确认结果正确性</span>
-            <span className="inline-flex gap-0.5">
-              <span className="w-1 h-1 rounded-full bg-[var(--color-warning)] animate-bounce [animation-delay:0ms]" />
-              <span className="w-1 h-1 rounded-full bg-[var(--color-warning)] animate-bounce [animation-delay:150ms]" />
-              <span className="w-1 h-1 rounded-full bg-[var(--color-warning)] animate-bounce [animation-delay:300ms]" />
-            </span>
-          </div>
-        );
-      case "reflecting":
-        return <ReflectingIndicator content={thinkingContent} />;
-      case "responding":
-        if (streamText) {
-          return <AnimatedStreamText text={streamText} />;
-        }
-        return <ThinkingDots />;
-      default:
-        if (streamText) {
-          return <AnimatedStreamText text={streamText} />;
-        }
-        return <ThinkingDots />;
+    const statusBar = (
+      <AgentStatusBar
+        phase={phase}
+        toolName={executingTool}
+        startTime={startTime}
+      />
+    );
+
+    // Show streamText with status bar below if executing
+    if (streamText) {
+      return (
+        <>
+          <AnimatedStreamText text={streamText} />
+          {statusBar}
+        </>
+      );
     }
+
+    // Phase indicator with timer
+    if (phase === "understanding") {
+      return (
+        <>
+          {statusBar}
+          <span className="inline-flex gap-0.5 ml-2">
+            <span className="w-1 h-1 rounded-full bg-[var(--color-primary)] animate-bounce [animation-delay:0ms]" />
+            <span className="w-1 h-1 rounded-full bg-[var(--color-primary)] animate-bounce [animation-delay:150ms]" />
+            <span className="w-1 h-1 rounded-full bg-[var(--color-primary)] animate-bounce [animation-delay:300ms]" />
+          </span>
+        </>
+      );
+    }
+
+    return statusBar || <ThinkingDots />;
   }
 
   const streamContent = renderStreamContent();
@@ -521,6 +555,7 @@ export default function AgentChat({
   executingTool,
   thinkingContent,
   activeAgentId,
+  startTime,
   suggestions,
   onSend,
   emptyState,
@@ -667,6 +702,7 @@ export default function AgentChat({
                 executingTool={isLastAssistant ? executingTool : undefined}
                 thinkingContent={isLastAssistant ? thinkingContent : undefined}
                 activeAgentId={isLastAssistant ? activeAgentId : undefined}
+                startTime={isLastAssistant ? startTime : undefined}
               />
             </div>
           );

@@ -7,7 +7,7 @@
 import type { AgentDefinition, AgentPromptContext } from "@/lib/agent/registry/types";
 
 // ── Tool names used by this agent ──
-const EVAL_TOOL_NAMES = ["evaluate_jd", "fetch_jd_content", "web_search"];
+const EVAL_TOOL_NAMES = ["evaluate_jd", "evaluate_jd_full", "fetch_jd_content", "web_search", "analyze_jd_risks", "decode_black_market_terms"];
 
 // ── Build tools description for the 3 eval tools ──
 const EVAL_TOOLS_DESC = `
@@ -87,7 +87,8 @@ export const evaluateAgent: AgentDefinition = {
   name: "JD 评估",
   description: "评估职位匹配度、公司分析、薪资查询",
   intentPatterns: EVAL_INTENT_PATTERNS,
-  tools: [], // Populated at registration time via tools/index.ts
+  tools: [], // Populated via populateAgentTools()
+  toolNames: EVAL_TOOL_NAMES,
   knowledgeSubset: ["salary-benchmarks", "zhiyuan-levels", "jd-signals"],
   priority: 10,
   suggestions: EVAL_SUGGESTIONS,

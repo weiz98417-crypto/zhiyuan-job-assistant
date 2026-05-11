@@ -15,7 +15,10 @@ export const TOOL_DISPLAY: Record<string, ToolDisplay> = {
   get_recent_activity:  { label: "近期活动",     emoji: "🕐" },
   get_recommendations:  { label: "岗位推荐",     emoji: "💼" },
   get_pipeline_status:  { label: "Pipeline 状态", emoji: "📡" },
-  import_resume:        { label: "导入简历",     emoji: "📥" },
+  import_resume:             { label: "导入简历",     emoji: "📥" },
+  decode_black_market_terms: { label: "黑话解码",     emoji: "🔓" },
+  generate_interview_questions: { label: "生成面试题", emoji: "📝" },
+  score_interview_answer:  { label: "评分面试回答", emoji: "⭐" },
 
   // Action tools
   evaluate_jd:          { label: "评估 JD",      emoji: "🔍" },
@@ -26,6 +29,19 @@ export const TOOL_DISPLAY: Record<string, ToolDisplay> = {
   fetch_jd_content:     { label: "获取 JD 内容", emoji: "📥" },
   export_file:          { label: "导出文件",     emoji: "📦" },
   mine_profile:         { label: "挖掘画像",     emoji: "⛏️" },
+  evaluate_jd_full:     { label: "JD 完整评估",  emoji: "🛡️" },
+  analyze_jd_risks:     { label: "JD 风险扫描",  emoji: "⚠️" },
+  self_positioning:     { label: "自我定位引导", emoji: "🧭" },
+  prepare_interview_full:{ label: "面试全案准备", emoji: "🎯" },
+  compare_offers_deep:  { label: "Offer 深度对比", emoji: "⚖️" },
+  check_pipeline_health:{ label: "管道健康检查", emoji: "📋" },
+  optimize_resume_section:{ label: "简历优化",   emoji: "✏️" },
+  fill_application_form:{ label: "填表助手",     emoji: "📝" },
+  get_profile_insights: { label: "画像洞察",     emoji: "📊" },
+  detect_skill_gaps:    { label: "技能缺口分析", emoji: "🔍" },
+  save_resume_section:      { label: "保存到简历", emoji: "💾" },
+  check_ats_compatibility:  { label: "ATS 兼容检查", emoji: "🤖" },
+  start_interview_session:  { label: "启动模拟面试", emoji: "🎙️" },
 
   // MCP tools
   web_search:           { label: "网络搜索",     emoji: "🌐" },

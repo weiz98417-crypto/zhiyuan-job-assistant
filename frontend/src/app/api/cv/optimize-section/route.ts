@@ -4,6 +4,7 @@ import type { Operation } from "@/types";
 
 const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
 const MODEL = "deepseek-v4-pro";
+const FAST_MODEL = "deepseek-v4-flash";
 
 export async function POST(request: Request) {
   try {
@@ -22,13 +23,14 @@ export async function POST(request: Request) {
       targetJD,
       userProfile,
       referenceIds,
+      fast,
     } = body as {
       sectionId: string;
       sectionContent: string;
       fullCV: Record<string, string>;
       intent?: string;
       operation: Operation;
-      effort: number; // 1-5
+      effort: number;
       enablePlaceholders: boolean;
       enableQuestions: boolean;
       roleDirection: string;
@@ -36,7 +38,10 @@ export async function POST(request: Request) {
       targetJD?: { role: string; company: string; keywords: string[] };
       userProfile?: { headline: string; superpowers: string[]; targetRoles: { name: string; fit: string }[] };
       referenceIds?: number[];
+      fast?: boolean;
     };
+
+    const model = fast ? FAST_MODEL : MODEL;
 
     if (!sectionContent || sectionContent.trim().length < 20) {
       return NextResponse.json(
@@ -78,7 +83,7 @@ export async function POST(request: Request) {
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: MODEL,
+        model,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: `请优化以下简历段落（${sectionId}），生成改写方案，以 JSON 格式输出。` },

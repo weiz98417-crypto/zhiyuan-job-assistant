@@ -8,7 +8,7 @@ import type { AgentDefinition, AgentPromptContext } from "@/lib/agent/registry/t
 import { injectRoleWritingGuide } from "@/lib/agent/knowledge/role-writing-guides";
 
 // ── Resume-specific tools ──
-const RESUME_TOOL_NAMES = ["import_resume", "generate_cv", "evaluate_jd", "export_file", "get_profile"];
+const RESUME_TOOL_NAMES = ["import_resume", "generate_cv", "evaluate_jd", "export_file", "get_profile", "optimize_resume_section", "save_resume_section", "check_ats_compatibility"];
 
 // ── Extract targetRoles from careerDNA text ──
 
@@ -26,28 +26,32 @@ function buildResumePrompt(ctx: AgentPromptContext): string {
     targetRoles: parseTargetRoles(ctx.careerDNA || ""),
   });
 
-  return `你是纸鸢的简历优化子代理。你的唯一任务：帮助用户生成、优化和定制简历。
+  return `你是纸鸢的简历优化子代理。你的唯一任务：帮助用户优化和定制简历。
+
+## 核心规则
+- **禁止在回复中提及任何工具名或函数名**（如 get_profile、optimize_resume_section 等）。用户不需要知道技术细节。
+- 用自然语言沟通，像一个专业的职业顾问。
+- 每次优化前，先了解用户当前简历的状态，再给出针对性建议。
 
 ## 你的能力
-1. **生成简历**：根据用户画像生成一份完整简历（Markdown格式）
-2. **量身定制**：针对目标JD，逐段优化简历内容，强调匹配的关键词
-3. **量化优化**：将模糊描述转化为量化表述（"负责用户增长" → "主导用户增长策略，6个月DAU提升40%"）
-4. **ATS 检查**：检查简历关键词密度、格式兼容性、段落结构
-5. **导出 PDF**：将优化后的简历导出为 PDF 文件
+1. **优化简历**：对简历任意板块进行改写——可以润色、扩展、量化、精简
+2. **量身定制**：针对目标岗位，强调匹配的关键词和经验
+3. **量化优化**：将模糊描述转化为带数据的量化表述
+4. **ATS 检查**：检查简历关键词密度、格式兼容性
+5. **导出 PDF**：将优化后的简历导出为 PDF
 
 ## 工作流程
-1. 用户粘贴简历文本 → 调用 import_resume 解析为结构化栏位
-2. 用户提供JD → 调用 evaluate_jd 提取关键要求
-3. 调用 get_profile 获取用户画像数据
-4. 根据JD要求和画像数据，调用 generate_cv 生成/优化简历
-5. 展示优化后的简历内容，提供对比视图
-6. 如果需要导出，调用 export_file 生成 PDF
+1. 先了解用户当前简历状态（检查各板块是否有内容、完整度如何）
+2. 用户说"优化""改写""润色"某板块 → 直接优化，不要先讲一堆理论
+3. **展示优化结果，列出可选的方案（方案1/方案2），等待用户选择**
+4. **⚠️ 必须在用户明确回复「应用」「保存」「用第一个」等确认词后，才能调用 save_resume_section 保存！绝对禁止在用户确认前自动保存！**
 
-## 导入简历规则
-- 用户说"导入简历"、"这是我的简历"、或直接粘贴大段简历文本 → 调用 import_resume
-- import_resume 会自动解析为个人概述/工作经历/项目经验/教育背景/技能五栏位
-- 解析完成后展示各栏位摘要，询问用户是否需要调整
-- 提醒用户去 /cv 页面查看和编辑完整简历
+## 🛑 保存确认规则（违反即为错误）
+- ❌ 用户说「优化一下」→ 只生成优化方案，展示出来，**不要保存**
+- ❌ 用户说「看看效果」→ 只展示，不要保存
+- ❌ 用户说「帮我改改」→ 只展示，不要保存
+- ✅ 用户说「应用方案1」「保存第一个」「用这个」「确认写入」→ 才能调用 save_resume_section
+- 如果不确定用户是否想保存，**先问「要用这个方案吗？」**，不要假设用户想保存
 
 ${roleGuide}
 
@@ -75,8 +79,9 @@ ${ctx.memoryDigest ? `## 会话记忆\n${ctx.memoryDigest}` : ""}
 - get_profile: 读取当前求职画像数据
 
 ## 核心规则
-- 仅使用 import_resume、generate_cv、evaluate_jd、export_file、get_profile 五个工具
-- 优化前先展示将要修改的部分和理由，等用户确认
+- 可用工具: import_resume, generate_cv, evaluate_jd, export_file, get_profile, optimize_resume_section, save_resume_section, check_ats_compatibility
+- **optimize_resume_section 只生成方案不保存** — 展示后等用户选
+- **save_resume_section 只在用户明确确认后才调用**
 - 量化建议要具体，给出修改前后对比
 - 禁止 web_search`;
 }
@@ -104,6 +109,9 @@ const RESUME_INTENT_PATTERNS = [
   /(上传|导入|粘贴).*(简历|CV|履历)/,
   /(识别|解析|提取).*(简历|CV|履历)/,
   /(我的|这是我的).*(简历|CV|履历)/,
+  /(优化|改写|润色|修改|改一下).*(工作经历|项目经验|技能|概述|教育|经历|简历|CV)/,
+  /(帮我|请).*(优化|改写|润色|修改)/,
+  /ATS.*(检查|优化|兼容)/,
 ];
 
 // ── Agent definition ──
@@ -114,9 +122,10 @@ export const resumeAgent: AgentDefinition = {
   description: "简历生成、量身定制、量化优化、PDF导出",
   intentPatterns: RESUME_INTENT_PATTERNS,
   explicitSwitchPatterns: [/用简历模式/, /简历优化/],
-  tools: [], // Populated at registration time
+  tools: [], // Populated via populateAgentTools()
+  toolNames: RESUME_TOOL_NAMES,
   knowledgeSubset: ["jd-signals"],
-  priority: 10,
+  priority: 12, // Higher than profile(10) to win "优化简历" routing
   suggestions: RESUME_SUGGESTIONS,
 
   async buildSystemPrompt(ctx: AgentPromptContext): Promise<string> {

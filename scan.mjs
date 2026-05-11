@@ -3,14 +3,24 @@
 /**
  * scan.mjs — Zero-token portal scanner
  *
- * Fetches Greenhouse, Ashby, and Lever APIs directly, applies title
- * filters from portals.yml, deduplicates against existing history,
- * and appends new offers to pipeline.md + scan-history.tsv.
+ * Supported ATS platforms (API-based, zero Playwright):
+ *   ✅ Greenhouse (boards.greenhouse.io / job-boards.greenhouse.io)
+ *   ✅ Ashby (jobs.ashbyhq.com)
+ *   ✅ Lever (jobs.lever.co)
  *
- * Zero Claude API tokens — pure HTTP + JSON.
+ * NOT supported (requires Playwright via pipeline mode):
+ *   ❌ Boss直聘, 拉勾, 猎聘, 51job, 智联招聘
+ *   ❌ LinkedIn, Indeed, Glassdoor
+ *
+ * scan_method in portals.yml:
+ *   api        → scanned by this script (HTTP API)
+ *   playwright → skipped by this script, processed via pipeline mode
+ *
+ * CONCURRENCY=10 applies to HTTP API calls only.
+ * Playwright is ALWAYS serial — browser automation can't be parallelized.
  *
  * Usage:
- *   node scan.mjs                  # scan all enabled companies
+ *   node scan.mjs                  # scan all api-marked companies
  *   node scan.mjs --dry-run        # preview without writing files
  *   node scan.mjs --company Cohere # scan a single company
  */
@@ -265,16 +275,30 @@ async function main() {
   const companies = config.tracked_companies || [];
   const titleFilter = buildTitleFilter(config.title_filter);
 
-  // 2. Filter to enabled companies with detectable APIs
-  const targets = companies
-    .filter(c => c.enabled !== false)
-    .filter(c => !filterCompany || c.name.toLowerCase().includes(filterCompany))
-    .map(c => ({ ...c, _api: detectApi(c) }))
-    .filter(c => c._api !== null);
+  // 2. Filter to enabled companies based on scan_method
+  const enabled = companies.filter(c => c.enabled !== false && (!filterCompany || c.name.toLowerCase().includes(filterCompany)));
 
-  const skippedCount = companies.filter(c => c.enabled !== false).length - targets.length;
+  const playwritingSkipped = [];
+  const noApiSkipped = [];
+  const targets = [];
 
-  console.log(`Scanning ${targets.length} companies via API (${skippedCount} skipped — no API detected)`);
+  for (const c of enabled) {
+    if (c.scan_method === 'playwright') {
+      playwritingSkipped.push(c.name);
+      continue;
+    }
+    const api = c.scan_method === 'api' ? { type: 'forced' } : detectApi(c);
+    if (api) {
+      targets.push({ ...c, _api: api.type === 'forced' ? detectApi(c) || api : api });
+    } else {
+      noApiSkipped.push(c.name);
+    }
+  }
+
+  if (playwritingSkipped.length) console.log(`SKIPPED (requires Playwright): ${playwritingSkipped.join(', ')}`);
+  if (noApiSkipped.length) console.log(`SKIPPED (no API detected): ${noApiSkipped.join(', ')}`);
+
+  console.log(`Scanning ${targets.length} companies via API`);
   if (dryRun) console.log('(dry run — no files will be written)\n');
 
   // 3. Load dedup sets

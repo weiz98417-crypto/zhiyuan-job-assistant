@@ -102,7 +102,7 @@ function splitWorkAndProject(exp: string): { work: string; projects: string } {
   const proj: string[] = [];
 
   for (let i = 1; i < parts.length; i++) {
-    let block = parts[i];
+    const block = parts[i];
     // Try to find trailing company header (3-4 lines at end: company, position, date)
     const lines = block.split("\n");
     // Look for date pattern in last few lines

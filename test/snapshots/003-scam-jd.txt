@@ -1,0 +1,9 @@
+# Snapshot 003: 诈骗 JD — 招转培/培训贷
+# Expected: signals>=3 critical, risk_tier=🔴严重
+# Key signals: "招小可爱"(critical=10), "零基础拿高薪"(critical=10), "先培训后上岗"(critical=10), "包就业"(critical pattern)
+# Date: 2026-05-09
+
+招小可爱啦！零基础拿高薪月入过万，不限经验不限学历。
+先培训后上岗包就业，培训费19800元从工资里扣，分期付款无压力。
+央国企内推保录名额有限，内部渠道直签保过！
+签就业保障协议，上岗后月薪不低于8000元。

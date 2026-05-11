@@ -36,6 +36,7 @@ title 字段使用中文：个人概述、工作经历、项目经历、技能�
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
+    signal: AbortSignal.timeout(30_000),
     body: JSON.stringify({
       model: MODEL,
       messages: [
@@ -43,7 +44,7 @@ title 字段使用中文：个人概述、工作经历、项目经历、技能�
         { role: "user", content: rawText.slice(0, 8000) },
       ],
       temperature: 0.1,
-      max_tokens: 4000,
+      max_tokens: 8000,
       response_format: { type: "json_object" },
     }),
   });
@@ -55,13 +56,20 @@ title 字段使用中文：个人概述、工作经历、项目经历、技能�
   if (!content) throw new Error("AI 返回为空");
 
   let parsed: { sections?: CVSection[] };
-  try {
-    parsed = JSON.parse(content);
-  } catch {
-    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (jsonMatch) parsed = JSON.parse(jsonMatch[1]);
-    else throw new Error("AI 返回格式解析失败");
+  // Try multiple extraction strategies
+  const strategies = [
+    () => JSON.parse(content),
+    () => { const m = content.match(/```(?:json)?\s*([\s\S]*?)```/); return m ? JSON.parse(m[1]) : null; },
+    () => { const m = content.match(/\{[\s\S]*"sections"[\s\S]*\}/); return m ? JSON.parse(m[0]) : null; },
+    () => { const m = content.match(/\{[\s\S]*\}/); return m ? JSON.parse(m[0]) : null; },
+  ];
+  for (const strat of strategies) {
+    try {
+      const result = strat();
+      if (result && result.sections) { parsed = result; break; }
+    } catch { /* next strategy */ }
   }
+  if (!parsed!) throw new Error(`AI 返回格式解析失败。原始返回: ${content.slice(0, 300)}`);
 
   if (!parsed.sections || !Array.isArray(parsed.sections)) {
     throw new Error("AI 解析结果缺少 sections 数组");

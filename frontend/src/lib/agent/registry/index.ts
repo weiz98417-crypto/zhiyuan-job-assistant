@@ -13,7 +13,6 @@ import { evaluateAgent } from "./agents/evaluate-agent";
 import { profileAgent } from "./agents/profile-agent";
 import { resumeAgent } from "./agents/resume-agent";
 import { generalAgent } from "./agents/general-agent";
-
 // ── Static registry (registration order = tie-break order) ──
 
 const AGENT_REGISTRY: AgentDefinition[] = [

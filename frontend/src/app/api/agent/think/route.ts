@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
 
-const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
-const MODEL = "deepseek-v4-flash";
 const MAX_MESSAGES = 10;
 const MAX_MSG_LEN = 2000;
 const MAX_TOTAL_CHARS = 15000;
@@ -10,85 +8,100 @@ function sse(event: { type: string } & Record<string, unknown>): string {
   return `data: ${JSON.stringify(event)}\n\n`;
 }
 
+// Model fallback chain: DeepSeek → GLM-4 → Qwen-Long
+const MODEL_CHAIN = [
+  { model: "deepseek-v4-flash", url: "https://api.deepseek.com/chat/completions", keyEnv: "DEEPSEEK_API_KEY" },
+  { model: "glm-4.6v-flashx", url: "https://open.bigmodel.cn/api/paas/v4/chat/completions", keyEnv: "ZHIPU_API_KEY" },
+  { model: "qwen-long", url: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", keyEnv: "DASHSCOPE_API_KEY" },
+];
+
+async function fetchWithFallback(
+  bodyFn: (model: string) => Record<string, unknown>,
+): Promise<{ response: Response; modelUsed: string }> {
+  let lastError = "";
+  for (const { model, url, keyEnv } of MODEL_CHAIN) {
+    const apiKey = process.env[keyEnv];
+    if (!apiKey) continue; // Skip if no key configured
+
+    const body = bodyFn(model);
+    let response: Response | null = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify(body),
+      });
+      if (response.ok) return { response, modelUsed: model };
+      lastError = `${response.status}`;
+      if (response.status !== 429 && response.status !== 503) break;
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+  }
+  throw new Error(`All models failed. Last error: ${lastError}`);
+}
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { systemPrompt, messages } = body as {
+    const { systemPrompt, messages, tools } = body as {
       systemPrompt?: string;
-      messages?: { role: string; content: string }[];
+      messages?: { role: string; content: string; tool_call_id?: string; toolName?: string }[];
+      tools?: Array<{ type: string; function: { name: string; description: string; parameters: object } }>;
     };
 
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return NextResponse.json({ success: false, error: "消息列表不能为空" }, { status: 400 });
     }
 
-    console.log("[think] msgs:", messages.length, "last:", messages[messages.length - 1]?.content?.slice(-200));
+    console.log("[think] msgs:", messages.length, "hasTools:", !!(tools?.length));
     console.log("[think] systemPrompt length:", systemPrompt?.length || 0);
 
-    const apiKey = process.env.DEEPSEEK_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json({ success: false, error: "未配置 DEEPSEEK_API_KEY" }, { status: 500 });
+    if (!process.env.DEEPSEEK_API_KEY && !process.env.ZHIPU_API_KEY && !process.env.DASHSCOPE_API_KEY) {
+      return NextResponse.json({ success: false, error: "未配置任何 LLM API Key" }, { status: 500 });
     }
 
-    // Sanitize messages for DeepSeek V4 compatibility
+    // Sanitize messages
     let truncated = messages.slice(-MAX_MESSAGES).map((m) => {
       let role = m.role as string;
       let content = typeof m.content === "string" ? m.content : "";
-      // DeepSeek V4 requires tool_call_id for any message with role="tool"
-      // Convert tool messages to user messages to avoid 400 error
-      if (role === "tool") {
+      if (role === "tool" && !(m as Record<string,unknown>).tool_call_id) {
         role = "user";
         content = `<!-- tool_result:${(m as Record<string,unknown>).toolName || "unknown"} -->\n${content}`;
       }
-      // Skip sanitization for messages containing research protocol (has format examples)
-      if (!content.includes("【最高优先级指令")) {
-        content = content.replace(/<<TOOL>>[\s\S]*?<<\/TOOL>>/g, "");
-      }
       content = content.slice(0, MAX_MSG_LEN);
-      return { role, content };
+      return { role, content, ...(m.tool_call_id ? { tool_call_id: m.tool_call_id } : {}) };
     });
-    // Cap total context size to avoid overwhelming the model
     let totalChars = truncated.reduce((sum, m) => sum + (typeof m.content === "string" ? m.content.length : 0), 0);
     while (totalChars > MAX_TOTAL_CHARS && truncated.length > 2) {
       truncated = truncated.slice(1);
       totalChars = truncated.reduce((sum, m) => sum + (typeof m.content === "string" ? m.content.length : 0), 0);
     }
 
-    console.log("[think] sending to DeepSeek, msg count:", truncated.length + (systemPrompt ? 1 : 0));
-
-    // Retry up to 2 times on failure (DeepSeek occasionally rate-limits)
-    let response: Response | null = null;
-    let lastError = "";
-    for (let attempt = 0; attempt < 2; attempt++) {
-      response = await fetch(DEEPSEEK_API_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: MODEL,
-          messages: [
-            ...(systemPrompt ? [{ role: "system", content: systemPrompt }] : []),
-            ...truncated,
-          ],
-          temperature: 0.7,
-          max_tokens: 16384,
-          stream: true,
-        }),
-      });
-
-      if (response.ok) break;
-      lastError = `${response.status}`;
-      if (response.status !== 429 && response.status !== 503) break; // Don't retry non-rate-limit errors
-      await new Promise((r) => setTimeout(r, 1000)); // Wait 1s before retry
+    // Use fallback chain: DeepSeek → GLM-4 → Qwen-Long
+    let response: Response;
+    let modelUsed: string;
+    try {
+      const result = await fetchWithFallback((m) => ({
+        model: m,
+        messages: [...(systemPrompt ? [{ role: "system", content: systemPrompt }] : []), ...truncated],
+        ...(tools?.length ? { tools } : {}),
+        temperature: 0.7,
+        max_tokens: 16384,
+        stream: true,
+      }));
+      response = result.response;
+      modelUsed = result.modelUsed;
+      console.log("[think] using model:", modelUsed);
+    } catch (err) {
+      console.error("All models failed:", err);
+      return NextResponse.json({ success: false, error: "所有模型均不可用" }, { status: 502 });
     }
 
-    if (!response || !response.ok) {
-      const errText = response ? await response.text().catch(() => "") : "no response";
-      console.error("DeepSeek think error:", lastError, errText.slice(0, 500));
+    if (!response.ok) {
+      const errText = await response.text().catch(() => "");
+      console.error(`${modelUsed} error:`, response.status, errText.slice(0, 500));
       return NextResponse.json(
-        { success: false, error: `DeepSeek API ${lastError}: ${errText.slice(0, 200)}` },
+        { success: false, error: `${modelUsed} API ${response.status}: ${errText.slice(0, 200)}` },
         { status: 502 },
       );
     }
@@ -105,6 +118,9 @@ export async function POST(request: Request) {
         let buffered = "";
         let phaseSent = false;
 
+        // Accumulate tool_call fragments by index (native function calling)
+        const toolCallFragments = new Map<number, { id: string; name: string; arguments: string }>();
+
         try {
           while (true) {
             const { done, value } = await reader.read();
@@ -117,19 +133,33 @@ export async function POST(request: Request) {
               if (data === "[DONE]") continue;
               try {
                 const parsed = JSON.parse(data);
-                const content = parsed.choices?.[0]?.delta?.content;
+                const delta = parsed.choices?.[0]?.delta;
+
+                // Handle native tool_calls deltas
+                if (delta?.tool_calls) {
+                  for (const tc of delta.tool_calls) {
+                    const idx = tc.index ?? 0;
+                    if (!toolCallFragments.has(idx)) {
+                      toolCallFragments.set(idx, { id: "", name: "", arguments: "" });
+                    }
+                    const frag = toolCallFragments.get(idx)!;
+                    if (tc.id) frag.id = tc.id;
+                    if (tc.function?.name) frag.name += tc.function.name;
+                    if (tc.function?.arguments) frag.arguments += tc.function.arguments;
+                  }
+                }
+
+                // Handle text content
+                const content = delta?.content;
                 if (content) {
                   buffered += content;
-                  // Log first content chunks for debugging
                   if (buffered.length <= 100 && buffered.length + content.length >= 6) {
                     console.log("[think] first content:", buffered.slice(0, 100));
                   }
-                  // Wait until 6 chars before switching out of "thinking" phase
                   if (!phaseSent && buffered.length < 6) continue;
                   if (!phaseSent) {
                     controller.enqueue(encoder.encode(sse({ type: "phase", phase: "responding" })));
                     phaseSent = true;
-                    // Flush accumulated buffer on first threshold crossing
                     controller.enqueue(encoder.encode(sse({ type: "text", content: buffered })));
                   } else {
                     controller.enqueue(encoder.encode(sse({ type: "text", content })));
@@ -139,6 +169,12 @@ export async function POST(request: Request) {
                 /* skip */
               }
             }
+          }
+
+          // Emit accumulated tool_calls at end of stream (before done)
+          if (toolCallFragments.size > 0) {
+            const toolCalls = Array.from(toolCallFragments.values());
+            controller.enqueue(encoder.encode(sse({ type: "tool_calls", tool_calls: toolCalls })));
           }
           controller.enqueue(encoder.encode(sse({ type: "done" })));
         } catch (err) {

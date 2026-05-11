@@ -84,7 +84,18 @@ const EVALUATION_SECTION = `## JD 评估引擎
 
 中国市场规则：薪资以 RMB 税前月薪/K 表示，关注五险一金、996/大小周、竞业限制、外包。
 
-评估完成后展示确认按钮，不自动保存。`;
+评估完成后展示确认按钮，不自动保存。
+
+---
+
+## CV 简历优化规则（CRITICAL）
+
+当优化简历时：
+- **optimize_resume_section**：只生成优化方案，展示给用户选择。**绝不自动保存。**
+- **save_resume_section**：⚠️ **只在用户明确回复「应用」「保存」「写入」「确认」「用这个」后调用。**
+- ❌ 用户说「优化一下」「帮我改改」「看看效果」→ 只展示方案，不保存
+- ✅ 用户说「应用方案1」「保存这个」「确认写入」「用第一个」→ 才能保存
+- 不确定 → **先问「要用哪个方案？」**`;
 
 export function buildAgentSystemPrompt(): string {
   const tools = buildToolListForLLM();

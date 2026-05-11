@@ -167,3 +167,61 @@ body {
 .scrollbar-thin::-webkit-scrollbar-thumb { background: var(--color-divider); border-radius: 2px; }
 .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: var(--color-muted); }
 .scrollbar-thin { scrollbar-width: thin; scrollbar-color: var(--color-divider) transparent; }
+
+/* ── Risk Badge Styles (for JD evaluation risk signals) ── */
+.risk-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.4;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+.risk-badge.risk-critical {
+  background: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fecaca;
+}
+.risk-badge.risk-high {
+  background: #fff7ed;
+  color: #ea580c;
+  border: 1px solid #fed7aa;
+}
+.risk-badge.risk-medium {
+  background: #fefce8;
+  color: #ca8a04;
+  border: 1px solid #fef08a;
+}
+.risk-badge.risk-low {
+  background: #f0fdf4;
+  color: #16a34a;
+  border: 1px solid #bbf7d0;
+}
+
+/* Dark mode risk badges */
+.dark .risk-badge.risk-critical,
+[data-theme="dark"] .risk-badge.risk-critical {
+  background: #7f1d1d33;
+  color: #fca5a5;
+  border-color: #7f1d1d66;
+}
+.dark .risk-badge.risk-high,
+[data-theme="dark"] .risk-badge.risk-high {
+  background: #7c2d1233;
+  color: #fdba74;
+  border-color: #7c2d1266;
+}
+.dark .risk-badge.risk-medium,
+[data-theme="dark"] .risk-badge.risk-medium {
+  background: #713f1233;
+  color: #fde047;
+  border-color: #713f1266;
+}
+.dark .risk-badge.risk-low,
+[data-theme="dark"] .risk-badge.risk-low {
+  background: #14532d33;
+  color: #86efac;
+  border-color: #14532d66;
+}

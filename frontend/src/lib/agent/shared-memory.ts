@@ -32,45 +32,49 @@ const DOMAIN_SCENARIO: Record<KnowledgeDomain, AgentScenario> = {
  */
 export async function getCareerDNASummary(): Promise<string> {
   try {
-    const parts: string[] = [];
-
-    // Read from IndexedDB profile signals
-    try {
-      const { default: db } = await import("@/lib/db");
-      const profile = await db.profiles.orderBy("lastUpdated").last();
-      if (profile) {
-        if (profile.goals) {
-          const goals = typeof profile.goals === "string" ? JSON.parse(profile.goals) : profile.goals;
-          if (goals.targetRoles?.length) {
-            parts.push(`目标岗位: ${goals.targetRoles.join("、")}`);
-          }
-          if (goals.salaryRange) {
-            parts.push(`薪资期望: ${goals.salaryRange}`);
-          }
-          if (goals.preferredCompanies?.length) {
-            parts.push(`意向公司: ${goals.preferredCompanies.join("、")}`);
-          }
-        }
-        if (profile.skills?.length) {
-          const topSkills = profile.skills
-            .slice(0, 8)
-            .map((s: { name: string; proficiency?: number }) =>
-              s.proficiency != null ? `${s.name}(${s.proficiency})` : s.name,
-            );
-          parts.push(`核心技能: ${topSkills.join("、")}`);
-        }
-        if (profile.goals?.dealBreakers?.length) {
-          parts.push(`底线: ${profile.goals.dealBreakers.join("、")}`);
-        }
-      }
-    } catch {
-      // IndexedDB not available — skip
+    // First try server-side profile API for authoritative data
+    const res = await fetch("/api/profile/dna").catch(() => null);
+    if (res?.ok) {
+      const json = await res.json();
+      if (json.success && json.data?.summary) return json.data.summary;
     }
 
-    return parts.length > 0 ? parts.join("\n") : "用户画像数据暂不可用";
-  } catch {
-    return "用户画像数据暂不可用";
-  }
+    // Fallback to IndexedDB
+    const { default: db } = await import("@/lib/db");
+    const profile = await db.profiles.orderBy("lastUpdated").last();
+    if (profile) {
+      const parts: string[] = [];
+      if (profile.goals) {
+        const goals = typeof profile.goals === "string" ? JSON.parse(profile.goals) : profile.goals;
+        if (goals.targetRoles?.length) {
+          const roleStrs = goals.targetRoles.map((r: unknown) => {
+            if (typeof r === "string") return r;
+            if (r && typeof r === "object") {
+              const o = r as Record<string,string>;
+              return o.level ? `${o.role}(${o.level})` : o.role;
+            }
+            return String(r);
+          });
+          parts.push(`目标岗位: ${roleStrs.join("、")}`);
+        }
+        if (goals.salaryRange) {
+          if (typeof goals.salaryRange === "object") {
+            const sr = goals.salaryRange as { min?: number; max?: number };
+            parts.push(`薪资期望: ${sr.min || "?"}K-${sr.max || "?"}K`);
+          } else {
+            parts.push(`薪资期望: ${goals.salaryRange}`);
+          }
+        }
+        if (goals.dealBreakers?.length) parts.push(`底线: ${goals.dealBreakers.join("、")}`);
+      }
+      if (profile.skills?.length) {
+        parts.push(`核心技能: ${profile.skills.slice(0, 8).map((s: { name: string }) => s.name).join("、")}`);
+      }
+      if (parts.length) return parts.join("\n");
+    }
+  } catch { /* fall through */ }
+
+  return "用户画像数据暂不可用";
 }
 
 /**
@@ -118,6 +122,26 @@ export async function getAgentFindings(agentId: string): Promise<string[]> {
       .slice(0, 5);
   } catch {
     return [];
+  }
+}
+
+/**
+ * Get Claude Agent's recent evaluation activity from SQLite.
+ *
+ * Queries the applications table for the 5 most recent evaluations,
+ * plus pipeline status summary. Returns a compact formatted string
+ * suitable for injection into Next.js Agent system prompts.
+ *
+ * Falls back to empty string on any error (SQLite not available, no data, etc.)
+ */
+export async function getClaudeAgentActivity(): Promise<string> {
+  try {
+    const res = await fetch("/api/agent/claude-activity");
+    if (!res.ok) return "";
+    const data = await res.json();
+    return data.activity || "";
+  } catch {
+    return "";
   }
 }
 

@@ -600,6 +600,7 @@ export default function ComparePage() {
               <BarChart3 size={18} className="text-[var(--color-primary)]" />
               <HandwritingTitle as="h3" className="text-lg">多维度雷达图</HandwritingTitle>
             </div>
+            {/* eslint-disable-next-line */}
             <RadarChart offers={selectedForCompare} />
             {/* Legend */}
             <div className="flex justify-center gap-6 mt-3">

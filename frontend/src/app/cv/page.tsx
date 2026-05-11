@@ -53,6 +53,19 @@ const TEMPLATES = [
   { id: "compact", name: "紧凑效率", description: "高密度排版，适合经验丰富者" },
 ];
 
+function renderMarkdown(text: string): string {
+  if (!text) return "";
+  return text
+    .replace(/^### (.+)$/gm, '<h4 class="font-semibold text-sm mt-2 mb-1">$1</h4>')
+    .replace(/^## (.+)$/gm, '<h3 class="font-bold text-sm text-gray-800 mt-3 mb-1">$1</h3>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong class="font-semibold">$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/^- (.+)$/gm, '<li class="ml-3 text-xs">• $1</li>')
+    .replace(/((?:<li[^>]*>.*<\/li>\n?)+)/g, '<ul class="my-1">$1</ul>')
+    .replace(/\n\n/g, '<br/>')
+    .replace(/\n/g, '<br/>');
+}
+
 function PreviewBlock({ title, content, sidebar, tags }: {
   title?: string;
   content?: string;
@@ -73,15 +86,22 @@ function PreviewBlock({ title, content, sidebar, tags }: {
     );
   }
 
+  const htmlContent = renderMarkdown(content || "");
+
   return (
     <div>
       <h3 className={sidebar
         ? "text-sm font-bold text-gray-700 border-b border-gray-300 pb-1 mb-2"
         : "text-sm font-bold text-gray-700 border-b-2 border-amber-400 pb-1 mb-2"
       }>{title}</h3>
-      <p className={sidebar ? "text-xs text-gray-600 whitespace-pre-wrap leading-relaxed" : "text-xs text-gray-700 whitespace-pre-wrap leading-relaxed"}>
-        {content || <span className="text-gray-300 italic">待填写...</span>}
-      </p>
+      {htmlContent ? (
+        <div
+          className={sidebar ? "text-xs text-gray-600 leading-relaxed" : "text-xs text-gray-700 leading-relaxed"}
+          dangerouslySetInnerHTML={{ __html: htmlContent }}
+        />
+      ) : (
+        <p className={sidebar ? "text-xs text-gray-300 italic" : "text-xs text-gray-300 italic"}>待填写...</p>
+      )}
     </div>
   );
 }

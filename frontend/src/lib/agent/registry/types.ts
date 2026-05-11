@@ -27,6 +27,8 @@ export interface AgentPromptContext {
   currentMessages: { role: string; content: string }[];
   /** Agent-specific knowledge injection text */
   agentKnowledge: string;
+  /** Claude Agent recent evaluation activity (from SQLite) */
+  claudeAgentActivity?: string;
 }
 
 export interface AgentDefinition {
@@ -42,8 +44,10 @@ export interface AgentDefinition {
   explicitSwitchPatterns?: RegExp[];
   /** Build agent-specific system prompt (async — may fetch dingwei prompt, load CV, etc.) */
   buildSystemPrompt: (ctx: AgentPromptContext) => Promise<string>;
-  /** Tools available to this agent */
+  /** Tools available to this agent — populated by populateAgentTools() */
   tools: ToolDefinition[];
+  /** Tool names to resolve from ToolRegistry (populated at agent init) */
+  toolNames: string[];
   /** Knowledge domains to inject into this agent's prompt */
   knowledgeSubset?: KnowledgeDomain[];
   /** Routing priority — higher wins on tie */

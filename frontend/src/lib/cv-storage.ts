@@ -69,6 +69,12 @@ export function loadCVData(): CVData {
 
 export function saveCVData(data: CVData): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  // Also sync to server (fire-and-forget)
+  fetch("/api/cv/data", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  }).catch(() => {});
 }
 
 export function getActiveSections(): CVSection[] {

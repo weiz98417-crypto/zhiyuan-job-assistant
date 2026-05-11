@@ -34,6 +34,36 @@ export class ToolRegistry {
     return `\n## 可用工具\n\n${lines.join("\n")}`;
   }
 
+  toOpenAITools(): Array<{
+    type: "function";
+    function: {
+      name: string;
+      description: string;
+      parameters: {
+        type: "object";
+        properties: Record<string, { type: string; description: string }>;
+        required: string[];
+      };
+    };
+  }> {
+    return this.getAll().map((t) => {
+      const properties: Record<string, { type: string; description: string }> = {};
+      const required: string[] = [];
+      for (const [key, param] of Object.entries(t.parameters)) {
+        properties[key] = { type: param.type, description: param.description };
+        if (param.required) required.push(key);
+      }
+      return {
+        type: "function" as const,
+        function: {
+          name: t.name,
+          description: t.description,
+          parameters: { type: "object", properties, required },
+        },
+      };
+    });
+  }
+
   async execute(name: string, params: Record<string, unknown>): Promise<ToolResult> {
     // Tool whitelist enforcement for multi-agent architecture
     if (this.activeAgentTools && !this.activeAgentTools.has(name)) {

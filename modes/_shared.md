@@ -25,16 +25,16 @@
 
 ## Scoring System
 
-The evaluation uses 6 blocks (A-F) with a global score of 1-5:
+Read `modes/scoring-dimensions.yml` for the authoritative list of evaluation dimensions (A-G, with weights and labels). Use `label_en` for display text. The global score is 1-5, computed as the weighted average of all dimension scores.
 
-| Dimension | What it measures |
-|-----------|-----------------|
-| Match con CV | Skills, experience, proof points alignment |
-| North Star alignment | How well the role fits the user's target archetypes (from _profile.md) |
-| Comp | Salary vs market (5=top quartile, 1=well below) |
-| Cultural signals | Company culture, growth, stability, remote policy |
-| Red flags | Blockers, warnings (negative adjustments) |
-| **Global** | Weighted average of above |
+Dimensions defined in scoring-dimensions.yml:
+- A: Role Summary & Company Context (10%)
+- B: CV Match (20%)
+- C: Level & Strategy (15%)
+- D: Compensation & Benefits (15%)
+- E: Personalization (15%)
+- F: Interview Prep (15%)
+- G: Posting Legitimacy & Risk (10%)
 
 **Score interpretation:**
 - 4.5+ → Strong match, recommend applying immediately
@@ -120,7 +120,7 @@ After detecting archetype, read `modes/_profile.md` for the user's specific fram
 |------|-----|
 | WebSearch | Comp research, trends, company culture, LinkedIn contacts, fallback for JDs |
 | WebFetch | Fallback for extracting JDs from static pages |
-| Playwright | Verify offers (browser_navigate + browser_snapshot). **NEVER 2+ agents with Playwright in parallel.** |
+| Playwright | Verify offers (browser_navigate + browser_snapshot). **NEVER 2+ agents with Playwright in parallel — this includes pipeline mode. Process Playwright URLs one at a time.** |
 | Read | cv.md, _profile.md, article-digest.md, cv-template.html |
 | Write | Temporary HTML for PDF, applications.md, reports .md |
 | Edit | Update tracker |

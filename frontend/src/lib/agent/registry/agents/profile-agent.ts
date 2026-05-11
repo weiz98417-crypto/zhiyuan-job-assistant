@@ -97,7 +97,8 @@ export const profileAgent: AgentDefinition = {
   description: "自我定位、竞争力分析、职业方向探索",
   intentPatterns: PROFILE_INTENT_PATTERNS,
   explicitSwitchPatterns: [/用画像模式/, /帮我定位/, /自我定位/],
-  tools: [], // Populated at registration time
+  tools: [], // Populated via populateAgentTools()
+  toolNames: ["get_profile", "get_recommendations", "get_profile_insights", "self_positioning", "check_pipeline_health", "get_recent_activity", "mine_profile"],
   knowledgeSubset: ["zhiyuan-levels", "salary-benchmarks"],
   priority: 10,
   suggestions: PROFILE_SUGGESTIONS,

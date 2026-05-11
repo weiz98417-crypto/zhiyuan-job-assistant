@@ -5,6 +5,7 @@ data/pipeline.md
 data/scan-history.tsv
 reports/*.md
 !reports/.gitkeep
+reports/.locks/
 output/*
 !output/.gitkeep
 batch/logs/*
@@ -45,3 +46,4 @@ package-lock.json
 
 # Openspec archive
 openspec/changes/archive/
+.gstack/

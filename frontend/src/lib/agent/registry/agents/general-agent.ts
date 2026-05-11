@@ -28,7 +28,8 @@ export const generalAgent: AgentDefinition = {
   name: "通用助手",
   description: "求职咨询、状态查询、岗位推荐、简历建议",
   intentPatterns: [/.*/], // Catch-all — always matches
-  tools: [], // Populated at registration time with ALL tools
+  tools: [], // Populated via populateAgentTools() with ALL tools
+  toolNames: [], // Empty = include all registered tools
   knowledgeSubset: ["salary-benchmarks", "zhiyuan-levels", "interview-styles", "jd-signals"],
   priority: 1, // Lowest — only matches when no other agent does
   suggestions: DEFAULT_SUGGESTIONS,

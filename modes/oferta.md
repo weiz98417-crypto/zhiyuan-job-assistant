@@ -1,6 +1,6 @@
-# Modo: oferta — Evaluación Completa A-G
+# Modo: oferta — Evaluación Completa
 
-Cuando el candidato pega una oferta (texto o URL), entregar SIEMPRE los 7 bloques (A-F evaluation + G legitimacy):
+Cuando el candidato pega una oferta (texto o URL), entregar SIEMPRE todos los bloques definidos en `modes/scoring-dimensions.yml` (A-G). Read that file for the authoritative dimension list, weights, and labels (use `label_en`).
 
 ## Paso 0 — Detección de Arquetipo
 

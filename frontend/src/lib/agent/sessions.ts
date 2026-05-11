@@ -22,6 +22,25 @@ export async function createSession(
     createdAt: now,
     updatedAt: now,
   };
+
+  // Try server-side first
+  try {
+    const res = await fetch("/api/sessions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: session.title, messages: session.messages }),
+    });
+    if (res.ok) {
+      const json = await res.json();
+      if (json.success && json.data?.id) {
+        // Cache to Dexie with server ID
+        session.id = json.data.id;
+        await db.chatSessions.put(session);
+        return json.data.id;
+      }
+    }
+  } catch { /* fallback to Dexie */ }
+
   const id = await db.chatSessions.add(session);
   return id as number;
 }
@@ -42,11 +61,23 @@ export async function updateSession(
   updates: Partial<ChatSession>,
 ): Promise<void> {
   await db.chatSessions.update(id, { ...updates, updatedAt: new Date().toISOString() });
+  // Sync to server
+  fetch(`/api/sessions/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      title: updates.title,
+      messages: updates.messages,
+      pinned: updates.pinned,
+      memoryDigest: updates.memoryDigest,
+    }),
+  }).catch(() => {});
 }
 
 export async function softDeleteSession(id: number): Promise<void> {
   const now = new Date().toISOString();
   await db.chatSessions.update(id, { deletedAt: now, updatedAt: now });
+  fetch(`/api/sessions/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ deleted: true }) }).catch(() => {});
 
   setTimeout(async () => {
     const session = await db.chatSessions.get(id);

@@ -10,6 +10,10 @@ export interface ToolResult {
   success: boolean;
   data: unknown;
   error?: string;
+  /** Whether the failure is recoverable (LLM can retry with different params). Defaults to true for backward compat. */
+  recoverable?: boolean;
+  /** Hint for LLM on how to recover from the failure. Only used when recoverable is true. */
+  retryHint?: string;
 }
 
 export interface ToolDefinition<TParams = Record<string, unknown>> {

@@ -124,3 +124,73 @@ CREATE TABLE IF NOT EXISTS news_cache (
 );
 CREATE INDEX IF NOT EXISTS idx_news_cache_source ON news_cache(source);
 CREATE INDEX IF NOT EXISTS idx_news_cache_cached ON news_cache(cached_at);
+
+-- Chat Sessions (P1: server-side session persistence)
+CREATE TABLE IF NOT EXISTS sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL DEFAULT '新对话',
+  messages_json TEXT NOT NULL DEFAULT '[]',
+  memory_digest TEXT,
+  pinned INTEGER NOT NULL DEFAULT 0,
+  deleted_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_updated ON sessions(updated_at);
+
+-- CV Data (P1: server-side CV storage)
+CREATE TABLE IF NOT EXISTS cv_data (
+  id INTEGER PRIMARY KEY DEFAULT 1,
+  data_json TEXT NOT NULL DEFAULT '{}',
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Offers (P2: offer comparison data)
+CREATE TABLE IF NOT EXISTS offers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  company TEXT NOT NULL,
+  role TEXT NOT NULL,
+  monthly_salary REAL,
+  bonus REAL,
+  equity TEXT,
+  location TEXT,
+  level TEXT,
+  benefits_json TEXT NOT NULL DEFAULT '{}',
+  application_id INTEGER REFERENCES applications(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- STAR Stories (P2: interview story bank)
+CREATE TABLE IF NOT EXISTS stories (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL,
+  situation TEXT NOT NULL DEFAULT '',
+  task TEXT NOT NULL DEFAULT '',
+  action TEXT NOT NULL DEFAULT '',
+  result TEXT NOT NULL DEFAULT '',
+  tags_json TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Agent Preferences (P1: preference model with decay)
+CREATE TABLE IF NOT EXISTS agent_preferences (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  entity_type TEXT NOT NULL,
+  entity_key TEXT NOT NULL,
+  weight REAL NOT NULL DEFAULT 1.0,
+  decay_rate REAL NOT NULL DEFAULT 0.05,
+  last_updated TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(entity_type, entity_key)
+);
+CREATE INDEX IF NOT EXISTS idx_agent_prefs_type ON agent_preferences(entity_type);
+
+-- Session Memory (cross-session semantic + episodic)
+CREATE TABLE IF NOT EXISTS session_memory (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id INTEGER DEFAULT 0,
+  summary_type TEXT NOT NULL,
+  content TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_session_memory_type ON session_memory(summary_type);

@@ -1,6 +1,22 @@
 # 模式：jianzhi — 完整评估 A-G（中文版）
 
-当候选人粘贴职位信息（文本或URL）时，始终交付 7 个板块（A-F 评估 + G 合法性）：
+当候选人粘贴职位信息（文本或URL）时，始终交付完整的评估报告。
+
+**前置检查：** 如果 JD 提取后为空文本或少于 50 个有效字符（去除空白和 Markdown 标记后），输出"⚠️ JD 内容不足，无法完成评估。请确认链接可访问或手动粘贴 JD 文本。"并停止评估。
+
+---
+
+## 第-1步 — 风险检测 🛡️
+
+**读取并执行** `modes/zh/jianzhi-risk.md` 中的风险检测流程：
+1. 字面匹配 → `node scripts/scan-risks.mjs`
+2. 公司风险精确查找 → `risk-intel.md` company_risks
+3. LLM 语义补充 → 禁止重复已知信号
+4. 合并去重 → 加权计分 → 风险等级 → 输出表格
+
+详见 `modes/zh/jianzhi-risk.md` 获取完整的风险分级表和输出模板。
+
+---
 
 ## 第0步 — Archetype 检测
 
@@ -247,40 +263,33 @@
 (15-20个JD关键词用于简历优化)
 ```
 
-### 2. 记录到追踪表
+### 2. 校验输出
 
-**始终**记录到 `data/applications.md`：
-- 下一个顺序号
-- 当前日期
-- 公司名
-- 岗位名
-- Score: 总分 (1-5)
-- 状态: `Evaluated`
-- PDF: ❌（或 ✅ 如果 auto-pipeline 生成了 PDF）
-- Report: 报告相对链接（例：`[001](reports/001-gongsi-2026-04-30.md)`）
-- Notes: 一句话备注
+如果 LLM 在评估过程中超时或返回不完整结果，**不要编造缺失的板块**。输出已完成的部分，缺失板块标记为"⚠️ 此板块生成超时，请重新运行评估"。
 
-**追踪表格式：**
+保存报告后，**始终**运行校验脚本：
 
-```markdown
-| # | 日期 | 公司 | 岗位 | Score | 状态 | PDF | Report | 备注 |
+```bash
+node scripts/validate-output.mjs --data '{"overall_score":<分数>,"date":"<日期>","status":"<状态>","report_path":"reports/<报告文件名>"}'
 ```
 
-### 3. TSV格式（批次处理用）
+- 如果校验失败（exit ≠ 0），重试报告生成，修正校验错误字段
+- 校验通过后才进入下一步持久化
 
-写入单行 TSV 到 `batch/tracker-additions/{###}-{company-slug}.tsv`（9列tab分隔）：
+### 3. 持久化到 SQLite（规范存储）
+
+**始终**调用 `db-write.mjs` 写入 SQLite：
+
+```bash
+# 写入应用记录
+node scripts/db-write.mjs --action upsertApp --data '{"num":<编号>,"date":"<日期>","company":"<公司>","role":"<岗位>","score":<分数>,"status":"<状态>","pdf_generated":<0或1>,"report_path":"reports/<文件名>","notes":"<备注>"}'
+
+# 写入报告元数据
+node scripts/db-write.mjs --action upsertReport --data '{"report_num":<编号>,"date":"<日期>","company":"<公司>","role":"<岗位>","archetype":"<archetype>","overall_score":<分数>,"legitimacy":"<等级>","blocks_json":"<JSON>","keywords_json":"<JSON数组>"}'
+```
+
+**Fallback：** 如果 `db-write.mjs` 不可用（exit ≠ 0），回退到 TSV 写入 `batch/tracker-additions/{###}-{company-slug}.tsv`：
 
 ```
 {###}\t{日期}\t{公司}\t{岗位}\t{状态}\t{分数}/5\t{✅或❌}\t[{###}](reports/{###}-{slug}-{日期}.md)\t{备注}
 ```
-
-**列顺序（重要——状态在分数前）：**
-1. 序号
-2. 日期 (YYYY-MM-DD)
-3. 公司
-4. 岗位
-5. 状态（使用中文别名）
-6. 分数 (X.X/5)
-7. PDF（✅ 或 ❌）
-8. Report（markdown链接）
-9. 备注

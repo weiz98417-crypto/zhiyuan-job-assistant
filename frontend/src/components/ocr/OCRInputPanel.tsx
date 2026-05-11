@@ -55,23 +55,6 @@ export default function OCRInputPanel({ onEvaluate }: OCRInputPanelProps) {
   const dropRef = useRef<HTMLDivElement>(null);
   const [dragOver, setDragOver] = useState(false);
 
-  // Handle paste events globally
-  useEffect(() => {
-    const handler = (e: ClipboardEvent) => {
-      if (phase !== "upload") return;
-      const items = e.clipboardData?.items;
-      if (!items) return;
-      for (let i = 0; i < items.length; i++) {
-        if (items[i].type.startsWith("image/")) {
-          const file = items[i].getAsFile();
-          if (file) addFiles([file]);
-        }
-      }
-    };
-    document.addEventListener("paste", handler);
-    return () => document.removeEventListener("paste", handler);
-  }, [phase]);
-
   const toBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -98,6 +81,24 @@ export default function OCRInputPanel({ onEvaluate }: OCRInputPanelProps) {
     },
     [queue.length]
   );
+
+  // Handle paste events globally
+  useEffect(() => {
+    const handler = (e: ClipboardEvent) => {
+      if (phase !== "upload") return;
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.startsWith("image/")) {
+          const file = items[i].getAsFile();
+          if (file) addFiles([file]);
+        }
+      }
+    };
+    document.addEventListener("paste", handler);
+    return () => document.removeEventListener("paste", handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase]);
 
   const removeItem = (id: string) => {
     setQueue((prev) => {

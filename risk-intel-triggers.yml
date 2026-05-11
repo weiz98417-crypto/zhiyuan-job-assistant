@@ -1,0 +1,134 @@
+# Risk Intel Triggers — Literal regex matching patterns
+# Read by scripts/scan-risks.mjs for deterministic risk signal detection.
+# Add new patterns as new scam/black-market terms emerge.
+
+triggers:
+  # ── 诈骗/传销信号 (critical) ──
+  - pattern: "招(小可爱|助理|徒弟|学徒|实习生.{0,5}无经验)"
+    signal: "疑似诈骗招聘——以招聘为名诱导交费或套取个人信息"
+    severity: critical
+
+  - pattern: "(先培训|岗前实训|岗前培训).{0,5}(后上岗|再上岗|入职)"
+    signal: "招转培骗局——以培训为名诱导贷款"
+    severity: critical
+
+  - pattern: "(培训费|服装费|押金|保证金|政审费).{0,5}(元|块|¥|RMB)"
+    signal: "违规收费——《劳动合同法》第9条明文禁止"
+    severity: critical
+
+  - pattern: "(央国企|央企|国企).{0,5}(内推|保录|直签)"
+    signal: "央国企内推骗局——花钱买工作是骗局"
+    severity: critical
+
+  - pattern: "(内部渠道|有关系|有人).{0,5}(入职|进|安排)"
+    signal: "疑似内推收费骗局"
+    severity: critical
+
+  - pattern: "(保录|保过|包进|100%入职|包入职)"
+    signal: "保录承诺——100%是骗局"
+    severity: critical
+
+  - pattern: "(零基础|不限经验).{0,10}(月薪.{0,5}万|高薪)"
+    signal: "虚假引流——零基础高薪是典型招转培诱饵"
+    severity: critical
+
+  - pattern: "(发展下线|拉人头|会员等级|入门费)"
+    signal: "疑似传销伪装招聘"
+    severity: critical
+
+  # ── 加班/工作强度信号 (high) ──
+  - pattern: "(亲自|手把手|leader.{0,5}).{0,10}(带|教|指导|培养)"
+    signal: "\"亲自带\"——公司无培训体系，或无限制加班"
+    severity: high
+
+  - pattern: "(抗压|能扛).{0,5}(能力强|精神)"
+    signal: "\"抗压能力强\"——加班多、能背锅"
+    severity: high
+
+  # ── 加班/薪资信号 (medium) ──
+  - pattern: "弹性工作(制|时间)"
+    signal: "\"弹性工作制\"——上班固定下班弹性，无加班费"
+    severity: medium
+
+  - pattern: "(有激情|有上进心|有冲劲)"
+    signal: "\"有激情/上进心\"——经常无偿加班"
+    severity: medium
+
+  - pattern: "(不强制|不提倡).{0,5}加班"
+    signal: "\"不强制加班\"——别人都在加你也不好意思走"
+    severity: medium
+
+  - pattern: "(薪资|工资|收入).{0,5}(上不封顶|不设上限)"
+    signal: "\"薪资上不封顶\"——底薪极低全靠提成"
+    severity: medium
+
+  - pattern: "(期权|股权).{0,5}(激励|奖励)"
+    signal: "\"期权激励\"——工资更低，期权大概率是画饼"
+    severity: medium
+
+  - pattern: "(独立|独自).{0,5}(完成|负责)"
+    signal: "\"能独立完成任务\"——身兼数职一个人全干"
+    severity: medium
+
+  - pattern: "(责任心|责任感).{0,3}(强|重)"
+    signal: "\"责任心强\"——活不干完不准走"
+    severity: medium
+
+  # ── 管理信号 (low) ──
+  - pattern: "扁平化(管理|架构)"
+    signal: "\"扁平化管理\"——公司人少老板一人说了算"
+    severity: low
+
+  - pattern: "(年轻|活力).{0,3}团队"
+    signal: "\"年轻有活力团队\"——成员经验<1年"
+    severity: low
+
+  - pattern: "(上升空间|晋升).{0,5}(大|快|多)"
+    signal: "\"上升空间大\"——薪资起点低、离职率高"
+    severity: low
+
+  - pattern: "(包三餐|包吃|免费三餐)"
+    signal: "\"包三餐\"——早晚都得加班 / 公司偏僻"
+    severity: low
+
+  - pattern: "(零食|饮料|下午茶).{0,5}(随便|不限|免费)"
+    signal: "\"零食随便吃\"——暗示加班多"
+    severity: low
+
+  # ── 新增：合同陷阱 (high) ──
+  - pattern: "(试岗|见习|适应).{0,3}期"
+    signal: "\"试岗期/见习期\"——变种试用期，法律上不存在，可能白嫖劳动力"
+    severity: high
+
+  - pattern: "(自愿放弃|主动放弃).{0,5}(社保|加班费|年假|公积金)"
+    signal: "\"自愿放弃社保/加班费\"——违法条款，法定义务不能自愿放弃"
+    severity: high
+
+  - pattern: "(管培生|管培制|管理培训生).{0,10}(培训|付费|贷款)"
+    signal: "\"管培制\"——可能是招转培变种，需确认是否收费培训"
+    severity: high
+
+  - pattern: "(空白|阴阳).{0,2}(合同|协议)"
+    signal: "\"空白/阴阳合同\"——关键信息留白或两份不同合同，维权困难"
+    severity: high
+
+  # ── 新增：诈骗信号 (critical) ──
+  - pattern: "(付费|花钱|买).{0,5}(内推|保录|入职|工作)"
+    signal: "\"付费内推/买工作\"——正规招聘不收费，这是骗局"
+    severity: critical
+
+  - pattern: "(刷脸|人脸).{0,5}(入职|录入|认证|识别)"
+    signal: "\"刷脸入职\"——可能被诱导办理贷款"
+    severity: critical
+
+  - pattern: "(居家|在家|远程).{0,5}(日薪|日结).{0,5}(百|千|万)"
+    signal: "\"居家高薪日结\"——可能是刷单/电诈团伙诱饵"
+    severity: critical
+
+  - pattern: "(市场调研|课题研究).{0,5}(兼职|日结|高薪)"
+    signal: "\"调研/课题研究兼职\"——可能是间谍套路收集敏感信息"
+    severity: critical
+
+  - pattern: "(竞业限制|竞业禁止).{0,10}(全员|所有员工)"
+    signal: "\"全员竞业限制\"——通常仅适用于涉密/高管岗位，全员签订是滥用"
+    severity: medium

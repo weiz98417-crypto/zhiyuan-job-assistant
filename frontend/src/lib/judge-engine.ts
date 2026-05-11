@@ -129,42 +129,64 @@ export function buildReferencePrompt(refIds?: number[], sectionId?: string): str
   if (!refIds || refIds.length === 0) return "";
 
   const refSections: string[] = [];
-  const styleNotes: string[] = [];
+  const refFullCV: string[] = [];
 
-  for (const refId of refIds.slice(0, 5)) {
+  for (const refId of refIds.slice(0, 3)) {
     const ref = getReferenceResume(refId);
     if (!ref) continue;
     const sections = JSON.parse(ref.sections_json || "[]") as { id: string; title: string; content: string }[];
+
+    // Full CV structure for overall analysis
+    const fullText = sections
+      .filter(s => s.content?.trim())
+      .map(s => `【${s.title}】\n${s.content}`)
+      .join("\n\n");
+    refFullCV.push(`## ${ref.name} 完整结构\n${fullText}`);
+
+    // Matching section for targeted reference
     const matchingSection = sectionId
       ? sections.find((s) => s.id === sectionId)
       : sections[0];
-
     if (matchingSection?.content?.trim()) {
-      refSections.push(`【参考范例：${ref.name} — ${matchingSection.title}】\n${matchingSection.content}`);
-    }
-
-    // Extract style features
-    if (ref.tags) {
-      const tags = JSON.parse(ref.tags || "[]") as string[];
-      styleNotes.push(`- ${ref.name}：${tags.join("、")}`);
+      refSections.push(matchingSection.content);
     }
   }
 
-  if (refSections.length === 0) return "";
+  if (refFullCV.length === 0) return "";
 
-  return `## 参考风格范本（辅助指令，在 Operation 框架内生效）
+  return `## 参考简历范本（核心指令，优先级最高）
 
-以下是优秀简历中同板块的写法，请参考其表达风格、量化方式和结构组织，但不要照抄具体内容。
+以下是同岗位优秀简历，请深入分析其撰写水平并在改写时全面对标：
 
-${refSections.join("\n\n")}
+${refFullCV.join("\n\n---\n\n")}
 
-风格特征：
-- 学习参考范例的句式节奏和句长
-- 对齐参考范例的动词选择强度
-- 匹配参考范例的量化密度
-- 保持参考范例的专业语气
+### 对标分析要求
+在改写前，先分析参考简历的以下维度，然后在改写中匹配：
 
-重要性：参考风格 ≈ JD 滤网，两者平级协作。参考风格只管「写成什么味道」，不管「内容放什么」。如与 JD 内容基调冲突，参考风格让位于 JD。`;
+**1. 内容丰富度对标**
+- 参考简历每个经历写了多少字？每条 bullet 的深度如何？
+- 如果参考简历某个项目写了 200 字、5 条量化成果，你也应该把用户的对应经历扩展到同样深度
+- 不要因为用户的原文简略就简单处理——基于用户的实际工作内容，合理推断并补全细节
+
+**2. 结构流程对标**
+- 参考简历如何组织每个经历？（背景→职责→行动→量化成果→影响）
+- 参考简历的项目叙事节奏是怎样的？（问题→方案→执行→结果）
+- 将这些结构模式应用到用户的经历中
+
+**3. 量化密度对标**
+- 统计参考简历中数字、百分比、具体指标的出现频率
+- 用户经历中凡是能合理推断的数据，都要量化（用户量、转化率、效率提升、成本节省等）
+- 用 [XX] 占位符标注需要用户确认的数据
+
+**4. 表达技法对标**
+- 动词选择强度（主导 vs 参与、设计 vs 协助搭建）
+- 专业术语密度
+- 句式节奏和句长变化
+
+### 核心原则
+**不要照抄参考内容。** 而是理解参考简历「为什么写得好」——它的信息密度、结构逻辑、表达质感——然后用同样的标准重写用户的真实经历。用户的经历有自己的价值，你的任务是让它以同样的专业水准呈现出来。
+
+${refSections.length > 0 ? `### 当前板块参考\n${refSections[0].slice(0, 2000)}\n` : ""}`;
 }
 
 /* ── Preference Prompt ── */
@@ -295,7 +317,10 @@ ${questionAnswers.map(qa => `- **${qa.question}** → ${qa.answer}`).join("\n")}
   const parts = [
     `你是资深简历优化专家。用户给你一个简历段落，你需要在四维评判模型的指导下生成改写方案。
 
-优先级规则（重要！按此顺序执行）：
+**重要：全量处理原则**
+如果原文包含多个项目/经历/条目，你必须对**每一个**都进行优化，不能只优化第一个。每个项目独立分析其亮点和量化空间，保持原文的项目数量和顺序不变。
+
+优先级规则（按此顺序执行）：
 1. Operation（最高优先）：用户选择的优化操作类型，决定「做什么」，不可被任何其他维度覆盖
 2. JD 滤网 ≈ Reference 风格（同级协作）：JD 决定「重点放哪」，Reference 决定「写成啥味」
 3. Effort（执行深度）：以上所有指令的执行深度，由 Effort 控制`,

@@ -14,10 +14,13 @@ These files contain your personal data, customizations, and work product. Update
 | `article-digest.md` | Your proof points from portfolio |
 | `interview-prep/story-bank.md` | Your accumulated STAR+R stories |
 | `portals.yml` | Your customized company list |
-| `data/applications.md` | Your application tracker |
-| `data/pipeline.md` | Your URL inbox |
+| `data/applications.md` | Your application tracker (read-only legacy — canonical data in SQLite) |
+| `data/pipeline.md` | Your URL inbox (read-only legacy — canonical data in SQLite) |
 | `data/scan-history.tsv` | Your scan history |
 | `data/follow-ups.md` | Your follow-up history |
+| `data/zhiyuan.db` | Your canonical data store (SQLite — applications, reports, JDs, profiles) |
+| `data/zhiyuan.db-shm` | SQLite WAL shared memory (auto-generated) |
+| `data/zhiyuan.db-wal` | SQLite WAL journal (auto-generated) |
 | `reports/*` | Your evaluation reports |
 | `output/*` | Your generated PDFs |
 | `jds/*` | Your saved job descriptions |
@@ -54,7 +57,7 @@ These files contain system logic, scripts, templates, and instructions that impr
 | `*.mjs` | Utility scripts |
 | `batch/batch-prompt.md` | Batch worker prompt |
 | `batch/batch-runner.sh` | Batch orchestrator |
-| `dashboard/*` | Go TUI dashboard |
+
 | `templates/*` | Base templates |
 | `fonts/*` | Self-hosted fonts |
 | `.claude/skills/*` | Skill definitions |

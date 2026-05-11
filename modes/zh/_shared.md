@@ -24,22 +24,24 @@
 
 ## 评分体系 (Scoring System)
 
-评估包含 6 个维度（A-F），总分 1-5：
+读取 `modes/scoring-dimensions.yml` 获取评分维度的权威定义（A-G 共 7 个维度，含权重和标签）。使用 `label_zh` 字段作为显示文本。总分 1-5，所有维度加权平均计算。
 
-| 维度 | 衡量内容 |
-|------|---------|
-| 简历匹配度 (Match con CV) | 技能、经验、证明点对应度 |
-| 北极星匹配 (North Star) | 岗位与用户目标archetype的匹配度（来自 _profile.md） |
-| 薪资 (Comp) | 薪资 vs 市场水平（5=市场前25%，1=远低于市场） |
-| 文化信号 (Cultural) | 公司文化、成长性、稳定性、工作制度 |
-| 红线/风险 (Red Flags) | 负面影响因素（负面调整） |
-| **总分 (Global)** | 以上维度的加权平均 |
+scoring-dimensions.yml 中定义的维度：
+- A: 岗位摘要与公司背景 (10%)
+- B: 简历匹配度 (20%)
+- C: 级别定位与竞争策略 (15%)
+- D: 薪酬福利评估 (15%)
+- E: 个性化申请方案 (15%)
+- F: 面试准备 (15%)
+- G: 发布合法性与风险提示 (10%)
 
 **分数解读：**
 - 4.5+ → 强匹配，建议立即投递
 - 4.0-4.4 → 好匹配，值得申请
 - 3.5-3.9 → 一般，有特别原因才申请
 - 低于 3.5 → 建议不投（参考 CLAUDE.md 中的道德使用准则）
+
+**风险加权：** 如果评估流程中的风险检测（第-1步）发现了风险信号，按加权计分制对上述总分进行降级。详见 `modes/zh/jianzhi.md` 的风险检测流程。
 
 ## 职位真实性评估 (Block G)
 
@@ -147,7 +149,7 @@ Block G 评估招聘信息是否为真实活跃的职位空缺。它**不影响*
 |------|------|
 | WebSearch | 薪资研究、行业趋势、公司文化、脉脉/看准网数据 |
 | WebFetch | 从静态页面提取JD的备选方案 |
-| Playwright | 验证职位发布（browser_navigate + browser_snapshot）。**绝不要2+agent同时用Playwright。** |
+| Playwright | 验证职位发布（browser_navigate + browser_snapshot）。**绝不要2+agent同时用Playwright——包括pipeline模式。Playwright URL必须逐个串行处理。** |
 | Read | cv.md、_profile.md、article-digest.md、cv-template.html |
 | Write | 临时HTML用于PDF，applications.md，报告.md |
 | Edit | 更新追踪表 |

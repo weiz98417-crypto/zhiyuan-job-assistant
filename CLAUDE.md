@@ -10,7 +10,7 @@ There are two layers. Read `DATA_CONTRACT.md` for the full list.
 
 **System Layer (DON'T put user data here):**
 - `modes/_shared.md`, `modes/oferta.md`, all other modes
-- `CLAUDE.md`, `*.mjs` scripts, `dashboard/*`, `templates/*`, `batch/*`
+- `CLAUDE.md`, `*.mjs` scripts, `templates/*`, `batch/*`
 
 **THE RULE: When the user asks to customize anything (archetypes, narrative, negotiation scripts, proof points, location policy, comp targets), ALWAYS write to `modes/_profile.md` or `config/profile.yml`. NEVER edit `modes/_shared.md` for user-specific content.**
 
@@ -47,8 +47,9 @@ AI-powered job search automation for the Chinese market: pipeline tracking, offe
 2. Does `config/profile.yml` exist (not just profile.example.zh.yml)?
 3. Does `modes/_profile.md` exist?
 4. Does `portals.yml` exist?
+5. **HARD GATE: Run `node scripts/check-onboarding.mjs`.** If exit code ≠ 0, the check has failed. Do NOT proceed with evaluations, scans, or any other mode until the user fixes the reported issues. Display the error output to the user.
 
-**If ANY of these is missing, enter onboarding mode.** Do NOT proceed with evaluations, scans, or any other mode until the basics are in place. Guide the user step by step:
+**If check-onboarding.mjs fails, enter onboarding mode.** Do NOT proceed with evaluations, scans, or any other mode until the basics are in place. Guide the user step by step:
 
 #### Step 1: CV (required)
 If `cv.md` is missing, ask:
@@ -192,41 +193,36 @@ Default modes are in `modes/` (English). Chinese-specific modes are in `modes/zh
 - JDs in `jds/` (referenced as `local:jds/{file}` in pipeline.md)
 - Batch in `batch/` (gitignored except scripts and prompt)
 - Report numbering: sequential 3-digit zero-padded, max existing + 1
-- **RULE: After each batch of evaluations, run `node merge-tracker.mjs`** to merge tracker additions and avoid duplications.
-- **RULE: NEVER create new entries in applications.md if company+role already exists.** Update the existing entry.
+- **RULE: After each evaluation, persist data via `node scripts/db-write.mjs`** (writes to SQLite, the canonical data store). See `scripts/db-write.mjs` for usage.
+- **RULE: NEVER create new entries in applications.md if company+role already exists.** Update the existing entry via db-write.mjs (ON CONFLICT handles dedup).
 
-### TSV Format for Tracker Additions
+### Data Persistence (SQLite)
 
-Write one TSV file per evaluation to `batch/tracker-additions/{num}-{company-slug}.tsv`. Single line, 9 tab-separated columns:
+**Primary path:** After evaluation, call `node scripts/db-write.mjs`:
 
+```bash
+# Application record
+node scripts/db-write.mjs --action upsertApp --data '{"num":42,"date":"2026-05-08","company":"Acme Corp","role":"AI PM","score":4.2,"status":"Evaluated","pdf_generated":0,"report_path":"reports/042-acme-2026-05-08.md","notes":""}'
+
+# Report metadata
+node scripts/db-write.mjs --action upsertReport --data '{"report_num":42,"date":"2026-05-08","company":"Acme Corp","role":"AI PM","archetype":"AI产品经理","overall_score":4.2,"legitimacy":"高可信度","blocks_json":"{}","keywords_json":"[]"}'
 ```
-{num}\t{date}\t{company}\t{role}\t{status}\t{score}/5\t{pdf_emoji}\t[{num}](reports/{num}-{slug}-{date}.md)\t{note}
-```
+
+**Fallback:** If `db-write.mjs` is unavailable, write TSV to `batch/tracker-additions/{num}-{company-slug}.tsv` (see merge-tracker.mjs for legacy format).
 
 ### Pipeline Integrity
 
-1. **NEVER edit applications.md to ADD new entries** -- Write TSV in `batch/tracker-additions/` and `merge-tracker.mjs` handles the merge.
-2. **YES you can edit applications.md to UPDATE status/notes of existing entries.**
+1. **NEVER edit applications.md to ADD new entries** -- Use `node scripts/db-write.mjs` to write to SQLite. TSV in `batch/tracker-additions/` is fallback only.
+2. **YES you can edit applications.md to UPDATE status/notes of existing entries** (legacy read-only path). Preferred: use db-write.mjs.
 3. All reports MUST include `**URL:**` in the header. Include `**Legitimacy:** {tier}`.
-4. All statuses MUST be canonical (see `templates/states.yml`).
-5. Health check: `node verify-pipeline.mjs`
-6. Normalize statuses: `node normalize-statuses.mjs`
-7. Dedup: `node dedup-tracker.mjs`
+4. All statuses MUST be canonical (see `templates/states.yml` — the single source of truth).
+5. After each evaluation, validate output: `node scripts/validate-output.mjs --data '<json>'` before persisting.
+6. Health check: `node verify-pipeline.mjs`
+7. Normalize statuses: `node normalize-statuses.mjs`
 
-### Canonical States (applications.md)
+### Canonical States
 
-**Source of truth:** `templates/states.yml`
-
-| State | When to use |
-|-------|-------------|
-| `Evaluated` | Report completed, pending decision |
-| `Applied` | Application sent |
-| `Responded` | Company responded |
-| `Interview` | In interview process |
-| `Offer` | Offer received |
-| `Rejected` | Rejected by company |
-| `Discarded` | Discarded by candidate or offer closed |
-| `SKIP` | Doesn't fit, don't apply |
+**Source of truth:** `templates/states.yml` — Read this file for the authoritative list of valid application statuses, their canonical labels, and aliases. Do NOT hardcode status values.
 
 **RULES:**
 - No markdown bold (`**`) in status field

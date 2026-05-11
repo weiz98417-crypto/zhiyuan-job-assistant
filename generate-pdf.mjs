@@ -10,7 +10,7 @@
  * Uses Chromium headless to render the HTML and produce a clean, ATS-parseable PDF.
  */
 
-import { chromium } from 'playwright';
+import puppeteer from 'puppeteer';
 import { resolve, dirname } from 'path';
 import { readFile } from 'fs/promises';
 import { mkdirSync } from 'fs';
@@ -133,15 +133,17 @@ async function generatePDF() {
     console.log(`🧹 ATS normalization: ${totalReplacements} replacements (${breakdown})`);
   }
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = await puppeteer.launch({ headless: true });
   try {
     const page = await browser.newPage();
 
-    // Set content with file base URL for any relative resources
-    await page.setContent(html, {
-      waitUntil: 'networkidle',
-      baseURL: `file://${dirname(inputPath)}/`,
-    });
+    // Write HTML to temp file then navigate (Puppeteer needs file:// for font resolution)
+    const { writeFile, unlink } = await import('fs/promises');
+    const tmpPath = inputPath.replace('.html', '.tmp.html');
+    await writeFile(tmpPath, html);
+    await page.goto(`file://${tmpPath}`, { waitUntil: 'networkidle0' });
+    // Cleanup temp file after PDF generation
+    const cleanup = () => unlink(tmpPath).catch(() => {});
 
     // Wait for fonts to load
     await page.evaluate(() => document.fonts.ready);
@@ -174,6 +176,7 @@ async function generatePDF() {
     return { outputPath, pageCount, size: pdfBuffer.length };
   } finally {
     await browser.close();
+    cleanup();
   }
 }
 

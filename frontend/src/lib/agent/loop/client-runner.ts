@@ -33,73 +33,9 @@ function checkResultQuality(formatted: string): ResultQuality {
 const MAX_MESSAGES = 30;
 const MAX_CONTEXT_TOKENS = 24000;
 
-/* ── Tool tag parsing ── */
+/* ── Tool call handling (native function calling) ── */
 
-function stripCodeFences(text: string): string {
-  return text
-    .replace(/^```[\s\S]*?\n/, "")
-    .replace(/\n```\s*$/, "")
-    .trim();
-}
-
-const TOOL_RE_EXACT = new RegExp("<<TOOL>>\\s*(\\S+)\\s*\\n([\\s\\S]*?)<</TOOL>>");
-
-function findLastMarker(text: string, marker: string): number {
-  return text.lastIndexOf(marker);
-}
-
-function parseToolCall(text: string): { name: string; params: Record<string, unknown> } | null {
-  let match = text.match(TOOL_RE_EXACT);
-  let paramsText: string | undefined;
-
-  if (match) {
-    paramsText = match[2].trim();
-  } else {
-    const stripped = stripCodeFences(text);
-    match = stripped.match(TOOL_RE_EXACT);
-    if (match) {
-      paramsText = match[2].trim();
-    } else {
-      const idx = findLastMarker(text, "<<TOOL>>");
-      if (idx === -1) return null;
-      const after = text.slice(idx + 8);
-      const nameMatch = after.match(/^\s*(\S+)/);
-      if (!nameMatch) return null;
-      const name = nameMatch[1];
-      const paramsStart = after.indexOf("\n");
-      const paramsEnd = after.indexOf("<</TOOL>>");
-      // Fallback: if no closing tag, take params to end of text or next <<TOOL>>
-      const effectiveEnd = paramsEnd !== -1 ? paramsEnd : (after.indexOf("<<TOOL>>", paramsStart + 1) !== -1 ? after.indexOf("<<TOOL>>", paramsStart + 1) : after.length);
-      if (paramsStart === -1) return null;
-      paramsText = after.slice(paramsStart, effectiveEnd).trim();
-      try {
-        const params = JSON.parse(paramsText);
-        console.log("[loop] parsed tool call (no closing tag):", name);
-        return { name, params };
-      } catch {
-        return null;
-      }
-    }
-  }
-
-  try {
-    const params = JSON.parse(paramsText!);
-    return { name: match![1], params };
-  } catch {
-    return null;
-  }
-}
-
-/** Extract text before `<<TOOL>>` as thinking content. Only show when no tool call follows. */
-function extractThinkingContent(text: string): string {
-  const toolIdx = text.indexOf("<<TOOL>>");
-  // Show thinking content even when tools follow — the user wants
-  // visibility into the agent's reasoning.
-  const content = toolIdx !== -1 ? text.slice(0, toolIdx).trim() : text.trim();
-  if (!content) return "";
-  if (content.length > 300) return content.slice(0, 300) + "...";
-  return content;
-}
+type NativeToolCall = { id: string; name: string; arguments: string };
 
 /* ── Context helpers ── */
 
@@ -117,16 +53,9 @@ function truncateContext(
 
 /* ── Think proxy helpers ── */
 
-/** Tool-calling directive + research protocol injected into every think call.
- *  DeepSeek Flash follows conversation-level instructions better than system prompts. */
-const RESEARCH_PROTOCOL = `\n\n【最高优先级指令 — 必须遵守】
-
-**回复格式（必须照抄，包括闭合标签）：**
-<<TOOL>>工具名
-{"参数":"值"}
-<</TOOL>>
-
-**研究流程：**
+/** Research protocol injected into every think call.
+ *  Strategy guidance only — native function calling handles tool invocation. */
+const RESEARCH_PROTOCOL = `\n\n【研究流程】
 1. 拆实体：用户提到了几个独立实体？不要把不同实体合并搜索
    - 例：「安世亚太和大连的CAE企业」→ 实体1=安世亚太（公司），实体2=大连的CAE企业（需发现）
    - ❌ 错误：「安世亚太 大连 分公司」（把两个独立实体合并了）
@@ -144,7 +73,7 @@ function injectResearchProtocol(
 ): { role: string; content: string }[] {
   if (skip) return messages;
   return messages.map((m, i) => {
-    if (i === messages.length - 1 && m.role === "user" && !m.content.includes("【最高优先级指令")) {
+    if (i === messages.length - 1 && m.role === "user") {
       return { ...m, content: m.content + RESEARCH_PROTOCOL };
     }
     return m;
@@ -168,9 +97,9 @@ async function fetchFromThinkProxy(
   signal?: AbortSignal,
   searchProgress = "",
   skipResearchProtocol?: boolean,
+  tools?: Array<{ type: string; function: object }>,
 ): Promise<Response> {
   let withDirective = injectResearchProtocol(messages, searchProgress, skipResearchProtocol);
-  // Append search progress as a separate user message if present
   if (searchProgress) {
     withDirective = [...withDirective, { role: "user" as const, content: searchProgress }];
   }
@@ -178,15 +107,19 @@ async function fetchFromThinkProxy(
   return fetch("/api/agent/think", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ systemPrompt, messages: truncated }),
+    body: JSON.stringify({ systemPrompt, messages: truncated, ...(tools?.length ? { tools } : {}) }),
     signal,
   });
 }
 
-async function collectThinkText(response: Response): Promise<string> {
+async function collectThinkResponse(response: Response): Promise<{
+  text: string;
+  toolCalls: NativeToolCall[];
+}> {
   const reader = response.body!.getReader();
   const decoder = new TextDecoder();
   let fullText = "";
+  const toolCalls: NativeToolCall[] = [];
   let buffer = "";
 
   while (true) {
@@ -202,13 +135,17 @@ async function collectThinkText(response: Response): Promise<string> {
         const parsed = JSON.parse(data);
         if (parsed.type === "text" && parsed.content) {
           fullText += parsed.content;
+        } else if (parsed.type === "tool_calls" && Array.isArray(parsed.tool_calls)) {
+          for (const tc of parsed.tool_calls) {
+            toolCalls.push(tc);
+          }
         }
       } catch {
         /* skip */
       }
     }
   }
-  return fullText;
+  return { text: fullText, toolCalls };
 }
 
 /* ── Agent Loop (client-side) — quality-gated ReAct cycle ── */
@@ -220,6 +157,7 @@ export async function* agentLoopClient(
   signal?: AbortSignal,
   skipResearchProtocol?: boolean,
   toolWhitelist?: string[],
+  tools?: Array<{ type: string; function: object }>,
 ): AsyncGenerator<SSEEvent> {
   const state: LoopState = {
     iteration: 0,
@@ -260,16 +198,19 @@ export async function* agentLoopClient(
     const searchProgress = buildSearchProgress(recentCalls, firstIteration);
 
     let thinkText: string;
+    let toolCalls: NativeToolCall[];
     try {
-      const thinkResponse = await fetchFromThinkProxy(systemPrompt, ctx, signal, searchProgress, skipResearchProtocol);
+      const thinkResponse = await fetchFromThinkProxy(systemPrompt, ctx, signal, searchProgress, skipResearchProtocol, tools);
       if (!thinkResponse.ok) {
         yield { type: "phase", phase: "responding" };
         yield { type: "text", content: `AI 请求失败: ${thinkResponse.status}` };
         yield { type: "done" };
         return;
       }
-      thinkText = await collectThinkText(thinkResponse);
-      console.log("[loop] thinkText length:", thinkText.length, "preview:", thinkText.slice(0, 300));
+      const resp = await collectThinkResponse(thinkResponse);
+      thinkText = resp.text;
+      toolCalls = resp.toolCalls;
+      console.log("[loop] thinkText length:", thinkText.length, "toolCalls:", toolCalls.length);
     } catch (err) {
       yield { type: "phase", phase: "responding" };
       yield { type: "text", content: `请求失败: ${err instanceof Error ? err.message : "未知错误"}` };
@@ -282,28 +223,25 @@ export async function* agentLoopClient(
       return;
     }
 
-    // Yield any thinking content (only when no tool call follows)
-    const thinkingContent = extractThinkingContent(thinkText);
-    if (thinkingContent) {
-      yield { type: "thinking_content", content: thinkingContent };
+    // If LLM wrote thinking text alongside tool calls, stream it first
+    if (toolCalls.length > 0 && thinkText.trim()) {
+      state.phase = "responding";
+      yield { type: "phase", phase: "responding" };
+      const preview = thinkText.trim().slice(0, 200); // Limit thinking text
+      for (let i = 0; i < preview.length; i += 4) {
+        if (signal?.aborted) break;
+        yield { type: "text", content: preview.slice(i, i + 4) };
+        await new Promise((r) => setTimeout(r, 3));
+      }
+      await new Promise((r) => setTimeout(r, 80)); // Brief pause before tool call
     }
 
-    const toolCall = parseToolCall(thinkText);
-
-    if (!toolCall) {
-      console.log("[loop] no tool call in thinkText. Full text:", thinkText.slice(0, 500));
+    if (toolCalls.length === 0) {
       // ── No tool needed → Respond ──
       state.phase = "responding";
       yield { type: "phase", phase: "responding" };
 
-      let responseText = thinkText;
-      responseText = responseText.replace(new RegExp("<<TOOL>>[\\s\\S]*?<</TOOL>>", "g"), "");
-      const rogueToolIdx = responseText.indexOf("<<TOOL>>");
-      if (rogueToolIdx !== -1) {
-        responseText = responseText.slice(0, rogueToolIdx);
-      }
-      responseText = responseText.trim();
-
+      let responseText = thinkText.trim();
       if (responseText) {
         for (let i = 0; i < responseText.length; i += 8) {
           if (signal?.aborted) break;
@@ -318,80 +256,87 @@ export async function* agentLoopClient(
       break;
     }
 
-    // ── Phase 2: Executing (调用工具搜索) ──
-    // Dedup: skip if same tool+params was called recently
-    const paramsKey = JSON.stringify(toolCall.params);
-    const recent = recentCalls.find((c) => c.name === toolCall.name && c.params === paramsKey);
-    let toolResult: ToolResult;
-    let formatted: string;
-    if (recent) {
-      toolResult = { success: true, data: recent.result };
-      formatted = recent.result;
-      console.log(`[loop] dedup: skipping repeat call to ${toolCall.name}`);
-    } else {
-      state.phase = "executing";
-      yield { type: "phase", phase: "executing" };
-      yield { type: "tool_call", name: toolCall.name, params: toolCall.params };
+    // ── Phase 2: Executing (native tool calls) ──
+    for (const tc of toolCalls) {
+      let params: Record<string, unknown>;
+      try { params = JSON.parse(tc.arguments); } catch { continue; }
 
-      // Tool whitelist enforcement (multi-agent architecture)
-      if (toolWhitelist && !toolWhitelist.includes(toolCall.name)) {
-        const errMsg = `工具 ${toolCall.name} 不在当前 Agent 模式下可用`;
-        console.warn(`[loop] blocked: ${errMsg}`);
-        yield {
-          type: "tool_result",
-          name: toolCall.name,
-          result: errMsg,
-          success: false,
-        };
-        // Inject error into context so LLM can adapt
-        ctx.push({ role: "user", content: `<!-- tool:${toolCall.name} result -->${errMsg}。请使用可用工具重新尝试，或直接基于已有知识回答。` });
-        state.consecutiveFailures++;
-        continue;
+      const paramsKey = JSON.stringify(params);
+      const recent = recentCalls.find((c) => c.name === tc.name && c.params === paramsKey);
+      let toolResult: ToolResult;
+      let formatted: string;
+      if (recent) {
+        toolResult = { success: true, data: recent.result };
+        formatted = recent.result;
+        console.log(`[loop] dedup: skipping repeat call to ${tc.name}`);
+      } else {
+        state.phase = "executing";
+        yield { type: "phase", phase: "executing" };
+        yield { type: "tool_call", name: tc.name, params };
+
+        if (toolWhitelist && !toolWhitelist.includes(tc.name)) {
+          const errMsg = `工具 ${tc.name} 不在当前 Agent 模式下可用`;
+          console.warn(`[loop] blocked: ${errMsg}`);
+          yield { type: "tool_result", name: tc.name, result: errMsg, success: false };
+          ctx.push({ role: "user", content: `<!-- tool:${tc.name} result -->${errMsg}。请使用可用工具重新尝试，或直接基于已有知识回答。` });
+          state.consecutiveFailures++;
+          continue;
+        }
+
+        try {
+          toolResult = await executeTool(tc.name, params);
+        } catch (execErr) {
+          toolResult = { success: false, data: null, error: execErr instanceof Error ? execErr.message : "Tool execution error" };
+        }
+        formatted = formatToolResult(toolResult, tc.name);
+        recentCalls.push({ name: tc.name, params: paramsKey, result: formatted });
+        if (recentCalls.length > 5) recentCalls.shift();
       }
 
-      toolResult = await executeTool(toolCall.name, toolCall.params);
-      formatted = formatToolResult(toolResult, toolCall.name);
-      recentCalls.push({ name: toolCall.name, params: paramsKey, result: formatted });
-      if (recentCalls.length > 5) recentCalls.shift();
+      yield { type: "tool_result", name: tc.name, result: formatted, success: toolResult.success };
+
+      // ── Self-healing: yield error info so LLM can adapt ──
+      if (!toolResult.success) {
+        yield { type: "tool_error", name: tc.name, error: toolResult.error || "未知错误", recoverable: toolResult.recoverable !== false };
+      }
+
+      state.phase = "verifying";
+      yield { type: "phase", phase: "verifying" };
+
+      const quality = checkResultQuality(formatted);
+      yield { type: "result_quality", quality };
+
+      if (toolResult.success) {
+        state.consecutiveFailures = 0;
+      } else {
+        state.consecutiveFailures++;
+      }
+
+      let qualityHint = "";
+      if (!toolResult.success) {
+        if (toolResult.recoverable === false) {
+          // Permanent failure — do NOT retry, just tell user
+          qualityHint = `\n<!-- ⚠️ 工具执行失败（无法重试）: ${toolResult.error || "未知错误"}。请直接告知用户原因并引导用户操作。 -->`;
+        } else {
+          qualityHint = `\n<!-- ⚠️ 工具执行失败: ${toolResult.error || "未知错误"}。${toolResult.retryHint || "请换参数重试、使用其他工具获取信息、或基于已有知识直接回答。"} -->`;
+          autoRetryCount++;
+        }
+      } else if (quality === "empty") {
+        qualityHint = "\n<!-- ⚠️ 搜索结果为空，请在下一轮换不同关键词重新搜索。不要直接回复用户。 -->";
+        autoRetryCount++;
+      } else if (quality === "irrelevant") {
+        qualityHint = "\n<!-- ⚠️ 搜索结果不相关（可能是同名文化作品等），请换更精确的关键词重新搜索。不要直接回复用户。 -->";
+        autoRetryCount++;
+      } else {
+        autoRetryCount = 0;
+      }
+
+      ctx.push({
+        role: "user",
+        content: `<!-- tool:${tc.name} result -->\n${formatted}${qualityHint}\n\n【请基于以上工具返回的数据进行深度分析和扩容解释。不要仅复述数据——要分析原因、风险判断、面试追问策略和行动建议。】`,
+      });
+      state.contextSize = estimateTokens(ctx);
     }
-
-    yield {
-      type: "tool_result",
-      name: toolCall.name,
-      result: formatted,
-      success: toolResult.success,
-    };
-
-    // ── Phase 3: Verifying (确认结果正确性) ──
-    state.phase = "verifying";
-    yield { type: "phase", phase: "verifying" };
-
-    const quality = checkResultQuality(formatted);
-    yield { type: "result_quality", quality };
-
-    if (toolResult.success) {
-      state.consecutiveFailures = 0;
-    } else {
-      state.consecutiveFailures++;
-    }
-
-    // Build context with quality hint for LLM
-    let qualityHint = "";
-    if (quality === "empty") {
-      qualityHint = "\n<!-- ⚠️ 搜索结果为空，请在下一轮换不同关键词重新搜索。不要直接回复用户。 -->";
-      autoRetryCount++;
-    } else if (quality === "irrelevant") {
-      qualityHint = "\n<!-- ⚠️ 搜索结果不相关（可能是同名文化作品等），请换更精确的关键词重新搜索。不要直接回复用户。 -->";
-      autoRetryCount++;
-    } else {
-      autoRetryCount = 0; // Reset on good result
-    }
-
-    ctx.push({
-      role: "user",
-      content: `<!-- tool:${toolCall.name} result -->\n${formatted}${qualityHint}`,
-    });
-    state.contextSize = estimateTokens(ctx);
 
     // Hard stop: consecutively bad results
     if (state.consecutiveFailures >= 2) {
@@ -406,13 +351,10 @@ export async function* agentLoopClient(
       yield { type: "phase", phase: "responding" };
       yield { type: "text", content: `搜索暂不可用（已尝试 ${autoRetryCount} 次），以下是我基于已有知识的分析：` };
       // Let LLM think one more time without quality hint
-      const forceResponse = await fetchFromThinkProxy(systemPrompt, ctx, signal, "", skipResearchProtocol);
+      const forceResponse = await fetchFromThinkProxy(systemPrompt, ctx, signal, "", skipResearchProtocol, tools);
       if (forceResponse.ok) {
-        const forceText = await collectThinkText(forceResponse);
-        const clean = forceText
-          .replace(new RegExp("<<TOOL>>[\\s\\S]*?<</TOOL>>", "g"), "")
-          .replace(/<<TOOL>>[\s\S]*/, "")
-          .trim();
+        const forceResp = await collectThinkResponse(forceResponse);
+        const clean = forceResp.text.trim();
         if (clean) {
           for (let i = 0; i < clean.length; i += 8) {
             if (signal?.aborted) break;
