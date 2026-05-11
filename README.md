@@ -85,7 +85,7 @@ AI-powered job search assistant for the Chinese market. Evaluate JDs, optimize r
 
 ```bash
 # 1. Install
-cd frontend && npm install
+npm install
 
 # 2. Configure API keys (at least one)
 cp .env.example .env.local
@@ -107,49 +107,48 @@ npm run dev
 ## Project Structure
 
 ```
-├── frontend/                     # Next.js 16 web app
-│   └── src/
-│       ├── app/                  # 11 pages + 50+ API routes
-│       │   ├── agent/            # Conversational agent (home)
-│       │   ├── cv/               # Resume editor + optimizer
-│       │   ├── evaluate/         # JD evaluation
-│       │   ├── tracker/          # Application pipeline
-│       │   ├── interview/        # Interview prep
-│       │   ├── compare/          # Offer comparison
-│       │   ├── discover/         # Job portal scanner
-│       │   ├── explore/          # Legacy chat (migrated to agent)
-│       │   ├── profile/          # Career profile / DNA
-│       │   ├── settings/         # User preferences
-│       │   ├── analytics/        # Data dashboard
-│       │   └── api/              # REST + SSE endpoints
-│       ├── components/
-│       │   ├── agent/            # AgentChat, SessionList, SuggestionChips
-│       │   ├── design/           # Shared design system components
-│       │   └── ocr/              # Screenshot OCR input
-│       └── lib/
-│           ├── agent/            # Agent system
-│           │   ├── loop/         # client-runner + server-runner
-│           │   ├── registry/     # 5 sub-agents + tool registry
-│           │   ├── tools/        # 16 action + 11 query tools
-│           │   ├── memory/       # Layered memory (working/episodic/semantic)
-│           │   ├── orchestrator/ # Intent routing + tool dispatch
-│           │   └── interview/    # Interview simulation engine
-│           ├── db.ts             # SQLite client
-│           ├── cv-storage.ts     # CV data layer
-│           ├── judge-engine.ts   # Resume optimization prompts
-│           └── jd-storage.ts     # JD persistence
-├── scripts/                      # Node.js utilities (*.mjs)
-│   ├── scan-risks.mjs            # 3-layer risk signal detection
-│   ├── check-onboarding.mjs      # First-run setup validation
-│   ├── db-write.mjs              # SQLite data writer
-│   └── validate-output.mjs       # Output validation
-├── modes/                        # AI prompt modes
-│   └── zh/                       # China-specific: jianzhi, risk-intel, etc.
-├── templates/                    # CV HTML/PDF templates
-├── risk-intel-triggers.yml       # 31 regex risk detection patterns
-├── data/                         # SQLite database (gitignored)
-├── reports/                      # Evaluation reports
-└── openspec/                     # Design documents + change proposals
+├── src/
+│   ├── app/                  # 11 pages + 50+ API routes
+│   │   ├── agent/            # Conversational agent (home)
+│   │   ├── cv/               # Resume editor + optimizer
+│   │   ├── evaluate/         # JD evaluation
+│   │   ├── tracker/          # Application pipeline
+│   │   ├── interview/        # Interview prep
+│   │   ├── compare/          # Offer comparison
+│   │   ├── discover/         # Job portal scanner
+│   │   ├── explore/          # Legacy chat (migrated to agent)
+│   │   ├── profile/          # Career profile / DNA
+│   │   ├── settings/         # User preferences
+│   │   ├── analytics/        # Data dashboard
+│   │   └── api/              # REST + SSE endpoints
+│   ├── components/
+│   │   ├── agent/            # AgentChat, SessionList, SuggestionChips
+│   │   ├── design/           # Shared design system components
+│   │   └── ocr/              # Screenshot OCR input
+│   └── lib/
+│       ├── agent/            # Agent system
+│       │   ├── loop/         # client-runner + server-runner
+│       │   ├── registry/     # 5 sub-agents + tool registry
+│       │   ├── tools/        # 16 action + 11 query tools
+│       │   ├── memory/       # Layered memory (working/episodic/semantic)
+│       │   ├── orchestrator/ # Intent routing + tool dispatch
+│       │   └── interview/    # Interview simulation engine
+│       ├── db.ts             # SQLite client
+│       ├── cv-storage.ts     # CV data layer
+│       ├── judge-engine.ts   # Resume optimization prompts
+│       └── jd-storage.ts     # JD persistence
+├── scripts/                  # Node.js utilities (*.mjs)
+│   ├── scan-risks.mjs        # 3-layer risk signal detection
+│   ├── check-onboarding.mjs  # First-run setup validation
+│   ├── db-write.mjs          # SQLite data writer
+│   └── validate-output.mjs   # Output validation
+├── modes/                    # AI prompt modes
+│   └── zh/                   # China-specific: jianzhi, risk-intel, etc.
+├── templates/                # CV HTML/PDF templates
+├── risk-intel-triggers.yml   # 31 regex risk detection patterns
+├── data/                     # SQLite database (gitignored)
+├── reports/                  # Evaluation reports
+└── openspec/                 # Design documents + change proposals
 ```
 
 ---
