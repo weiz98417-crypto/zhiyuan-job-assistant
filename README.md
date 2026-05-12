@@ -18,27 +18,37 @@ AI-powered job search assistant for the Chinese market. Evaluate JDs, optimize r
 ## Features
 
 ### Conversational Agent (纸鸢 Agent)
-- **5 specialized sub-agents**: Resume, Evaluate, Interview, Profile, General — auto-routed by intent
-- **Native function calling**: 27 tools across query (read) and action (write) categories
+- **5 specialized sub-agents**: Resume, Evaluate, Interview, Profile, General — auto-routed by LLM intent classification with regex fallback
+- **Native function calling**: 28 tools across query (read) and action (write) categories
+- **Stream Delegation pattern**: Long-running tools return ReadableStream for real-time progress events through the generator loop
+- **True streaming LLM responses**: collectThinkResponseStreaming yields text chunks as they arrive — no buffering
+- **Direct data rendering**: ProfileViewCard (CV), ReportMessage (A-G reports) — structured tool data renders via React components, bypassing LLM re-generation errors
+- **Context protection**: capToolCtx caps tool results entering LLM context at 600 chars; full data shown via components
 - **Quality-gated ReAct loop**: Self-healing with retry/degrade on tool failures, dedup for repeat calls
 - **Multi-model fallback chain**: DeepSeek V4 → Zhipu GLM → Qwen — auto-degrades on 429/503
 - **Server-side agent loop**: Direct API key management, no client-side key exposure
-- **Claude Code-style status bar**: Real-time phase indicator with elapsed timer (`🧠 识别中 ⏱ 3s`)
+- **Real-time progress bar**: Per-block A-G evaluation status (`A·概览 ✓4.2 · B·匹配 ⏳ ⏱ 12s`)
 
 ### JD Evaluation (职位评估)
-- **A-G 7-dimension scoring**: Overview, CV Match, Level & Strategy, Salary & Market, Customization, Interview Prep, Legitimacy
-- **3-layer risk scanning**: Regex patterns + blacklist dictionary (30 terms) + scam pattern detection
+- **A-G 7-dimension real-time streaming**: OCR → Archetype detection → Blocks A-G evaluated one-by-one via SSE, with live progress (`A·概览 ✓4.2 · B·匹配 ⏳`)
+- **Auto CV matching**: Block B automatically fetches saved CV from SQLite for precise skill/experience matching
+- **3-layer risk scanning**: Regex patterns + blacklist dictionary (30 terms) + scam pattern detection; risk signals injected into Block G evaluation
 - **Risk signal highlighting**: Color-coded severity badges (🔴 critical / 🟠 high / 🟡 medium) in output
+- **Score extraction defense**: Bounds-checked regex (1-5 range) prevents false scores like "256/5"
+- **Smart no-data scoring**: Missing salary/legitimacy info → 1 point (not default 3)
+- **Auto-persist**: Report + JD saved to SQLite and Dexie simultaneously after evaluation completes
 - **Decode black market terms**: "弹性工作制" → "上班固定下班弹性，越弹越晚，无加班费"
 - **China-specific**: 五险一金, 税前/税后, 竞业限制, 外包/本部, 试用期陷阱, 公积金
 
 ### Resume Optimization (简历优化)
 - **Section-by-section optimization**: Summary, Experience, Projects, Education, Skills
+- **Reference resume library**: Upload reference resumes for style/richness inspiration; click-to-rename, rename-on-import
 - **4 operation modes**: Full, Polish, Expand, Quantify — 5 effort levels each
 - **Role-specific templates**: PM, AI PM, Backend, Frontend, Data/AI, QA, Design, Operations
 - **Save confirmation gate**: Agent MUST ask before writing — no auto-save
 - **ATS compatibility check**: Keyword density, format scanning
 - **PDF export**: Playwright-based HTML → PDF with custom templates
+- **Source disambiguation**: Agent distinguishes own CV vs reference resumes with explicit rules
 
 ### Application Tracker (投递追踪)
 - Full pipeline: Evaluated → Applied → Screened → Interview → Offer → Accepted/Rejected
@@ -75,7 +85,7 @@ AI-powered job search assistant for the Chinese market. Evaluate JDs, optimize r
 | **Frontend** | Next.js 16 (Turbopack), React 19, TypeScript |
 | **Styling** | Tailwind CSS 4, Framer Motion, CSS custom properties |
 | **AI Models** | DeepSeek V4 (primary), Zhipu GLM-4, Qwen-Long (fallbacks) |
-| **Database** | SQLite via better-sqlite3 (canonical), localStorage (cache) |
+| **Database** | SQLite via better-sqlite3 (canonical), Dexie/IndexedDB (client cache), localStorage (CV) |
 | **PDF** | Playwright + HTML/CSS templates |
 | **Agent Runtime** | Custom ReAct loop with native function calling |
 
@@ -153,12 +163,12 @@ npm run dev
 
 ---
 
-## Agent Tools (27 total)
+## Agent Tools (28 total)
 
 ### Query (read-only)
-`get_profile` `get_recent_activity` `get_pipeline_status` `search_applications`
-`get_recommendations` `get_report_detail` `get_profile_insights` `detect_skill_gaps`
-`check_pipeline_health` `decode_black_market_terms` `check_ats_compatibility`
+`get_profile` `get_reference_detail` `get_recent_activity` `get_pipeline_status`
+`search_applications` `get_recommendations` `get_report_detail` `get_profile_insights`
+`detect_skill_gaps` `check_pipeline_health` `decode_black_market_terms` `check_ats_compatibility`
 
 ### Action (write-capable)
 `evaluate_jd_full` `analyze_jd_risks` `optimize_resume_section` `save_resume_section`
