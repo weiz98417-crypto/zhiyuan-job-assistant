@@ -6,7 +6,7 @@ export interface LoopConfig {
 }
 
 export const DEFAULT_LOOP_CONFIG: LoopConfig = {
-  maxIterations: 3, // reduced from 5 — most tasks need 1-2 iterations
+  maxIterations: 5, // bumped from 3 — resume optimization + reference lookup need 3-4 iterations
 };
 
 export type AgentPhase =

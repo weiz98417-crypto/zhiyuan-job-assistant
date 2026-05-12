@@ -9,7 +9,7 @@
 筝筝纸鸢的 Agent 系统经历了两个阶段：
 
 ```
-阶段 1 (2026-05-09 前)              阶段 2 (当前)
+阶段 1 (2026-05-01 前)              阶段 2 (当前)
 ─────────────────────────           ─────────────────────
 Claude Mode 文件 唯一智能层          TypeScript Agent 主力
                                     Claude Mode 文件 降为 CLI 备选
@@ -27,7 +27,7 @@ Claude Mode 文件（`modes/zh/*.md`）保留的原因是：
 
 ---
 
-## 2. TypeScript Agent 系统（主力）
+## 2. TypeScript Agent 系统
 
 ### 架构分层
 
