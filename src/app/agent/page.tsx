@@ -6,13 +6,14 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Menu, User, Bot } from "lucide-react";
 import { HandwritingTitle, WarmButton } from "@/components/design";
 import AgentChat from "@/components/agent/AgentChat";
+import type { EvalBlockProgress, CompletionInfo } from "@/components/agent/AgentChat";
 import SessionList from "@/components/agent/SessionList";
 import { DEFAULT_SUGGESTIONS } from "@/components/agent/SuggestionChips";
 import type { SuggestionChip } from "@/components/agent/SuggestionChips";
 import { logInteraction } from "@/lib/agent/memory";
 import { migrateExploreToAgent } from "@/lib/agent/migrate";
-import { agentLoopClient } from "@/lib/agent/loop/client-runner"; // legacy fallback
 import { orchestrate } from "@/lib/agent/orchestrator";
+import { agentLoopClient } from "@/lib/agent/loop/client-runner";
 import type { AgentDefinition } from "@/lib/agent/registry/types";
 import { triggerProfileUpdate } from "@/lib/profile-update";
 import { scanMessage, deduplicateSignals, maybeRawContext } from "@/lib/agent/signal-extractor";
@@ -33,7 +34,7 @@ import type { AgentMessage, AgentInteraction, ChatSession } from "@/types";
 
 /* ── Agent phase ── */
 
-type AgentPhase = "understanding" | "executing" | "verifying" | "reflecting" | "responding" | "done" | null;
+type AgentPhase = "understanding" | "executing" | "verifying" | "reflecting" | "responding" | "done" | "extracting_ocr" | "extracting_jd" | "jd_extracted" | "detecting_archetype" | "archetype_detected" | null;
 
 /* ── Welcome message ── */
 
@@ -91,18 +92,12 @@ function AgentPageInner() {
   const [sessionSidebarOpen, setSessionSidebarOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [activeAgent, setActiveAgent] = useState<AgentDefinition | null>(null);
+  const [evalProgress, setEvalProgress] = useState<EvalBlockProgress[]>([]);
+  const [completionInfo, setCompletionInfo] = useState<CompletionInfo | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
   const streamContentRef = useRef("");
   const seenSignalKeys = useRef<Set<string>>(new Set());
-
-  /* ── Detect JD evaluation intent ── */
-  const isJDEvalIntent = useCallback((content: string, images?: string[]) => {
-    if (images?.length) return true;
-    if (content.length > 200) return true;
-    if (/^(帮我|请|麻烦).*(评估|分析).*(JD|职位|岗位|这个)/.test(content)) return true;
-    return false;
-  }, []);
 
   /* ── Detect if user is uploading a resume ── */
   const isResumeUpload = useCallback((content: string, images?: string[]) => {
@@ -223,194 +218,6 @@ function AgentPageInner() {
         }
       }
 
-      /* ── Direct JD eval path with progressive chat messages ── */
-      if (isJDEvalIntent(content, images)) {
-        const cmdMatch = content.match(/(?:评估|分析).*(?:JD|职位|岗位|这个)[：:\s]*([\s\S]+)/);
-        const jdText = cmdMatch ? cmdMatch[1].trim() : content;
-
-        // Start a single streaming assistant message that grows
-        const streamMsg: AgentMessage = {
-          role: "assistant",
-          content: "🔍 正在评估...\n",
-          timestamp: new Date().toISOString(),
-        };
-        setMessages([...updated, streamMsg]);
-        setStreaming(true);
-        setStreamText("🔍 正在评估...\n");
-
-        const labelMap: Record<string, string> = {
-          a: "A", b: "B", c: "C", d: "D", e: "E", f: "F", g: "G",
-        };
-        let streamContent = "🔍 正在评估...\n";
-        let doneData: Record<string, unknown> = {};
-
-        // Read CV from localStorage
-        let cvText = "";
-        try {
-          const cvRaw = localStorage.getItem("zhiyuan-cv");
-          if (cvRaw) {
-            const cv = JSON.parse(cvRaw);
-            if (cv?.activeVersion && cv?.versions?.[cv.activeVersion]?.sections) {
-              cvText = cv.versions[cv.activeVersion].sections
-                .filter((s: { content?: string }) => s.content?.trim())
-                .map((s: { title: string; content: string }) => `【${s.title}】\n${s.content}`)
-                .join("\n\n");
-            }
-          }
-        } catch { /* ignore */ }
-
-        try {
-          const res = await fetch("/api/evaluate/stream", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ jdText: jdText.length >= 50 ? jdText : content, images, cvText: cvText || undefined, language: "zh" }),
-          });
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-          const reader = res.body!.getReader();
-          const decoder = new TextDecoder();
-          let buf = "";
-
-          // Accumulate block content for full report
-          const blockContents: Record<string, string> = {};
-
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buf += decoder.decode(value, { stream: true });
-            const lines = buf.split("\n");
-            buf = lines.pop() || "";
-
-            for (const line of lines) {
-              if (!line.startsWith("data: ")) continue;
-              try {
-                const evt = JSON.parse(line.slice(6));
-
-                switch (evt.type) {
-                  case "phase": {
-                    const labels: Record<string, string> = {
-                      jd_extracted: "✅ JD 已提取", extracting_ocr: "🔍 正在识别截图...",
-                      detecting_archetype: "🏷️ 正在分析职位类型...", archetype_detected: `🏷️ Archetype: ${evt.archetype || ''}`,
-                    };
-                    if (labels[evt.phase]) {
-                      streamContent += labels[evt.phase] + "\n";
-                      streamContentRef.current = streamContent;
-                    }
-                    break;
-                  }
-                  case "ocr_progress":
-                    streamContent += `📷 识别截图 ${evt.current}/${evt.total}...\n`;
-                    streamContentRef.current = streamContent;
-                    break;
-                  case "block_start": {
-                    const l = labelMap[evt.block] || evt.block;
-                    streamContent += `\n📊 ${evt.label || l} ⏳`;
-                    streamContentRef.current = streamContent;
-                    break;
-                  }
-                  case "block_chunk": {
-                    const bk = evt.block;
-                    if (!blockContents[bk]) blockContents[bk] = "";
-                    blockContents[bk] += (evt.content || "");
-                    break;
-                  }
-                  case "block_done": {
-                    const l = labelMap[evt.block] || evt.block;
-                    streamContent = streamContent.replace(new RegExp(`📊.*⏳$`, "m"), "");
-                    streamContent += `✅ **${l}板块** 完成 (${((blockContents[evt.block] || "").length)}字)\n`;
-                    streamContentRef.current = streamContent;
-                    break;
-                  }
-                  case "overall_score": {
-                    streamContent += `\n📈 总分: **${evt.score}/5**\n`;
-                    streamContentRef.current = streamContent;
-                    break;
-                  }
-                  case "done":
-                    doneData = evt;
-                    break;
-                }
-              } catch { /* skip */ }
-            }
-          }
-
-          // Final summary
-          const company = (doneData.company as string) || "未知";
-          const role = (doneData.role as string) || "未知";
-          const score = (doneData.overallScore as number) || 0;
-          const archetype = (doneData.archetype as string) || "";
-          const doneBlocks = (doneData.blocks || {}) as Record<string, { content: string; score: number }>;
-          const reportBlockContents = { ...blockContents };
-
-          // Build full report text from block contents
-          const blockLabels: Record<string, string> = {
-            a: "A · 职位概览", b: "B · 简历匹配", c: "C · 职级与策略",
-            d: "D · 薪资与市场", e: "E · 定制化方案", f: "F · 面试准备", g: "G · 职位合法性",
-          };
-          let fullReport = "";
-          for (const bk of ["a","b","c","d","e","f","g"]) {
-            let content = reportBlockContents[bk] || doneBlocks[bk]?.content || "";
-            if (content) {
-              // Strip any leading ## X heading from content (model may include its own)
-              content = content.replace(/^##\s*[A-G](?![A-Za-z]).*\n?/m, "").trim();
-              fullReport += `\n\n## ${blockLabels[bk]}\n\n${content}\n`;
-            }
-          }
-
-          streamContent += `\n---\n**${company} — ${role}** | 总分 **${score}/5** | ${archetype}`;
-          streamContentRef.current = streamContent;
-          setStreamText(streamContent);
-
-          // Finalize: streaming message + full report + HITL card
-          const reportMsg: AgentMessage = {
-            role: "assistant",
-            content: fullReport || "（报告内容已生成，详情见各板块）",
-            timestamp: new Date().toISOString(),
-          };
-          setMessages((prev) => {
-            const msgs = [...prev];
-            msgs[msgs.length - 1] = { role: "assistant", content: streamContent, timestamp: new Date().toISOString() };
-            msgs.push(reportMsg);
-            msgs.push({
-              role: "tool", toolName: "evaluate_jd",
-              content: JSON.stringify({ company, role, overallScore: score, archetype, blocks: doneBlocks, jdText: (doneData.jdText as string) || jdText }),
-              timestamp: new Date().toISOString(),
-            });
-            return msgs;
-          });
-
-          // Persist to current session
-          if (currentSessionId) {
-            const session = await getSession(currentSessionId);
-            if (session) {
-              const allMsgs: AgentMessage[] = [...session.messages, ...updated.slice(-1), { role: "assistant" as const, content: streamContent, timestamp: new Date().toISOString() }, reportMsg];
-              const evalTitle = session.title && session.title !== "新的对话" ? session.title : `${company} — ${role}`;
-              await updateSession(currentSessionId, { messages: allMsgs, title: evalTitle });
-            }
-          }
-        } catch (err) {
-          streamContent += `\n❌ 评估中断: ${err instanceof Error ? err.message : '网络错误'}`;
-          streamContentRef.current = streamContent;
-          setStreamText(streamContent);
-        }
-
-        // Auto-scan JD text and user reaction for profile signals
-        const jdSignals = deduplicateSignals(scanMessage(jdText, sesId), seenSignalKeys.current);
-        if (jdSignals.length > 0) {
-          fetch("/api/data/signals/batch", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ signals: jdSignals }),
-          }).catch(() => {});
-        }
-
-        // Auto-trigger profile update after JD evaluation
-        triggerProfileUpdate().catch(() => {});
-
-        setStreaming(false);
-        return;
-      }
-
       const assistantMsg: AgentMessage = {
         role: "assistant",
         content: "",
@@ -426,11 +233,13 @@ function AgentPageInner() {
       setExecutingTool(undefined);
       setThinkingContent("");
       setStartTime(undefined);
+      setEvalProgress([]);
+      setCompletionInfo(null);
       const controller = new AbortController();
       abortRef.current = controller;
 
       try {
-        // ── Multi-Agent Orchestrator: classify intent + build agent-specific prompt ──
+        // ── Client-side orchestration: classify + agentLoopClient ──
         const sessionMessages = updated.map((m) => ({
           role: m.role,
           content: m.content,
@@ -448,7 +257,7 @@ function AgentPageInner() {
 
         setActiveAgent(agent);
 
-        let toolResultInfo: { name: string; result: string; success: boolean } | null = null;
+        let toolResultInfo: { name: string; result: string; success: boolean; data?: unknown } | null = null;
         let assistantText = "";
 
         const msgList = updated.map((m) => ({ role: m.role, content: m.content }));
@@ -461,27 +270,90 @@ function AgentPageInner() {
           if (firstEvent) { setStartTime(Date.now()); firstEvent = false; }
           switch (event.type) {
             case "phase": setPhase(event.phase); break;
+            case "intent": break;
+            case "agent_switch": break;
             case "thinking_content": setThinkingContent(event.content); break;
             case "tool_call": setExecutingTool(event.name); break;
             case "tool_result":
-              toolResultInfo = { name: event.name, result: event.result, success: event.success };
-              console.log("[agent] tool_result received:", event.name, "success:", event.success, "result:", event.result?.slice(0, 100));
-              // Skip display for conversational tools — LLM presents results naturally
-              const showAsCard = !["optimize_resume_section", "save_resume_section"].includes(event.name);
+              toolResultInfo = { name: event.name, result: event.result, success: event.success, data: event.data };
+              // Only show cards for light tools; heavy tools go through status bar
+              const showAsCard = ["web_search", "decode_black_market_terms", "get_report_detail", "export_file", "download_report_pdf", "get_profile"].includes(event.name);
               if (showAsCard) {
                 setMessages((prev) => {
                   const copy = [...prev];
-                  const toolMsg: AgentMessage = { role: "tool", content: event.result, toolResult: event.result, toolName: event.name, timestamp: new Date().toISOString() };
-                  const lastIdx = copy.length - 1;
-                  if (copy[lastIdx]?.role === "tool" && copy[lastIdx]?.toolName === event.name) copy[lastIdx] = toolMsg;
-                  else copy.push(toolMsg);
+                  // For get_profile: store structured data in toolResult for ProfileViewCard
+                  if (event.name === "get_profile" && (event as {data?: unknown}).data) {
+                    const profileData = (event as {data?: unknown}).data;
+                    copy.push({
+                      role: "tool" as const,
+                      toolName: "get_profile",
+                      content: event.result,
+                      toolResult: { data: profileData },
+                      timestamp: new Date().toISOString(),
+                    });
+                  // For evaluate_jd_full: push JSON data message
+                  } else if (event.name === "evaluate_jd_full" && (event as {data?: unknown}).data) {
+                    const raw = (event as {data?: Record<string, unknown>}).data;
+                    copy.push({
+                      role: "tool" as const,
+                      toolName: "evaluate_jd_full",
+                      content: JSON.stringify({
+                        company: raw?.company || "unknown",
+                        role: raw?.role || "unknown",
+                        overallScore: raw?.overallScore || 0,
+                        archetype: raw?.archetype || "",
+                        blocks: raw?.blocks || {},
+                        jdText: raw?.jdText || "",
+                        reportNum: raw?.reportNum || 0,
+                      }),
+                      timestamp: new Date().toISOString(),
+                    });
+                  } else {
+                    const toolMsg: AgentMessage = { role: "tool", content: event.result, toolResult: event.result, toolName: event.name, timestamp: new Date().toISOString() };
+                    const lastIdx = copy.length - 1;
+                    if (copy[lastIdx]?.role === "tool" && copy[lastIdx]?.toolName === event.name) copy[lastIdx] = toolMsg;
+                    else copy.push(toolMsg);
+                  }
                   return copy;
                 });
               }
               break;
-            case "tool_error": console.warn(`[agent] tool error: ${event.name} recoverable=${event.recoverable} — ${event.error}`); break;
+            case "tool_error": console.warn(`[agent] tool error: ${event.name} — ${event.error}`); break;
             case "result_quality": break;
-            case "text": assistantText += event.content; streamContentRef.current = assistantText; break;
+            case "text": assistantText += event.content; streamContentRef.current = assistantText; setStreamText(assistantText); break;
+            case "block_start":
+              setEvalProgress(prev => {
+                const filtered = prev.filter(p => p.block !== event.block);
+                return [...filtered, { block: event.block, label: event.label || event.block, status: "running" }];
+              });
+              break;
+            case "block_done":
+              setEvalProgress(prev => prev.map(p => p.block === event.block ? { ...p, status: "done" } : p));
+              break;
+            case "score":
+              setEvalProgress(prev => prev.map(p => p.block === event.block ? { ...p, score: event.score } : p));
+              break;
+            case "overall_score": break;
+            case "search_start":
+              // Show risk scan / external search as a progress step
+              if (event.source === "risk-scan" || event.source === "web") {
+                setEvalProgress(prev => {
+                  const filtered = prev.filter(p => p.block !== "search");
+                  return [...filtered, { block: "search", label: `🔍 ${event.query.slice(0, 12)}`, status: "running" }];
+                });
+              }
+              break;
+            case "search_result":
+              setEvalProgress(prev => prev.map(p => p.block === "search" ? { ...p, status: "done", score: event.count } : p));
+              break;
+            case "persist_done":
+              setCompletionInfo({
+                reportNum: event.reportNum,
+                company: event.company,
+                role: event.role,
+                score: event.score,
+              });
+              break;
             case "done": break;
           }
         }
@@ -492,6 +364,7 @@ function AgentPageInner() {
         setStreaming(false);
         setPhase(null);
         setExecutingTool(undefined);
+        setEvalProgress([]);
 
         if (assistantText || toolResultInfo) {
           // Build final assistant
@@ -524,7 +397,9 @@ function AgentPageInner() {
                   role: "tool",
                   content: toolResultInfo.result,
                   toolName: toolResultInfo.name,
-                  toolResult: toolResultInfo.result,
+                  toolResult: toolResultInfo.name === "get_profile" && toolResultInfo.data
+                    ? { data: toolResultInfo.data }
+                    : toolResultInfo.result,
                   agent_id: agent.id !== "general" ? agent.id : undefined,
                   timestamp: new Date().toISOString(),
                 });
@@ -812,6 +687,8 @@ function AgentPageInner() {
           thinkingContent={thinkingContent}
           activeAgentId={activeAgent?.id}
           startTime={startTime}
+          evalProgress={evalProgress}
+          completionInfo={completionInfo}
           suggestions={activeAgent?.suggestions?.length ? activeAgent.suggestions.map(s => ({ icon: null as unknown as React.ReactNode, label: s.label, prompt: s.prompt })) : DEFAULT_SUGGESTIONS}
           onSend={sendMessage}
           emptyState={null}

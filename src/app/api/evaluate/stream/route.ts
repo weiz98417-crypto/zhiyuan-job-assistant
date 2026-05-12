@@ -211,9 +211,22 @@ async function ocrSingle(
 /* ── Score extraction ── */
 
 function extractScore(text: string, blockKey: string): number {
-  if (blockKey === "g") return 0;
-  const scoreMatch = text.match(/[总平]分[：:]\s*([\d.]+)/) || text.match(/([\d.]+)\s*\/\s*5/);
-  return scoreMatch ? parseFloat(scoreMatch[1]) : 3;
+  if (blockKey === "g") {
+    // Block G: 0 = no content, 1 = concerns found (the norm for legitimacy checks)
+    return text.trim().length > 20 ? 1 : 0;
+  }
+  // Prefer explicit score markers, then fall back to /5 pattern
+  const scoreMatch = text.match(/[总平]分[：:]\s*([\d.]+)/)
+    || text.match(/(?<!\d)(\d+\.?\d*)\s*\/\s*5(?!\d)/);
+  if (scoreMatch) {
+    const s = parseFloat(scoreMatch[1]);
+    if (s >= 1 && s <= 5) return Math.round(s * 10) / 10;
+  }
+  // If LLM explicitly says no data / can't evaluate, score low
+  if (/零(薪资|信息|数据)|无.*(信息|数据)|无法评估|不.*可.*(用|得)|缺失|cannot/i.test(text)) {
+    return 1;
+  }
+  return 3;
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -336,6 +349,28 @@ export async function POST(request: Request) {
         emit(controller, { type: "phase", phase: "archetype_detected", archetype: state.archetype });
         if (signal?.aborted) { controller.close(); return; }
 
+        /* ── Fetch CV data for block B/E/F matching ── */
+        let cvTextEffective = cvText || "";
+        if (!cvTextEffective) {
+          try {
+            const origin = request.headers.get("origin") || "http://localhost:3000";
+            const cvRes = await fetch(`${origin}/api/cv/data`, { signal }).catch(() => null);
+            if (cvRes?.ok) {
+              const cvJson = await cvRes.json();
+              const cv = cvJson?.data;
+              if (cv?.versions && cv?.activeVersion) {
+                const sections = cv.versions[cv.activeVersion]?.sections;
+                if (Array.isArray(sections)) {
+                  cvTextEffective = sections
+                    .filter((s: { content: string }) => s.content?.trim())
+                    .map((s: { title: string; content: string }) => `【${s.title}】\n${s.content}`)
+                    .join("\n\n");
+                }
+              }
+            }
+          } catch { /* non-blocking */ }
+        }
+
         /* ── Blocks A-G ── */
         const blockKeys = ["a", "b", "c", "d", "e", "f", "g"] as const;
         const blockLabels: Record<string, string> = {
@@ -356,8 +391,8 @@ export async function POST(request: Request) {
             user: `JD:\n${state.jdText.slice(0, 5000)}\n\n${archBrief}`,
           },
           b: {
-            sys: `你是AI求职评估引擎。当前日期: ${todayCN} (${today})。只生成「B板块·简历匹配」，不要涉及其他板块。逐条对照JD要求与候选人简历，标注匹配/缺口/应对策略。${cvText ? '简历已提供，请精确匹配并引用简历行号。' : '无简历，请列出JD要求并标注"待提供简历"。'}Archetype策略: ${state.archetype === 'AI产品经理' ? '优先PRD、产品规划、数据驱动决策的证据' : state.archetype === 'AI运营' ? '优先增长指标、AI工具应用、A/B测试' : '优先相关领域经验'}。用中文markdown表格输出。`,
-            user: `${cvText ? `候选人简历:\n${cvText.slice(0, 6000)}\n\n` : ""}JD:\n${state.jdText.slice(0, 4000)}\n\n${archBrief}`,
+            sys: `你是AI求职评估引擎。当前日期: ${todayCN} (${today})。只生成「B板块·简历匹配」，不要涉及其他板块。逐条对照JD要求与候选人简历，标注匹配/缺口/应对策略。${cvTextEffective ? '简历已提供，请精确匹配并引用简历行号。' : '无简历，请列出JD要求并标注"待提供简历"。'}Archetype策略: ${state.archetype === 'AI产品经理' ? '优先PRD、产品规划、数据驱动决策的证据' : state.archetype === 'AI运营' ? '优先增长指标、AI工具应用、A/B测试' : '优先相关领域经验'}。用中文markdown表格输出。`,
+            user: `${cvTextEffective ? `候选人简历:\n${cvTextEffective.slice(0, 6000)}\n\n` : ""}JD:\n${state.jdText.slice(0, 4000)}\n\n${archBrief}`,
           },
           c: {
             sys: `你是AI求职评估引擎。当前日期: ${todayCN} (${today})。只生成「C板块·职级与策略」，不要涉及其他板块。分析JD职级要求，对照中国互联网职级体系(P6/P7/P8等)，给出"卖senior不撒谎"方案和被downlevel应对策略。用中文markdown输出。`,
@@ -369,11 +404,11 @@ export async function POST(request: Request) {
           },
           e: {
             sys: `你是AI求职评估引擎。当前日期: ${todayCN} (${today})。只生成「E板块·定制化方案」，不要涉及其他板块。给出简历5项具体修改建议(修改前→修改后→原因)，格式为markdown表格。用中文输出。`,
-            user: `JD:\n${state.jdText.slice(0, 4000)}\n\n${archBrief}${cvText ? `\n候选人简历:\n${cvText.slice(0, 3000)}` : ""}`,
+            user: `JD:\n${state.jdText.slice(0, 4000)}\n\n${archBrief}${cvTextEffective ? `\n候选人简历:\n${cvTextEffective.slice(0, 3000)}` : ""}`,
           },
           f: {
             sys: `你是AI求职评估引擎。当前日期: ${todayCN} (${today})。只生成「F板块·面试准备」，不要涉及其他板块。生成6-10个STAR+R面试故事(情境-任务-行动-结果-反思)，和红线问题应对话术。用中文markdown表格输出。${state.archetype}对应策略: 强调该岗位相关的项目经验和量化成果。`,
-            user: `JD:\n${state.jdText.slice(0, 4000)}\n\n${archBrief}${cvText ? `\n候选人简历:\n${cvText.slice(0, 3000)}` : ""}`,
+            user: `JD:\n${state.jdText.slice(0, 4000)}\n\n${archBrief}${cvTextEffective ? `\n候选人简历:\n${cvTextEffective.slice(0, 3000)}` : ""}`,
           },
           g: {
             sys: `你是AI求职评估引擎。当前日期: ${todayCN} (${today})。只生成「G板块·职位合法性」，不要涉及其他板块。分析JD是否为真实活跃职位，检测: 薪资是否合理、JD是否有技术细节、是否重复发布、中国平台特有风险(培训公司/猎头收集简历)。给出: 高可信度/谨慎推进/疑似虚假 + 理由。用中文输出。`,
@@ -407,6 +442,32 @@ export async function POST(request: Request) {
           if (bk === "f") {
             const sp = path.join(process.cwd(), "interview-prep", "story-bank.md");
             if (fs.existsSync(sp)) bp.sys += `\n用户已有故事库:\n${fs.readFileSync(sp, "utf-8").slice(0, 2000)}`;
+          }
+
+          // Block G: inject risk scan results (from /api/agent/scan-risks)
+          if (bk === "g") {
+            emit(controller, { type: "search_start", query: "风险信号扫描", source: "risk-scan" });
+            try {
+              const origin = request.headers.get("origin") || "http://localhost:3000";
+              const risksRes = await fetch(`${origin}/api/agent/scan-risks`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ jd_text: state.jdText }),
+                signal,
+              });
+              if (risksRes.ok) {
+                const risksData = await risksRes.json();
+                const riskSignals = (risksData.data || []) as Array<{ signal: string; excerpt?: string; severity: string }>;
+                if (riskSignals.length > 0) {
+                  const riskText = riskSignals.map((r) => {
+                    const badge = r.severity === "critical" ? "🔴" : r.severity === "high" ? "🟠" : "🟡";
+                    return `- ${badge} ${r.signal}${r.excerpt ? `: ${r.excerpt}` : ""}`;
+                  }).join("\n");
+                  bp.sys += `\n\n风险扫描结果（来自 scan-risks API）:\n${riskText}\n请在G板块的合法性分析中引用这些风险信号。`;
+                  emit(controller, { type: "search_result", count: riskSignals.length, summary: riskSignals.map(r => r.signal).join("、") });
+                }
+              }
+            } catch { /* non-blocking — proceed without risk signals */ }
           }
 
           try {

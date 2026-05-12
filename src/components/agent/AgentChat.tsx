@@ -2,7 +2,7 @@
 
 import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import { motion } from "framer-motion";
-import { Send, Loader2, Check, CheckCircle, X, ChevronDown, ChevronUp, Brain, RefreshCw, Plus, FileText, BookOpen, Trash2, Briefcase } from "lucide-react";
+import { Send, Loader2, Check, CheckCircle, X, ChevronDown, ChevronUp, Brain, RefreshCw, Plus, FileText, BookOpen, Trash2, Briefcase, User, Target } from "lucide-react";
 import { WarmButton, ScoreBadge } from "@/components/design";
 import { getToolDisplay } from "@/lib/agent/tool-display-names";
 import { getAgentById } from "@/lib/agent/registry";
@@ -19,7 +19,21 @@ const VALID_IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"];
 
 /* ── Types ── */
 
-type AgentPhase = "understanding" | "executing" | "verifying" | "reflecting" | "responding" | "done" | null;
+type AgentPhase = "understanding" | "executing" | "verifying" | "reflecting" | "responding" | "done" | "extracting_ocr" | "extracting_jd" | "jd_extracted" | "detecting_archetype" | "archetype_detected" | null;
+
+export interface EvalBlockProgress {
+  block: string;
+  label: string;
+  status: "running" | "done";
+  score?: number;
+}
+
+export interface CompletionInfo {
+  reportNum: number;
+  company: string;
+  role: string;
+  score: number;
+}
 
 /* ── Props ── */
 
@@ -34,6 +48,10 @@ interface AgentChatProps {
   activeAgentId?: string;
   /** Timestamp when current agent run started (for elapsed timer) */
   startTime?: number;
+  /** Per-block evaluation progress (from stream events) */
+  evalProgress?: EvalBlockProgress[];
+  /** Evaluation completion info (after persist) */
+  completionInfo?: CompletionInfo | null;
 
   suggestions?: SuggestionChip[];
   onSend: (content: string, images?: string[]) => Promise<void>;
@@ -171,6 +189,15 @@ const PHASE_LABELS: Record<string, { emoji: string; label: string }> = {
   executing: { emoji: "🔧", label: "执行中" },
   verifying: { emoji: "🔍", label: "验证中" },
   responding: { emoji: "✏️", label: "输出中" },
+  extracting_ocr: { emoji: "📷", label: "截图识别" },
+  extracting_jd: { emoji: "🌐", label: "抓取JD" },
+  jd_extracted: { emoji: "📄", label: "JD提取完成" },
+  detecting_archetype: { emoji: "🏷️", label: "分析类型" },
+  archetype_detected: { emoji: "✅", label: "类型确认" },
+};
+
+const BLOCK_LABELS: Record<string, string> = {
+  a: "A·概览", b: "B·匹配", c: "C·职级", d: "D·薪资", e: "E·定制", f: "F·面试", g: "G·合法",
 };
 
 function AgentStatusBar({
@@ -178,11 +205,13 @@ function AgentStatusBar({
   toolName,
   startTime,
   tokenCount,
+  evalProgress,
 }: {
   phase: AgentPhase;
   toolName?: string;
   startTime?: number;
   tokenCount?: number;
+  evalProgress?: EvalBlockProgress[];
 }) {
   const [elapsed, setElapsed] = useState(0);
 
@@ -203,6 +232,17 @@ function AgentStatusBar({
   const parts: string[] = [];
   parts.push(`${phaseInfo.emoji} ${phaseInfo.label}`);
   if (display && phase === "executing") parts.push(`· ${display.emoji} ${display.label}`);
+
+  // Render eval block progress from props (driven by generator SSE events)
+  if (evalProgress && evalProgress.length > 0) {
+    const blockParts = evalProgress.map((p) => {
+      const label = BLOCK_LABELS[p.block] || p.label;
+      if (p.status === "done") return `${label} ✓${p.score ?? ""}`;
+      return `${label} ⏳`;
+    });
+    parts.push(blockParts.join(" · "));
+  }
+
   if (startTime && elapsed > 0) parts.push(`⏱ ${elapsed}s`);
   if (tokenCount && tokenCount > 0) {
     const k = (tokenCount / 1000).toFixed(1);
@@ -317,6 +357,32 @@ function AnimatedStreamText({ text }: { text: string }) {
   );
 }
 
+/* ── Eval Completion Notice ── */
+
+function EvalCompletionNotice({ info }: { info: CompletionInfo }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3 }}
+      className="flex justify-start"
+    >
+      <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-[var(--radius-md)] px-4 py-3 max-w-[90%]">
+        <div className="flex items-center gap-2 text-sm">
+          <CheckCircle size={16} className="text-emerald-500 flex-shrink-0" />
+          <span className="font-medium text-[var(--color-text)]">
+            评估完成 · {info.company} — {info.role}
+          </span>
+          {info.score > 0 && <ScoreBadge score={info.score} size="sm" />}
+        </div>
+        <p className="text-xs text-[var(--color-muted)] mt-1.5">
+          报告已自动保存 #{String(info.reportNum).padStart(3, "0")}
+        </p>
+      </div>
+    </motion.div>
+  );
+}
+
 /* ── HITL Eval Confirm Card ── */
 
 function EvalConfirmCard({ msg }: { msg: AgentMessage }) {
@@ -383,7 +449,7 @@ function EvalConfirmCard({ msg }: { msg: AgentMessage }) {
         company, role, archetype,
         overallScore: score,
         legitimacy: "",
-        blocks: { a: blocks.a?.content || "", b: blocks.b?.content || "", c: blocks.c?.content || "", d: blocks.d?.content || "", e: blocks.e?.content || "", f: blocks.f?.content || "", g: blocks.g?.content || "" },
+        blocks: { a: typeof blocks.a === "string" ? blocks.a : blocks.a?.content || "", b: typeof blocks.b === "string" ? blocks.b : blocks.b?.content || "", c: typeof blocks.c === "string" ? blocks.c : blocks.c?.content || "", d: typeof blocks.d === "string" ? blocks.d : blocks.d?.content || "", e: typeof blocks.e === "string" ? blocks.e : blocks.e?.content || "", f: typeof blocks.f === "string" ? blocks.f : blocks.f?.content || "", g: typeof blocks.g === "string" ? blocks.g : blocks.g?.content || "" },
         scores: { a: blocks.a?.score || 0, b: blocks.b?.score || 0, c: blocks.c?.score || 0, d: blocks.d?.score || 0, e: blocks.e?.score || 0, f: blocks.f?.score || 0, g: "" },
         keywords: [],
         createdAt: new Date(),
@@ -428,6 +494,139 @@ function EvalConfirmCard({ msg }: { msg: AgentMessage }) {
   );
 }
 
+/* ── Profile/CV View Card ── */
+
+interface ProfileViewData {
+  cvData?: {
+    activeVersion?: string;
+    versions?: Record<string, {
+      sections?: Array<{ id: string; title: string; content: string }>;
+    }>;
+  };
+  profileData?: {
+    skills?: Array<{ name: string }>;
+    goals?: { targetRoles?: Array<{ role: string; level: string }>; dealBreakers?: string[] };
+  };
+  dnaSummary?: string;
+}
+
+function ProfileViewCard({ data }: { data: ProfileViewData }) {
+  const byId: Record<string, string> = {};
+  if (data.cvData?.versions) {
+    const activeVer = data.cvData.activeVersion || Object.keys(data.cvData.versions)[0];
+    const sections = data.cvData.versions[activeVer]?.sections;
+    if (sections) {
+      for (const s of sections) byId[s.id] = (s.content || "").trim();
+    }
+  }
+
+  return (
+    <div className="space-y-4 max-w-[95%]">
+      {/* Personal info table extracted from summary */}
+      {byId.summary && (
+        <div className="rounded-[var(--radius-md)] border border-[var(--color-divider)] overflow-hidden">
+          <div className="px-4 py-2 bg-[var(--color-bg)] border-b border-[var(--color-divider)] flex items-center gap-2">
+            <User size={14} className="text-[var(--color-primary)]" />
+            <span className="text-sm font-medium text-[var(--color-text)]">基本信息</span>
+          </div>
+          <div className="p-4 text-sm">
+            <table className="w-full text-sm">
+              <tbody>
+                {byId.summary.split("\n").map((line, i) => {
+                  const colonIdx = line.indexOf("：") > 0 ? line.indexOf("：") : line.indexOf(":");
+                  if (colonIdx > 0) {
+                    const key = line.slice(0, colonIdx).trim();
+                    const val = line.slice(colonIdx + 1).trim();
+                    if (!val) return null;
+                    return (
+                      <tr key={i} className={i > 0 ? "border-t border-[var(--color-divider)]" : ""}>
+                        <td className="py-1.5 pr-4 text-[var(--color-muted)] whitespace-nowrap align-top">{key}</td>
+                        <td className="py-1.5 text-[var(--color-text)]">{val}</td>
+                      </tr>
+                    );
+                  }
+                  // First line (name) or other lines
+                  if (i === 0 && line && !line.includes("：") && !line.includes(":")) {
+                    return (
+                      <tr key={i}>
+                        <td className="py-1.5 pr-4 text-[var(--color-muted)] whitespace-nowrap align-top">姓名</td>
+                        <td className="py-1.5 text-[var(--color-text)] font-medium">{line}</td>
+                      </tr>
+                    );
+                  }
+                  return line ? (
+                    <tr key={i} className={i > 0 ? "border-t border-[var(--color-divider)]" : ""}>
+                      <td colSpan={2} className="py-1.5 text-[var(--color-text-soft)]">{line}</td>
+                    </tr>
+                  ) : null;
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Work Experience */}
+      {byId.experience && (
+        <div className="rounded-[var(--radius-md)] border border-[var(--color-divider)] overflow-hidden">
+          <div className="px-4 py-2 bg-[var(--color-bg)] border-b border-[var(--color-divider)] flex items-center gap-2">
+            <Briefcase size={14} className="text-[var(--color-primary)]" />
+            <span className="text-sm font-medium text-[var(--color-text)]">工作经历</span>
+          </div>
+          <div className="p-4 text-sm whitespace-pre-wrap text-[var(--color-text)]">{byId.experience}</div>
+        </div>
+      )}
+
+      {/* Projects */}
+      {byId.projects && (
+        <div className="rounded-[var(--radius-md)] border border-[var(--color-divider)] overflow-hidden">
+          <div className="px-4 py-2 bg-[var(--color-bg)] border-b border-[var(--color-divider)] flex items-center gap-2">
+            <FileText size={14} className="text-[var(--color-primary)]" />
+            <span className="text-sm font-medium text-[var(--color-text)]">项目经验</span>
+          </div>
+          <div className="p-4 text-sm whitespace-pre-wrap text-[var(--color-text)]">{byId.projects}</div>
+        </div>
+      )}
+
+      {/* Education + Skills */}
+      {(byId.education || byId.skills) && (
+        <div className="grid grid-cols-2 gap-3">
+          {byId.education && (
+            <div className="rounded-[var(--radius-md)] border border-[var(--color-divider)] overflow-hidden">
+              <div className="px-3 py-1.5 bg-[var(--color-bg)] border-b border-[var(--color-divider)] text-xs font-medium text-[var(--color-text)]">教育背景</div>
+              <div className="p-3 text-sm text-[var(--color-text)] whitespace-pre-wrap">{byId.education}</div>
+            </div>
+          )}
+          {byId.skills && (
+            <div className="rounded-[var(--radius-md)] border border-[var(--color-divider)] overflow-hidden">
+              <div className="px-3 py-1.5 bg-[var(--color-bg)] border-b border-[var(--color-divider)] text-xs font-medium text-[var(--color-text)]">技能</div>
+              <div className="p-3 text-sm text-[var(--color-text)] whitespace-pre-wrap">{byId.skills}</div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Profile Goals */}
+      {data.profileData?.goals && (
+        <div className="rounded-[var(--radius-md)] border border-[var(--color-divider)] overflow-hidden">
+          <div className="px-4 py-2 bg-[var(--color-bg)] border-b border-[var(--color-divider)] flex items-center gap-2">
+            <Target size={14} className="text-[var(--color-primary)]" />
+            <span className="text-sm font-medium text-[var(--color-text)]">求职目标</span>
+          </div>
+          <div className="p-4 text-sm space-y-1">
+            {data.profileData.goals.targetRoles?.length ? (
+              <p>目标岗位: {data.profileData.goals.targetRoles.map(r => r.level ? `${r.role}(${r.level})` : r.role).join("、")}</p>
+            ) : null}
+            {data.profileData.goals.dealBreakers?.length ? (
+              <p className="text-[var(--color-muted)]">底线: {data.profileData.goals.dealBreakers.join("、")}</p>
+            ) : null}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ── Message Bubble ── */
 
 function MessageBubble({
@@ -452,10 +651,40 @@ function MessageBubble({
   const isUser = msg.role === "user";
 
   if (msg.role === "tool") {
-    // Special handling for evaluate_jd: render HITL confirmation buttons
+    // Structured data tools — render directly via React components, not LLM text
+    if (msg.toolName === "get_profile") {
+      let profileData: ProfileViewData | null = null;
+      try {
+        const raw = msg.toolResult as Record<string, unknown> | undefined;
+        if (raw?.data && typeof raw.data === "object") {
+          profileData = raw.data as ProfileViewData;
+        }
+      } catch { /* fall through */ }
+      if (profileData && (profileData.cvData || profileData.profileData)) {
+        return <ProfileViewCard data={profileData} />;
+      }
+    }
+
+    // Report detail — render via existing ReportMessage component with A-G blocks
+    if (msg.toolName === "get_report_detail" && msg.content) {
+      if (isReportMessage(msg.content)) {
+        return <ReportMessage content={msg.content} />;
+      }
+      // Fallback: render as markdown text
+      return (
+        <div className="max-w-[90%]">
+          <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-[var(--radius-md)] px-4 py-3 text-sm"
+               dangerouslySetInnerHTML={{ __html: mdToHtml(msg.content) }} />
+        </div>
+      );
+    }
+
+    // Special handling for evaluate_jd (not evaluate_jd_full — that uses EvalCompletionNotice)
     if (msg.toolName === "evaluate_jd") {
       return <EvalConfirmCard msg={msg} />;
     }
+    // evaluate_jd_full tool result is data-only (not rendered as card) —
+    // completion info is shown via EvalCompletionNotice
 
     const resultStr = typeof msg.toolResult === "string"
       ? msg.toolResult
@@ -480,39 +709,15 @@ function MessageBubble({
   function renderStreamContent() {
     if (!showStream) return null;
 
-    const statusBar = (
-      <AgentStatusBar
-        phase={phase}
-        toolName={executingTool}
-        startTime={startTime}
-      />
-    );
-
-    // Show streamText with status bar below if executing
     if (streamText) {
-      return (
-        <>
-          <AnimatedStreamText text={streamText} />
-          {statusBar}
-        </>
-      );
+      return <AnimatedStreamText text={streamText} />;
     }
 
-    // Phase indicator with timer
     if (phase === "understanding") {
-      return (
-        <>
-          {statusBar}
-          <span className="inline-flex gap-0.5 ml-2">
-            <span className="w-1 h-1 rounded-full bg-[var(--color-primary)] animate-bounce [animation-delay:0ms]" />
-            <span className="w-1 h-1 rounded-full bg-[var(--color-primary)] animate-bounce [animation-delay:150ms]" />
-            <span className="w-1 h-1 rounded-full bg-[var(--color-primary)] animate-bounce [animation-delay:300ms]" />
-          </span>
-        </>
-      );
+      return <ThinkingDots />;
     }
 
-    return statusBar || <ThinkingDots />;
+    return <ThinkingDots />;
   }
 
   const streamContent = renderStreamContent();
@@ -556,6 +761,8 @@ export default function AgentChat({
   thinkingContent,
   activeAgentId,
   startTime,
+  evalProgress,
+  completionInfo,
   suggestions,
   onSend,
   emptyState,
@@ -708,7 +915,19 @@ export default function AgentChat({
           );
         })}
 
-        {/* Standalone thinking/reflecting bubbles when not tied to a message */}
+        {/* Status bar: shown independently when executing, even without stream text */}
+        {streaming && phase && phase !== "done" && (
+          <div className="flex justify-start pl-4">
+            <AgentStatusBar phase={phase} toolName={executingTool} startTime={startTime} evalProgress={evalProgress} />
+          </div>
+        )}
+
+        {/* Eval completion notice: shown after streaming ends and persist_done fires */}
+        {!streaming && completionInfo && (
+          <EvalCompletionNotice info={completionInfo} />
+        )}
+
+        {/* Standalone thinking/reflecting bubbles */}
         {streaming && thinkingContent && (phase === "understanding" || phase === "reflecting") && (
           <ThinkingBubble content={thinkingContent} />
         )}

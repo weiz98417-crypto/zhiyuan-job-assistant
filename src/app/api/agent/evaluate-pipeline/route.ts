@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { upsertApp, upsertReport, listReports, type AppRow, type ReportRow } from "@/lib/server-db";
 
 export async function POST(request: Request) {
   try {
@@ -75,19 +76,47 @@ export async function POST(request: Request) {
 
           const { company, role, overallScore, archetype, blocks } = evalJson.data;
 
-          // Phase 4: Persist
+          // Emit per-block progress (blocks are generated in one shot, but we show completion sequentially)
+          const blockLabels: Record<string, string> = { a: "A·概览", b: "B·匹配", c: "C·职级", d: "D·薪资", e: "E·定制", f: "F·面试", g: "G·合法" };
+          for (const bk of ["a","b","c","d","e","f","g"]) {
+            if (blocks[bk]) {
+              sse({ type: "block_start", block: bk, label: blockLabels[bk] || bk });
+              // Small delay so the status bar visibly updates
+              await new Promise(r => setTimeout(r, 200));
+            }
+          }
+
+          // Phase 4: Persist to both applications and reports tables
           sse({ type: "phase", phase: "persisting" });
+          let reportNum = 0;
           try {
-            await fetch(`${baseUrl}/api/data/application`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ company, role, score: overallScore, archetype, blocks }),
-            });
-          } catch { /* best-effort */ }
+            const keywords = evalJson.data.keywords || [];
+            const legitimacy = evalJson.data.legitimacy || "";
+            const date = evalJson.data.date || new Date().toISOString().slice(0, 10);
+
+            // Save application record
+            const appRow: Partial<AppRow> = {
+              company, role, score: overallScore, status: "Evaluated",
+              date, archetype, report_path: "",
+            };
+            upsertApp(appRow as AppRow);
+
+            // Save report record with full blocks
+            const allReports = listReports();
+            const maxNum = allReports.reduce((max, r) => Math.max(max, r.report_num), 0);
+            reportNum = maxNum + 1;
+            const reportRow: ReportRow = {
+              report_num: reportNum, date, company, role,
+              archetype, overall_score: overallScore, legitimacy,
+              blocks_json: JSON.stringify(blocks),
+              keywords_json: JSON.stringify(keywords),
+            };
+            upsertReport(reportRow);
+          } catch (e) { console.warn("[pipeline] persist failed:", e); }
 
           sse({
             type: "done",
-            data: { company, role, overallScore, archetype, blocks, risks, jdText },
+            data: { company, role, overallScore, archetype, blocks, risks, jdText, reportNum, keywords: evalJson.data.keywords, date: evalJson.data.date, legitimacy: evalJson.data.legitimacy },
           });
         } catch (err) {
           sse({ type: "error", error: err instanceof Error ? err.message : "未知错误" });

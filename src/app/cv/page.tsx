@@ -19,6 +19,7 @@ import {
   Upload,
   ClipboardPaste,
   GitCompare,
+  CheckCircle,
 } from "lucide-react";
 import {
   HandwritingTitle,
@@ -157,6 +158,10 @@ export default function CVPage() {
   const [importMode, setImportMode] = useState<"paste" | "upload">("paste");
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importDragOver, setImportDragOver] = useState(false);
+  const [importedRefId, setImportedRefId] = useState<number | null>(null);
+  const [renameImportedValue, setRenameImportedValue] = useState("");
+  const [showRenamePrompt, setShowRenamePrompt] = useState(false);
+  const [renameSaving, setRenameSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ── Import own CV from file ──
@@ -239,13 +244,32 @@ export default function CVPage() {
       if (!data.success) throw new Error(data.error || "导入失败");
       setImportText("");
       setImportFile(null);
-      setShowImportPanel(false);
+      // Show rename prompt instead of immediately closing
+      setImportedRefId(data.data.id);
+      setRenameImportedValue(data.data.name);
+      setShowRenamePrompt(true);
       fetchReferences();
     } catch (err: unknown) {
       setImportError(err instanceof Error ? err.message : "导入失败");
     } finally {
       setImportLoading(false);
     }
+  };
+
+  const handleRenameImported = async () => {
+    if (!importedRefId || !renameImportedValue.trim()) return;
+    setRenameSaving(true);
+    try {
+      await fetch(`/api/cv/references/${importedRefId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: renameImportedValue.trim() }),
+      });
+    } catch { /* ignore */ }
+    setRenameSaving(false);
+    setShowRenamePrompt(false);
+    setShowImportPanel(false);
+    fetchReferences();
   };
 
   const handleFileDrop = (e: React.DragEvent) => {
@@ -303,6 +327,10 @@ export default function CVPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(updates),
     });
+    // Update the currently viewed detail so the UI reflects changes immediately
+    if (viewingRefDetail && viewingRefDetail.id === id) {
+      setViewingRefDetail({ ...viewingRefDetail, ...updates } as typeof viewingRefDetail);
+    }
     fetchReferences();
   };
 
@@ -1257,6 +1285,40 @@ export default function CVPage() {
                     {importError && (
                       <p className="text-xs text-red-500">{importError}</p>
                     )}
+
+                    {/* Rename prompt after import */}
+                    {showRenamePrompt && (
+                      <div className="p-3 bg-emerald-50 dark:bg-emerald-950/20 rounded-[var(--radius-md)] border border-emerald-200 dark:border-emerald-800 space-y-2">
+                        <p className="text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                          <CheckCircle size={12} className="inline mr-1" />
+                          解析成功！给这份简历起个名字吧：
+                        </p>
+                        <div className="flex gap-2">
+                          <input
+                            autoFocus
+                            value={renameImportedValue}
+                            onChange={(e) => setRenameImportedValue(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Enter") handleRenameImported(); }}
+                            className="flex-1 bg-white dark:bg-[var(--color-bg)] border border-[var(--color-border)] rounded-[var(--radius-sm)] px-3 py-1.5 text-sm"
+                            placeholder="输入简历名称..."
+                          />
+                          <button
+                            onClick={handleRenameImported}
+                            disabled={renameSaving || !renameImportedValue.trim()}
+                            className="text-xs px-3 py-1.5 rounded-[var(--radius-sm)] bg-emerald-500 text-white disabled:opacity-50"
+                          >
+                            {renameSaving ? "保存中..." : "保存"}
+                          </button>
+                          <button
+                            onClick={() => { setShowRenamePrompt(false); setShowImportPanel(false); }}
+                            className="text-xs px-2 py-1.5 text-[var(--color-muted)]"
+                          >
+                            跳过
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
                     <div className="flex gap-2">
                       <button
                         onClick={handleImportReference}

@@ -12,10 +12,12 @@ import { interviewAgent } from "./agents/interview-agent";
 import { evaluateAgent } from "./agents/evaluate-agent";
 import { profileAgent } from "./agents/profile-agent";
 import { resumeAgent } from "./agents/resume-agent";
+import { orchestratorAgent } from "./agents/orchestrator/index";
 import { generalAgent } from "./agents/general-agent";
 // ── Static registry (registration order = tie-break order) ──
 
 const AGENT_REGISTRY: AgentDefinition[] = [
+  orchestratorAgent, // System agent — not matched by regex (no intentPatterns)
   interviewAgent,
   evaluateAgent,
   profileAgent,

@@ -56,4 +56,6 @@ export interface AgentDefinition {
   suggestions: AgentSuggestion[];
   /** Optional model override */
   model?: string;
+  /** Pro tier model (activated by user keywords like "深度评估") */
+  modelPro?: string;
 }

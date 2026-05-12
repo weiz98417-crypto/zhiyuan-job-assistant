@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { orchestrate } from "@/lib/agent/orchestrator";
-import { agentLoopServer } from "@/lib/agent/loop/server-runner";
+import { orchestrateGen } from "@/lib/agent/orchestrator";
 import type { SSEEvent } from "@/lib/agent/loop/types";
 
 export const maxDuration = 180; // 3 minutes for complex agents
@@ -22,12 +21,6 @@ export async function POST(request: Request) {
 
     const userMessage = messages[messages.length - 1]?.content || "";
 
-    // Orchestrate: classify intent, build prompt, tool whitelist
-    const { systemPrompt, toolWhitelist, tools } = await orchestrate(userMessage, {
-      sessionId: null,
-      messages,
-    });
-
     const encoder = new TextEncoder();
     let aborted = false;
 
@@ -36,10 +29,14 @@ export async function POST(request: Request) {
         request.signal.addEventListener("abort", () => { aborted = true; });
 
         try {
-          const runner = agentLoopServer(systemPrompt, messages, undefined, tools, toolWhitelist);
+          // orchestrateGen handles: intent classification → agent switch → delegate to sub-agent loop
+          const runner = orchestrateGen(userMessage, {
+            sessionId: null,
+            messages,
+          });
           for await (const event of runner) {
             if (aborted) break;
-            controller.enqueue(encoder.encode(sse(event)));
+            controller.enqueue(encoder.encode(sse(event as SSEEvent)));
           }
         } catch (err) {
           if (!aborted) {

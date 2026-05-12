@@ -102,6 +102,7 @@ export const profileAgent: AgentDefinition = {
   knowledgeSubset: ["zhiyuan-levels", "salary-benchmarks"],
   priority: 10,
   suggestions: PROFILE_SUGGESTIONS,
+  model: "deepseek-v4-flash",
 
   async buildSystemPrompt(ctx: AgentPromptContext): Promise<string> {
     // Fetch dingwei SOP prompt from API (cached)

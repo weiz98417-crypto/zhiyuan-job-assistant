@@ -2,6 +2,8 @@ import type { LoopConfig, LoopState, SSEEvent } from "./types";
 import { DEFAULT_LOOP_CONFIG } from "./types";
 import { executeTool, formatToolResult } from "@/lib/agent/tools";
 import type { ToolResult } from "@/lib/agent/tools/types";
+import db from "@/lib/db";
+import { createJD } from "@/lib/jd-storage";
 
 export type { SSEEvent };
 
@@ -14,7 +16,6 @@ function checkResultQuality(formatted: string): ResultQuality {
   if (!trimmed || trimmed === "未找到相关结果" || trimmed === "搜索失败: 未找到相关结果") {
     return "empty";
   }
-  // Detect obviously irrelevant Wikipedia results (e.g., TV dramas for company queries)
   const garbagePatterns = [
     /被惡魔附身/,
     /理想之城/,
@@ -51,10 +52,17 @@ function truncateContext(
   return messages.slice(-keepLast);
 }
 
+/** Cap tool result text entering LLM context.
+ *  Full data is shown to user via React components — LLM only needs a signal. */
+const MAX_TOOL_CTX = 600;
+function capToolCtx(text: string, toolName: string): string {
+  if (text.length <= MAX_TOOL_CTX) return text;
+  const head = text.slice(0, MAX_TOOL_CTX);
+  return `${head}\n...[已截断: 原始${text.length}字, 完整内容已通过前端组件展示]`;
+}
+
 /* ── Think proxy helpers ── */
 
-/** Research protocol injected into every think call.
- *  Strategy guidance only — native function calling handles tool invocation. */
 const RESEARCH_PROTOCOL = `\n\n【研究流程】
 1. 拆实体：用户提到了几个独立实体？不要把不同实体合并搜索
    - 例：「安世亚太和大连的CAE企业」→ 实体1=安世亚太（公司），实体2=大连的CAE企业（需发现）
@@ -72,12 +80,11 @@ function injectResearchProtocol(
   skip?: boolean,
 ): { role: string; content: string }[] {
   if (skip) return messages;
-  return messages.map((m, i) => {
-    if (i === messages.length - 1 && m.role === "user") {
-      return { ...m, content: m.content + RESEARCH_PROTOCOL };
-    }
-    return m;
-  });
+  // Inject as a separate system message instead of appending to user message
+  // to avoid confusing the LLM about what the user actually said
+  const withProtocol = [...messages];
+  withProtocol.push({ role: "system", content: RESEARCH_PROTOCOL.trim() });
+  return withProtocol;
 }
 
 function buildSearchProgress(
@@ -112,39 +119,56 @@ async function fetchFromThinkProxy(
   });
 }
 
-async function collectThinkResponse(response: Response): Promise<{
-  text: string;
-  toolCalls: NativeToolCall[];
-}> {
+/* ── Streaming Think Response Collector ── */
+
+/**
+ * Reads SSE stream from think proxy and yields text chunks as they arrive.
+ * Tool calls are accumulated and yielded as a final event.
+ */
+async function* collectThinkResponseStreaming(
+  response: Response,
+  signal?: AbortSignal,
+): AsyncGenerator<SSEEvent, { text: string; toolCalls: NativeToolCall[] }> {
   const reader = response.body!.getReader();
   const decoder = new TextDecoder();
   let fullText = "";
   const toolCalls: NativeToolCall[] = [];
   let buffer = "";
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() || "";
-    for (const line of lines) {
-      if (!line.startsWith("data: ")) continue;
-      const data = line.slice(6);
-      try {
-        const parsed = JSON.parse(data);
-        if (parsed.type === "text" && parsed.content) {
-          fullText += parsed.content;
-        } else if (parsed.type === "tool_calls" && Array.isArray(parsed.tool_calls)) {
-          for (const tc of parsed.tool_calls) {
-            toolCalls.push(tc);
+  try {
+    while (true) {
+      if (signal?.aborted) break;
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const data = line.slice(6);
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed.type === "text" && parsed.content) {
+            fullText += parsed.content;
+            yield { type: "text", content: parsed.content };
+          } else if (parsed.type === "tool_calls" && Array.isArray(parsed.tool_calls)) {
+            for (const tc of parsed.tool_calls) {
+              toolCalls.push(tc);
+            }
           }
+        } catch {
+          /* skip */
         }
-      } catch {
-        /* skip */
       }
     }
+  } finally {
+    reader.releaseLock();
   }
+
+  if (toolCalls.length > 0) {
+    yield { type: "tool_calls", tool_calls: toolCalls };
+  }
+
   return { text: fullText, toolCalls };
 }
 
@@ -180,13 +204,12 @@ export async function* agentLoopClient(
 
     state.iteration++;
 
-    // Context truncation
     if (state.contextSize > MAX_CONTEXT_TOKENS) {
       ctx = truncateContext(ctx, 15);
       state.contextSize = estimateTokens(ctx);
     }
 
-    // ── Phase 1: Understanding (识别中) or Reflecting (分析结果中) ──
+    // ── Phase 1: Understanding / Reflecting ──
     if (firstIteration) {
       state.phase = "understanding";
       yield { type: "phase", phase: "understanding" };
@@ -207,9 +230,17 @@ export async function* agentLoopClient(
         yield { type: "done" };
         return;
       }
-      const resp = await collectThinkResponse(thinkResponse);
-      thinkText = resp.text;
-      toolCalls = resp.toolCalls;
+
+      // Use streaming collector — yields text chunks as they arrive
+      const streamGen = collectThinkResponseStreaming(thinkResponse, signal);
+      let streamResult: IteratorResult<SSEEvent, { text: string; toolCalls: NativeToolCall[] }>;
+      while (true) {
+        streamResult = await streamGen.next();
+        if (streamResult.done) break;
+        yield streamResult.value;
+      }
+      thinkText = streamResult.value.text;
+      toolCalls = streamResult.value.toolCalls;
       console.log("[loop] thinkText length:", thinkText.length, "toolCalls:", toolCalls.length);
     } catch (err) {
       yield { type: "phase", phase: "responding" };
@@ -223,18 +254,7 @@ export async function* agentLoopClient(
       return;
     }
 
-    // If LLM wrote thinking text alongside tool calls, stream it first
-    if (toolCalls.length > 0 && thinkText.trim()) {
-      state.phase = "responding";
-      yield { type: "phase", phase: "responding" };
-      const preview = thinkText.trim().slice(0, 200); // Limit thinking text
-      for (let i = 0; i < preview.length; i += 4) {
-        if (signal?.aborted) break;
-        yield { type: "text", content: preview.slice(i, i + 4) };
-        await new Promise((r) => setTimeout(r, 3));
-      }
-      await new Promise((r) => setTimeout(r, 80)); // Brief pause before tool call
-    }
+    // Note: preview loop removed — text is now streamed in real-time by collectThinkResponseStreaming
 
     if (toolCalls.length === 0) {
       // ── No tool needed → Respond ──
@@ -243,11 +263,8 @@ export async function* agentLoopClient(
 
       let responseText = thinkText.trim();
       if (responseText) {
-        for (let i = 0; i < responseText.length; i += 8) {
-          if (signal?.aborted) break;
-          yield { type: "text", content: responseText.slice(i, i + 8) };
-          await new Promise((r) => setTimeout(r, 5));
-        }
+        // Text already streamed by collectThinkResponseStreaming above.
+        // Only emit the final phase event — don't re-stream the text.
       } else {
         yield { type: "text", content: "操作完成。" };
       }
@@ -288,14 +305,144 @@ export async function* agentLoopClient(
         } catch (execErr) {
           toolResult = { success: false, data: null, error: execErr instanceof Error ? execErr.message : "Tool execution error" };
         }
+
+        // ═════════════════════════════════════════════════════════
+        // Stream Delegation: if tool returned a ReadableStream,
+        // read it and yield events through the generator loop.
+        // ═════════════════════════════════════════════════════════
+        const isStreaming = toolResult._streaming && toolResult.data;
+        const toolStream = isStreaming
+          ? (toolResult.data as Record<string, unknown>)?._stream as ReadableStream<Uint8Array> | undefined
+          : undefined;
+
+        if (toolStream) {
+          const reader = toolStream.getReader();
+          const decoder = new TextDecoder();
+          let buf = "";
+          let finalData: Record<string, unknown> = {};
+
+          try {
+            while (true) {
+              if (signal?.aborted) { reader.cancel(); break; }
+              const { done, value } = await reader.read();
+              if (done) break;
+              buf += decoder.decode(value, { stream: true });
+              const streamLines = buf.split("\n");
+              buf = streamLines.pop() || "";
+              for (const streamLine of streamLines) {
+                if (!streamLine.startsWith("data: ")) continue;
+                try {
+                  const event = JSON.parse(streamLine.slice(6));
+                  // Forward stream events to UI
+                  yield event as SSEEvent;
+                  // Extract finalData from the done event (flat fields, NOT nested under .data)
+                  if (event.type === "done" && event.company) {
+                    finalData = event as Record<string, unknown>;
+                  }
+                } catch { /* skip malformed */ }
+              }
+            }
+          } finally {
+            reader.releaseLock();
+          }
+
+          // Persist after stream completes
+          console.log("[loop] persist check:", { company: finalData.company, role: finalData.role, hasBlocks: !!finalData.blocks });
+          if (finalData.company && finalData.role) {
+            try {
+              const persistRes = await fetch("/api/agent/persist-eval", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(finalData),
+              });
+              const persistJson = await persistRes.json();
+              console.log("[loop] persist result:", persistJson);
+              if (persistJson.success) {
+                // Also save to client-side Dexie (IndexedDB) so UI pages can find the data
+                const d = finalData;
+                const reportNum = persistJson.reportNum || 0;
+                const blocks = (d.blocks || {}) as Record<string, { content: string; score: number }>;
+                const today = new Date().toISOString().split("T")[0];
+                try {
+                  await db.reports.add({
+                    reportNum,
+                    date: (d.date as string) || today,
+                    company: (d.company as string) || "",
+                    role: (d.role as string) || "",
+                    archetype: (d.archetype as string) || "",
+                    overallScore: (d.overallScore as number) || 0,
+                    legitimacy: (d.legitimacy as string) || "",
+                    blocks: {
+                      a: typeof blocks.a === "string" ? blocks.a : blocks.a?.content || "",
+                      b: typeof blocks.b === "string" ? blocks.b : blocks.b?.content || "",
+                      c: typeof blocks.c === "string" ? blocks.c : blocks.c?.content || "",
+                      d: typeof blocks.d === "string" ? blocks.d : blocks.d?.content || "",
+                      e: typeof blocks.e === "string" ? blocks.e : blocks.e?.content || "",
+                      f: typeof blocks.f === "string" ? blocks.f : blocks.f?.content || "",
+                      g: typeof blocks.g === "string" ? blocks.g : blocks.g?.content || "",
+                    },
+                    scores: {
+                      a: blocks.a?.score || 0, b: blocks.b?.score || 0, c: blocks.c?.score || 0,
+                      d: blocks.d?.score || 0, e: blocks.e?.score || 0, f: blocks.f?.score || 0, g: "",
+                    },
+                    keywords: Array.isArray(d.keywords) ? d.keywords as string[] : [],
+                    createdAt: new Date(),
+                  });
+                } catch (e) { console.warn("[loop] dexie report save failed:", e); }
+
+                // Save JD to client-side Dexie
+                const jdText = (d.jdText as string) || "";
+                if (jdText.trim().length >= 50) {
+                  try {
+                    await createJD({
+                      company: (d.company as string) || "",
+                      role: (d.role as string) || "",
+                      sourceType: "agent",
+                      body: jdText,
+                      keywords: (Array.isArray(d.keywords) ? d.keywords : []) as string[],
+                    });
+                  } catch (e) { console.warn("[loop] dexie JD save failed:", e); }
+                }
+
+                yield {
+                  type: "persist_done",
+                  reportNum: reportNum,
+                  company: d.company as string,
+                  role: d.role as string,
+                  score: (d.overallScore as number) || 0,
+                };
+              }
+            } catch (err) {
+              console.error("[loop] persist failed:", err);
+            }
+          } else {
+            console.warn("[loop] persist skipped: missing company or role");
+          }
+
+          formatted = formatToolResult({ success: true, data: finalData }, tc.name);
+          yield { type: "tool_result", name: tc.name, result: formatted, success: true, data: finalData };
+
+          // Push formatted result to context for LLM summary in next iteration
+          ctx.push({
+            role: "user",
+            content: capToolCtx(`<!-- tool:${tc.name} result -->\n${formatted}\n\n【请基于以上工具返回的数据进行深度分析和扩容解释。不要仅复述数据——要分析原因、风险判断、面试追问策略和行动建议。】`, tc.name),
+          });
+          state.contextSize = estimateTokens(ctx);
+          state.consecutiveFailures = 0;
+          recentCalls.push({ name: tc.name, params: paramsKey, result: formatted });
+          if (recentCalls.length > 5) recentCalls.shift();
+          continue; // Skip the normal post-tool logic below
+        }
+
+        // ── Non-streaming tool: existing logic ──
         formatted = formatToolResult(toolResult, tc.name);
         recentCalls.push({ name: tc.name, params: paramsKey, result: formatted });
         if (recentCalls.length > 5) recentCalls.shift();
       }
 
-      yield { type: "tool_result", name: tc.name, result: formatted, success: toolResult.success };
+      yield { type: "tool_result", name: tc.name, result: formatted, success: toolResult.success, data: toolResult.data };
 
-      // ── Self-healing: yield error info so LLM can adapt ──
+      // ── Self-healing ──
       if (!toolResult.success) {
         yield { type: "tool_error", name: tc.name, error: toolResult.error || "未知错误", recoverable: toolResult.recoverable !== false };
       }
@@ -315,7 +462,6 @@ export async function* agentLoopClient(
       let qualityHint = "";
       if (!toolResult.success) {
         if (toolResult.recoverable === false) {
-          // Permanent failure — do NOT retry, just tell user
           qualityHint = `\n<!-- ⚠️ 工具执行失败（无法重试）: ${toolResult.error || "未知错误"}。请直接告知用户原因并引导用户操作。 -->`;
         } else {
           qualityHint = `\n<!-- ⚠️ 工具执行失败: ${toolResult.error || "未知错误"}。${toolResult.retryHint || "请换参数重试、使用其他工具获取信息、或基于已有知识直接回答。"} -->`;
@@ -333,7 +479,7 @@ export async function* agentLoopClient(
 
       ctx.push({
         role: "user",
-        content: `<!-- tool:${tc.name} result -->\n${formatted}${qualityHint}\n\n【请基于以上工具返回的数据进行深度分析和扩容解释。不要仅复述数据——要分析原因、风险判断、面试追问策略和行动建议。】`,
+        content: capToolCtx(`<!-- tool:${tc.name} result -->\n${formatted}${qualityHint}\n\n【请基于以上工具返回的数据进行深度分析和扩容解释。不要仅复述数据——要分析原因、风险判断、面试追问策略和行动建议。】`, tc.name),
       });
       state.contextSize = estimateTokens(ctx);
     }
@@ -346,21 +492,18 @@ export async function* agentLoopClient(
       return;
     }
 
-    // Auto-retry limit: force LLM to respond after too many retries
+    // Auto-retry limit
     if (autoRetryCount > MAX_AUTO_RETRY) {
       yield { type: "phase", phase: "responding" };
       yield { type: "text", content: `搜索暂不可用（已尝试 ${autoRetryCount} 次），以下是我基于已有知识的分析：` };
-      // Let LLM think one more time without quality hint
       const forceResponse = await fetchFromThinkProxy(systemPrompt, ctx, signal, "", skipResearchProtocol, tools);
       if (forceResponse.ok) {
-        const forceResp = await collectThinkResponse(forceResponse);
-        const clean = forceResp.text.trim();
-        if (clean) {
-          for (let i = 0; i < clean.length; i += 8) {
-            if (signal?.aborted) break;
-            yield { type: "text", content: clean.slice(i, i + 8) };
-            await new Promise((r) => setTimeout(r, 5));
-          }
+        const streamGen = collectThinkResponseStreaming(forceResponse, signal);
+        let streamResult: IteratorResult<SSEEvent, { text: string; toolCalls: NativeToolCall[] }>;
+        while (true) {
+          streamResult = await streamGen.next();
+          if (streamResult.done) break;
+          yield streamResult.value;
         }
       }
       yield { type: "done" };

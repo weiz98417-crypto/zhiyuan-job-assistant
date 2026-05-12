@@ -89,6 +89,8 @@ export default function ReferenceViewer({
     setSaving(true);
     await onUpdate(resume.id, { name: editName.trim() });
     setSaving(false);
+    // Show new name immediately — prop update might lag behind async fetchReferences
+    setEditName(editName.trim());
     setIsEditingName(false);
   };
 

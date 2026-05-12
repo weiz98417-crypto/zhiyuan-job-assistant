@@ -8,7 +8,7 @@ import type { AgentDefinition, AgentPromptContext } from "@/lib/agent/registry/t
 import { injectRoleWritingGuide } from "@/lib/agent/knowledge/role-writing-guides";
 
 // ── Resume-specific tools ──
-const RESUME_TOOL_NAMES = ["import_resume", "generate_cv", "evaluate_jd", "export_file", "get_profile", "optimize_resume_section", "save_resume_section", "check_ats_compatibility"];
+const RESUME_TOOL_NAMES = ["import_resume", "generate_cv", "evaluate_jd", "export_file", "get_profile", "get_reference_detail", "optimize_resume_section", "save_resume_section", "check_ats_compatibility"];
 
 // ── Extract targetRoles from careerDNA text ──
 
@@ -76,10 +76,11 @@ ${ctx.memoryDigest ? `## 会话记忆\n${ctx.memoryDigest}` : ""}
 - generate_cv: 根据画像和JD要求生成/优化简历 (jdRequirements?: JD关键要求, sections?: 要优化的简历段落, style?: 风格偏好)
 - evaluate_jd: 分析JD提取关键要求 (jdText?: JD全文, jdUrl?: JD链接)
 - export_file: 导出文件 (format?: 文件格式, content?: 内容)
-- get_profile: 读取当前求职画像数据
+- get_profile: 读取当前求职画像和简历摘要——返回简短摘要（完整简历由前端卡片渲染）。返回数据中包含"参考简历库"列表，列出了可用的参考简历 id
+- get_reference_detail: 用户提到"参考简历""上传的简历""未命名简历"时→按 id 读取参考简历全文
 
 ## 核心规则
-- 可用工具: import_resume, generate_cv, evaluate_jd, export_file, get_profile, optimize_resume_section, save_resume_section, check_ats_compatibility
+- 可用工具: import_resume, generate_cv, evaluate_jd, export_file, get_profile, get_reference_detail, optimize_resume_section, save_resume_section, check_ats_compatibility
 - **optimize_resume_section 只生成方案不保存** — 展示后等用户选
 - **save_resume_section 只在用户明确确认后才调用**
 - 量化建议要具体，给出修改前后对比
@@ -125,8 +126,9 @@ export const resumeAgent: AgentDefinition = {
   tools: [], // Populated via populateAgentTools()
   toolNames: RESUME_TOOL_NAMES,
   knowledgeSubset: ["jd-signals"],
-  priority: 12, // Higher than profile(10) to win "优化简历" routing
+  priority: 12,
   suggestions: RESUME_SUGGESTIONS,
+  model: "deepseek-v4-pro",
 
   async buildSystemPrompt(ctx: AgentPromptContext): Promise<string> {
     return buildResumePrompt(ctx);

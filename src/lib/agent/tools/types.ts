@@ -14,6 +14,8 @@ export interface ToolResult {
   recoverable?: boolean;
   /** Hint for LLM on how to recover from the failure. Only used when recoverable is true. */
   retryHint?: string;
+  /** If true, data._stream contains a ReadableStream for client-runner to read and yield events from. */
+  _streaming?: boolean;
 }
 
 export interface ToolDefinition<TParams = Record<string, unknown>> {

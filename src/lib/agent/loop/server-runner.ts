@@ -10,6 +10,7 @@ import type { LoopConfig, LoopState, SSEEvent, AgentPhase } from "./types";
 import { DEFAULT_LOOP_CONFIG } from "./types";
 import { executeTool, formatToolResult } from "@/lib/agent/tools";
 import type { ToolResult } from "@/lib/agent/tools/types";
+import type { AgentDefinition } from "@/lib/agent/registry/types";
 
 /* ── Quality check ── */
 
@@ -40,6 +41,7 @@ function checkResultQuality(formatted: string): ResultQuality {
 
 const MODEL_CHAIN = [
   { model: "deepseek-v4-flash", url: "https://api.deepseek.com/chat/completions", keyEnv: "DEEPSEEK_API_KEY" },
+  { model: "deepseek-v4-pro", url: "https://api.deepseek.com/chat/completions", keyEnv: "DEEPSEEK_API_KEY" },
   { model: "glm-4.6v-flashx", url: "https://open.bigmodel.cn/api/paas/v4/chat/completions", keyEnv: "ZHIPU_API_KEY" },
   { model: "qwen-long", url: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", keyEnv: "DASHSCOPE_API_KEY" },
 ];
@@ -65,9 +67,14 @@ async function callLLM(
   messages: DeepSeekMessage[],
   systemPrompt: string,
   tools?: Array<{ type: string; function: object }>,
+  modelPreference?: string,
 ): Promise<{ text: string; toolCalls: NativeToolCall[] }> {
   let lastError = "";
-  for (const { model, url, keyEnv } of MODEL_CHAIN) {
+  // If model preferred, reorder chain to put it first
+  const chain = modelPreference
+    ? [...MODEL_CHAIN].sort((a) => a.model === modelPreference ? -1 : 1)
+    : MODEL_CHAIN;
+  for (const { model, url, keyEnv } of chain) {
     const apiKey = process.env[keyEnv];
     if (!apiKey) continue;
 
@@ -148,13 +155,16 @@ function estimateTokens(messages: { role: string; content: string }[]): number {
   return messages.reduce((sum, m) => sum + m.content.length, 0);
 }
 
-export async function* agentLoopServer(
-  systemPrompt: string,
-  messages: { role: string; content: string }[],
-  config: LoopConfig = DEFAULT_LOOP_CONFIG,
-  tools?: Array<{ type: string; function: object }>,
-  toolWhitelist?: string[],
-): AsyncGenerator<SSEEvent> {
+export async function* agentLoopServer(opts: {
+  agent?: AgentDefinition;
+  systemPrompt: string;
+  messages: { role: string; content: string }[];
+  config?: LoopConfig;
+  tools?: Array<{ type: string; function: object }>;
+}): AsyncGenerator<SSEEvent> {
+  const { systemPrompt, messages, config = DEFAULT_LOOP_CONFIG, tools, agent } = opts;
+  const modelPreference = agent?.model;
+  const toolWhitelist = agent?.toolNames?.length ? agent.toolNames : undefined;
   const state: LoopState = {
     iteration: 0,
     consecutiveFailures: 0,
@@ -183,7 +193,7 @@ export async function* agentLoopServer(
     let thinkText: string;
     let toolCalls: NativeToolCall[];
     try {
-      const resp = await callLLM(ctx, systemPrompt, tools);
+      const resp = await callLLM(ctx, systemPrompt, tools, modelPreference);
       thinkText = resp.text;
       toolCalls = resp.toolCalls;
     } catch (err) {
@@ -300,7 +310,7 @@ export async function* agentLoopServer(
       yield { type: "phase", phase: "responding" };
       yield { type: "text", content: `搜索暂不可用（已尝试 ${autoRetryCount} 次），以下是我基于已有知识的分析：` };
       try {
-        const forceResp = await callLLM(ctx, systemPrompt, tools);
+        const forceResp = await callLLM(ctx, systemPrompt, tools, modelPreference);
         const clean = forceResp.text.trim();
         if (clean) yield { type: "text", content: clean };
       } catch { /* ignore */ }
