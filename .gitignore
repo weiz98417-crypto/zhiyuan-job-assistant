@@ -3,6 +3,9 @@ cv.md
 data/applications.md
 data/pipeline.md
 data/scan-history.tsv
+data/zhiyuan.db
+data/zhiyuan.db-shm
+data/zhiyuan.db-wal
 reports/*.md
 !reports/.gitkeep
 reports/.locks/
