@@ -116,6 +116,18 @@ clearActiveAgentTools()     → 清除白名单 (允许所有工具)
 
 ---
 
+## 设计思想
+
+Agent 工具生态的设计遵循一个看似朴素但极为强大的原则——**Unix 哲学：每个工具只做一件事，把它做到极致**。这不是盲目套用经典教条，而是经过实践验证的工程智慧。当 LLM 需要在多个工具之间做决策时，一个职责清晰的工具比一个"全能的"工具更容易被正确调用。`evaluate_jd_full` 负责评估，`analyze_jd_risks` 负责风险扫描，`fetch_jd_content` 负责抓取——三者的边界像乐高积木一样分明，LLM 在推理时几乎不会搞混。
+
+这种设计背后的深层逻辑是**组合优于配置**。工具本身不是"API 端点加了一层聊天包装"——而是可以被 LLM 编排的基础原语。一个复杂的求职评估任务可能涉及 5 个工具的链式调用：先 `fetch_jd_content` 抓取 JD 文本，再 `analyze_jd_risks` 扫描风险信号，然后 `evaluate_jd_full` 执行 7 维评估，如果用户对简历不放心，还可能调用 `check_ats_compatibility` 做格式检查。每一个工具独立可测试、独立可迭代，新增一个能力就是新增一个文件——定义 handler、写 formatResult、export 注册——不需要改动任何编排代码。
+
+工具的 **action/query 二分法**直接借鉴了 **CQRS（命令查询职责分离）** 模式。Query 工具（11 个）是纯读操作：不写入任何数据，不产生副作用，即使被 LLM 反复调用也不会造成数据污染。Action 工具（17 个）是写操作：会修改 SQLite、localStorage、触发网络请求或推进 SOP 状态机。这种分类不仅是文档层面的标注——ToolRegistry 的执行层可以利用这个分类做差异化处理：比如在测试环境中 stub 所有 Action 工具但让 Query 工具真实执行，从而安全地验证 Agent 的推理逻辑。
+
+新工具的注册流程也体现了极简设计原则。一个 `ToolDefinition` 只需要四个要素：name（唯一标识）、handler（执行逻辑）、formatResult（格式化输出给 LLM）、category（query/action）。没有复杂的配置文件，没有 XML 描述符，没有注解——就是一个 TypeScript 对象。`populateAgentTools()` 函数自动将工具按白名单注入到各个子 Agent，新工具被注册后 30 秒内就能在全系统中生效。这种轻量级的设计意味着扩展成本极低，鼓励"先做出来试试"的快速迭代节奏。
+
+---
+
 ## 2. 工具全景列表 (35 个)
 
 ### 2.1 Query 工具 (11 个 — 只读查询)
