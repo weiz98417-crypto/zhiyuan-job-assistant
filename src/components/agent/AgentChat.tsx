@@ -682,17 +682,25 @@ function MessageBubble({
     const raw = msg.toolResult as Record<string, unknown> | undefined;
     const uiPayload = raw?.uiPayload as Record<string, unknown> | undefined;
 
-    // read_file / get_reference_detail: data is for LLM only, don't dump raw text to user
-    if (msg.toolName === "read_file" || msg.toolName === "get_reference_detail") {
-      const label = msg.toolName === "read_file" ? "已读取文件" : "已读取参考简历";
-      let preview = "";
-      try {
-        if (raw?.uiPayload) {
-          preview = ((raw.uiPayload as Record<string, unknown>).content as string)?.slice(0, 80)?.replace(/\n/g, " ") || "";
-        } else if (typeof msg.toolResult === "string") {
-          preview = msg.toolResult.slice(0, 80).replace(/\n/g, " ");
-        }
-      } catch { /* ignore */ }
+    // Data query tools: data is for LLM only, show minimal indicator
+    const DATA_QUERY_TOOLS: Record<string, string> = {
+      read_file: "已读取文件",
+      get_reference_detail: "已读取参考简历",
+      search_applications: "已查询投递记录",
+      get_recent_activity: "已获取活动",
+      get_pipeline_status: "已获取 Pipeline 状态",
+      get_recommendations: "已获取推荐",
+      check_pipeline_health: "已完成健康检查",
+      get_profile_insights: "已完成画像分析",
+      detect_skill_gaps: "已完成技能分析",
+      check_ats_compatibility: "已完成 ATS 检查",
+      decode_black_market_terms: "已解码黑话",
+      analyze_jd_risks: "已完成风险扫描",
+      web_search: "已完成搜索",
+    };
+    if (DATA_QUERY_TOOLS[msg.toolName || ""]) {
+      const label = DATA_QUERY_TOOLS[msg.toolName!];
+      const preview = (typeof msg.toolResult === "string" ? msg.toolResult : msg.content || "").slice(0, 80).replace(/\n/g, " ");
       return (
         <div className="max-w-[90%]">
           <motion.div

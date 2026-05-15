@@ -80,6 +80,7 @@ const PROFILE_SUGGESTIONS = [
 const PROFILE_INTENT_PATTERNS = [
   /自我定位/,
   /帮我定位/,
+  /定位一下/,
   /找.*方向/,
   /适合.*什么/,
   /我.*能做什么/,
@@ -87,6 +88,8 @@ const PROFILE_INTENT_PATTERNS = [
   /我.*(适合|匹配).*岗位/,
   /(帮我|请).*(分析|看看).*(画像|profile|优势|短板)/,
   /职业.*(规划|方向|路径)/,
+  /(不太?确定|迷茫|不知道).*(方向|适合|做什么)/,
+  /(帮我|想).*(了解|看看).*(自己|我)/,
 ];
 
 // ── Agent definition ──
@@ -96,7 +99,7 @@ export const profileAgent: AgentDefinition = {
   name: "求职画像",
   description: "自我定位、竞争力分析、职业方向探索",
   intentPatterns: PROFILE_INTENT_PATTERNS,
-  explicitSwitchPatterns: [/用画像模式/, /帮我定位/, /自我定位/],
+  explicitSwitchPatterns: [/用画像模式/, /画像模式/, /帮我定位/, /自我定位/, /定位一下/],
   tools: [], // Populated via populateAgentTools()
   toolNames: ["get_profile", "get_recommendations", "get_profile_insights", "self_positioning", "check_pipeline_health", "get_recent_activity", "mine_profile"],
   knowledgeSubset: ["zhiyuan-levels", "salary-benchmarks"],

@@ -18,16 +18,17 @@ AI-powered job search assistant for the Chinese market. Evaluate JDs, optimize r
 ## Features
 
 ### Conversational Agent (纸鸢 Agent)
-- **5 specialized sub-agents**: Resume, Evaluate, Interview, Profile, General — auto-routed by LLM intent classification with regex fallback
-- **Native function calling**: 28 tools across query (read) and action (write) categories
-- **Stream Delegation pattern**: Long-running tools return ReadableStream for real-time progress events through the generator loop
-- **True streaming LLM responses**: collectThinkResponseStreaming yields text chunks as they arrive — no buffering
-- **Direct data rendering**: ProfileViewCard (CV), ReportMessage (A-G reports) — structured tool data renders via React components, bypassing LLM re-generation errors
-- **Context protection**: capToolCtx caps tool results entering LLM context at 600 chars; full data shown via components
-- **Quality-gated ReAct loop**: Self-healing with retry/degrade on tool failures, dedup for repeat calls
-- **Multi-model fallback chain**: DeepSeek V4 → Zhipu GLM → Qwen — auto-degrades on 429/503
+- **6 specialized sub-agents**: Resume, Evaluate, Interview, Profile, Offer, General — auto-routed by regex intent classification with priority ordering
+- **Native function calling**: 41 tools across query (16), action (18), interview (2), MCP (5)
+- **ToolResult triple-pipe architecture**: `llmSummary` (LLM context), `uiPayload` (React components), `rawData` (storage) — fully decoupled
+- **Stream Delegation pattern**: Long-running tools return ReadableStream for real-time progress events
+- **True streaming LLM responses**: Text chunks yield as they arrive — no buffering. `isLastAssistant` fix keeps streaming text visible during tool execution
+- **Minimal tool result cards**: Data-query tools show compact indicators ("已读取文件", "已完成搜索") — no raw text dumping
+- **Error self-healing**: `errorCategory` (ok/transient/permanent/need_user_input) + `forceTextOnly` code-level guard — permanent errors block subsequent tool calls
+- **Context budget**: `MAX_CONTEXT_TOKENS=64000`, `DEFAULT_TOOL_CTX_CAP=800` — tuned for DeepSeek V4 128K window
+- **Multi-model fallback chain**: DeepSeek V4 Flash → Pro → Zhipu GLM → Qwen — auto-degrades on 429/503
 - **Server-side agent loop**: Direct API key management, no client-side key exposure
-- **Real-time progress bar**: Per-block A-G evaluation status (`A·概览 ✓4.2 · B·匹配 ⏳ ⏱ 12s`)
+- **Agent.md loading**: Agent souls defined in Markdown files, loaded via `loadAgentMD()` — clean separation of prompts and code
 
 ### JD Evaluation (职位评估)
 - **A-G 7-dimension real-time streaming**: OCR → Archetype detection → Blocks A-G evaluated one-by-one via SSE, with live progress (`A·概览 ✓4.2 · B·匹配 ⏳`)
@@ -42,13 +43,14 @@ AI-powered job search assistant for the Chinese market. Evaluate JDs, optimize r
 
 ### Resume Optimization (简历优化)
 - **Section-by-section optimization**: Summary, Experience, Projects, Education, Skills
-- **Reference resume library**: Upload reference resumes for style/richness inspiration; click-to-rename, rename-on-import
-- **4 operation modes**: Full, Polish, Expand, Quantify — 5 effort levels each
+- **Reference resume library**: Upload + AI-parse (DeepSeek Flash, 16K tokens, project extraction from experience). Reference matching gated behind Effort ≥ 4
+- **6-step thinking framework**: AI extracts reference resume structure (background→design→mechanism→feedback→team→metrics) and applies same depth to user's domain
+- **4 operation modes**: Full, Polish, Expand, Quantify — 5 effort levels each. `enablePlaceholders` globally controls [XX] across all prompt functions
 - **Role-specific templates**: PM, AI PM, Backend, Frontend, Data/AI, QA, Design, Operations
 - **Save confirmation gate**: Agent MUST ask before writing — no auto-save
-- **ATS compatibility check**: Keyword density, format scanning
+- **ATS compatibility check**: JD-specific keyword coverage analysis
 - **PDF export**: Playwright-based HTML → PDF with custom templates
-- **Source disambiguation**: Agent distinguishes own CV vs reference resumes with explicit rules
+- **Agent.md loaded**: Resume agent soul in Markdown, loaded via `loadAgentMD("resume")`
 
 ### Application Tracker (投递追踪)
 - Full pipeline: Evaluated → Applied → Screened → Interview → Offer → Accepted/Rejected
@@ -61,10 +63,11 @@ AI-powered job search assistant for the Chinese market. Evaluate JDs, optimize r
 - Tax-adjusted real income calculation
 
 ### Interview Preparation (面试准备)
+- **4 workflows**: 普通出题 (read resume→generate), JD专项 (search JD→read resume→targeted), 面经搜索 (web_search→generate), 项目深挖 (read specific project→deep dive)
 - AI-generated role-specific questions from JD + career profile
-- STAR+R story bank with accumulated experience across evaluations
-- Company-specific interview intel (style, common questions, culture)
-- Interactive mock interview sessions
+- Company/industry research via `web_search` for real interview experiences
+- Interactive mock interview sessions with scoring
+- Agent.md loaded: Interview coach soul in Markdown, four workflows defined cleanly
 
 ### Job Discovery (职位发现)
 - Configurable portal scanner with dedup history
@@ -107,9 +110,12 @@ cp .env.example .env.local
 # 3. Onboarding check
 node scripts/check-onboarding.mjs
 
-# 4. Start
+# 4. Start dev server
 npm run dev
 # → http://localhost:3000
+
+# 5. Production build
+npm run build && npm start
 ```
 
 ---
@@ -119,18 +125,18 @@ npm run dev
 ```
 ├── src/
 │   ├── app/                  # 11 pages + 50+ API routes
-│   │   ├── agent/            # Conversational agent (home)
+│   │   ├── agent/            # Conversational agent (home) — AgentChat + SessionList
 │   │   ├── cv/               # Resume editor + optimizer
-│   │   ├── evaluate/         # JD evaluation
+│   │   ├── evaluate/         # JD evaluation + JD library + report library
 │   │   ├── tracker/          # Application pipeline
-│   │   ├── interview/        # Interview prep
+│   │   ├── interview/        # Interview prep + mock sessions
 │   │   ├── compare/          # Offer comparison
 │   │   ├── discover/         # Job portal scanner
-│   │   ├── explore/          # Legacy chat (migrated to agent)
+│   │   ├── explore/          # Free-form AI chat
 │   │   ├── profile/          # Career profile / DNA
-│   │   ├── settings/         # User preferences
+│   │   ├── settings/         # User preferences + data import/export
 │   │   ├── analytics/        # Data dashboard
-│   │   └── api/              # REST + SSE endpoints
+│   │   └── api/              # REST + SSE endpoints (50+ routes)
 │   ├── components/
 │   │   ├── agent/            # AgentChat, SessionList, SuggestionChips
 │   │   ├── design/           # Shared design system components
@@ -138,8 +144,8 @@ npm run dev
 │   └── lib/
 │       ├── agent/            # Agent system
 │       │   ├── loop/         # client-runner + server-runner
-│       │   ├── registry/     # 5 sub-agents + tool registry
-│       │   ├── tools/        # 16 action + 11 query tools
+│       │   ├── registry/     # 6 sub-agents + agent.md souls
+│       │   ├── tools/        # 18 action + 13 query + 2 interview + 5 MCP tools
 │       │   ├── memory/       # Layered memory (working/episodic/semantic)
 │       │   ├── orchestrator/ # Intent routing + tool dispatch
 │       │   └── interview/    # Interview simulation engine
@@ -163,18 +169,26 @@ npm run dev
 
 ---
 
-## Agent Tools (28 total)
+## Agent Tools (41 total)
 
-### Query (read-only)
-`get_profile` `get_reference_detail` `get_recent_activity` `get_pipeline_status`
-`search_applications` `get_recommendations` `get_report_detail` `get_profile_insights`
-`detect_skill_gaps` `check_pipeline_health` `decode_black_market_terms` `check_ats_compatibility`
+### Query (read-only, 16 tools)
+`search_applications` `get_report_detail` `get_reference_detail` `read_file`
+`get_profile` `get_recent_activity` `get_recommendations` `get_pipeline_status`
+`decode_black_market_terms` `check_pipeline_health` `get_profile_insights`
+`detect_skill_gaps` `check_ats_compatibility` `generate_interview_questions`
+`score_interview_answer` `check_ats_compatibility`
 
-### Action (write-capable)
+### Action (write-capable, 18 tools)
 `evaluate_jd_full` `analyze_jd_risks` `optimize_resume_section` `save_resume_section`
 `generate_cv` `import_resume` `compare_offers_deep` `prepare_interview_full`
 `self_positioning` `start_interview_session` `scan_portals` `fetch_jd_content`
 `evaluate_offer` `export_file` `mine_profile` `check_health`
+`download_report_pdf` `evaluate_jd`
+
+### MCP Shims (5 tools)
+`web_search` `get_weather` `search_place` `get_directions` `search_jobs`
+
+**Key parameters across all tools**: `offset`/`limit` (cursor-based reading), `section` (targeted reading), `role`/`date_from`/`score_min` (filtering), `timeout`/`retry` (resilience), `focus`/`difficulty` (precision control)
 
 ---
 
@@ -195,7 +209,7 @@ Output → evaluate-jd-full tool → LLM synthesizes with colored risk badges
 
 This project began as a fork of **[career-ops](https://github.com/bengous/career-ops)** by [Ben Gou's](https://github.com/bengous). The original laid the foundation: CLI pipeline automation, multi-mode evaluation agents, and the philosophy of "AI should help candidates choose companies."
 
-We added: interactive frontend, conversational agent with 27 tools, 3-layer risk scanning, China-specific localization, resume optimization judge engine, SQLite persistence, and 50+ API endpoints.
+We extended: interactive frontend, conversational agent with 41 tools across 6 specialized sub-agents, ToolResult triple-pipe architecture, 3-layer risk scanning, China-specific localization, resume optimization judge engine with 6-step thinking framework, interview coach with 4 workflows, SQLite canonical persistence, and 50+ API endpoints.
 
 ---
 

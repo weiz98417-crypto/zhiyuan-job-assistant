@@ -105,22 +105,21 @@ export default function OptimizePanel({
       });
 
       if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "追问生成失败");
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `追问生成失败 (${res.status})`);
       }
 
       const data = await res.json();
       if (!data.success || !data.data?.questions?.length) {
-        // Fallback: just generate directly
-        await generateVariants();
+        setError(data.error || "AI 未能生成有效追问，请直接生成方案");
+        setAskingQuestions(false);
         return;
       }
 
       setQuestions(data.data.questions);
-    } catch {
-      // Fallback to direct generation
-      await generateVariants();
-    } finally {
+      setAskingQuestions(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "追问生成失败，请重试或直接生成方案");
       setAskingQuestions(false);
     }
   };

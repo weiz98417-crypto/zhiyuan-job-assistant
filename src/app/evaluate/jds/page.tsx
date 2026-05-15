@@ -59,9 +59,15 @@ export default function JDLibraryPage() {
   const [deleteConfirm, setDeleteConfirm] = useState<JDRecord | null>(null);
 
   const loadJDs = useCallback(async () => {
-    const data = search.trim()
-      ? await searchJDs(search.trim())
-      : await getAllJDs();
+    try {
+      const res = await fetch("/api/data/jds");
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) {
+        setJDs(json.data);
+        return;
+      }
+    } catch { /* fallback to DexieDB */ }
+    const data = search.trim() ? await searchJDs(search.trim()) : await getAllJDs();
     setJDs(data);
   }, [search]);
 

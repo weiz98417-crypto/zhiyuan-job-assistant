@@ -60,6 +60,29 @@ export default function ReportsPage() {
   const [deleteConfirm, setDeleteConfirm] = useState<EvaluationReport | null>(null);
 
   const loadReports = useCallback(async () => {
+    try {
+      const res = await fetch("/api/data/reports");
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data) && json.data.length > 0) {
+        // Map SQLite snake_case to Dexie camelCase
+        const mapped = json.data.map((r: Record<string, unknown>) => ({
+          id: r.id,
+          reportNum: r.report_num,
+          date: r.date,
+          company: r.company,
+          role: r.role,
+          archetype: r.archetype,
+          overallScore: r.overall_score,
+          legitimacy: r.legitimacy,
+          blocks: typeof r.blocks_json === "string" ? JSON.parse(r.blocks_json) : (r.blocks_json || {}),
+          keywords: typeof r.keywords_json === "string" ? JSON.parse(r.keywords_json) : (r.keywords_json || []),
+          scores: {},
+          createdAt: r.created_at ? new Date(r.created_at as string) : new Date(),
+        }));
+        setReports(mapped as EvaluationReport[]);
+        return;
+      }
+    } catch { /* fallback to DexieDB */ }
     const data = await db.reports.orderBy("createdAt").reverse().toArray();
     setReports(data);
   }, []);

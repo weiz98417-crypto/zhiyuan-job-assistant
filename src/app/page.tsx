@@ -55,13 +55,38 @@ function getTwoWeeksAgo(): Date {
 export default function HomePage() {
   const [applications, setApplications] = useState<Application[]>([]);
   const [interviews, setInterviews] = useState<InterviewSchedule[]>([]);
+  const [offerCount, setOfferCount] = useState(0);
+  const [reportCount, setReportCount] = useState(0);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     async function load() {
-      const apps = await db.applications.toArray();
+      // Primary: fetch from SQLite API; fallback: DexieDB
+      try {
+        const [appsRes, reportsRes, offersRes] = await Promise.all([
+          fetch("/api/data/applications"),
+          fetch("/api/data/reports"),
+          fetch("/api/offers"),
+        ]);
+        if (appsRes.ok) {
+          const json = await appsRes.json();
+          if (json.success && Array.isArray(json.data)) setApplications(json.data);
+        }
+        if (reportsRes.ok) {
+          const json = await reportsRes.json();
+          if (json.success && Array.isArray(json.data)) setReportCount(json.data.length);
+        }
+        if (offersRes.ok) {
+          const json = await offersRes.json();
+          if (json.success && Array.isArray(json.data)) setOfferCount(json.data.length);
+        }
+      } catch { /* fallback to DexieDB */ }
+      // Fallback: DexieDB if API failed
+      if (applications.length === 0) {
+        const apps = await db.applications.toArray();
+        setApplications(apps);
+      }
       const ivs = await db.interviews.toArray();
-      setApplications(apps);
       setInterviews(ivs);
       setMounted(true);
     }
@@ -80,12 +105,13 @@ export default function HomePage() {
     return d >= twoWeeksAgo && d < weekAgo;
   });
 
-  const evaluated = applications.filter((a) => a.status === "evaluated").length;
+  const s = (a: Application) => (a as unknown as { status: string }).status;
+  const evaluated = Math.max(reportCount, applications.filter((a) => s(a) === "evaluated" || s(a) === "Evaluated").length);
   const applied = applications.filter((a) =>
-    ["applied", "responded", "interview", "offer"].includes(a.status)
+    ["applied", "Applied", "responded", "Responded", "interview", "Interview", "offer", "Offer"].includes(s(a))
   ).length;
-  const interviewing = applications.filter((a) => a.status === "interview").length;
-  const offers = applications.filter((a) => a.status === "offer").length;
+  const interviewing = applications.filter((a) => s(a) === "interview" || s(a) === "Interview").length;
+  const offers = offerCount > 0 ? offerCount : applications.filter((a) => s(a) === "offer" || s(a) === "Offer").length;
 
   const scoredApps = applications.filter((a) => a.score > 0);
   const avgScore = scoredApps.length > 0
@@ -93,12 +119,12 @@ export default function HomePage() {
     : 0;
 
   // Previous week for trend
-  const prevEvaluated = lastWeek.filter((a) => a.status === "evaluated").length;
+  const prevEvaluated = lastWeek.filter((a) => s(a) === "evaluated" || s(a) === "Evaluated").length;
   const prevApplied = lastWeek.filter((a) =>
-    ["applied", "responded", "interview", "offer"].includes(a.status)
+    ["applied", "Applied", "responded", "Responded", "interview", "Interview", "offer", "Offer"].includes(s(a))
   ).length;
-  const prevInterviewing = lastWeek.filter((a) => a.status === "interview").length;
-  const prevOffers = lastWeek.filter((a) => a.status === "offer").length;
+  const prevInterviewing = lastWeek.filter((a) => s(a) === "interview" || s(a) === "Interview").length;
+  const prevOffers = lastWeek.filter((a) => s(a) === "offer" || s(a) === "Offer").length;
   const prevScored = lastWeek.filter((a) => a.score > 0);
   const prevAvgScore = prevScored.length > 0
     ? prevScored.reduce((sum, a) => sum + a.score, 0) / prevScored.length
