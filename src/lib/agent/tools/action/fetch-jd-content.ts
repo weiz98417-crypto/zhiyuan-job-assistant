@@ -5,13 +5,25 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
   if (typeof url !== "string") {
     return { success: false, data: null, error: "url is required" };
   }
-  const res = await fetch("/api/fetch-jd", {
+  const timeout = Number(params.timeout) || 30000;
+  const retry = Number(params.retry) || 0;
+  const doFetch = async () => fetch("/api/fetch-jd", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ url }),
+    signal: AbortSignal.timeout(timeout),
   });
-  const json = await res.json();
-  return { success: json.success, data: json.data, error: json.error };
+  let lastErr: Error | null = null;
+  for (let i = 0; i <= retry; i++) {
+    try {
+      const res = await doFetch();
+      const json = await res.json();
+      return { success: json.success, data: json.data, error: json.error, errorCategory: json.success ? "ok" : "permanent" };
+    } catch (err) {
+      lastErr = err instanceof Error ? err : new Error("unknown");
+    }
+  }
+  return { success: false, data: null, error: `获取 JD 失败（重试${retry}次后仍失败）: ${lastErr?.message || "超时"}`, errorCategory: "transient" };
 }
 
 function formatResult(result: ToolResult): string {
@@ -25,6 +37,8 @@ export const fetchJDContent: ToolDefinition = {
   description: "通过 URL 获取 JD 的完整文本内容",
   parameters: {
     url: { type: "string", required: true, description: "职位链接 URL" },
+    timeout: { type: "number", required: false, description: "超时毫秒，默认 30000" },
+    retry: { type: "number", required: false, description: "失败重试次数，默认 0" },
   },
   category: "action",
   handler,

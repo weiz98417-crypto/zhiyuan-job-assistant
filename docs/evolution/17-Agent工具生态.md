@@ -29,7 +29,7 @@ Agent 工具系统是"真 Agent"的核心执行层，所有工具遵循统一的
                           │       2 个            │
                           └─────────────────────┘
 
-共 35 个工具，覆盖查询、动作、面试、MCP 四大类别。
+共 41 个工具，覆盖查询、动作、面试、MCP 四大类别。
 ```
 
 ### 1.1 核心类型定义
@@ -43,21 +43,31 @@ ToolDefinition {
   category: "query" | "action";          // query=只读不修改, action=会触发副作用
   parameters: Record<string, ToolParameter>;  // 输入参数 schema
   handler: (params) => Promise<ToolResult>;   // 执行逻辑
-  formatResult: (result) => string;           // 格式化输出给 LLM
+  formatResult: (result) => string;           // @deprecated 格式化输出（迁移中，fallback 保留）
+  buildLLMSummary?: (result) => string;       // 构建 LLM 摘要（默认取 result.llmSummary）
+  toolCtxCap?: number;                        // LLM 上下文截断上限（默认 800，文档类 4000）
 }
 ```
 
-**`ToolResult`** — 工具执行结果：
+**`ToolResult`** — 工具执行结果（三管道架构）：
 
 ```
 ToolResult {
-  success: boolean;         // 是否执行成功
-  data: unknown;            // 返回数据 (success=true 时有值)
-  error?: string;           // 错误信息 (success=false 时有值)
-  recoverable?: boolean;    // 是否可重试 (默认 true)
-  retryHint?: string;       // 重试提示，指导 LLM 如何修正参数
+  success: boolean;              // 是否执行成功
+  data: unknown;                 // @deprecated 原始数据（保留向后兼容）
+  error?: string;                // 错误信息 (success=false 时有值)
+  errorCategory?: ErrorCategory; // 错误分类: ok|transient|permanent|need_user_input
+  recoverable?: boolean;         // @deprecated 用 errorCategory 替代
+  retryHint?: string;            // 重试提示
+
+  // ── 三管道架构 ──
+  llmSummary?: string;           // LLM 上下文文本（默认 800 字截断）
+  uiPayload?: Record<string,unknown>; // UI 结构化数据（驱动组件渲染，不进 LLM 上下文）
+  rawData?: unknown;             // 完整原始数据（存储/日志）
 }
 ```
+
+**三管道设计**：`llmSummary` 专门给 LLM 做决策（精简摘要），`uiPayload` 给 React 组件渲染（结构化数据），`rawData` 给持久化存储。三条线独立调参，互不挤压。未迁移的工具由 `formatResult` fallback 保证兼容。
 
 **`ToolParameter`** — 参数定义：
 
@@ -128,25 +138,30 @@ Agent 工具生态的设计遵循一个看似朴素但极为强大的原则—�
 
 ---
 
-## 2. 工具全景列表 (35 个)
+## 2. 工具全景列表 (41 个)
 
-### 2.1 Query 工具 (11 个 — 只读查询)
+### 2.1 Query 工具 (16 个 — 只读查询)
 
 | # | 工具名 | 中文名 | 描述 | 关键参数 |
 |---|--------|--------|------|----------|
 | 1 | `search_applications` | 搜索投递记录 | 搜索用户的投递记录，可按状态和公司名筛选 | `status?`, `company?`, `limit?` |
-| 2 | `get_report_detail` | 查看评估报告 | 获取某份评估报告的完整详情 | `reportNum*` (报告编号) |
-| 3 | `get_profile` | 读取求职画像 | 获取用户求职画像（目标岗位/经验/技能/薪资期望/底线） | 无参数 |
-| 4 | `get_recent_activity` | 近期活动 | 获取最近 10 条投递活动记录 | 无参数 |
-| 5 | `get_recommendations` | 岗位推荐 | 基于用户画像和偏好获取智能推荐岗位 | `limit?` |
-| 6 | `get_pipeline_status` | Pipeline 状态 | 获取 Pipeline 总体投递统计（按状态分组，平均分） | 无参数 |
-| 7 | `decode_black_market_terms` | 黑话解码 | 解释 JD 中的招聘黑话真实含义（如"亲自带"→无偿加班风险） | `phrase*` (要解码的短语) |
-| 8 | `check_pipeline_health` | 管道健康检查 | 检测超过 7 天未回复的投递项，按逾期天数降序排列 | 无参数 |
-| 9 | `get_profile_insights` | 画像洞察 | 从历史行为信号提炼求职偏好、行业倾向、投递模式 | 无参数 |
-| 10 | `detect_skill_gaps` | 技能缺口分析 | 对比 CV 和 JD，输出缺失技能/薄弱项/匹配项/学习建议 | `jd_text*`, `cv_text?` |
-| 11 | `check_ats_compatibility` | ATS 兼容检查 | 检查简历的 ATS 兼容性（联系方式/量化密度/关键词/格式） | `cv_text*` |
+| 2 | `get_report_detail` | 查看评估报告 | 获取某份评估报告的完整 A-G 详情（三管道：llmSummary + uiPayload） | `reportNum*` (报告编号) |
+| 3 | `get_reference_detail` | 读取参考简历 | 读取上传参考简历的全文（按 ID） | `id*` (参考简历 ID) |
+| 4 | `read_file` | 读取文件 | 智能路由文件读取：我的简历→CV API，参考简历→DB，文件路径→服务端 | `path*` (文件路径或资源名) |
+| 5 | `get_profile` | 读取求职画像 | 获取用户完整求职画像和简历全文（三管道：llmSummary + ProfileViewCard uiPayload） | 无参数 |
+| 6 | `get_recent_activity` | 近期活动 | 获取最近 10 条投递活动记录 | 无参数 |
+| 7 | `get_recommendations` | 岗位推荐 | 基于用户画像和偏好获取智能推荐岗位 | `limit?` |
+| 8 | `get_pipeline_status` | Pipeline 状态 | 获取 Pipeline 总体投递统计（按状态分组，平均分） | 无参数 |
+| 9 | `decode_black_market_terms` | 黑话解码 | 解释 JD 中的招聘黑话真实含义（如"亲自带"→无偿加班风险） | `phrase*` (要解码的短语) |
+| 10 | `check_pipeline_health` | 管道健康检查 | 检测超过 7 天未回复的投递项，按逾期天数降序排列 | 无参数 |
+| 11 | `get_profile_insights` | 画像洞察 | 从历史行为信号提炼求职偏好、行业倾向、投递模式 | 无参数 |
+| 12 | `detect_skill_gaps` | 技能缺口分析 | 对比 CV 和 JD，输出缺失技能/薄弱项/匹配项/学习建议 | `jd_text*`, `cv_text?` |
+| 13 | `check_ats_compatibility` | ATS 兼容检查 | 检查简历的 ATS 兼容性（联系方式/量化密度/关键词/格式） | `cv_text*` |
+| 14 | `generate_interview_questions` | 生成面试题 | 根据 JD/简历/模式生成 8-12 道面试题 | `jdText?`, `cvText?`, `company?`, `role?` |
+| 15 | `score_interview_answer` | 评分面试回答 | 对面试回答进行四维度评分 | `question*`, `answer*` |
+| 16 | — | — | — | — |
 
-### 2.2 Action 工具 (17 个 — 触发副作用)
+### 2.2 Action 工具 (18 个 — 触发副作用)
 
 | # | 工具名 | 中文名 | 描述 | 关键参数 |
 |---|--------|--------|------|----------|
@@ -167,6 +182,7 @@ Agent 工具生态的设计遵循一个看似朴素但极为强大的原则—�
 | 26 | `start_interview_session` | 启动模拟面试 | 启动交互式模拟面试会话 | `company*`, `role*` |
 | 27 | `optimize_resume_section` | 简历优化 | 优化简历板块（full/polish/expand/quantify 四种操作） | `section?`, `instruction?`, `operation?`, `effort?` |
 | 28 | `save_resume_section` | 保存到简历 | 用户确认后将优化方案写入简历（SQLite + localStorage） | `section*`, `content*` |
+| 29 | `download_report_pdf` | 导出报告 PDF | 获取评估报告数据，构建 HTML 页面并打开浏览器打印对话框 | `reportNum*` |
 
 ### 2.3 Interview 工具 (2 个)
 
@@ -309,10 +325,10 @@ populateAgentTools(agents)
 | Agent | 工具数量 | 白名单 |
 |-------|---------|--------|
 | **general** (通用助手) | 35 (全部) | `toolNames: []` — 空数组 = 全部工具 |
-| **evaluate** (JD 评估) | 6 | `evaluate_jd`, `evaluate_jd_full`, `fetch_jd_content`, `web_search`, `analyze_jd_risks`, `decode_black_market_terms` |
+| **evaluate** (JD 评估) | 10 | `evaluate_jd`, `evaluate_jd_full`, `fetch_jd_content`, `web_search`, `analyze_jd_risks`, `decode_black_market_terms`, `get_report_detail`, `export_file`, `download_report_pdf`, `get_profile` |
 | **interview** (面试教练) | 4 | `generate_interview_questions`, `score_interview_answer`, `start_interview_session`, `prepare_interview_full` |
 | **profile** (求职画像) | 7 | `get_profile`, `get_recommendations`, `get_profile_insights`, `self_positioning`, `check_pipeline_health`, `get_recent_activity`, `mine_profile` |
-| **resume** (简历优化) | 8 | `import_resume`, `generate_cv`, `evaluate_jd`, `export_file`, `get_profile`, `optimize_resume_section`, `save_resume_section`, `check_ats_compatibility` |
+| **resume** (简历优化) | 9 | `read_file`, `import_resume`, `generate_cv`, `evaluate_jd`, `export_file`, `get_reference_detail`, `optimize_resume_section`, `save_resume_section`, `check_ats_compatibility` |
 
 ### 4.3 白名单强制执行
 
@@ -419,37 +435,30 @@ handler(params):
   └─ "reset" → clearSOP()
 ```
 
-### 5.3 错误自愈机制
+### 5.3 错误分类与自愈机制
 
-部分工具在失败时提供 `recoverable` 和 `retryHint` 字段：
+工具通过 `errorCategory` 字段（必填）告知 Agent Loop 如何处理失败：
 
 ```
-recoverable: true    → LLM 可以换参数重试
-recoverable: false   → 不可重试 (如数据不足、CV 为空)
-retryHint: string    → 给 LLM 的修正建议
+errorCategory: "ok"              → 成功，继续
+errorCategory: "transient"       → 临时失败（网络超时等），自动重试最多 2 次
+errorCategory: "permanent"       → 永久失败（数据不存在/编码错误），不重试，触发 forceTextOnly
+errorCategory: "need_user_input" → 需要用户输入，降级给用户
 ```
 
-例子（`analyze_jd_risks`）：
-```
-success: false, error: "JD 文本不足 20 字符（无法分析风险）",
-recoverable: false,
-retryHint: "请提供完整的 JD 文本或 URL，至少 20 字符以上"
-```
+未显式设置 errorCategory 时，resolveErrorCategory 提供 fallback：`success=true → "ok"`，`success=false → "permanent"`。
 
-例子（`save_resume_section`）：
-```
-success: false, error: "CV 数据为空，请先在 CV 页面创建简历",
-recoverable: false,
-retryHint: "请引导用户到 CV 页面 (/cv) 填写基本信息"
-```
+**permanent 错误后的 forceTextOnly 机制**：工具返回 permanent 错误 → Agent Loop 设置 `forceTextOnly = true` → 下一轮 LLM 只能输出文本回复，所有 tool calls 被代码级忽略。不再依赖文本指令"请"LLM 停止。
 
-### 5.4 formatResult — LLM 输出格式化
+**工具错误自描述**：permanent 错误消息包含可用资源列表，LLM 能从错误中自我纠正。例如 `read_file(path="")` 返回 `"请提供路径。可用: read_file('我的简历'), 参考简历: #1 张雯茜"`。
 
-每个工具都有 `formatResult` 函数，将结构化 `ToolResult` 转化为 LLM 可理解的自然语言文本。关键设计：
+### 5.4 formatResult — LLM 输出格式化（迁移中）
+
+每个工具都有 `formatResult` 函数，将结构化 `ToolResult` 转化为 LLM 可理解的自然语言文本。**正在迁移到三管道架构**：新工具优先使用 `llmSummary` 字段，`formatResult` 作为未迁移工具的 fallback。
 
 - **失败时**：返回 `{操作名}失败: {error}`，让 LLM 知道发生了什么
 - **成功时**：根据 data 结构生成结构化输出（Markdown 表格、列表、带 emoji 的摘要）
-- **截断控制**：web_search 限制 1200 字符，baidu-map 工具限制 600 字符，避免 token 浪费
+- **截断控制**：LLM 上下文截断由 `toolCtxCap` 控制（默认 800，文档类 4000），UI 渲染由 `uiPayload` 驱动
 
 ---
 

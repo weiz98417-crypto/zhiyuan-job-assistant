@@ -31,6 +31,7 @@ export const checkATS: ToolDefinition = {
   description: "检查简历的 ATS（求职者追踪系统）兼容性：联系方式完整性、量化数据密度、关键词覆盖、section 完整性、格式问题。当用户问'简历能过ATS吗''简历会被机器筛掉吗'时调用此工具。",
   parameters: {
     cv_text: { type: "string", required: true, description: "完整 CV 文本" },
+    jd_text: { type: "string", required: false, description: "目标 JD 文本，用于 JD 针对性关键词覆盖分析" },
   },
   category: "query",
   handler,

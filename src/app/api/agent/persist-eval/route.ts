@@ -13,9 +13,10 @@ export async function POST(request: Request) {
       legitimacy?: string;
       date?: string;
       jdText?: string;
+      reportNum?: number;
     };
 
-    const { company, role, overallScore, archetype, blocks, keywords, legitimacy, date, jdText } = body;
+    const { company, role, overallScore, archetype, blocks, keywords, legitimacy, date, jdText, reportNum: forceReportNum } = body;
 
     if (!company || !role) {
       return NextResponse.json(
@@ -39,10 +40,14 @@ export async function POST(request: Request) {
     };
     upsertApp(appRow);
 
-    // 3. Generate report number and persist report
-    const allReports = listReports();
-    const maxReportNum = allReports.reduce((max, r) => Math.max(max, r.report_num), 0);
-    const reportNum = maxReportNum + 1;
+    // 3. Generate report number — use pre-allocated value from stream if available
+    const reportNum = (typeof forceReportNum === "number" && forceReportNum > 0)
+      ? forceReportNum
+      : (() => {
+          const allReports = listReports();
+          const maxReportNum = allReports.reduce((max, r) => Math.max(max, r.report_num), 0);
+          return maxReportNum + 1;
+        })();
 
     const reportRow: ReportRow = {
       report_num: reportNum,

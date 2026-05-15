@@ -2,6 +2,7 @@
 
 import fs from "fs";
 import path from "path";
+import { listReports } from "@/lib/server-db";
 
 const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
 const DEEPSEEK_MODEL = "deepseek-v4-flash";
@@ -495,6 +496,14 @@ export async function POST(request: Request) {
 
         emit(controller, { type: "overall_score", score: state.overallScore });
 
+        /* ── Pre-allocate report number ── */
+        let reportNum = 0;
+        try {
+          const allReports = listReports();
+          const maxReportNum = allReports.reduce((max, r) => Math.max(max, r.report_num), 0);
+          reportNum = maxReportNum + 1;
+        } catch { /* non-blocking */ }
+
         /* ── Done: return full result data for client to confirm save ── */
         const company = state.company || extractFromJD(state.jdText, "company");
         const role = state.role || extractFromJD(state.jdText, "role");
@@ -507,6 +516,7 @@ export async function POST(request: Request) {
           overallScore: state.overallScore,
           blocks: state.blocks,
           jdText: state.jdText,
+          reportNum,
         });
 
         controller.close();

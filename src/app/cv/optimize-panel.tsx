@@ -94,6 +94,7 @@ export default function OptimizePanel({
       const res = await fetch("/api/cv/optimize-section/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(120_000),
         body: JSON.stringify({
           sectionContent,
           sectionId,
@@ -161,6 +162,7 @@ export default function OptimizePanel({
       const res = await fetch("/api/cv/optimize-section", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(180_000),
         body: JSON.stringify({
           sectionId,
           sectionContent,
@@ -435,18 +437,28 @@ export default function OptimizePanel({
               参考笔法（可选，多选）
             </label>
             <div className="space-y-0.5 max-h-20 overflow-y-auto">
+              {effort < 4 && (
+                <p className="text-[10px] text-[var(--color-muted)] px-1">参考简历对标需要 Effort ≥ 4（大刀或重写），请先提高改写强度</p>
+              )}
               {referenceResumes.map((ref) => (
                 <label
                   key={ref.id}
-                  className="flex items-center gap-2 text-[10px] text-[var(--color-text-soft)] cursor-pointer hover:bg-[var(--color-divider)] rounded px-1 py-0.5"
+                  className={`flex items-center gap-2 text-[10px] rounded px-1 py-0.5 ${
+                    effort >= 4 ? "text-[var(--color-text-soft)] cursor-pointer hover:bg-[var(--color-divider)]" : "text-[var(--color-muted)] cursor-not-allowed opacity-50"
+                  }`}
                 >
                   <input
                     type="checkbox"
                     checked={selectedRefIds.includes(ref.id)}
+                    disabled={effort < 4}
                     onChange={() => {
-                      setSelectedRefIds(prev =>
-                        prev.includes(ref.id) ? prev.filter(id => id !== ref.id) : [...prev, ref.id]
-                      );
+                      if (effort < 4) return;
+                      setSelectedRefIds(prev => {
+                        const next = prev.includes(ref.id) ? prev.filter(id => id !== ref.id) : [...prev, ref.id];
+                        // Auto-bump effort to 4 when selecting first reference
+                        if (next.length > 0 && effort < 4) setEffort(4);
+                        return next;
+                      });
                     }}
                     className="accent-[var(--color-primary)]"
                   />

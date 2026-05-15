@@ -94,6 +94,7 @@ function AgentPageInner() {
   const [activeAgent, setActiveAgent] = useState<AgentDefinition | null>(null);
   const [evalProgress, setEvalProgress] = useState<EvalBlockProgress[]>([]);
   const [completionInfo, setCompletionInfo] = useState<CompletionInfo | null>(null);
+  const [resultQuality, setResultQuality] = useState<string | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
   const streamContentRef = useRef("");
@@ -257,7 +258,7 @@ function AgentPageInner() {
 
         setActiveAgent(agent);
 
-        let toolResultInfo: { name: string; result: string; success: boolean; data?: unknown } | null = null;
+        let toolResultInfo: { name: string; result: string; success: boolean; data?: unknown; uiPayload?: Record<string, unknown> } | null = null;
         let assistantText = "";
 
         const msgList = updated.map((m) => ({ role: m.role, content: m.content }));
@@ -273,53 +274,54 @@ function AgentPageInner() {
             case "intent": break;
             case "agent_switch": break;
             case "thinking_content": setThinkingContent(event.content); break;
-            case "tool_call": setExecutingTool(event.name); break;
+            case "tool_call": setExecutingTool(event.name); setResultQuality(null); break;
             case "tool_result":
-              toolResultInfo = { name: event.name, result: event.result, success: event.success, data: event.data };
-              // Only show cards for light tools; heavy tools go through status bar
-              const showAsCard = ["web_search", "decode_black_market_terms", "get_report_detail", "export_file", "download_report_pdf", "get_profile"].includes(event.name);
-              if (showAsCard) {
-                setMessages((prev) => {
-                  const copy = [...prev];
-                  // For get_profile: store structured data in toolResult for ProfileViewCard
-                  if (event.name === "get_profile" && (event as {data?: unknown}).data) {
-                    const profileData = (event as {data?: unknown}).data;
-                    copy.push({
-                      role: "tool" as const,
-                      toolName: "get_profile",
-                      content: event.result,
-                      toolResult: { data: profileData },
-                      timestamp: new Date().toISOString(),
-                    });
-                  // For evaluate_jd_full: push JSON data message
-                  } else if (event.name === "evaluate_jd_full" && (event as {data?: unknown}).data) {
-                    const raw = (event as {data?: Record<string, unknown>}).data;
-                    copy.push({
-                      role: "tool" as const,
-                      toolName: "evaluate_jd_full",
-                      content: JSON.stringify({
-                        company: raw?.company || "unknown",
-                        role: raw?.role || "unknown",
-                        overallScore: raw?.overallScore || 0,
-                        archetype: raw?.archetype || "",
-                        blocks: raw?.blocks || {},
-                        jdText: raw?.jdText || "",
-                        reportNum: raw?.reportNum || 0,
-                      }),
-                      timestamp: new Date().toISOString(),
-                    });
-                  } else {
-                    const toolMsg: AgentMessage = { role: "tool", content: event.result, toolResult: event.result, toolName: event.name, timestamp: new Date().toISOString() };
-                    const lastIdx = copy.length - 1;
-                    if (copy[lastIdx]?.role === "tool" && copy[lastIdx]?.toolName === event.name) copy[lastIdx] = toolMsg;
-                    else copy.push(toolMsg);
-                  }
-                  return copy;
-                });
-              }
+              toolResultInfo = { name: event.name, result: event.result, success: event.success, data: event.data, uiPayload: (event as { uiPayload?: Record<string, unknown> }).uiPayload };
+              // Show tool cards: use uiPayload if available (structured rendering), else fall back to text
+              setMessages((prev) => {
+                const copy = [...prev];
+                const uiPayload = (event as { uiPayload?: Record<string, unknown> }).uiPayload;
+                if (uiPayload) {
+                  // Structured tool result: uiPayload drives component rendering
+                  const toolMsg: AgentMessage = {
+                    role: "tool" as const,
+                    toolName: event.name,
+                    content: event.result,
+                    toolResult: { uiPayload, data: event.data },
+                    timestamp: new Date().toISOString(),
+                  };
+                  const lastIdx = copy.length - 1;
+                  if (copy[lastIdx]?.role === "tool" && copy[lastIdx]?.toolName === event.name) copy[lastIdx] = toolMsg;
+                  else copy.push(toolMsg);
+                } else if (event.name === "evaluate_jd_full" && (event as { data?: unknown }).data) {
+                  // Legacy: evaluate_jd_full stores JSON data
+                  const raw = (event as { data?: Record<string, unknown> }).data;
+                  copy.push({
+                    role: "tool" as const,
+                    toolName: "evaluate_jd_full",
+                    content: JSON.stringify({
+                      company: raw?.company || "unknown",
+                      role: raw?.role || "unknown",
+                      overallScore: raw?.overallScore || 0,
+                      archetype: raw?.archetype || "",
+                      blocks: raw?.blocks || {},
+                      jdText: raw?.jdText || "",
+                      reportNum: raw?.reportNum || 0,
+                    }),
+                    timestamp: new Date().toISOString(),
+                  });
+                } else {
+                  // Plain text tool result
+                  const toolMsg: AgentMessage = { role: "tool", content: event.result, toolResult: event.result, toolName: event.name, timestamp: new Date().toISOString() };
+                  const lastIdx = copy.length - 1;
+                  if (copy[lastIdx]?.role === "tool" && copy[lastIdx]?.toolName === event.name) copy[lastIdx] = toolMsg;
+                  else copy.push(toolMsg);
+                }
+                return copy;
+              });
               break;
             case "tool_error": console.warn(`[agent] tool error: ${event.name} — ${event.error}`); break;
-            case "result_quality": break;
+            case "result_quality": setResultQuality(event.quality); break;
             case "text": assistantText += event.content; streamContentRef.current = assistantText; setStreamText(assistantText); break;
             case "block_start":
               setEvalProgress(prev => {
@@ -378,6 +380,8 @@ function AgentPageInner() {
             const last = copy[copy.length - 1];
             if (last && last.role === "assistant") {
               copy[copy.length - 1] = finalAssistant;
+            } else {
+              copy.push(finalAssistant);
             }
             return copy;
           });
@@ -397,9 +401,11 @@ function AgentPageInner() {
                   role: "tool",
                   content: toolResultInfo.result,
                   toolName: toolResultInfo.name,
-                  toolResult: toolResultInfo.name === "get_profile" && toolResultInfo.data
-                    ? { data: toolResultInfo.data }
-                    : toolResultInfo.result,
+                  toolResult: toolResultInfo.uiPayload
+                    ? { uiPayload: toolResultInfo.uiPayload }
+                    : toolResultInfo.name === "get_profile" && toolResultInfo.data
+                      ? { data: toolResultInfo.data }
+                      : toolResultInfo.result,
                   agent_id: agent.id !== "general" ? agent.id : undefined,
                   timestamp: new Date().toISOString(),
                 });
@@ -413,11 +419,13 @@ function AgentPageInner() {
               const userMsgCount = fullMessages.filter((m) => m.role === "user").length;
               const memoryDigest = userMsgCount >= 5 ? generateMemoryDigest(fullMessages) : undefined;
 
-              // Set title from first user message
+              // Set title from FIRST user message (not current message)
               const needsTitle = isFirstUserMsg || !currentSession.title || currentSession.title === "新对话" || currentSession.title === "新的对话";
               let sessionTitle: string | undefined;
               if (needsTitle) {
-                sessionTitle = content.trim().length <= 6 ? content.trim() : content.trim().slice(0, 6) + "...";
+                const firstUserMsg = fullMessages.find((m) => m.role === "user");
+                const titleText = firstUserMsg ? firstUserMsg.content.trim() : content.trim();
+                sessionTitle = titleText.length <= 6 ? titleText : titleText.slice(0, 6) + "...";
               }
               await updateSession(currentSessionId, {
                 messages: fullMessages,
@@ -689,6 +697,7 @@ function AgentPageInner() {
           startTime={startTime}
           evalProgress={evalProgress}
           completionInfo={completionInfo}
+          resultQuality={resultQuality}
           suggestions={activeAgent?.suggestions?.length ? activeAgent.suggestions.map(s => ({ icon: null as unknown as React.ReactNode, label: s.label, prompt: s.prompt })) : DEFAULT_SUGGESTIONS}
           onSend={sendMessage}
           emptyState={null}

@@ -8,8 +8,25 @@ interface SkillGapParams {
 async function handler(params: Record<string, unknown>): Promise<ToolResult> {
   const { jd_text, cv_text } = params as SkillGapParams;
 
-  if (!jd_text || jd_text.trim().length < 50) {
-    return { success: false, data: null, error: "JD 文本不足 50 字符" };
+  // Support reportNum: fetch JD text from existing report
+  let effectiveJdText = jd_text || "";
+  const reportNum = params.reportNum;
+  if (!effectiveJdText && reportNum) {
+    try {
+      const reportRes = await fetch(`/api/data/reports/${reportNum}`);
+      const reportJson = await reportRes.json();
+      if (reportJson.success && reportJson.data) {
+        const blocks = typeof reportJson.data.blocks_json === "string"
+          ? JSON.parse(reportJson.data.blocks_json)
+          : (reportJson.data.blocks_json || {});
+        const blockA = blocks.a?.content || blocks.a || "";
+        effectiveJdText = [reportJson.data.role, reportJson.data.company, blockA].filter(Boolean).join(" — ");
+      }
+    } catch { /* fall through to error */ }
+  }
+
+  if (!effectiveJdText || effectiveJdText.trim().length < 50) {
+    return { success: false, data: null, error: "JD 文本不足 50 字符。可传入 jd_text 参数或 reportNum 从已评估报告获取" };
   }
 
   // Get CV text if not provided
@@ -35,7 +52,7 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
 
   return {
     success: true,
-    data: { jd_text, cv_text: cv },
+    data: { jd_text: effectiveJdText, cv_text: cv },
   };
 }
 
@@ -60,7 +77,8 @@ export const detectSkillGaps: ToolDefinition = {
   name: "detect_skill_gaps",
   description: "对比用户 CV 和目标 JD 的技能要求，识别缺失技能和薄弱项，给出优先级和学习建议。当用户问'我缺什么技能''还需要学什么''能不能投这个岗位'时调用此工具。",
   parameters: {
-    jd_text: { type: "string", required: true, description: "目标 JD 完整文本" },
+    jd_text: { type: "string", required: false, description: "目标 JD 完整文本（与 reportNum 二选一）" },
+    reportNum: { type: "number", required: false, description: "已评估报告编号，自动从中获取 JD 文本（与 jd_text 二选一）" },
     cv_text: { type: "string", required: false, description: "用户 CV 文本（可选，不提供时自动读取）" },
   },
   category: "query",

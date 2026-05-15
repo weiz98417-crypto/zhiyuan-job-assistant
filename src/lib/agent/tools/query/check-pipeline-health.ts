@@ -52,7 +52,9 @@ function formatResult(result: ToolResult): string {
 export const checkPipelineHealth: ToolDefinition = {
   name: "check_pipeline_health",
   description: "检测投递管道健康状态。识别超过 7 天未回复的投递项，按逾期天数排序。当用户问'投了哪些还没回''管道状态'时调用此工具。",
-  parameters: {},
+  parameters: {
+    days_threshold: { type: "number", required: false, description: "逾期天数阈值，默认 7" },
+  },
   category: "query",
   handler,
   formatResult,

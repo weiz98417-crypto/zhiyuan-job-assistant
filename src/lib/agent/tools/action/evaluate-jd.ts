@@ -94,6 +94,7 @@ export const evaluateJD: ToolDefinition = {
     jdUrl: { type: "string", required: false, description: "JD 链接 URL" },
     images: { type: "array", required: false, description: "截图 base64 数组，最多 5 张" },
     language: { type: "string", required: false, description: "语言: zh/en，默认 zh" },
+    archetype: { type: "string", required: false, description: "覆盖自动检测的 archetype，如 'AI产品经理'" },
   },
   category: "action",
   handler,

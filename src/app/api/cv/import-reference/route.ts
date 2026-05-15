@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { insertReferenceResume, checkReferenceResumeName } from "@/lib/server-db";
+import { isGarbledText } from "@/lib/agent/loop/text-quality";
 import mammoth from "mammoth";
 
 const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
@@ -22,11 +23,12 @@ async function parseCVWithAI(rawText: string): Promise<CVSection[]> {
   const systemPrompt = `你是一个简历解析专家。将输入的简历文本解析为结构化 sections。
 标准 sections: summary（概述/个人总结）、experience（工作经历）、projects（项目经历）、skills（技能）、education（教育背景）。
 
-规则：
-1. 按原文内容归类到对应 section
-2. 保留原文措辞和量化数据，不要改写
-3. 如果原文没有某个 section，该 section 置空字符串
-4. 返回纯 JSON，格式：{"sections":[{"id":"summary","title":"个人概述","content":"..."},...]}
+关键规则：
+1. **项目经历提取（最重要）**：工作经历中嵌套的项目描述（通常以"项目名称""项目背景""核心工作""XX项目"等开头），必须完整提取到 projects section。工作经历保留公司、职位、时间、部门等框架信息，具体项目内容移到项目经历。
+2. **个人概述**：如果原文没有独立的个人概述段落，从工作经历和技能中提取 1-2 句话总结候选人的核心定位和专业特长。
+3. **保留原文**：所有量化数据、专业术语、项目名称必须原样保留，不要改写或总结。
+4. **不遗漏**：检查原文每一个段落是否都被归类到了某个 section，不允许丢弃任何内容。
+5. 返回纯 JSON，格式：{"sections":[{"id":"summary","title":"个人概述","content":"..."},...]}
 
 title 字段使用中文：个人概述、工作经历、项目经历、技能、教育背景`;
 
@@ -36,15 +38,15 @@ title 字段使用中文：个人概述、工作经历、项目经历、技能�
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
-    signal: AbortSignal.timeout(30_000),
+    signal: AbortSignal.timeout(120_000),
     body: JSON.stringify({
       model: MODEL,
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: rawText.slice(0, 8000) },
+        { role: "user", content: rawText.slice(0, 16000) },
       ],
       temperature: 0.1,
-      max_tokens: 8000,
+      max_tokens: 16000,
       response_format: { type: "json_object" },
     }),
   });
@@ -193,6 +195,27 @@ export async function POST(request: Request) {
           rawText = result.value;
           if (!rawText.trim()) {
             return NextResponse.json({ success: false, error: "Word 文档中未提取到文本内容" }, { status: 400 });
+          }
+          // Mammoth hardcodes TextDecoder("utf-8") for the ZIP'd XML — when the docx
+          // was authored by tools that encode XML as GBK (older WPS etc.), we get mojibake.
+          // Fall back to Qwen-Long which handles encoding more robustly.
+          if (isGarbledText(rawText)) {
+            console.log("[import-reference] mammoth output appears garbled, falling back to Qwen-Long");
+            try {
+              const fallbackText = await extractViaQwenLong(fileBuffer, file.name);
+              if (fallbackText.trim()) {
+                rawText = fallbackText;
+              }
+            } catch (fallbackErr) {
+              console.error("[import-reference] Qwen-Long fallback also failed:", fallbackErr);
+            }
+            // If Qwen-Long fallback also produced garbage or failed, tell the user
+            if (isGarbledText(rawText) || !rawText.trim()) {
+              return NextResponse.json({
+                success: false,
+                error: "文档编码不兼容，无法提取文本。请尝试：1)将文档另存为 UTF-8 编码的 .txt 文件后重新上传 2)直接粘贴简历文本内容 3)发送截图",
+              }, { status: 400 });
+            }
           }
         } catch {
           return NextResponse.json({ success: false, error: "Word 文档解析失败，请确认文件格式为 .docx" }, { status: 400 });

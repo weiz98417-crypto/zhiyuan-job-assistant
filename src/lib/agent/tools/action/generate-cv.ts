@@ -32,6 +32,7 @@ export const generateCV: ToolDefinition = {
     jdText: { type: "string", required: true, description: "JD 文本内容" },
     language: { type: "string", required: false, description: "语言: zh/en，默认 zh" },
     targetRole: { type: "string", required: false, description: "目标岗位（可选，从 JD 提取）" },
+    referenceIds: { type: "array", required: false, description: "参考简历 ID 列表，用于风格对齐" },
   },
   category: "action",
   handler,

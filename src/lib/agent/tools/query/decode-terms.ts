@@ -39,7 +39,8 @@ export const decodeBlackMarketTerms: ToolDefinition = {
   name: "decode_black_market_terms",
   description: "解释 JD 中的招聘黑话真实含义。当用户问'XX是什么意思''JD里写的YY代表什么'时调用此工具。例如'亲自带'=可能有长期无偿加班风险。",
   parameters: {
-    phrase: { type: "string", required: true, description: "JD 中需要解码的词语或短语" },
+    phrase: { type: "string", required: false, description: "单个短语解码（与 jd_text 二选一）" },
+    jd_text: { type: "string", required: false, description: "完整 JD 文本，批量解码其中所有黑话（与 phrase 二选一）" },
   },
   category: "query",
   handler,

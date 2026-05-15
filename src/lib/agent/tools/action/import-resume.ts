@@ -10,6 +10,16 @@ export const importResume: ToolDefinition = {
       required: true,
       description: "简历的完整文本内容",
     },
+    source: {
+      type: "string",
+      required: false,
+      description: "来源: paste/upload/email，默认 paste",
+    },
+    language: {
+      type: "string",
+      required: false,
+      description: "语言: zh/en，默认 zh",
+    },
   },
   async handler(params: Record<string, unknown>) {
     const text = String(params.text || "");

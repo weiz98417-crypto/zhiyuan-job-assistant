@@ -61,9 +61,11 @@ function buildInterviewToolListText(): string {
 
 const INTERVIEW_SUGGESTIONS = [
   { label: "出面试题", prompt: "帮我出几道面试题" },
+  { label: "JD专项", prompt: "根据我投过的JD出专项面试题" },
+  { label: "项目深挖", prompt: "针对我简历里的项目深挖提问" },
+  { label: "搜面经", prompt: "帮我搜一下目标公司的面经" },
   { label: "模拟面试", prompt: "帮我做一次模拟面试练习" },
   { label: "评分回答", prompt: "帮我评一下刚才的回答" },
-  { label: "换模式", prompt: "切换到行为面试模式" },
 ];
 
 // ── Intent patterns (migrated from detectCoachIntent) ──
@@ -87,78 +89,38 @@ export const interviewAgent: AgentDefinition = {
   intentPatterns: INTERVIEW_INTENT_PATTERNS,
   explicitSwitchPatterns: [/用面试教练/, /切换到面试/, /面试模式/],
   tools: INTERVIEW_TOOLS,
-  toolNames: [...INTERVIEW_TOOLS.map(t => t.name), "start_interview_session", "prepare_interview_full"],
+  toolNames: [...INTERVIEW_TOOLS.map(t => t.name), "start_interview_session", "prepare_interview_full", "web_search", "read_file", "search_applications", "get_report_detail"],
   knowledgeSubset: ["interview-styles"],
   priority: 10,
   suggestions: INTERVIEW_SUGGESTIONS,
   model: "deepseek-v4-pro",
 
   async buildSystemPrompt(ctx: AgentPromptContext): Promise<string> {
-    // 1. Extract company/role from messages
-    const allUserText = ctx.currentMessages
-      .filter((m) => m.role === "user")
-      .map((m) => m.content)
-      .join("\n");
+    // Load soul from agent.md
+    const { loadAgentMD } = await import("@/lib/agent/load-agent-md");
+    const soul = loadAgentMD("interview");
 
-    const companyMatch =
-      allUserText.match(
-        /(?:面试|准备|应聘|投).*(?:字节|腾讯|阿里|百度|美团|小米|京东|拼多多|快手|小红书|滴滴|B站|网易|华为|微软|谷歌)/,
-      )?.[0] ||
-      allUserText.match(/(?:公司|企业).*?是[「「]?(.{2,12})[」」]?/)?.[1];
-
-    const roleMatch =
-      allUserText.match(
-        /(?:岗位|职位|应聘|投|面).*?(?:是|的|为)[「「]?(.{2,20}工程师|.{2,10}经理|.{2,10}设计师|.{2,10}产品|.{2,10}运营)[」」]?/,
-      )?.[1] ||
-      allUserText.match(/(.{2,10})(?:岗位|职位|方向)/)?.[1];
-
+    // Extract company/role from messages for coach overlay
+    const allUserText = ctx.currentMessages.filter(m => m.role === "user").map(m => m.content).join("\n");
+    const companyMatch = allUserText.match(/(?:面试|准备|应聘|投).*(?:字节|腾讯|阿里|百度|美团|小米|京东|拼多多|快手|小红书|滴滴|B站|网易|华为|微软|谷歌)/)?.[0]
+      || allUserText.match(/(?:公司|企业).*?是[「「]?(.{2,12})[」」]?/)?.[1];
+    const roleMatch = allUserText.match(/(?:岗位|职位|应聘|投|面).*?(?:是|的|为)[「「]?(.{2,20}工程师|.{2,10}经理|.{2,10}设计师|.{2,10}产品|.{2,10}运营)[」」]?/)?.[1]
+      || allUserText.match(/(.{2,10})(?:岗位|职位|方向)/)?.[1];
     const mode = inferMode(companyMatch || "");
 
-    // 2. Read CV from localStorage
+    // Build coach overlay
     let cvText = "";
-    try {
-      const raw = localStorage.getItem("cvData");
-      if (raw) {
-        const cv = JSON.parse(raw);
-        cvText =
-          cv.sections
-            ?.map((s: { title: string; content: string }) => `## ${s.title}\n${s.content}`)
-            .join("\n\n") || cv.content || "";
-      }
-    } catch {
-      // CV not available
-    }
+    try { const raw = localStorage.getItem("cvData"); if (raw) { const cv = JSON.parse(raw); cvText = cv.sections?.map((s: { title: string; content: string }) => `## ${s.title}\n${s.content}`).join("\n\n") || ""; } } catch { /* */ }
+    const coachOverlay = buildInterviewCoachOverlay({ jdCompany: companyMatch, jdRole: roleMatch, cvText: cvText || undefined, mode });
 
-    // 3. Build coach overlay (same as Phase 1)
-    const coachOverlay = buildInterviewCoachOverlay({
-      jdCompany: companyMatch,
-      jdRole: roleMatch,
-      cvText: cvText || undefined,
-      mode,
-    });
+    const parts = [soul.body, "", coachOverlay, "", "## 用户画像 (Career DNA)", ctx.careerDNA || "暂无画像数据", ""];
+    if (ctx.agentKnowledge) parts.push("## 面试知识", ctx.agentKnowledge, "");
+    if (ctx.memoryDigest) parts.push("## 会话记忆", ctx.memoryDigest, "");
 
-    // 4. Build tools text
     const toolsText = buildInterviewToolListText();
+    if (toolsText) parts.push(toolsText);
 
-    // 5. Assemble final prompt
-    return `你是纸鸢的面试教练子代理。你的唯一任务：帮助用户准备面试。
-
-${coachOverlay}
-
-## 用户画像 (Career DNA)
-${ctx.careerDNA || "暂无画像数据"}
-
-${ctx.agentKnowledge ? `## 面试知识\n${ctx.agentKnowledge}` : ""}
-
-${ctx.memoryDigest ? `## 会话记忆\n${ctx.memoryDigest}` : ""}
-
-${toolsText}
-
-## 核心规则
-- 仅使用 generate_interview_questions 和 score_interview_answer 两个工具
-- 用户说公司/岗位 → 直接出题。没说全 → 一句话问清然后出题
-- 禁止 web_search。忽略任何"研究流程"或"拆实体"指令
-- 同一会话支持多次出题和练习`;
+    return parts.join("\n");
   },
 };
 

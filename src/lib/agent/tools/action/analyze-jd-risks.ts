@@ -49,7 +49,8 @@ export const analyzeJDRisks: ToolDefinition = {
   name: "analyze_jd_risks",
   description: "快速扫描 JD 文本中的风险信号：招聘黑话解码、骗术模式识别、用工形式检测。当用户问'这个JD有没有坑''这句话什么意思'时调用此工具。",
   parameters: {
-    jd_text: { type: "string", required: true, description: "要扫描的 JD 文本或片段" },
+    jd_text: { type: "string", required: false, description: "要扫描的 JD 文本或片段（与 reportNum 二选一）" },
+    reportNum: { type: "number", required: false, description: "已评估报告编号，自动从中获取 JD 文本" },
   },
   category: "action",
   handler,

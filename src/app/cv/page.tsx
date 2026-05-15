@@ -475,13 +475,34 @@ export default function CVPage() {
     setSectionFeedback([]);
     setMissingTerms([]);
 
+    // Try to get JD text from JD library for richer analysis
+    const jdKeywords = report.keywords || [];
+    let jdText = "";
+    if (jdKeywords.length === 0) {
+      try {
+        const jdFromDb = await db.jds.where("reportId").equals(report.reportNum).first();
+        jdText = jdFromDb?.body || "";
+      } catch { /* ignore */ }
+    }
+
+    // Fallback: generate keywords from role + archetype if JD data is unavailable
+    let effectiveKeywords = jdKeywords;
+    let effectiveJdText = jdText;
+    if (jdKeywords.length === 0 && !jdText) {
+      const fallbackTerms = [report.role, report.archetype].filter(Boolean)
+        .flatMap(t => (t || "").split(/[/\-\s]+/))
+        .filter(w => w.length >= 2);
+      effectiveKeywords = fallbackTerms;
+    }
+
     try {
       const res = await fetch("/api/cv/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sections: Object.fromEntries(sections.map((s) => [s.id, s.content])),
-          keywords: report.keywords || [],
+          keywords: effectiveKeywords,
+          jdText: effectiveJdText || undefined,
           role: report.role,
           archetype: report.archetype,
         }),

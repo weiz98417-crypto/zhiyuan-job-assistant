@@ -36,31 +36,32 @@ Claude Mode 文件（`modes/zh/*.md`）保留的原因是：
     │  SSE 流式连接
     ▼
 编排器 (src/lib/agent/orchestrator/index.ts)
-    ├── classifyIntent() → 意图分类 → 5 子 Agent 择一
+    ├── classifyIntent() → 意图分类 → 6 子 Agent 择一
     ├── AgentPromptContext 组装（画像 + 3 层记忆 + 知识）
     └── agentLoopClient() / agentLoopServer()
     │
     ▼
 Agent Loop (src/lib/agent/loop/)
     ├── callLLM() → DeepSeek V4 → GLM-4 → Qwen-Long (模型降级)
-    ├── Native function calling → 27 TypeScript 工具
+    ├── Native function calling → 38+ TypeScript 工具
     └── Quality gate → checkResultQuality → self-healing
     │
     ▼
 工具注册表 (src/lib/agent/tools/)
     ├── registry.execute("tool_name", params)
-    └── formatResult() → LLM 上下文注入
+    └── llmSummary / formatResult() → LLM 上下文注入（三管道：llmSummary/uiPayload/rawData）
 ```
 
-### 5 个子 Agent
+### 6 个子 Agent
 
 | Agent ID | 名称 | 工具白名单 | 触发条件 |
 |----------|------|-----------|---------|
-| `general` | 通用助手 | 全部 27 工具 | 兜底（`.*`） |
-| `evaluate` | JD 评估 | evaluate_jd_full, analyze_jd_risks, decode_terms | 评估/分析 JD |
-| `resume` | 简历优化 | optimize_resume_section, save_resume_section, ats_check | 简历/优化/CV |
-| `interview` | 面试教练 | prepare_interview_full, start_interview_session | 面试/准备 |
-| `profile` | 求职画像 | mine_profile, self_positioning, detect_skill_gaps | 定位/画像 |
+| `general` | 通用助手 | 全部 38-41 工具 | 兜底（`.*`） |
+| `evaluate` | JD 评估 | evaluate_jd, evaluate_jd_full, fetch_jd_content, web_search, analyze_jd_risks, decode_terms, get_report_detail, export_file, download_report_pdf | 评估/分析 JD |
+| `resume` | 简历优化 | read_file, import_resume, generate_cv, evaluate_jd, export_file, get_reference_detail, optimize_resume_section, save_resume_section, check_ats_compatibility | 简历/优化/CV |
+| `interview` | 面试教练 | generate_interview_questions, score_interview_answer, start_interview_session, prepare_interview_full, web_search, read_file, search_applications, get_report_detail | 面试/准备 |
+| `profile` | 求职画像 | get_profile, get_recommendations, get_profile_insights, self_positioning, check_pipeline_health, get_recent_activity, mine_profile | 定位/画像 |
+| `offer` | Offer 评估 | evaluate_offer, compare_offers_deep, export_file, download_report_pdf | Offer/对比/选offer |
 
 ---
 

@@ -226,6 +226,11 @@ export function listSignals(limit = 50): SignalRow[] {
   return getDb().prepare("SELECT * FROM profile_signals ORDER BY created_at DESC LIMIT ?").all(limit) as SignalRow[];
 }
 
+export function clearProfileSignals(): number {
+  const result = getDb().prepare("DELETE FROM profile_signals").run();
+  return result.changes;
+}
+
 /* ── Reference Resumes ── */
 
 export interface ReferenceResumeRow {

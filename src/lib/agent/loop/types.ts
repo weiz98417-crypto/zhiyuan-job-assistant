@@ -9,6 +9,9 @@ export const DEFAULT_LOOP_CONFIG: LoopConfig = {
   maxIterations: 5, // bumped from 3 — resume optimization + reference lookup need 3-4 iterations
 };
 
+/** Tool result quality classification */
+export type ResultQuality = "good" | "empty" | "irrelevant" | "garbled";
+
 export type AgentPhase =
   | "understanding" | "executing" | "verifying" | "reflecting" | "responding" | "done"
   | "extracting_ocr" | "extracting_jd" | "jd_extracted"
@@ -25,9 +28,9 @@ export type SSEEvent =
   | { type: "phase"; phase: AgentPhase }
   | { type: "thinking_content"; content: string }
   | { type: "tool_call"; name: string; params: Record<string, unknown> }
-  | { type: "tool_result"; name: string; result: string; success: boolean; data?: unknown }
+  | { type: "tool_result"; name: string; result: string; success: boolean; data?: unknown; uiPayload?: Record<string, unknown> }
   | { type: "tool_error"; name: string; error: string; recoverable: boolean }
-  | { type: "result_quality"; quality: "good" | "empty" | "irrelevant" }
+  | { type: "result_quality"; quality: ResultQuality }
   | { type: "text"; content: string }
   | { type: "tool_calls"; tool_calls: Array<{ id: string; name: string; arguments: string }> }
   | { type: "intent"; agentId: string; reason: string; modelTier?: string }

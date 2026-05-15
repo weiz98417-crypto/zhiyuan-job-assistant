@@ -46,7 +46,10 @@ function formatResult(result: ToolResult): string {
 export const getProfileInsights: ToolDefinition = {
   name: "get_profile_insights",
   description: "从用户历史求职行为中提炼画像洞察：偏好行业、薪资区间、岗位类型、投递行为模式。当用户问'我的求职偏好''我适合什么'时调用此工具。",
-  parameters: {},
+  parameters: {
+    timeframe: { type: "string", required: false, description: "分析时间范围: 30d/90d/all，默认 all" },
+    focus: { type: "string", required: false, description: "聚焦维度: skills/salary/preferences/all，默认 all" },
+  },
   category: "query",
   handler,
   formatResult,

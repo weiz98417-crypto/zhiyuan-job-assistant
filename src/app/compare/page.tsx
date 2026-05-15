@@ -84,12 +84,42 @@ export default function ComparePage() {
 
   useEffect(() => {
     async function load() {
-      const [o, a] = await Promise.all([
+      const [local, apps] = await Promise.all([
         db.offers.toArray(),
         db.applications.where("status").equals("offer").toArray(),
       ]);
-      setOffers(o);
-      setApplications(a);
+      // Also fetch SQLite offers (saved by agent)
+      let remote: Offer[] = [];
+      try {
+        const res = await fetch("/api/offers");
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          remote = json.data.map((r: Record<string, unknown>) => ({
+            id: r.id as number,
+            company: r.company as string || "",
+            role: r.role as string || "",
+            monthlySalary: (r.monthly_salary as number) || 0,
+            monthsPerYear: (r.months_per_year as number) || 12,
+            annualBonus: (r.annual_bonus as number) || 0,
+            location: r.location as string || "",
+            level: r.level as string || "",
+            hasSocialInsurance: (r.has_social_insurance as number) !== 0,
+            housingFundRate: (r.housing_fund_rate as number) || 7,
+            probationMonths: (r.probation_months as number) || 3,
+            options: r.options as string || undefined,
+            otherBenefits: r.other_benefits as string || undefined,
+            startDate: r.start_date as string || undefined,
+            createdAt: new Date((r.created_at as string) || Date.now()),
+          }));
+        }
+      } catch { /* non-fatal */ }
+      // Merge: local + remote (dedup by id)
+      const all = [...local];
+      for (const r of remote) {
+        if (!all.find(o => o.id === r.id)) all.push(r);
+      }
+      setOffers(all);
+      setApplications(apps);
       setMounted(true);
     }
     load();
@@ -107,6 +137,27 @@ export default function ComparePage() {
       probationMonths: Number(form.probationMonths) || 3,
       createdAt: new Date(),
     });
+    // Also save to SQLite with full fields
+    fetch("/api/offers", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        company: form.company,
+        role: form.role,
+        monthly_salary: Number(form.monthlySalary),
+        months_per_year: Number(form.monthsPerYear) || 12,
+        annual_bonus: Number(form.annualBonus) || 0,
+        has_social_insurance: form.hasSocialInsurance ?? true,
+        housing_fund_rate: Number(form.housingFundRate) || 7,
+        options: (form as Record<string,unknown>).options || null,
+        probation_months: Number(form.probationMonths) || 3,
+        start_date: (form as Record<string,unknown>).startDate || null,
+        other_benefits: (form as Record<string,unknown>).otherBenefits || null,
+        location: (form as Record<string,unknown>).location || "",
+        level: "",
+        benefits: {},
+      }),
+    }).catch(() => {});
     const saved = await db.offers.get(id);
     if (saved) setOffers((prev) => [...prev, saved]);
     setShowForm(false);
@@ -186,6 +237,174 @@ export default function ComparePage() {
   const sortedOffers = [...selectedForCompare].sort(
     (a, b) => weightedScore(b) - weightedScore(a)
   );
+
+  /* ── Export report helpers ── */
+  const buildReportMarkdown = () => {
+    const lines: string[] = [];
+    lines.push(`# Offer 对比报告`);
+    lines.push(`\n> 生成时间：${new Date().toLocaleString("zh-CN")} | 共 ${selectedForCompare.length} 个 Offer\n`);
+
+    // Summary table
+    lines.push(`## 概览\n`);
+    lines.push(`| # | 公司 | 岗位 | 税前月薪 | 发薪月数 | 年终奖 | 年总包 | 公积金 | 五险一金 | 试用期 | 期权 | 加权评分 |`);
+    lines.push(`|---|------|------|----------|----------|--------|--------|--------|----------|--------|------|----------|`);
+    for (const [i, o] of sortedOffers.entries()) {
+      lines.push(`| ${i + 1} | ${o.company} | ${o.role} | ${o.monthlySalary}K | ${o.monthsPerYear || 12}薪 | ${o.annualBonus || 0}个月 | ${totalAnnualComp(o)}K | ${o.housingFundRate || 7}% | ${o.hasSocialInsurance ? "全额" : "最低基数"} | ${o.probationMonths || 3}个月 | ${o.options || "—"} | ${weightedScore(o).toFixed(1)} |`);
+    }
+
+    // Detailed dimension breakdown
+    lines.push(`\n## 维度评分\n`);
+    for (const o of sortedOffers) {
+      lines.push(`### ${o.company} — ${o.role}\n`);
+      const dims = getDimensions(o);
+      lines.push(`| 维度 | 评分 | 权重 |`);
+      lines.push(`|------|------|------|`);
+      for (const d of dims) {
+        lines.push(`| ${d.label} | ${"★".repeat(d.score)}${"☆".repeat(5 - d.score)} (${d.score}/5) | ${weights[d.key] || 0}% |`);
+      }
+      lines.push(`| **加权总分** | **${weightedScore(o).toFixed(1)}** | |\n`);
+    }
+
+    // Rankings
+    lines.push(`## 排名\n`);
+    for (const [i, o] of sortedOffers.entries()) {
+      lines.push(`${i + 1}. **${o.company}** — ${o.role}（加权 ${weightedScore(o).toFixed(1)}/5，年总包 ${totalAnnualComp(o)}K）`);
+    }
+
+    // Negotiation tips
+    if (sortedOffers.length > 0) {
+      lines.push(`\n## 谈判建议\n`);
+      const tips = NegotiationTips({ topOffer: sortedOffers[0] });
+      for (const tip of tips) {
+        lines.push(`- ${tip}`);
+      }
+    }
+
+    // Radar chart description
+    lines.push(`\n## 雷达图维度说明\n`);
+    lines.push(`| 维度 | 说明 |`);
+    lines.push(`|------|------|`);
+    lines.push(`| 薪资 | 年总包在市场中的竞争力 |`);
+    lines.push(`| 成长空间 | 职级含金量、晋升通道、技术栈匹配度 |`);
+    lines.push(`| WLB | 工作强度、加班文化、双休/大小周/996 |`);
+    lines.push(`| 公司前景 | 融资阶段、业务稳定性、裁员风险 |`);
+    lines.push(`| 团队匹配 | 岗位匹配度、团队氛围、汇报线 |`);
+    lines.push(`| 风险 | 五险一金、竞业限制、试用期条款 |`);
+
+    lines.push(`\n---\n*本报告由 筝筝纸鸢 AI 求职助手自动生成*`);
+    return lines.join("\n");
+  };
+
+  const buildReportHTML = () => {
+    const md = buildReportMarkdown();
+    // Simple markdown-to-HTML conversion
+    let html = md
+      .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+      .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+      .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+      .replace(/^\| (.+) \|$/gm, (line) => {
+        const cells = line.slice(1, -1).split("|").map(c => c.trim());
+        const tag = line.includes("---") ? "th" : "td";
+        return `<tr>${cells.map(c => `<${tag}>${c}</${tag}>`).join("")}</tr>`;
+      })
+      .replace(/^> (.+)$/gm, '<blockquote><p>$1</p></blockquote>')
+      .replace(/^- (.+)$/gm, '<li>$1</li>')
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\n\n/g, '</p><p>')
+      .replace(/\n/g, '<br>');
+    html = html.replace(/<tr>/g, '<table><tr>').replace(/<\/tr>/g, '</tr></table>');
+    return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Offer 对比报告</title>
+<style>
+  body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; color: #333; line-height: 1.7; }
+  h1 { font-size: 1.5em; border-bottom: 2px solid #2563eb; padding-bottom: 8px; }
+  h2 { font-size: 1.15em; margin-top: 28px; color: #1e40af; }
+  h3 { font-size: 1.05em; margin-top: 20px; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+  th, td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; font-size: 0.9em; }
+  th { background: #f0f4ff; font-weight: 600; }
+  blockquote { border-left: 3px solid #2563eb; padding-left: 12px; color: #666; margin: 12px 0; }
+  @media print { body { margin: 0; padding: 20px; } }
+</style>
+</head>
+<body>
+${html}
+</body>
+</html>`;
+  };
+
+  const exportMarkdown = async () => {
+    const content = buildReportMarkdown();
+    const filename = `offer-compare-${selectedForCompare.map(o => o.company).join("-").slice(0, 60)}-${new Date().toISOString().slice(0, 10)}`;
+    const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${filename}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+
+    // Persist to SQLite
+    try {
+      await fetch("/api/offer-reports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: `Offer 对比报告`,
+          offers_json: selectedForCompare.map(o => ({
+            company: o.company,
+            role: o.role,
+            monthlySalary: o.monthlySalary,
+            monthsPerYear: o.monthsPerYear,
+            annualBonus: o.annualBonus,
+            hasSocialInsurance: o.hasSocialInsurance,
+            housingFundRate: o.housingFundRate,
+            options: o.options,
+            probationMonths: o.probationMonths,
+          })),
+          report_markdown: content,
+        }),
+      });
+      // Also sync to export-file API for server-side download
+      await fetch("/api/export-file", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content, filename, format: "md" }),
+      });
+    } catch { /* non-critical */ }
+  };
+
+  const exportPDF = async () => {
+    const html = buildReportHTML();
+    const w = window.open("", "_blank");
+    if (!w) { alert("浏览器拦截了弹窗，请允许弹窗后重试"); return; }
+    w.document.write(html);
+    w.document.close();
+    setTimeout(() => w.print(), 800);
+
+    // Also persist to SQLite
+    const md = buildReportMarkdown();
+    try {
+      await fetch("/api/offer-reports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: "Offer 对比报告",
+          offers_json: selectedForCompare.map(o => ({
+            company: o.company,
+            role: o.role,
+            monthlySalary: o.monthlySalary,
+            monthsPerYear: o.monthsPerYear,
+            annualBonus: o.annualBonus,
+          })),
+          report_markdown: md,
+        }),
+      });
+    } catch { /* non-critical */ }
+  };
 
   /* ── Radar Chart (SVG) ── */
   function RadarChart({ offers: radarOffers }: { offers: Offer[] }) {
@@ -541,6 +760,27 @@ export default function ComparePage() {
       {/* ── Compare Mode ── */}
       {compareMode && selectedForCompare.length >= 2 ? (
         <div className="space-y-6">
+          {/* Export action bar */}
+          <div className="flex items-center gap-3 justify-between">
+            <p className="text-sm text-[var(--color-muted)]">
+              对比 {selectedForCompare.length} 个 Offer
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={exportMarkdown}
+                className="inline-flex items-center gap-1.5 text-xs px-3 py-2 rounded-[var(--radius-sm)] bg-[var(--color-primary-muted)] text-[var(--color-text)] hover:bg-[var(--color-primary-soft)] transition-colors"
+              >
+                📄 导出 Markdown
+              </button>
+              <button
+                onClick={exportPDF}
+                className="inline-flex items-center gap-1.5 text-xs px-3 py-2 rounded-[var(--radius-sm)] bg-[var(--color-primary)] text-white hover:opacity-90 transition-opacity"
+              >
+                🖨️ 导出 PDF
+              </button>
+            </div>
+          </div>
+
           {/* Side-by-side table */}
           <PaperCard padding="md">
             <div className="overflow-x-auto">

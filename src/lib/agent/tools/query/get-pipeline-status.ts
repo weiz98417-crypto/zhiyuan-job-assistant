@@ -17,10 +17,16 @@ async function handler(): Promise<ToolResult> {
 }
 function formatResult(result: ToolResult): string {
   if (!result.success) return `查询失败: ${result.error}`;
-  const d = result.data as { total?: number } | null;
-  return `Pipeline: ${d?.total || 0} 条记录`;
+  const d = result.data as { total?: number; byStatus?: Record<string, number>; avgScore?: number } | null;
+  if (!d) return "Pipeline 数据为空";
+  const statusLines = d.byStatus ? Object.entries(d.byStatus).map(([k,v]) => `${k}: ${v}`).join(", ") : "";
+  return `Pipeline: ${d.total || 0} 条记录 | 均分 ${d.avgScore || "-"}/5${statusLines ? ` | ${statusLines}` : ""}`;
 }
 export const getPipelineStatus: ToolDefinition = {
-  name: "get_pipeline_status", description: "获取Pipeline总体状态（投递统计）",
-  parameters: {}, category: "query", handler, formatResult,
+  name: "get_pipeline_status", description: "获取 Pipeline 总体投递统计，支持状态和日期过滤",
+  parameters: {
+    status: { type: "string", required: false, description: "投递状态过滤" },
+    date_from: { type: "string", required: false, description: "起始日期 YYYY-MM-DD" },
+    date_to: { type: "string", required: false, description: "截止日期 YYYY-MM-DD" },
+  }, category: "query", handler, formatResult,
 };

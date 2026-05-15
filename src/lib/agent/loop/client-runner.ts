@@ -1,7 +1,8 @@
-import type { LoopConfig, LoopState, SSEEvent } from "./types";
+import type { LoopConfig, LoopState, ResultQuality, SSEEvent } from "./types";
 import { DEFAULT_LOOP_CONFIG } from "./types";
-import { executeTool, formatToolResult } from "@/lib/agent/tools";
-import type { ToolResult } from "@/lib/agent/tools/types";
+import { isGarbledText } from "./text-quality";
+import { executeTool, formatToolResult, getTool } from "@/lib/agent/tools";
+import type { ToolResult, ErrorCategory } from "@/lib/agent/tools/types";
 import db from "@/lib/db";
 import { createJD } from "@/lib/jd-storage";
 
@@ -9,7 +10,9 @@ export type { SSEEvent };
 
 /* ── Result quality check ── */
 
-type ResultQuality = "good" | "empty" | "irrelevant";
+const GARBLED_RECOVERY_HINT =
+  "内容编码异常（乱码），无法自动解析。请直接告知用户文档可能存在编码问题，" +
+  "并引导用户：1) 直接粘贴简历文本内容 2) 将文档另存为 UTF-8 编码的 .txt 文件后重新上传 3) 发送截图";
 
 function checkResultQuality(formatted: string): ResultQuality {
   const trimmed = formatted.trim();
@@ -28,11 +31,32 @@ function checkResultQuality(formatted: string): ResultQuality {
   if (garbagePatterns.some((p) => p.test(trimmed))) {
     return "irrelevant";
   }
+  // Must be AFTER empty/irrelevant checks — garbled text is non-empty and non-entertainment
+  if (isGarbledText(trimmed)) {
+    return "garbled";
+  }
   return "good";
 }
 
+/* ── Error category dispatch (modeled after OpenAI Assistants + LangChain) ── */
+
+const ERROR_CATEGORY_ACTIONS: Record<ErrorCategory, { autoRetry: boolean; degradeToUser: boolean }> = {
+  ok:              { autoRetry: false, degradeToUser: false },
+  transient:       { autoRetry: true,  degradeToUser: false },
+  permanent:       { autoRetry: false, degradeToUser: true  },
+  need_user_input: { autoRetry: false, degradeToUser: true  },
+};
+
+/** Resolve errorCategory from a ToolResult. Falls back to "permanent" for
+ *  unclassified failures (no auto-retry without explicit opt-in). */
+function resolveErrorCategory(result: ToolResult): ErrorCategory {
+  if (result.errorCategory) return result.errorCategory;
+  // Backward compat: old tools without errorCategory — success=ok, failure=permanent
+  return result.success ? "ok" : "permanent";
+}
+
 const MAX_MESSAGES = 30;
-const MAX_CONTEXT_TOKENS = 24000;
+const MAX_CONTEXT_TOKENS = 64000;
 
 /* ── Tool call handling (native function calling) ── */
 
@@ -52,13 +76,38 @@ function truncateContext(
   return messages.slice(-keepLast);
 }
 
-/** Cap tool result text entering LLM context.
- *  Full data is shown to user via React components — LLM only needs a signal. */
-const MAX_TOOL_CTX = 600;
-function capToolCtx(text: string, toolName: string): string {
-  if (text.length <= MAX_TOOL_CTX) return text;
-  const head = text.slice(0, MAX_TOOL_CTX);
-  return `${head}\n...[已截断: 原始${text.length}字, 完整内容已通过前端组件展示]`;
+/** Enforce context budget before pushing. Harness hard-gate, not prompt suggestion. */
+function pushWithBudget(
+  ctx: { role: string; content: string }[],
+  msg: { role: string; content: string },
+  maxTokens: number,
+): void {
+  ctx.push(msg);
+  const currentTokens = ctx.reduce((sum, m) => sum + m.content.length, 0);
+  if (currentTokens > maxTokens) {
+    // Aggressive truncation: keep only last 15 messages
+    const kept = ctx.slice(-15);
+    ctx.length = 0;
+    ctx.push(...kept);
+  }
+}
+
+/** Get LLM context text from a ToolResult.
+ *  Triple-pipe: prefers result.llmSummary, falls back to formatResult(data) for unmigrated tools.
+ *  Per-tool cap from ToolDefinition.toolCtxCap, default 800 chars. */
+const DEFAULT_TOOL_CTX_CAP = 800;
+function getLLMContext(result: ToolResult, toolName: string): string {
+  // New tools: use llmSummary directly
+  let text = result.llmSummary ?? "";
+  // Fallback: unmigrated tools still use formatResult
+  if (!text) {
+    const toolDef = getTool(toolName);
+    if (toolDef?.formatResult) text = toolDef.formatResult(result);
+  }
+  const toolDef = getTool(toolName);
+  const max = toolDef?.toolCtxCap ?? DEFAULT_TOOL_CTX_CAP;
+  if (text.length <= max) return text;
+  return text.slice(0, max) + "\n<!-- 结果已截断，完整数据仅展示在 UI 中 -->";
 }
 
 /* ── Think proxy helpers ── */
@@ -128,11 +177,12 @@ async function fetchFromThinkProxy(
 async function* collectThinkResponseStreaming(
   response: Response,
   signal?: AbortSignal,
-): AsyncGenerator<SSEEvent, { text: string; toolCalls: NativeToolCall[] }> {
+): AsyncGenerator<SSEEvent, { text: string; toolCalls: NativeToolCall[]; finishReason: string }> {
   const reader = response.body!.getReader();
   const decoder = new TextDecoder();
   let fullText = "";
   const toolCalls: NativeToolCall[] = [];
+  let finishReason = "";
   let buffer = "";
 
   try {
@@ -151,6 +201,8 @@ async function* collectThinkResponseStreaming(
           if (parsed.type === "text" && parsed.content) {
             fullText += parsed.content;
             yield { type: "text", content: parsed.content };
+          } else if (parsed.type === "finish_reason" && parsed.finish_reason) {
+            finishReason = parsed.finish_reason as string;
           } else if (parsed.type === "tool_calls" && Array.isArray(parsed.tool_calls)) {
             for (const tc of parsed.tool_calls) {
               toolCalls.push(tc);
@@ -169,7 +221,7 @@ async function* collectThinkResponseStreaming(
     yield { type: "tool_calls", tool_calls: toolCalls };
   }
 
-  return { text: fullText, toolCalls };
+  return { text: fullText, toolCalls, finishReason };
 }
 
 /* ── Agent Loop (client-side) — quality-gated ReAct cycle ── */
@@ -193,8 +245,11 @@ export async function* agentLoopClient(
   let ctx = [...messages];
   let firstIteration = true;
   let autoRetryCount = 0;
+  let forceTextOnly = false; // Set after degradeToUser: next iteration LLM responds with text only, no tools
   const MAX_AUTO_RETRY = 2;
   const recentCalls: { name: string; params: string; result: string }[] = [];
+  // LangChain intermediate_steps pattern: accumulate structured step records for debugging & graceful degradation
+  const intermediateSteps: { tool: string; params: string; category: ErrorCategory; summary: string }[] = [];
 
   while (state.iteration < config.maxIterations) {
     if (signal?.aborted) {
@@ -222,6 +277,7 @@ export async function* agentLoopClient(
 
     let thinkText: string;
     let toolCalls: NativeToolCall[];
+    let finishReason: string;
     try {
       const thinkResponse = await fetchFromThinkProxy(systemPrompt, ctx, signal, searchProgress, skipResearchProtocol, tools);
       if (!thinkResponse.ok) {
@@ -233,7 +289,7 @@ export async function* agentLoopClient(
 
       // Use streaming collector — yields text chunks as they arrive
       const streamGen = collectThinkResponseStreaming(thinkResponse, signal);
-      let streamResult: IteratorResult<SSEEvent, { text: string; toolCalls: NativeToolCall[] }>;
+      let streamResult: IteratorResult<SSEEvent, { text: string; toolCalls: NativeToolCall[]; finishReason: string }>;
       while (true) {
         streamResult = await streamGen.next();
         if (streamResult.done) break;
@@ -241,7 +297,8 @@ export async function* agentLoopClient(
       }
       thinkText = streamResult.value.text;
       toolCalls = streamResult.value.toolCalls;
-      console.log("[loop] thinkText length:", thinkText.length, "toolCalls:", toolCalls.length);
+      finishReason = streamResult.value.finishReason;
+      console.log("[loop] thinkText length:", thinkText.length, "toolCalls:", toolCalls.length, "finishReason:", finishReason);
     } catch (err) {
       yield { type: "phase", phase: "responding" };
       yield { type: "text", content: `请求失败: ${err instanceof Error ? err.message : "未知错误"}` };
@@ -254,18 +311,29 @@ export async function* agentLoopClient(
       return;
     }
 
-    // Note: preview loop removed — text is now streamed in real-time by collectThinkResponseStreaming
+    // ── forceTextOnly guard: after permanent error, LLM must respond with text, no tools ──
+    if (forceTextOnly) {
+      state.phase = "responding";
+      yield { type: "phase", phase: "responding" };
+      if (thinkText.trim()) {
+        // Text was already yielded in streaming, just break
+      } else {
+        yield { type: "text", content: "抱歉，操作未能完成。请换个方式提问或稍后重试。" };
+      }
+      ctx.push({ role: "assistant", content: thinkText });
+      break;
+    }
 
-    if (toolCalls.length === 0) {
-      // ── No tool needed → Respond ──
+    // ── Decide: continue or stop? Model controls this via finish_reason (Anthropic pattern) ──
+    // Backward compat: if finish_reason is missing (old think proxy), fall back to toolCalls.length
+    const shouldContinue = finishReason === "tool_calls" || (toolCalls.length > 0 && !finishReason);
+    if (!shouldContinue) {
+      // ── Model says stop → Respond ──
       state.phase = "responding";
       yield { type: "phase", phase: "responding" };
 
       let responseText = thinkText.trim();
-      if (responseText) {
-        // Text already streamed by collectThinkResponseStreaming above.
-        // Only emit the final phase event — don't re-stream the text.
-      } else {
+      if (!responseText) {
         yield { type: "text", content: "操作完成。" };
       }
 
@@ -274,6 +342,65 @@ export async function* agentLoopClient(
     }
 
     // ── Phase 2: Executing (native tool calls) ──
+    // Anthropic parallel tool_use pattern: independent query tools run concurrently
+    const allIndependent = toolCalls.length > 1 && toolCalls.every(tc => {
+      try { const p = JSON.parse(tc.arguments); return p && typeof p === "object"; } catch { return false; }
+    }) && toolCalls.every(tc => !toolWhitelist || toolWhitelist.includes(tc.name));
+
+    if (allIndependent) {
+      state.phase = "executing";
+      yield { type: "phase", phase: "executing" };
+      const parallelParams = toolCalls.map(tc => ({ tc, params: JSON.parse(tc.arguments) as Record<string, unknown> }));
+      for (const { tc, params } of parallelParams) yield { type: "tool_call", name: tc.name, params };
+
+      const parallelResults = await Promise.all(parallelParams.map(({ tc, params }) =>
+        executeTool(tc.name, params).catch(err => ({ success: false, data: null, error: err instanceof Error ? err.message : "Tool error", errorCategory: "transient" as const, recoverable: true }))
+      ));
+
+      for (let i = 0; i < toolCalls.length; i++) {
+        const tc = toolCalls[i];
+        const params = parallelParams[i].params;
+        const paramsKey = JSON.stringify(params);
+        const toolResult = parallelResults[i];
+        const formatted = formatToolResult(toolResult, tc.name);
+
+        yield { type: "tool_result", name: tc.name, result: formatted, success: toolResult.success, data: toolResult.data, uiPayload: (toolResult as ToolResult).uiPayload };
+        if (!toolResult.success) yield { type: "tool_error", name: tc.name, error: toolResult.error || "未知错误", recoverable: toolResult.recoverable !== false };
+
+        const category = resolveErrorCategory(toolResult);
+        const action = ERROR_CATEGORY_ACTIONS[category];
+        if (action.degradeToUser) {
+          const errorObs = `[TOOL_ERROR tool=${tc.name} category=${category}] ${toolResult.error || "操作失败"}\n\n请基于此错误告知用户发生了什么，并给出具体的下一步建议。`;
+          ctx.push({ role: "user", content: errorObs });
+          forceTextOnly = true;
+        } else {
+          if (action.autoRetry) autoRetryCount++; else autoRetryCount = 0;
+          // Terminal export tools: don't feed content back to LLM context — just confirm download
+          if (tc.name === "export_file" || tc.name === "download_report_pdf") {
+            const d = (toolResult.data as { filename?: string }) || {};
+            ctx.push({ role: "user", content: `<!-- tool:${tc.name} result -->已导出文件: ${d.filename || "download"}。用户设备已自动下载，你不需要再提下载操作。` });
+          } else {
+            const catHints: Record<ErrorCategory, string> = { ok: "", transient: "\n<!-- ⚠️ 请换参数重试。 -->", permanent: "", need_user_input: "" };
+            // Parallel path: aggressive cap (500 chars) — LLM just needs to know which results to dig into
+            const ctxCap = 500;
+            const llmText = getLLMContext(toolResult, tc.name);
+            const capped = llmText.length > ctxCap ? llmText.slice(0, ctxCap) + "\n<!-- 并行结果截断，需要详情的工具结果请在下一轮单读 -->" : llmText;
+            ctx.push({ role: "user", content: `<!-- tool:${tc.name} result -->\n${capped}${catHints[category]}\n\n【请基于以上工具返回数据进行分析。】` });
+          }
+        }
+        intermediateSteps.push({ tool: tc.name, params: paramsKey, category, summary: toolResult.success ? formatted.slice(0, 100) : (toolResult.error || "失败").slice(0, 100) });
+        recentCalls.push({ name: tc.name, params: paramsKey, result: formatted });
+        if (recentCalls.length > 5) recentCalls.shift();
+        state.contextSize = estimateTokens(ctx);
+      }
+      // Push summary after parallel batch
+      if (toolCalls.length > 1) {
+        ctx.push({ role: "user", content: `<!-- system -->并行调用了 ${toolCalls.length} 个工具。如果需要某个工具的完整结果，请单独调用该工具。现在请基于已有数据继续分析。` });
+      }
+      firstIteration = false;
+      continue; // Skip the serial for loop below
+    }
+
     for (const tc of toolCalls) {
       let params: Record<string, unknown>;
       try { params = JSON.parse(tc.arguments); } catch { continue; }
@@ -283,7 +410,7 @@ export async function* agentLoopClient(
       let toolResult: ToolResult;
       let formatted: string;
       if (recent) {
-        toolResult = { success: true, data: recent.result };
+        toolResult = { success: true, data: recent.result, errorCategory: "ok" as const };
         formatted = recent.result;
         console.log(`[loop] dedup: skipping repeat call to ${tc.name}`);
       } else {
@@ -303,7 +430,7 @@ export async function* agentLoopClient(
         try {
           toolResult = await executeTool(tc.name, params);
         } catch (execErr) {
-          toolResult = { success: false, data: null, error: execErr instanceof Error ? execErr.message : "Tool execution error" };
+          toolResult = { success: false, data: null, error: execErr instanceof Error ? execErr.message : "Tool execution error", errorCategory: "transient" as const };
         }
 
         // ═════════════════════════════════════════════════════════
@@ -358,9 +485,10 @@ export async function* agentLoopClient(
               const persistJson = await persistRes.json();
               console.log("[loop] persist result:", persistJson);
               if (persistJson.success) {
-                // Also save to client-side Dexie (IndexedDB) so UI pages can find the data
+                // Inject real reportNum into finalData so formatResult uses it
                 const d = finalData;
                 const reportNum = persistJson.reportNum || 0;
+                (d as Record<string, unknown>).reportNum = reportNum;
                 const blocks = (d.blocks || {}) as Record<string, { content: string; score: number }>;
                 const today = new Date().toISOString().split("T")[0];
                 try {
@@ -419,14 +547,27 @@ export async function* agentLoopClient(
             console.warn("[loop] persist skipped: missing company or role");
           }
 
-          formatted = formatToolResult({ success: true, data: finalData }, tc.name);
-          yield { type: "tool_result", name: tc.name, result: formatted, success: true, data: finalData };
+          formatted = formatToolResult({ success: true, data: finalData, errorCategory: "ok" as const }, tc.name);
+          yield { type: "tool_result", name: tc.name, result: formatted, success: true, data: finalData, uiPayload: toolResult.uiPayload };
 
           // Push formatted result to context for LLM summary in next iteration
-          ctx.push({
-            role: "user",
-            content: capToolCtx(`<!-- tool:${tc.name} result -->\n${formatted}\n\n【请基于以上工具返回的数据进行深度分析和扩容解释。不要仅复述数据——要分析原因、风险判断、面试追问策略和行动建议。】`, tc.name),
-          });
+          if (tc.name === "export_file" || tc.name === "download_report_pdf") {
+            const d = (finalData as { filename?: string }) || {};
+            ctx.push({ role: "user", content: `<!-- tool:${tc.name} result -->已导出文件: ${d.filename || "download"}。用户设备已自动下载。` });
+          } else {
+            const llmText2 = getLLMContext(toolResult, tc.name);
+            ctx.push({
+              role: "user",
+              content: `<!-- tool:${tc.name} result -->\n${llmText2}\n\n【请基于以上工具返回的数据进行深度分析和扩容解释。不要仅复述数据——要分析原因、风险判断、面试追问策略和行动建议。】`,
+            });
+            // If a report was persisted, also push the reportNum so LLM can retrieve it later
+            if ((finalData as Record<string, unknown>).reportNum) {
+              ctx.push({
+                role: "user",
+                content: `<!-- system -->评估报告已保存，报告编号: ${(finalData as Record<string, unknown>).reportNum}。当用户说"看完整报告""展开报告"时，请调用 get_report_detail 并传入此报告编号。`,
+              });
+            }
+          }
           state.contextSize = estimateTokens(ctx);
           state.consecutiveFailures = 0;
           recentCalls.push({ name: tc.name, params: paramsKey, result: formatted });
@@ -440,7 +581,7 @@ export async function* agentLoopClient(
         if (recentCalls.length > 5) recentCalls.shift();
       }
 
-      yield { type: "tool_result", name: tc.name, result: formatted, success: toolResult.success, data: toolResult.data };
+      yield { type: "tool_result", name: tc.name, result: formatted, success: toolResult.success, data: toolResult.data, uiPayload: toolResult.uiPayload };
 
       // ── Self-healing ──
       if (!toolResult.success) {
@@ -459,28 +600,58 @@ export async function* agentLoopClient(
         state.consecutiveFailures++;
       }
 
-      let qualityHint = "";
-      if (!toolResult.success) {
-        if (toolResult.recoverable === false) {
-          qualityHint = `\n<!-- ⚠️ 工具执行失败（无法重试）: ${toolResult.error || "未知错误"}。请直接告知用户原因并引导用户操作。 -->`;
-        } else {
-          qualityHint = `\n<!-- ⚠️ 工具执行失败: ${toolResult.error || "未知错误"}。${toolResult.retryHint || "请换参数重试、使用其他工具获取信息、或基于已有知识直接回答。"} -->`;
-          autoRetryCount++;
-        }
-      } else if (quality === "empty") {
-        qualityHint = "\n<!-- ⚠️ 搜索结果为空，请在下一轮换不同关键词重新搜索。不要直接回复用户。 -->";
-        autoRetryCount++;
-      } else if (quality === "irrelevant") {
-        qualityHint = "\n<!-- ⚠️ 搜索结果不相关（可能是同名文化作品等），请换更精确的关键词重新搜索。不要直接回复用户。 -->";
+      // ── Error category dispatch (replaces qualityHint string splicing) ──
+      const category = resolveErrorCategory(toolResult);
+      const action = ERROR_CATEGORY_ACTIONS[category];
+
+      if (action.degradeToUser) {
+        // Anthropic pattern: errors are data, not exit signals.
+        // Send the error as an Observation so the model can tell the user naturally.
+        const errorObs = `[TOOL_ERROR tool=${tc.name} category=${category}] ${toolResult.error || "操作失败"}\n\n请基于此错误告知用户发生了什么，并给出具体的下一步建议。`;
+        ctx.push({ role: "user", content: errorObs });
+        state.contextSize = estimateTokens(ctx);
+        forceTextOnly = true;
+        intermediateSteps.push({ tool: tc.name, params: paramsKey, category, summary: (toolResult.error || "操作失败").slice(0, 100) });
+        recentCalls.push({ name: tc.name, params: paramsKey, result: formatted });
+        if (recentCalls.length > 5) recentCalls.shift();
+        continue; // Let the model process the error in next iteration
+      }
+
+      if (action.autoRetry) {
         autoRetryCount++;
       } else {
         autoRetryCount = 0;
       }
 
-      ctx.push({
-        role: "user",
-        content: capToolCtx(`<!-- tool:${tc.name} result -->\n${formatted}${qualityHint}\n\n【请基于以上工具返回的数据进行深度分析和扩容解释。不要仅复述数据——要分析原因、风险判断、面试追问策略和行动建议。】`, tc.name),
+      // Accumulate structured step record (LangChain pattern)
+      intermediateSteps.push({
+        tool: tc.name,
+        params: paramsKey,
+        category,
+        summary: toolResult.success ? (formatted.slice(0, 100)) : (toolResult.error || "失败").slice(0, 100),
       });
+
+      // Still build quality context for the LLM (lightweight, based on category)
+      const categoryHints: Record<ErrorCategory, string> = {
+        ok:              "",
+        transient:       "\n<!-- ⚠️ 搜索未找到理想结果，请换参数重试。 -->",
+        permanent:       "",
+        need_user_input: "",
+      };
+      const hint = categoryHints[category]
+        || (quality === "empty" ? "\n<!-- ⚠️ 搜索结果为空，请在下一轮换不同关键词重新搜索。不要直接回复用户。 -->"
+            : quality === "irrelevant" ? "\n<!-- ⚠️ 搜索结果不相关（可能是同名文化作品等），请换更精确的关键词重新搜索。不要直接回复用户。 -->"
+            : "");
+
+      if (tc.name === "export_file" || tc.name === "download_report_pdf") {
+        const d = (toolResult.data as { filename?: string }) || {};
+        ctx.push({ role: "user", content: `<!-- tool:${tc.name} result -->已导出文件: ${d.filename || "download"}。用户设备已自动下载。` });
+      } else {
+        ctx.push({
+          role: "user",
+          content: `<!-- tool:${tc.name} result -->\n${getLLMContext(toolResult, tc.name)}${hint}\n\n【请基于以上工具返回的数据进行深度分析和扩容解释。不要仅复述数据——要分析原因、风险判断、面试追问策略和行动建议。】`,
+        });
+      }
       state.contextSize = estimateTokens(ctx);
     }
 
@@ -513,11 +684,16 @@ export async function* agentLoopClient(
     firstIteration = false;
   }
 
-  // Max iterations — force respond
+  // Max iterations — force respond with structured summary (LangChain pattern)
   if (state.iteration >= config.maxIterations && state.phase !== "responding") {
     state.phase = "responding";
     yield { type: "phase", phase: "responding" };
-    yield { type: "text", content: "达到思考上限，请重新提问。" };
+    if (intermediateSteps.length > 0) {
+      const lines = intermediateSteps.map(s => `- ${s.tool}: ${s.summary} [${s.category}]`);
+      yield { type: "text", content: `已尝试 ${intermediateSteps.length} 次工具调用，未能完成任务。以下是尝试记录：\n${lines.join("\n")}\n\n请重新描述你的需求，或换个方式提问。` };
+    } else {
+      yield { type: "text", content: "达到处理上限，请重新提问。" };
+    }
   }
 
   yield { type: "done" };

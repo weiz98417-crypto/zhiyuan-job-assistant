@@ -150,13 +150,30 @@ CREATE TABLE IF NOT EXISTS offers (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   company TEXT NOT NULL,
   role TEXT NOT NULL,
-  monthly_salary REAL,
-  bonus REAL,
-  equity TEXT,
+  monthly_salary REAL NOT NULL DEFAULT 0,
+  months_per_year INTEGER NOT NULL DEFAULT 12,
+  annual_bonus REAL DEFAULT 0,
+  has_social_insurance INTEGER NOT NULL DEFAULT 1,
+  housing_fund_rate INTEGER NOT NULL DEFAULT 7,
+  options TEXT,
+  probation_months INTEGER NOT NULL DEFAULT 3,
+  start_date TEXT,
+  other_benefits TEXT,
   location TEXT,
   level TEXT,
   benefits_json TEXT NOT NULL DEFAULT '{}',
   application_id INTEGER REFERENCES applications(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(company, role)
+);
+
+-- Offer comparison reports (P2: persisted export snapshots)
+CREATE TABLE IF NOT EXISTS offer_reports (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL DEFAULT 'Offer 对比报告',
+  offers_json TEXT NOT NULL DEFAULT '[]',
+  report_markdown TEXT NOT NULL DEFAULT '',
+  num_offers INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

@@ -231,7 +231,7 @@ agentLoopServer(systemPrompt, messages, config, tools, toolWhitelist):
     state.iteration++
 
     ┌─ 上下文截断 ──────────────────────────────┐
-    │ if contextSize > MAX_CONTEXT_TOKENS (24000)  │
+    │ if contextSize > MAX_CONTEXT_TOKENS (64000)  │
     │   ctx = ctx.slice(-15)                        │
     │   contextSize = estimateTokens(ctx)            │
     └─────────────────────────────────────────────┘
@@ -370,34 +370,33 @@ checkResultQuality(formatted)
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    防御层 1: 连续失败                     │
+│                    防御层 1: forceTextOnly                │
+│  工具返回 permanent 错误                                  │
+│  → forceTextOnly = true（代码级拦截）                     │
+│  → 下一轮 LLM 只能文本输出，tool_calls 被忽略             │
+│  → 触发条件：errorCategory = "permanent" | "need_user_input" │
+├─────────────────────────────────────────────────────────┤
+│                    防御层 2: 连续失败                     │
 │  consecutiveFailures >= 2                                │
 │  → "工具连续失败 N 次，请检查配置或稍后重试。"             │
 │  → done                                                  │
-│  触发条件：工具返回 success:false                         │
-│  场景：API Key 未配置、服务端权限问题                      │
+│  触发条件：forceTextOnly 未拦截到的重复 failure            │
 ├─────────────────────────────────────────────────────────┤
-│                    防御层 2: 自动重试上限                  │
+│                    防御层 3: 自动重试上限                  │
 │  autoRetryCount > MAX_AUTO_RETRY (2)                     │
-│  → "搜索暂不可用（已尝试 N 次），以下是我基于已有知识的分析："│
-│  → 最后一轮 LLM 调用（无 quality hint）                   │
+│  → "搜索暂不可用，以下是我基于已有知识的分析："             │
 │  → done                                                  │
 │  触发条件：结果为空/不相关（工具执行成功了但结果质量差）     │
-│  场景：小众公司搜不到、关键词始终不匹配                     │
 └─────────────────────────────────────────────────────────┘
 ```
-
-**两者的区别：**
-
-- `consecutiveFailures`：工具**执行失败**（网络错误、权限错误），是硬错误。连续 2 次立刻停止。
-- `autoRetryCount`：工具执行**成功但结果无效**（空结果、不相关），是软错误。最多自动重试 2 次，之后降级为"基于已有知识回答"而非直接报错。
 
 ### 4.3 配置常量
 
 | 常量 | 值 | 位置 | 说明 |
 |------|-----|------|------|
 | `DEFAULT_LOOP_CONFIG.maxIterations` | 5 | `types.ts` | 最大 ReAct 迭代轮数 |
-| `MAX_CONTEXT_TOKENS` | 24000 | 两个 runner | 上下文 token 上限（字符估算） |
+| `MAX_CONTEXT_TOKENS` | 64000 | 两个 runner | 上下文 token 上限（字符估算） |
+| `DEFAULT_TOOL_CTX_CAP` | 800 | 两个 runner | 工具结果推入 LLM 上下文的默认字符上限 |
 | `MAX_AUTO_RETRY` | 2 | 两个 runner | 空/不相关结果最大自动重试次数 |
 | `maxDuration` | 180s | `route.ts` | API Route 最大执行时间 |
 
@@ -427,41 +426,28 @@ executeTool(name, params)
   └─ 返回 ToolResult → loop 层处理
 ```
 
-### 5.2 ToolResult 自愈字段
+### 5.2 错误分类与 forceTextOnly 机制
+
+工具通过 `errorCategory` 字段控制 Agent Loop 行为：
 
 ```typescript
-interface ToolResult {
-  success: boolean;
-  data: unknown;
-  error?: string;
-  recoverable?: boolean;   // 默认 true。false = 永久失败，不要重试
-  retryHint?: string;      // 仅在 recoverable=true 时有效
-}
+type ErrorCategory = "ok" | "transient" | "permanent" | "need_user_input";
 ```
 
-**不同失败模式的 retryHint 注入逻辑（server-runner 和 client-runner 完全一致）：**
+**resolveErrorCategory fallback**：未显式设置时，`success=true → "ok"`，`success=false → "permanent"`。
 
-```
-if (!toolResult.success)
-  ├─ recoverable === false
-  │   → hint = "工具执行失败（无法重试）: {error}。请直接告知用户原因并引导用户操作。"
-  │   → autoRetryCount 不增加（这是永久失败，不该重试）
-  │
-  └─ recoverable === true | undefined
-      → hint = "工具执行失败: {error}。{retryHint || '请换参数重试、使用其他工具获取信息、或基于已有知识直接回答。'}"
-      → autoRetryCount++
-```
+**forceTextOnly 机制**：工具返回 permanent 错误 → Agent Loop 设置 `forceTextOnly = true` → 下一轮 LLM 只能输出文本回复。**代码级拦截**——LLM 返回的 tool_calls 被直接忽略，不是依赖文本指令"请"LLM 停止。
 
-**典型场景示例：**
+**不同失败模式的行为：**
 
-| 场景 | success | recoverable | retryHint | Loop 行为 |
-|------|---------|-------------|-----------|-----------|
-| 网络超时 | false | true | "请换一组关键词重试" | autoRetryCount++，LLM 重试 |
-| API Key 未配置 | false | false | — | 直接告知用户，不重试 |
-| 文件不存在 | false | false | — | 直接告知用户 |
-| 搜索无结果 | true | — | — | quality="empty" → autoRetryCount++ |
-| 搜索到错误内容 | true | — | — | quality="irrelevant" → autoRetryCount++ |
-| 正常成功 | true | — | — | autoRetryCount=0，继续 |
+| 场景 | errorCategory | Loop 行为 |
+|------|-------------|-----------|
+| 正常成功 | ok | autoRetryCount=0，继续 |
+| 网络超时 | transient | autoRetryCount++，LLM 重试最多 2 次 |
+| 文件不存在 | permanent | forceTextOnly=true，下一轮 LLM 直接输出文本 |
+| 需要用户输入 | need_user_input | forceTextOnly=true，LLM 告知用户需要什么 |
+| 搜索无结果 | (success=true) | quality="empty" → autoRetryCount++ |
+| 搜索到错误内容 | (success=true) | quality="irrelevant" → autoRetryCount++ |
 
 ### 5.3 自愈事件对前端的影响
 
@@ -496,7 +482,7 @@ if (!toolResult.success)
   │  层截断        │          │   层截断           │
   ├──────────────┤          ├──────────────────┤
   │ coordinator   │          │ MAX_CONTEXT_      │
-  │ .buildContext │          │ TOKENS = 24000   │
+  │ .buildContext │          │ TOKENS = 64000   │
   │               │          │                  │
   │ working: 10轮 │          │ ctx.slice(-15)   │
   │ episodic: 摘要│          │ 保留最近 15 条    │
@@ -515,7 +501,7 @@ function estimateTokens(messages: { role: string; content: string }[]): number {
 
 **使用字符数作为 token 估算**（中文 1 字符约等于 1-2 token，实际安全余量充足）：
 
-- 触发截断阈值：`state.contextSize > 24000`
+- 触发截断阈值：`state.contextSize > 64000`
 - 截断方式：保留最近 15 条消息
 - 截断后重新估算：`state.contextSize = estimateTokens(ctx)`
 - 下一轮迭代时如果仍然超限，再次截断（循环安全）
@@ -576,7 +562,7 @@ type SSEEvent =
   | { type: "phase";            phase: AgentPhase }                          // 阶段切换
   | { type: "thinking_content"; content: string }                             // 思考过程（预留）
   | { type: "tool_call";        name: string; params: Record<string, unknown> } // 工具调用开始
-  | { type: "tool_result";      name: string; result: string; success: boolean } // 工具结果
+  | { type: "tool_result";      name: string; result: string; success: boolean; data?: unknown; uiPayload?: Record<string,unknown> } // 工具结果
   | { type: "tool_error";       name: string; error: string; recoverable: boolean } // 工具错误（自愈）
   | { type: "result_quality";   quality: "good" | "empty" | "irrelevant" }   // 结果质量判定
   | { type: "text";             content: string }                             // 响应文本（流式片段）

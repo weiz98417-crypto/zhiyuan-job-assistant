@@ -6,15 +6,32 @@
  *
  * Quality-gated loop logic ported from client-runner.ts.
  */
-import type { LoopConfig, LoopState, SSEEvent, AgentPhase } from "./types";
+import type { LoopConfig, LoopState, SSEEvent, AgentPhase, ResultQuality } from "./types";
 import { DEFAULT_LOOP_CONFIG } from "./types";
-import { executeTool, formatToolResult } from "@/lib/agent/tools";
-import type { ToolResult } from "@/lib/agent/tools/types";
+import { isGarbledText } from "./text-quality";
+import { executeTool, formatToolResult, getTool } from "@/lib/agent/tools";
+import type { ToolResult, ErrorCategory } from "@/lib/agent/tools/types";
 import type { AgentDefinition } from "@/lib/agent/registry/types";
+
+/* ── Context cap (per-tool) ── */
+const DEFAULT_TOOL_CTX_CAP = 800;
+function getLLMContext(result: ToolResult, toolName: string): string {
+  let text = result.llmSummary ?? "";
+  if (!text) {
+    const toolDef = getTool(toolName);
+    if (toolDef?.formatResult) text = toolDef.formatResult(result);
+  }
+  const toolDef = getTool(toolName);
+  const max = toolDef?.toolCtxCap ?? DEFAULT_TOOL_CTX_CAP;
+  if (text.length <= max) return text;
+  return text.slice(0, max) + "\n<!-- 结果已截断，完整数据仅展示在 UI 中 -->";
+}
 
 /* ── Quality check ── */
 
-type ResultQuality = "good" | "empty" | "irrelevant";
+const GARBLED_RECOVERY_HINT =
+  "内容编码异常（乱码），无法自动解析。请直接告知用户文档可能存在编码问题，" +
+  "并引导用户：1) 直接粘贴简历文本内容 2) 将文档另存为 UTF-8 编码的 .txt 文件后重新上传 3) 发送截图";
 
 function checkResultQuality(formatted: string): ResultQuality {
   const trimmed = formatted.trim();
@@ -34,7 +51,25 @@ function checkResultQuality(formatted: string): ResultQuality {
   if (garbagePatterns.some((p) => p.test(trimmed))) {
     return "irrelevant";
   }
+  // Must be AFTER empty/irrelevant checks — garbled text is non-empty and non-entertainment
+  if (isGarbledText(trimmed)) {
+    return "garbled";
+  }
   return "good";
+}
+
+/* ── Error category dispatch (modeled after OpenAI Assistants + LangChain) ── */
+
+const ERROR_CATEGORY_ACTIONS: Record<ErrorCategory, { autoRetry: boolean; degradeToUser: boolean }> = {
+  ok:              { autoRetry: false, degradeToUser: false },
+  transient:       { autoRetry: true,  degradeToUser: false },
+  permanent:       { autoRetry: false, degradeToUser: true  },
+  need_user_input: { autoRetry: false, degradeToUser: true  },
+};
+
+function resolveErrorCategory(result: ToolResult): ErrorCategory {
+  if (result.errorCategory) return result.errorCategory;
+  return result.success ? "ok" : "permanent";
 }
 
 /* ── LLM API with fallback ── */
@@ -149,7 +184,7 @@ async function callLLM(
 
 /* ── Agent Loop ── */
 
-const MAX_CONTEXT_TOKENS = 24000;
+const MAX_CONTEXT_TOKENS = 64000;
 
 function estimateTokens(messages: { role: string; content: string }[]): number {
   return messages.reduce((sum, m) => sum + m.content.length, 0);
@@ -174,8 +209,10 @@ export async function* agentLoopServer(opts: {
 
   let ctx: DeepSeekMessage[] = messages.map((m) => ({ role: m.role, content: m.content }));
   let autoRetryCount = 0;
+  let forceTextOnly = false; // Set after degradeToUser: next LLM response is text-only, no tools
   const MAX_AUTO_RETRY = 2;
   const recentCalls: { name: string; params: string; result: string }[] = [];
+  const intermediateSteps: { tool: string; params: string; category: ErrorCategory; summary: string }[] = [];
 
   while (state.iteration < config.maxIterations) {
     state.iteration++;
@@ -201,6 +238,20 @@ export async function* agentLoopServer(opts: {
       yield { type: "text", content: `AI 请求失败: ${err instanceof Error ? err.message : "未知错误"}` };
       yield { type: "done" };
       return;
+    }
+
+    // ── forceTextOnly guard: after permanent error, respond with text only, no tools ──
+    if (forceTextOnly) {
+      state.phase = "responding";
+      yield { type: "phase", phase: "responding" };
+      const responseText = thinkText.trim();
+      if (responseText) {
+        yield { type: "text", content: responseText };
+      } else {
+        yield { type: "text", content: "抱歉，操作未能完成。请换个方式提问或稍后重试。" };
+      }
+      ctx.push({ role: "assistant", content: thinkText });
+      break;
     }
 
     if (toolCalls.length === 0) {
@@ -229,7 +280,7 @@ export async function* agentLoopServer(opts: {
       let formatted: string;
 
       if (recent) {
-        toolResult = { success: true, data: recent.result };
+        toolResult = { success: true, data: recent.result, errorCategory: "ok" as const };
         formatted = recent.result;
       } else {
         state.phase = "executing";
@@ -247,7 +298,7 @@ export async function* agentLoopServer(opts: {
         try {
           toolResult = await executeTool(tc.name, params);
         } catch (execErr) {
-          toolResult = { success: false, data: null, error: execErr instanceof Error ? execErr.message : "Tool execution error" };
+          toolResult = { success: false, data: null, error: execErr instanceof Error ? execErr.message : "Tool execution error", errorCategory: "transient" as const };
         }
         formatted = formatToolResult(toolResult, tc.name);
         recentCalls.push({ name: tc.name, params: paramsKey, result: formatted });
@@ -273,29 +324,54 @@ export async function* agentLoopServer(opts: {
         state.consecutiveFailures++;
       }
 
-      let qualityHint = "";
-      if (!toolResult.success) {
-        if (toolResult.recoverable === false) {
-          // Permanent failure — do NOT retry, just tell user
-          qualityHint = `\n<!-- ⚠️ 工具执行失败（无法重试）: ${toolResult.error || "未知错误"}。请直接告知用户原因并引导用户操作。 -->`;
-        } else {
-          qualityHint = `\n<!-- ⚠️ 工具执行失败: ${toolResult.error || "未知错误"}。${toolResult.retryHint || "请换参数重试、使用其他工具获取信息、或基于已有知识直接回答。"} -->`;
-          autoRetryCount++;
-        }
-      } else if (quality === "empty") {
-        qualityHint = "\n<!-- ⚠️ 搜索结果为空，请在下一轮换不同关键词重新搜索。不要直接回复用户。 -->";
-        autoRetryCount++;
-      } else if (quality === "irrelevant") {
-        qualityHint = "\n<!-- ⚠️ 搜索结果不相关（可能是同名文化作品等），请换更精确的关键词重新搜索。不要直接回复用户。 -->";
+      // ── Error category dispatch ──
+      const category = resolveErrorCategory(toolResult);
+      const action = ERROR_CATEGORY_ACTIONS[category];
+
+      if (action.degradeToUser) {
+        const errorObs = `[TOOL_ERROR tool=${tc.name} category=${category}] ${toolResult.error || "操作失败"}\n\n请基于此错误告知用户发生了什么，并给出具体的下一步建议。`;
+        ctx.push({ role: "user", content: errorObs });
+        forceTextOnly = true;
+        state.contextSize = estimateTokens(ctx);
+        state.consecutiveFailures++;
+        intermediateSteps.push({ tool: tc.name, params: paramsKey, category, summary: (toolResult.error || "操作失败").slice(0, 100) });
+        recentCalls.push({ name: tc.name, params: paramsKey, result: formatted });
+        if (recentCalls.length > 5) recentCalls.shift();
+        continue;
+      }
+
+      if (action.autoRetry) {
         autoRetryCount++;
       } else {
         autoRetryCount = 0;
       }
 
-      ctx.push({
-        role: "user",
-        content: `<!-- tool:${tc.name} result -->\n${formatted}${qualityHint}\n\n【请基于以上工具返回的数据进行深度分析和扩容解释。不要仅复述数据——要分析原因、风险判断、面试追问策略和行动建议。】`,
+      intermediateSteps.push({
+        tool: tc.name, params: paramsKey, category,
+        summary: toolResult.success ? (formatted.slice(0, 100)) : (toolResult.error || "失败").slice(0, 100),
       });
+
+      const categoryHints: Record<ErrorCategory, string> = {
+        ok:              "",
+        transient:       "\n<!-- ⚠️ 搜索未找到理想结果，请换参数重试。 -->",
+        permanent:       "",
+        need_user_input: "",
+      };
+      const hint = categoryHints[category]
+        || (quality === "empty" ? "\n<!-- ⚠️ 搜索结果为空，请在下一轮换不同关键词重新搜索。不要直接回复用户。 -->"
+            : quality === "irrelevant" ? "\n<!-- ⚠️ 搜索结果不相关（可能是同名文化作品等），请换更精确的关键词重新搜索。不要直接回复用户。 -->"
+            : "");
+
+      if (tc.name === "export_file" || tc.name === "download_report_pdf") {
+        const d = (toolResult.data as { filename?: string }) || {};
+        ctx.push({ role: "user", content: `<!-- tool:${tc.name} result -->已导出文件: ${d.filename || "download"}。用户设备已自动下载。` });
+      } else {
+        const llmText = getLLMContext(toolResult, tc.name);
+        ctx.push({
+          role: "user",
+          content: `<!-- tool:${tc.name} result -->\n${llmText}${hint}\n\n【请基于以上工具返回的数据进行深度分析和扩容解释。不要仅复述数据——要分析原因、风险判断、面试追问策略和行动建议。】`,
+        });
+      }
       state.contextSize = estimateTokens(ctx);
     }
 
@@ -322,7 +398,12 @@ export async function* agentLoopServer(opts: {
   if (state.iteration >= config.maxIterations && state.phase !== "responding") {
     state.phase = "responding";
     yield { type: "phase", phase: "responding" };
-    yield { type: "text", content: "达到思考上限，请重新提问。" };
+    if (intermediateSteps.length > 0) {
+      const lines = intermediateSteps.map(s => `- ${s.tool}: ${s.summary} [${s.category}]`);
+      yield { type: "text", content: `已尝试 ${intermediateSteps.length} 次工具调用，未能完成任务：\n${lines.join("\n")}\n\n请换个方式提问。` };
+    } else {
+      yield { type: "text", content: "达到处理上限，请重新提问。" };
+    }
   }
 
   yield { type: "done" };

@@ -16,16 +16,54 @@ const BLOCK_LABELS: Record<string, string> = {
   g: "G · 职位合法性",
 };
 
+function renderTable(md: string): string {
+  const lines = md.split("\n");
+  const result: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    // Detect table start: current line has | and next line is separator like |---|---|
+    if (line.includes("|") && !line.startsWith(">") && i + 1 < lines.length && /^\|[\s\-:|]+\|$/.test(lines[i + 1])) {
+      const headerCells = line.split("|").filter(c => c.trim()).map(c => c.trim());
+      const tableRows: string[][] = [headerCells];
+      i += 2; // skip separator line
+      while (i < lines.length && lines[i].includes("|") && !/^\|[\s\-:|]+\|$/.test(lines[i])) {
+        tableRows.push(lines[i].split("|").filter(c => c.trim()).map(c => c.trim()));
+        i++;
+      }
+      result.push("<table class='w-full text-xs border-collapse'><thead><tr>");
+      for (const h of tableRows[0]) {
+        result.push(`<th class='border border-[var(--color-divider)] px-2 py-1 text-left font-medium text-[var(--color-text)] bg-[var(--color-primary-muted)]'>${h}</th>`);
+      }
+      result.push("</tr></thead><tbody>");
+      for (let r = 1; r < tableRows.length; r++) {
+        result.push("<tr>");
+        for (const cell of tableRows[r]) {
+          result.push(`<td class='border border-[var(--color-divider)] px-2 py-1 text-[var(--color-text-soft)]'>${cell}</td>`);
+        }
+        result.push("</tr>");
+      }
+      result.push("</tbody></table>");
+      continue;
+    }
+    result.push(line);
+    i++;
+  }
+  return result.join("\n");
+}
+
 function simpleMarkdown(md: string): string {
-  return md
-    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-    .replace(/\*(.+?)\*/g, "<em>$1</em>")
-    .replace(/^### (.+)$/gm, "<h3 class='text-lg font-medium mt-4 mb-2'>$1</h3>")
-    .replace(/^## (.+)$/gm, "<h2 class='text-xl font-bold mt-6 mb-3'>$1</h2>")
-    .replace(/^- (.+)$/gm, "<li class='ml-4 text-[var(--color-text-soft)]'>$1</li>")
-    .replace(/^(\d+)\.\s+(.+)$/gm, "<li class='ml-4 text-[var(--color-text-soft)]'>$1. $2</li>")
-    .replace(/\n\n/g, "<br/><br/>")
-    .replace(/\n/g, "<br/>");
+  return renderTable(
+    md
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/\*(.+?)\*/g, "<em>$1</em>")
+      .replace(/^### (.+)$/gm, "<h3 class='text-lg font-medium mt-4 mb-2'>$1</h3>")
+      .replace(/^## (.+)$/gm, "<h2 class='text-xl font-bold mt-6 mb-3'>$1</h2>")
+      .replace(/^- (.+)$/gm, "<li class='ml-4 text-[var(--color-text-soft)]'>$1</li>")
+      .replace(/^(\d+)\.\s+(.+)$/gm, "<li class='ml-4 text-[var(--color-text-soft)]'>$1. $2</li>")
+      .replace(/\n\n/g, "<br/><br/>")
+      .replace(/\n/g, "<br/>")
+  );
 }
 
 interface ReportBlocksProps {

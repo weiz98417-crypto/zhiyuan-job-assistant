@@ -42,6 +42,7 @@ export const TOOL_DISPLAY: Record<string, ToolDisplay> = {
   save_resume_section:      { label: "保存到简历", emoji: "💾" },
   check_ats_compatibility:  { label: "ATS 兼容检查", emoji: "🤖" },
   start_interview_session:  { label: "启动模拟面试", emoji: "🎙️" },
+  download_report_pdf:  { label: "导出报告 PDF", emoji: "🖨️" },
 
   // MCP tools
   web_search:           { label: "网络搜索",     emoji: "🌐" },

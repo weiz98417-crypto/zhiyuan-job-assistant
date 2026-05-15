@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getProfile, upsertProfile, upsertProfileGoals, migrateFromFiles } from "@/lib/server-db";
+import { getProfile, upsertProfile, upsertProfileGoals, clearProfileSignals, migrateFromFiles } from "@/lib/server-db";
 import fs from "fs";
 import path from "path";
 
@@ -133,7 +133,9 @@ export async function DELETE() {
       });
       upsertProfile("{}", JSON.stringify(history), "{}");
     }
-    return NextResponse.json({ success: true });
+    // Hard reset: also clear profile_signals table
+    const deletedSignals = clearProfileSignals();
+    return NextResponse.json({ success: true, data: { data_json: "{}", goals_json: "{}", history_json: "[]", deletedSignals } });
   } catch (err: unknown) {
     return NextResponse.json({ success: false, error: `重置失败: ${err instanceof Error ? err.message : "unknown"}` }, { status: 500 });
   }

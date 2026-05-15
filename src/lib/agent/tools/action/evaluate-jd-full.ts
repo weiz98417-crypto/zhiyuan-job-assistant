@@ -94,8 +94,11 @@ export const evaluateJDFull: ToolDefinition = {
     jd_text: { type: "string", required: false, description: "JD 完整文本，至少 50 字符" },
     jd_url: { type: "string", required: false, description: "JD 链接 URL，工具会自动抓取内容" },
     images: { type: "array", required: false, description: "JD 截图 base64 数组" },
+    language: { type: "string", required: false, description: "语言: zh/en，默认 zh" },
+    archetype: { type: "string", required: false, description: "覆盖自动检测的 archetype，如 'AI产品经理'" },
   },
   category: "action",
   handler,
   formatResult,
+  toolCtxCap: 2000,
 };

@@ -32,6 +32,7 @@ import { startInterviewSession } from "./action/start-interview-session";
 import { optimizeResumeSection } from "./action/optimize-resume-section";
 import { saveResumeSection } from "./action/save-resume-section";
 import { getReferenceDetail } from "./query/get-reference-detail";
+import { readFile } from "./query/read-file";
 import { downloadReportPDF } from "./action/download-report-pdf";
 
 // Interview tools
@@ -52,6 +53,7 @@ const registry = new ToolRegistry();
 registry.register(searchApplications);
 registry.register(getReportDetail);
 registry.register(getReferenceDetail);
+registry.register(readFile);
 registry.register(getProfile);
 registry.register(getRecentActivity);
 registry.register(getRecommendations);

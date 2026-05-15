@@ -19,7 +19,7 @@ function formatResult(result: ToolResult): string {
 
 export const checkHealth: ToolDefinition = {
   name: "check_health",
-  description: "检查 Pipeline 健康状态，识别堆积和停滞风险",
+  description: "【已废弃】请使用 check_pipeline_health（无需传参，直接从数据库读取）。此工具仍然可用但需要手动传入 pipeline 数据。",
   parameters: {
     pipeline: { type: "object", required: true, description: "Pipeline 数据 { applications: [...] }" },
     thresholds: { type: "object", required: false, description: "告警阈值 { evalWarningPct, evalDangerPct, zeroReplyCount, staleDays }" },

@@ -33,6 +33,8 @@ export const startInterviewSession: ToolDefinition = {
   parameters: {
     company: { type: "string", required: true, description: "目标公司，如'字节跳动'" },
     role: { type: "string", required: true, description: "目标岗位，如'AI产品经理'" },
+    difficulty: { type: "string", required: false, description: "难度: junior/mid/senior/staff，默认 mid" },
+    focus: { type: "string", required: false, description: "聚焦: technical/behavioral/case/all，默认 all" },
   },
   category: "action",
   handler,

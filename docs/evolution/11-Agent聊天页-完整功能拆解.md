@@ -17,7 +17,7 @@
 │                          │                     │            │
 │                          ▼                     ▼            │
 │  ┌───────────────────────────────────────────────────────┐  │
-│  │              5 个子 Agent (Sub-Agent Registry)         │  │
+│  │              6 个子 Agent (Sub-Agent Registry)         │  │
 │  │                                                        │  │
 │  │  Interview │ Evaluate │ Profile │ Resume │ General     │  │
 │  │   (P=10)   │  (P=10)  │ (P=10)  │ (P=8)  │   (P=1)     │  │
@@ -54,8 +54,8 @@
 
 | # | 功能 | 实现 | 数据源 |
 |---|------|------|--------|
-| 1 | 意图分类路由 | `orchestrator/classifyIntent()` -- 5 个 Agent | 用户输入 |
-| 2 | 5 子 Agent 系统 | Agent Registry + 各自 System Prompt | Career DNA + Knowledge |
+| 1 | 意图分类路由 | `orchestrator/classifyIntent()` -- 6 个 Agent | 用户输入 |
+| 2 | 6 子 Agent 系统 | Agent Registry + 各自 System Prompt | Career DNA + Knowledge |
 | 3 | 30+ 工具生态 | ToolRegistry + 工具展示名 | 内部 + 外部 API |
 | 4 | 双 Agent Loop | server-runner.ts / client-runner.ts | DeepSeek API (SSE) |
 | 5 | 流式响应 + 阶段指示 | AgentChat SSE events + 阶段状态栏 | `/api/agent/run` |
@@ -65,7 +65,7 @@
 | 9 | 工具调用日志 + 阶段展示 | AgentChat 内联 ToolCallLog + Phase 指示器 | Agent Loop 输出 |
 | 10 | 工具展示名系统 | `tool-display-names.ts` (30+ 映射) | 硬编码 |
 | 11 | Claude 活动上下文 | `getClaudeAgentActivity()` | `/api/agent/claude-activity` → SQLite |
-| 12 | Agent 选择切换 | 自动路由 + AgentSelector | 5 个 Agent |
+| 12 | Agent 选择切换 | 自动路由 + AgentSelector | 6 个 Agent |
 | 13 | 建议快捷词 | `SuggestionChips` 组件 | 各 Agent 预设快捷提问 |
 | 14 | 探索→Agent 数据迁移 | `migrateExploreToAgent()` | IndexedDB → SQLite |
 | 15 | 信号提取与画像更新 | `signal-extractor.ts` + `triggerProfileUpdate()` | 对话信号 → profile_signals |
@@ -103,7 +103,7 @@ export async function orchestrate(content, ctx): OrchestratorResult {
 2. `intentPatterns` -- 按 priority 排序（registration order 打破平局）
 3. `generalAgent` -- 兜底（priority=1，pattern `/.*/` 匹配一切）
 
-### 2. 5 子 Agent 系统
+### 2. 6 子 Agent 系统
 
 每个子 Agent 定义在 `src/lib/agent/registry/agents/` 下：
 
@@ -262,7 +262,8 @@ while (iteration < maxIterations):
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
 | `maxIterations` | 5 | 最大思考轮数 |
-| `MAX_CONTEXT_TOKENS` | 24000 | 上下文 token 上限 |
+| `MAX_CONTEXT_TOKENS` | 64000 | 上下文 token 上限 |
+| `DEFAULT_TOOL_CTX_CAP` | 800 | 工具结果注入 LLM 上下文的默认字符上限 |
 | `MAX_MESSAGES` | 30 (client) | 最大消息数 |
 | `MAX_AUTO_RETRY` | 2 | 自动重试次数 |
 

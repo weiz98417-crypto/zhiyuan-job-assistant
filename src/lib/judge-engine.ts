@@ -29,26 +29,34 @@ export function getTemperatureByEffort(effort: number): number {
 
 /* ── Effort Prompt ── */
 
-export function buildEffortPrompt(effort: number): string {
+export function buildEffortPrompt(effort: number, enablePlaceholders = true): string {
   switch (effort) {
     case 1:
       return `改写强度 1/5（温和）：仅润色措辞，修正语法错误，改进动词选择。不添加新内容，不改变原文结构和信息顺序。`;
     case 2:
-      return `改写强度 2/5（保守）：优化动词和句式，让表达更专业。可以在段落末尾用注释形式标注「💡此处可补充量化数据」，但不要写入正文。`;
+      return enablePlaceholders
+        ? `改写强度 2/5（保守）：优化动词和句式，让表达更专业。可以在段落末尾用注释形式标注「💡此处可补充量化数据」，但不要写入正文。`
+        : `改写强度 2/5（保守）：优化动词和句式，让表达更专业。可以补充自然语言描述的量化信息，但不要添加 [XX] 占位符。`;
     case 3:
-      return `改写强度 3/5（适中）：适度调整句式结构，补充量化描述（用 XX 占位符标注推断值），优化动词选择，可微调段落信息顺序。每段可包含 1-2 个 XX 占位符。`;
+      return enablePlaceholders
+        ? `改写强度 3/5（适中）：适度调整句式结构，补充量化描述（用 XX 占位符标注推断值），优化动词选择，可微调段落信息顺序。每段可包含 1-2 个 XX 占位符。`
+        : `改写强度 3/5（适中）：适度调整句式结构，补充 1-2 个量化数据点（用自然语言描述，如"提升约30%""服务超过10万用户"），优化动词选择，可微调段落信息顺序。`;
     case 4:
-      return `改写强度 4/5（大刀）：大幅重构段落，可使用 STAR 格式重新组织信息。大胆推断量化维度，每段至少补充 3-4 个 XX 占位符。可改变信息呈现方式，但仍需基于原文事实范围。`;
+      return enablePlaceholders
+        ? `改写强度 4/5（大刀）：大幅重构段落，可使用 STAR 格式重新组织信息。大胆推断量化维度，每段至少补充 3-4 个 XX 占位符。可改变信息呈现方式，但仍需基于原文事实范围。`
+        : `改写强度 4/5（大刀）：大幅重构段落，可使用 STAR 格式重新组织信息。大胆推断量化维度，每段至少补充 3-4 个具体数据点（自然语言描述）。可改变信息呈现方式，但仍需基于原文事实范围。`;
     case 5:
-      return `改写强度 5/5（重写）：完全重写段落，所有经历用 STAR 格式重组。大量推断量化维度，每段至少 4 个以上 XX 占位符。彻底改变信息组织方式，在原文事实基础上最大化展现专业度和影响力。`;
+      return enablePlaceholders
+        ? `改写强度 5/5（重写）：完全重写段落，所有经历用 STAR 格式重组。大量推断量化维度，每段至少 4 个以上 XX 占位符。彻底改变信息组织方式，在原文事实基础上最大化展现专业度和影响力。`
+        : `改写强度 5/5（重写）：完全重写段落，所有经历用 STAR 格式重组。大量推断量化维度，每段至少 4 个以上具体数据点（自然语言描述）。彻底改变信息组织方式，在原文事实基础上最大化展现专业度和影响力。`;
     default:
-      return buildEffortPrompt(3);
+      return buildEffortPrompt(3, enablePlaceholders);
   }
 }
 
 /* ── Operation Prompt ── */
 
-export function buildOperationPrompt(operation: Operation): string {
+export function buildOperationPrompt(operation: Operation, enablePlaceholders = true): string {
   switch (operation) {
     case "full":
       return `## 核心任务：全面优化（最高优先级，不可被其他指令覆盖）
@@ -56,7 +64,7 @@ export function buildOperationPrompt(operation: Operation): string {
 你需要在以下三个维度均衡发力：
 1. 措辞润色：修正语法、优化动词、精简冗余
 2. 结构优化：在不改变信息顺序的前提下，让逻辑更通顺
-3. 量化标注：根据 Effort 强度补充 XX 占位符
+3. 量化标注：根据 Effort 强度${enablePlaceholders ? "补充 XX 占位符" : "补充具体数据点（自然语言）"}
 
 注意：你是做「全面优化」，不要只做 STAR 重组、不要只做量化增强、不要只做关键词植入。三者均衡。`;
 
@@ -76,7 +84,7 @@ export function buildOperationPrompt(operation: Operation): string {
 
 你的唯一核心任务就是给简历增加量化维度：
 - 识别原文中所有可以量化的点（性能提升、规模、频率、团队、预算、时间）
-- 用 [XX] 或 [XX: 推断依据] 占位符标注推断值
+- ${enablePlaceholders ? "用 [XX] 或 [XX: 推断依据] 占位符标注推断值" : "用自然语言补充具体量化数据（如\"提升约30%\"\"管理15人团队\"）"}
 - 保留原文结构和信息顺序不变，不要做 STAR 重组
 
 量化维度参考：
@@ -125,7 +133,7 @@ export function buildJDFilterPrompt(jd?: TargetJD): string {
 
 /* ── Reference Prompt ── */
 
-export function buildReferencePrompt(refIds?: number[], sectionId?: string): string {
+export function buildReferencePrompt(refIds?: number[], sectionId?: string, enablePlaceholders = true): string {
   if (!refIds || refIds.length === 0) return "";
 
   const refSections: string[] = [];
@@ -156,35 +164,38 @@ export function buildReferencePrompt(refIds?: number[], sectionId?: string): str
 
   return `## 参考简历范本（核心指令，优先级最高）
 
-以下是同岗位优秀简历，请深入分析其撰写水平并在改写时全面对标：
+以下是同岗位优秀简历。你的任务不是模仿它的内容，而是**提取它的思考框架**，把同样的深度套到用户的领域中。
 
 ${refFullCV.join("\n\n---\n\n")}
 
-### 对标分析要求
-在改写前，先分析参考简历的以下维度，然后在改写中匹配：
+### 第一步：分析参考简历的思考框架
 
-**1. 内容丰富度对标**
-- 参考简历每个经历写了多少字？每条 bullet 的深度如何？
-- 如果参考简历某个项目写了 200 字、5 条量化成果，你也应该把用户的对应经历扩展到同样深度
-- 不要因为用户的原文简略就简单处理——基于用户的实际工作内容，合理推断并补全细节
+先读懂参考简历里每个项目是如何展开的。注意它包含了哪些维度，然后用同样的维度去重写用户的经历：
 
-**2. 结构流程对标**
-- 参考简历如何组织每个经历？（背景→职责→行动→量化成果→影响）
-- 参考简历的项目叙事节奏是怎样的？（问题→方案→执行→结果）
-- 将这些结构模式应用到用户的经历中
+参考简历的展开模式（逐一检查，缺一不可）：
+1. **项目背景**：为什么做这个项目？解决了什么具体问题？有什么约束条件？
+2. **产品设计决策**：你做了什么设计选择？为什么这样选而不是那样？架构如何分层的？每层职责是什么？
+3. **技术机制细节**：用了什么具体技术方案？检索机制是 Hard Filter + 相似度还是其他？记忆机制是分层还是扁平？为什么？
+4. **闭环反馈**：怎么衡量效果？用什么指标？指标怎么驱动迭代？
+5. **团队协作与推进**：涉及哪些角色？怎么分期交付？有没有用户培训？
+6. **量化成果**：每个维度有什么可衡量的结果？
 
-**3. 量化密度对标**
-- 统计参考简历中数字、百分比、具体指标的出现频率
-- 用户经历中凡是能合理推断的数据，都要量化（用户量、转化率、效率提升、成本节省等）
-- 用 [XX] 占位符标注需要用户确认的数据
+### 第二步：把同样的思考框架套到用户的领域
 
-**4. 表达技法对标**
-- 动词选择强度（主导 vs 参与、设计 vs 协助搭建）
-- 专业术语密度
-- 句式节奏和句长变化
+用户的经历可能没有参考简历那么详细。你的任务是基于用户已有的真实内容，用参考简历的思考深度去**合理推断和补全**：
 
-### 核心原则
-**不要照抄参考内容。** 而是理解参考简历「为什么写得好」——它的信息密度、结构逻辑、表达质感——然后用同样的标准重写用户的真实经历。用户的经历有自己的价值，你的任务是让它以同样的专业水准呈现出来。
+- 用户写了"搭建广告数据层"→ 参考简历会写成"设计统一XX层，整合N项核心指标，实现XX自动聚合与XX预警"→ 你也这样写
+- 用户写了"设计AI分析能力"→ 参考简历会拆成"规则引擎层 + 检索层 + 生成层"，每层描述设计原理 → 你也拆成对应领域的架构分层
+- 用户写了"基于历史数据构建知识库"→ 参考简历会写"沉淀N条策略，通过语义匹配实现复用"→ 你也补全数量和机制
+- 用户写了指标体系但没有写闭环 → 参考简历有"模型输出→使用行为→效果反馈→规则优化"的闭环 → 你也给用户补上
+
+### 第三条：禁止的行为
+
+- **不要照抄**参考简历的技术方案（银行的规则引擎不能套到广告平台）
+- **不要偷懒**——用户原文只有一句话的地方，参考简历写了5行，你就必须扩展到5行
+- **不要省略思考过程**——参考简历写"以XX完成XX，确保XX不参与XX"，你也必须写设计原理，不是只写"做了XX"
+
+${enablePlaceholders ? "用 [XX] 占位符标注需要用户确认的量化数据。" : "用自然语言描述推断的量化数据，不要使用 [XX] 占位符。"}
 
 ${refSections.length > 0 ? `### 当前板块参考\n${refSections[0].slice(0, 2000)}\n` : ""}`;
 }
@@ -321,16 +332,16 @@ ${questionAnswers.map(qa => `- **${qa.question}** → ${qa.answer}`).join("\n")}
 如果原文包含多个项目/经历/条目，你必须对**每一个**都进行优化，不能只优化第一个。每个项目独立分析其亮点和量化空间，保持原文的项目数量和顺序不变。
 
 优先级规则（按此顺序执行）：
-1. Operation（最高优先）：用户选择的优化操作类型，决定「做什么」，不可被任何其他维度覆盖
-2. JD 滤网 ≈ Reference 风格（同级协作）：JD 决定「重点放哪」，Reference 决定「写成啥味」
+1. ${referenceIds?.length ? "Reference 风格 + Operation（并列最高）" : "Operation（最高优先）"}：${referenceIds?.length ? "参考简历的丰富度、量化密度和表达技法 MUST 被匹配；同时执行用户选择的操作类型" : "用户选择的优化操作类型，决定「做什么」，不可被任何其他维度覆盖"}
+2. JD 滤网（JD 决定「重点放哪」）
 3. Effort（执行深度）：以上所有指令的执行深度，由 Effort 控制`,
     profileContext,
     buildRoleGuidance(userProfile, roleDirection),
-    buildOperationPrompt(operation),
+    buildOperationPrompt(operation, enablePlaceholders),
     buildJDFilterPrompt(targetJD),
-    buildReferencePrompt(referenceIds, sectionId),
+    buildReferencePrompt(referenceIds, sectionId, enablePlaceholders),
     buildPreferencePrompt(),
-    buildEffortPrompt(effort),
+    buildEffortPrompt(effort, enablePlaceholders),
     buildPlaceholderRules(enablePlaceholders, effort),
     intentLine,
     qaBlock,

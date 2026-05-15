@@ -28,7 +28,8 @@ export class ToolRegistry {
       const paramsStr = Object.entries(t.parameters)
         .map(([k, p]) => `${k}${p.required ? "*" : "?"}: ${p.description}`)
         .join(", ");
-      return `- ${t.name}: ${t.description}${paramsStr ? ` (${paramsStr})` : ""}`;
+      const hints = t.matchHints?.length ? ` [提示: ${t.matchHints.join(", ")}]` : "";
+      return `- ${t.name}: ${t.description}${hints}${paramsStr ? ` (${paramsStr})` : ""}`;
     });
 
     return `\n## 可用工具\n\n${lines.join("\n")}`;
@@ -74,7 +75,7 @@ export class ToolRegistry {
       };
     }
     const tool = this.tools.get(name);
-    if (!tool) return { success: false, data: null, error: `Unknown tool: ${name}` };
+    if (!tool) return { success: false, data: null, error: `工具 ${name} 不存在`, errorCategory: "permanent" };
     try {
       return await tool.handler(params);
     } catch (err) {

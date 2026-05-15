@@ -51,6 +51,7 @@ export async function POST(request: Request) {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
+      signal: AbortSignal.timeout(120_000),
       body: JSON.stringify({
         model: MODEL,
         messages: [

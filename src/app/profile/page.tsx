@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { PaperCard } from "@/components/design";
 import { loadProfile } from "@/lib/profile-storage";
+import db from "@/lib/db";
 import { syncProfileToCache } from "@/lib/profile-update";
 import { useLockedFields } from "@/lib/useLockedFields";
 import Link from "next/link";
@@ -129,8 +130,16 @@ export default function ProfilePage() {
 
   const handleReset = async () => {
     try {
-      await fetch("/api/data/profile", { method: "DELETE" });
-      setProfile(null);
+      const res = await fetch("/api/data/profile", { method: "DELETE" });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success) {
+          // Clear DexieDB cache
+          await db.profiles.clear();
+          // Set empty profile from server response
+          setProfile({ data_json: json.data?.data_json || "{}", goals_json: json.data?.goals_json || "{}", history_json: json.data?.history_json || "[]" } as unknown as ZhiyuanProfile);
+        }
+      }
       setResetConfirm(false);
       setToast("画像已重置");
     } catch { setToast("重置失败"); }

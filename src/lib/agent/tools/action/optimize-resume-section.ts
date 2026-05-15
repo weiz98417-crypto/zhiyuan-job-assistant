@@ -24,7 +24,7 @@ function resolveSection(input?: string): string {
 }
 
 async function handler(params: Record<string, unknown>): Promise<ToolResult> {
-  const { section, instruction, operation = "full", effort = 3 } = params as OptimizeParams;
+  const { section, instruction, operation = "full", effort = 3, referenceIds } = params as OptimizeParams & { referenceIds?: number[] };
   const sectionId = resolveSection(section);
 
   // Read CV from localStorage (cache) or SQLite (canonical)
@@ -89,7 +89,8 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
       effort: effort || 3,
       intent: instruction || "",
       enablePlaceholders: true,
-      fast: true, // Agent tool uses Flash for speed; CV page manual uses Pro for quality
+      referenceIds: referenceIds || undefined,
+      fast: !(referenceIds && referenceIds.length > 0), // Use Pro when reference resumes are provided
     }),
   });
 
@@ -137,6 +138,8 @@ export const optimizeResumeSection: ToolDefinition = {
     instruction: { type: "string", required: false, description: "优化意图，如'更量化''更简洁''突出 AI 产品能力'" },
     operation: { type: "string", required: false, description: "操作类型: full/polish/expand/quantify，默认 full" },
     effort: { type: "number", required: false, description: "改写力度 1-5，1最小改动 5最大改写，默认 3" },
+    referenceIds: { type: "array", required: false, description: "参考简历 ID 列表，如 [1, 2]。从 get_profile 或 read_file 的参考简历库中获取" },
+    jd_text: { type: "string", required: false, description: "JD 文本，用于针对性优化（强化 JD 关键词匹配）" },
   },
   category: "action",
   handler,

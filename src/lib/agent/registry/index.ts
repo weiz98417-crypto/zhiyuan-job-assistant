@@ -10,6 +10,7 @@
 import type { AgentDefinition } from "./types";
 import { interviewAgent } from "./agents/interview-agent";
 import { evaluateAgent } from "./agents/evaluate-agent";
+import { offerAgent } from "./agents/offer-agent";
 import { profileAgent } from "./agents/profile-agent";
 import { resumeAgent } from "./agents/resume-agent";
 import { orchestratorAgent } from "./agents/orchestrator/index";
@@ -19,6 +20,7 @@ import { generalAgent } from "./agents/general-agent";
 const AGENT_REGISTRY: AgentDefinition[] = [
   orchestratorAgent, // System agent — not matched by regex (no intentPatterns)
   interviewAgent,
+  offerAgent,       // priority 11 — matches "评估offer" before evaluateAgent
   evaluateAgent,
   profileAgent,
   resumeAgent,

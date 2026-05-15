@@ -72,6 +72,8 @@ export const prepareInterviewFull: ToolDefinition = {
   parameters: {
     company: { type: "string", required: false, description: "目标公司名，如'字节跳动'" },
     role: { type: "string", required: false, description: "目标岗位，如'AI产品经理'" },
+    focus: { type: "string", required: false, description: "聚焦方向: technical/behavioral/case/hr/all，默认 all" },
+    difficulty: { type: "string", required: false, description: "难度: junior/mid/senior/staff，默认 mid" },
   },
   category: "action",
   handler,

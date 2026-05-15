@@ -52,6 +52,8 @@ interface AgentChatProps {
   evalProgress?: EvalBlockProgress[];
   /** Evaluation completion info (after persist) */
   completionInfo?: CompletionInfo | null;
+  /** Tool result quality (good/empty/irrelevant/garbled) — drives verification indicator */
+  resultQuality?: string | null;
 
   suggestions?: SuggestionChip[];
   onSend: (content: string, images?: string[]) => Promise<void>;
@@ -100,10 +102,14 @@ function ToolResultCard({
   toolName,
   toolResult,
   success,
+  downloadUrl,
+  downloadLabel,
 }: {
   toolName: string;
   toolResult: string;
   success: boolean;
+  downloadUrl?: string | null;
+  downloadLabel?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
   const maxPreviewLines = 6;
@@ -160,6 +166,16 @@ function ToolResultCard({
             )}
           </button>
         )}
+
+        {downloadUrl && (
+          <a
+            href={downloadUrl}
+            download
+            className="inline-flex items-center gap-1.5 mt-2 text-xs px-3 py-1.5 rounded-[var(--radius-sm)] bg-[var(--color-primary)] text-white hover:opacity-90 transition-opacity no-underline"
+          >
+            📥 {downloadLabel || "下载文件"}
+          </a>
+        )}
       </div>
     </motion.div>
   );
@@ -206,12 +222,14 @@ function AgentStatusBar({
   startTime,
   tokenCount,
   evalProgress,
+  resultQuality,
 }: {
   phase: AgentPhase;
   toolName?: string;
   startTime?: number;
   tokenCount?: number;
   evalProgress?: EvalBlockProgress[];
+  resultQuality?: string | null;
 }) {
   const [elapsed, setElapsed] = useState(0);
 
@@ -231,6 +249,13 @@ function AgentStatusBar({
 
   const parts: string[] = [];
   parts.push(`${phaseInfo.emoji} ${phaseInfo.label}`);
+  if (resultQuality && (phase === "verifying" || phase === "reflecting")) {
+    const q = resultQuality;
+    if (q === "good" || q === "ok") parts.push("✅");
+    else if (q === "empty") parts.push("⚠️ 空结果 → 重试");
+    else if (q === "irrelevant") parts.push("⚠️ 不相关 → 重试");
+    else if (q === "garbled") parts.push("❌ 乱码");
+  }
   if (display && phase === "executing") parts.push(`· ${display.emoji} ${display.label}`);
 
   // Render eval block progress from props (driven by generator SSE events)
@@ -520,91 +545,93 @@ function ProfileViewCard({ data }: { data: ProfileViewData }) {
     }
   }
 
+  const [expanded, setExpanded] = useState<Set<string>>(new Set(["summary"]));
+
+  const toggle = (key: string) => {
+    const next = new Set(expanded);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    setExpanded(next);
+  };
+
+  const sectionDefs = [
+    { id: "summary",    label: "基本信息", icon: User,      content: byId.summary },
+    { id: "experience", label: "工作经历", icon: Briefcase, content: byId.experience },
+    { id: "projects",   label: "项目经验", icon: FileText,  content: byId.projects },
+    { id: "education",  label: "教育背景", icon: BookOpen,  content: byId.education },
+    { id: "skills",     label: "技能",     icon: BookOpen,  content: byId.skills },
+  ];
+
   return (
-    <div className="space-y-4 max-w-[95%]">
-      {/* Personal info table extracted from summary */}
-      {byId.summary && (
-        <div className="rounded-[var(--radius-md)] border border-[var(--color-divider)] overflow-hidden">
-          <div className="px-4 py-2 bg-[var(--color-bg)] border-b border-[var(--color-divider)] flex items-center gap-2">
-            <User size={14} className="text-[var(--color-primary)]" />
-            <span className="text-sm font-medium text-[var(--color-text)]">基本信息</span>
-          </div>
-          <div className="p-4 text-sm">
-            <table className="w-full text-sm">
-              <tbody>
-                {byId.summary.split("\n").map((line, i) => {
-                  const colonIdx = line.indexOf("：") > 0 ? line.indexOf("：") : line.indexOf(":");
-                  if (colonIdx > 0) {
-                    const key = line.slice(0, colonIdx).trim();
-                    const val = line.slice(colonIdx + 1).trim();
-                    if (!val) return null;
-                    return (
+    <div className="space-y-3 max-w-[95%]">
+      {sectionDefs.map(({ id, label, icon: Icon, content }) => {
+        if (!content) return null;
+        const isOpen = expanded.has(id);
+
+        if (id === "summary") {
+          return (
+            <div key={id} className="rounded-[var(--radius-md)] border border-[var(--color-divider)] overflow-hidden">
+              <div className="px-4 py-2 bg-[var(--color-bg)] border-b border-[var(--color-divider)] flex items-center gap-2">
+                <Icon size={14} className="text-[var(--color-primary)]" />
+                <span className="text-sm font-medium text-[var(--color-text)]">{label}</span>
+              </div>
+              <div className="p-4 text-sm">
+                <table className="w-full text-sm"><tbody>
+                  {content.split("\n").map((line, i) => {
+                    const colonIdx = line.indexOf("：") > 0 ? line.indexOf("：") : line.indexOf(":");
+                    if (colonIdx > 0) {
+                      const key = line.slice(0, colonIdx).trim();
+                      const val = line.slice(colonIdx + 1).trim();
+                      if (!val) return null;
+                      return (
+                        <tr key={i} className={i > 0 ? "border-t border-[var(--color-divider)]" : ""}>
+                          <td className="py-1.5 pr-4 text-[var(--color-muted)] whitespace-nowrap align-top">{key}</td>
+                          <td className="py-1.5 text-[var(--color-text)]">{val}</td>
+                        </tr>
+                      );
+                    }
+                    if (i === 0 && line && !line.includes("：") && !line.includes(":")) {
+                      return (
+                        <tr key={i}>
+                          <td className="py-1.5 pr-4 text-[var(--color-muted)] whitespace-nowrap align-top">姓名</td>
+                          <td className="py-1.5 text-[var(--color-text)] font-medium">{line}</td>
+                        </tr>
+                      );
+                    }
+                    return line ? (
                       <tr key={i} className={i > 0 ? "border-t border-[var(--color-divider)]" : ""}>
-                        <td className="py-1.5 pr-4 text-[var(--color-muted)] whitespace-nowrap align-top">{key}</td>
-                        <td className="py-1.5 text-[var(--color-text)]">{val}</td>
+                        <td colSpan={2} className="py-1.5 text-[var(--color-text-soft)]">{line}</td>
                       </tr>
-                    );
-                  }
-                  // First line (name) or other lines
-                  if (i === 0 && line && !line.includes("：") && !line.includes(":")) {
-                    return (
-                      <tr key={i}>
-                        <td className="py-1.5 pr-4 text-[var(--color-muted)] whitespace-nowrap align-top">姓名</td>
-                        <td className="py-1.5 text-[var(--color-text)] font-medium">{line}</td>
-                      </tr>
-                    );
-                  }
-                  return line ? (
-                    <tr key={i} className={i > 0 ? "border-t border-[var(--color-divider)]" : ""}>
-                      <td colSpan={2} className="py-1.5 text-[var(--color-text-soft)]">{line}</td>
-                    </tr>
-                  ) : null;
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* Work Experience */}
-      {byId.experience && (
-        <div className="rounded-[var(--radius-md)] border border-[var(--color-divider)] overflow-hidden">
-          <div className="px-4 py-2 bg-[var(--color-bg)] border-b border-[var(--color-divider)] flex items-center gap-2">
-            <Briefcase size={14} className="text-[var(--color-primary)]" />
-            <span className="text-sm font-medium text-[var(--color-text)]">工作经历</span>
-          </div>
-          <div className="p-4 text-sm whitespace-pre-wrap text-[var(--color-text)]">{byId.experience}</div>
-        </div>
-      )}
-
-      {/* Projects */}
-      {byId.projects && (
-        <div className="rounded-[var(--radius-md)] border border-[var(--color-divider)] overflow-hidden">
-          <div className="px-4 py-2 bg-[var(--color-bg)] border-b border-[var(--color-divider)] flex items-center gap-2">
-            <FileText size={14} className="text-[var(--color-primary)]" />
-            <span className="text-sm font-medium text-[var(--color-text)]">项目经验</span>
-          </div>
-          <div className="p-4 text-sm whitespace-pre-wrap text-[var(--color-text)]">{byId.projects}</div>
-        </div>
-      )}
-
-      {/* Education + Skills */}
-      {(byId.education || byId.skills) && (
-        <div className="grid grid-cols-2 gap-3">
-          {byId.education && (
-            <div className="rounded-[var(--radius-md)] border border-[var(--color-divider)] overflow-hidden">
-              <div className="px-3 py-1.5 bg-[var(--color-bg)] border-b border-[var(--color-divider)] text-xs font-medium text-[var(--color-text)]">教育背景</div>
-              <div className="p-3 text-sm text-[var(--color-text)] whitespace-pre-wrap">{byId.education}</div>
+                    ) : null;
+                  })}
+                </tbody></table>
+              </div>
             </div>
-          )}
-          {byId.skills && (
-            <div className="rounded-[var(--radius-md)] border border-[var(--color-divider)] overflow-hidden">
-              <div className="px-3 py-1.5 bg-[var(--color-bg)] border-b border-[var(--color-divider)] text-xs font-medium text-[var(--color-text)]">技能</div>
-              <div className="p-3 text-sm text-[var(--color-text)] whitespace-pre-wrap">{byId.skills}</div>
-            </div>
-          )}
-        </div>
-      )}
+          );
+        }
+
+        return (
+          <div key={id} className="rounded-[var(--radius-md)] border border-[var(--color-divider)] overflow-hidden">
+            <button
+              onClick={() => toggle(id)}
+              className="w-full px-4 py-2 bg-[var(--color-bg)] flex items-center justify-between hover:bg-[var(--color-primary-muted)] transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <Icon size={14} className="text-[var(--color-primary)]" />
+                <span className="text-sm font-medium text-[var(--color-text)]">{label}</span>
+                <span className="text-xs text-[var(--color-muted)]">（{content.length} 字）</span>
+              </div>
+              {isOpen
+                ? <ChevronUp size={14} className="text-[var(--color-muted)]" />
+                : <ChevronDown size={14} className="text-[var(--color-muted)]" />}
+            </button>
+            {isOpen && (
+              <div className="p-4 text-sm whitespace-pre-wrap text-[var(--color-text)] border-t border-[var(--color-divider)]">
+                {content}
+              </div>
+            )}
+          </div>
+        );
+      })}
 
       {/* Profile Goals */}
       {data.profileData?.goals && (
@@ -651,22 +678,64 @@ function MessageBubble({
   const isUser = msg.role === "user";
 
   if (msg.role === "tool") {
-    // Structured data tools — render directly via React components, not LLM text
-    if (msg.toolName === "get_profile") {
-      let profileData: ProfileViewData | null = null;
+    // Check for uiPayload-based rendering first (triple-pipe architecture)
+    const raw = msg.toolResult as Record<string, unknown> | undefined;
+    const uiPayload = raw?.uiPayload as Record<string, unknown> | undefined;
+
+    // read_file / get_reference_detail: data is for LLM only, don't dump raw text to user
+    if (msg.toolName === "read_file" || msg.toolName === "get_reference_detail") {
+      const label = msg.toolName === "read_file" ? "已读取文件" : "已读取参考简历";
+      let preview = "";
       try {
-        const raw = msg.toolResult as Record<string, unknown> | undefined;
-        if (raw?.data && typeof raw.data === "object") {
-          profileData = raw.data as ProfileViewData;
+        if (raw?.uiPayload) {
+          preview = ((raw.uiPayload as Record<string, unknown>).content as string)?.slice(0, 80)?.replace(/\n/g, " ") || "";
+        } else if (typeof msg.toolResult === "string") {
+          preview = msg.toolResult.slice(0, 80).replace(/\n/g, " ");
         }
-      } catch { /* fall through */ }
-      if (profileData && (profileData.cvData || profileData.profileData)) {
-        return <ProfileViewCard data={profileData} />;
-      }
+      } catch { /* ignore */ }
+      return (
+        <div className="max-w-[90%]">
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="rounded-[var(--radius-md)] border border-[var(--color-divider)] overflow-hidden"
+          >
+            <div className="flex items-center gap-2 px-3 py-2">
+              <FileText size={14} className="text-[var(--color-primary)]" />
+              <span className="text-xs font-medium text-[var(--color-text)]">{label}</span>
+              {preview && <span className="text-xs text-[var(--color-muted)] truncate">{preview}</span>}
+              <Check size={12} className="text-emerald-500 ml-auto flex-shrink-0" />
+            </div>
+          </motion.div>
+        </div>
+      );
     }
 
-    // Report detail — render via existing ReportMessage component with A-G blocks
-    if (msg.toolName === "get_report_detail" && msg.content) {
+    // get_profile: show minimal indicator (data is for LLM, full profile is at /profile)
+    if (msg.toolName === "get_profile") {
+      return (
+        <div className="max-w-[90%]">
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="rounded-[var(--radius-md)] border border-[var(--color-divider)] overflow-hidden"
+          >
+            <div className="flex items-center gap-2 px-3 py-2">
+              <User size={14} className="text-[var(--color-primary)]" />
+              <span className="text-xs font-medium text-[var(--color-text)]">已读取求职画像</span>
+              <span className="text-xs text-[var(--color-muted)] truncate">{msg.content?.slice(0, 50) || ""}</span>
+              <Check size={12} className="text-emerald-500 ml-auto flex-shrink-0" />
+            </div>
+          </motion.div>
+        </div>
+      );
+    }
+
+    // Report blocks: uiPayload or legacy text
+    if (msg.toolName === "get_report_detail") {
+      if (uiPayload?.type === "report_blocks") {
+        return <ReportMessage content={msg.content} />;
+      }
       if (isReportMessage(msg.content)) {
         return <ReportMessage content={msg.content} />;
       }
@@ -685,6 +754,31 @@ function MessageBubble({
     }
     // evaluate_jd_full tool result is data-only (not rendered as card) —
     // completion info is shown via EvalCompletionNotice
+
+    // Export file — show download button when file is available
+    if (msg.toolName === "export_file" || msg.toolName === "download_report_pdf") {
+      let downloadUrl: string | null = null;
+      let filename: string | null = null;
+      try {
+        const raw = msg.toolResult as Record<string, unknown> | undefined;
+        if (raw?.data && typeof raw.data === "object") {
+          const d = raw.data as { downloadUrl?: string; filename?: string };
+          downloadUrl = d.downloadUrl || null;
+          filename = d.filename || null;
+        }
+      } catch { /* fall through */ }
+      return (
+        <div className="max-w-[90%]">
+          <ToolResultCard
+            toolName={msg.toolName}
+            toolResult={typeof msg.toolResult === "string" ? msg.toolResult : msg.content || ""}
+            success={true}
+            downloadUrl={downloadUrl}
+            downloadLabel={filename ? `下载 ${filename}` : "下载文件"}
+          />
+        </div>
+      );
+    }
 
     const resultStr = typeof msg.toolResult === "string"
       ? msg.toolResult
@@ -763,6 +857,7 @@ export default function AgentChat({
   startTime,
   evalProgress,
   completionInfo,
+  resultQuality,
   suggestions,
   onSend,
   emptyState,
@@ -874,8 +969,10 @@ export default function AgentChat({
       {/* Messages */}
       <div className="flex-1 overflow-y-auto py-4 space-y-4 cursor-default">
         {messages.map((msg, i) => {
+          // Last assistant: this msg is assistant AND no assistant messages appear after it
           const isLastAssistant =
-            i === messages.length - 1 && msg.role === "assistant" && streaming;
+            msg.role === "assistant" && streaming &&
+            !messages.slice(i + 1).some(m => m.role === "assistant");
 
           // Agent source label: show when agent_id changes between messages
           const prevMsg = i > 0 ? messages[i - 1] : null;
@@ -918,7 +1015,7 @@ export default function AgentChat({
         {/* Status bar: shown independently when executing, even without stream text */}
         {streaming && phase && phase !== "done" && (
           <div className="flex justify-start pl-4">
-            <AgentStatusBar phase={phase} toolName={executingTool} startTime={startTime} evalProgress={evalProgress} />
+            <AgentStatusBar phase={phase} toolName={executingTool} startTime={startTime} evalProgress={evalProgress} resultQuality={resultQuality} />
           </div>
         )}
 

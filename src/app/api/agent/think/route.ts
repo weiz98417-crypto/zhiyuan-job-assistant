@@ -120,6 +120,7 @@ export async function POST(request: Request) {
 
         // Accumulate tool_call fragments by index (native function calling)
         const toolCallFragments = new Map<number, { id: string; name: string; arguments: string }>();
+        let finishReason = "";
 
         try {
           while (true) {
@@ -134,6 +135,9 @@ export async function POST(request: Request) {
               try {
                 const parsed = JSON.parse(data);
                 const delta = parsed.choices?.[0]?.delta;
+                // Capture finish_reason from the last chunk (model's signal to stop or continue)
+                const fr = parsed.choices?.[0]?.finish_reason;
+                if (fr) finishReason = fr;
 
                 // Handle native tool_calls deltas
                 if (delta?.tool_calls) {
@@ -175,6 +179,10 @@ export async function POST(request: Request) {
           if (toolCallFragments.size > 0) {
             const toolCalls = Array.from(toolCallFragments.values());
             controller.enqueue(encoder.encode(sse({ type: "tool_calls", tool_calls: toolCalls })));
+          }
+          // Emit finish_reason so the client loop knows whether to continue or stop (Anthropic stop_reason pattern)
+          if (finishReason) {
+            controller.enqueue(encoder.encode(sse({ type: "finish_reason", finish_reason: finishReason })));
           }
           controller.enqueue(encoder.encode(sse({ type: "done" })));
         } catch (err) {

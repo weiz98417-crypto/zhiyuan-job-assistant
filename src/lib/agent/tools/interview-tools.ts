@@ -149,6 +149,8 @@ export const generateInterviewQuestions: ToolDefinition = {
     role: { type: "string", required: false, description: "目标职位" },
     mode: { type: "string", required: false, description: `面试模式: ${Object.keys(COACH_MODES).join("|")}` },
     count: { type: "number", required: false, description: "题目数量，默认 8" },
+    difficulty: { type: "string", required: false, description: "难度: easy/medium/hard，默认 medium" },
+    focus_sections: { type: "array", required: false, description: "聚焦板块: behavioral/technical/case/culture，默认全部" },
   },
   category: "action",
   handler: generateHandler,
