@@ -151,7 +151,11 @@ export default function HomePage() {
     role: a.role,
     status: a.status,
     date: a.date,
-    updatedAt: new Date(a.updatedAt).toISOString().split("T")[0],
+    updatedAt: (() => {
+      const d = (a as any).updatedAt || (a as any).updated_at || a.date;
+      const parsed = new Date(d);
+      return isNaN(parsed.getTime()) ? a.date : parsed.toISOString().split("T")[0];
+    })(),
   }));
 
   if (!mounted) {

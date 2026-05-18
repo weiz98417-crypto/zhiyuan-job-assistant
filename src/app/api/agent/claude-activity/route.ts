@@ -2,9 +2,13 @@ import { NextResponse } from "next/server";
 import Database from "better-sqlite3";
 import path from "path";
 import fs from "fs";
+import { getCurrentUser } from "@/lib/auth";
 
 export async function GET() {
   try {
+    let user;
+    try { user = await getCurrentUser(); } catch { return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 }); }
+
     const dbPath = path.join(process.cwd(), "data", "zhiyuan.db");
     if (!fs.existsSync(dbPath)) {
       return NextResponse.json({ activity: "" });
@@ -17,14 +21,14 @@ export async function GET() {
       .prepare(
         `SELECT company, role, score, status, date, notes
          FROM applications
-         WHERE status NOT IN ('SKIP','Discarded')
+         WHERE user_id = ? AND status NOT IN ('SKIP','Discarded')
          ORDER BY num DESC LIMIT 5`
       )
-      .all() as { company: string; role: string; score: number; status: string; date: string; notes: string }[];
+      .all(user.userId) as { company: string; role: string; score: number; status: string; date: string; notes: string }[];
 
     const pipeline = db
-      .prepare("SELECT status, COUNT(*) as cnt FROM applications GROUP BY status")
-      .all() as { status: string; cnt: number }[];
+      .prepare("SELECT status, COUNT(*) as cnt FROM applications WHERE user_id = ? GROUP BY status")
+      .all(user.userId) as { status: string; cnt: number }[];
 
     db.close();
 

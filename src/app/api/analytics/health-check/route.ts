@@ -1,8 +1,12 @@
 /* ── POST /api/analytics/health-check — Pipeline 健康度检查 ── */
 
+import { getCurrentUser } from "@/lib/auth";
 import { callDeepSeekJson, parseJsonResponse, checkApiKey } from "@/lib/stream-utils";
 
 export async function POST(request: Request) {
+  let user;
+  try { user = await getCurrentUser(); } catch { return Response.json({ success: false, error: "Unauthorized" }, { status: 401 }); }
+
   const keyCheck = checkApiKey();
   if (!keyCheck.valid) return keyCheck.error;
 

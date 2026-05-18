@@ -1,6 +1,7 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { type ReactNode, useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import {
   Home,
   FileSearch,
@@ -15,10 +16,21 @@ import {
   Moon,
   Bot,
   User,
+  LogOut,
+  Shield,
+  TrendingUp,
 } from "lucide-react";
 import NavItem from "./NavItem";
 import { useTheme } from "@/components/providers/ThemeProvider";
 import { motion } from "framer-motion";
+
+interface UserInfo {
+  id: string;
+  username: string;
+  displayName: string;
+  role: 'admin' | 'member';
+  status: string;
+}
 
 const TOP_ITEM = { href: "/", label: "今日手帳", icon: Home };
 const BOTTOM_ITEM = { href: "/settings", label: "个人设置", icon: Settings };
@@ -57,6 +69,20 @@ const MOBILE_ITEMS = [
 
 export default function AppShell({ children }: { children: ReactNode }) {
   const { theme, toggleTheme } = useTheme();
+  const router = useRouter();
+  const [user, setUser] = useState<UserInfo | null>(null);
+
+  useEffect(() => {
+    fetch('/api/users/me')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => data && setUser(data))
+      .catch(() => {});
+  }, []);
+
+  async function handleLogout() {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    router.push('/login');
+  }
 
   return (
     <div className="flex min-h-full">
@@ -98,17 +124,62 @@ export default function AppShell({ children }: { children: ReactNode }) {
           <NavItem key={BOTTOM_ITEM.href} {...BOTTOM_ITEM} />
         </nav>
 
-        {/* Theme toggle & footer */}
-        <div className="px-4 pt-4 border-t border-[var(--color-divider)]">
-          <button
-            onClick={toggleTheme}
-            className="flex items-center gap-3 w-full px-4 py-3 rounded-[var(--radius-md)] text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-primary-muted)] transition-colors duration-[var(--duration-fast)]"
-          >
-            {theme === "light" ? <Moon size={18} /> : <Sun size={18} />}
-            <span className="text-sm">
-              {theme === "light" ? "深色模式" : "浅色模式"}
-            </span>
-          </button>
+        {/* User area + Theme toggle */}
+        <div className="border-t border-[var(--color-divider)] pt-3">
+          {user && (
+            <div className="px-3 mb-2">
+              {/* User info */}
+              <div className="flex items-center gap-2.5 px-2 py-1.5">
+                <div className="w-8 h-8 rounded-full bg-[var(--color-primary-soft)] text-[var(--color-primary)] flex items-center justify-center text-xs font-bold flex-shrink-0">
+                  {user.displayName.charAt(0)}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-semibold text-[var(--color-text)] truncate">
+                    {user.displayName}
+                  </div>
+                  <div className="text-[10px] text-[var(--color-muted)]">
+                    {user.role === 'admin' ? '管理员' : '成员'}
+                  </div>
+                </div>
+              </div>
+
+              {/* Admin links */}
+              {user.role === 'admin' && (
+                <div className="mt-1 space-y-0.5">
+                  <a href="/admin/users" className="flex items-center gap-2 px-2 py-1.5 rounded-[var(--radius-sm)] text-xs font-medium text-[var(--color-primary)] hover:bg-[var(--color-primary-muted)] transition-colors duration-[var(--duration-fast)] no-underline">
+                    <Shield size={14} />
+                    管理后台
+                  </a>
+                  <a href="/admin/insights" className="flex items-center gap-2 px-2 py-1.5 rounded-[var(--radius-sm)] text-xs font-medium text-[var(--color-primary)] hover:bg-[var(--color-primary-muted)] transition-colors duration-[var(--duration-fast)] no-underline">
+                    <TrendingUp size={14} />
+                    团队洞察
+                  </a>
+                </div>
+              )}
+
+              {/* Logout */}
+              <button
+                onClick={handleLogout}
+                className="flex items-center gap-2 w-full px-2 py-1.5 mt-1 rounded-[var(--radius-sm)] text-xs text-[var(--color-muted)] hover:text-[var(--color-error)] hover:bg-red-50 transition-colors duration-[var(--duration-fast)]"
+              >
+                <LogOut size={14} />
+                退出登录
+              </button>
+            </div>
+          )}
+
+          {/* Theme toggle */}
+          <div className="px-3">
+            <button
+              onClick={toggleTheme}
+              className="flex items-center gap-3 w-full px-3 py-2.5 rounded-[var(--radius-md)] text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-primary-muted)] transition-colors duration-[var(--duration-fast)]"
+            >
+              {theme === "light" ? <Moon size={18} /> : <Sun size={18} />}
+              <span className="text-sm">
+                {theme === "light" ? "深色模式" : "浅色模式"}
+              </span>
+            </button>
+          </div>
         </div>
       </aside>
 

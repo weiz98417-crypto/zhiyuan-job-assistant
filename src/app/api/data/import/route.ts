@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getCurrentUser } from "@/lib/auth";
 import fs from "fs";
 import path from "path";
 
@@ -86,6 +87,9 @@ function parseProfileYml(content: string): Record<string, unknown> {
 
 export async function GET() {
   try {
+    let user;
+    try { user = await getCurrentUser(); } catch { return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 }); }
+
     // Read applications.md
     let applications: Record<string, unknown>[] = [];
     const appsPath = path.join(PROJECT_ROOT, "data", "applications.md");

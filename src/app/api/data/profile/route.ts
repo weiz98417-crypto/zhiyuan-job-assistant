@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getProfile, upsertProfile, upsertProfileGoals, clearProfileSignals, migrateFromFiles } from "@/lib/server-db";
+import { getDb } from "@/lib/server-db";
+import { getCurrentUser, scopedDb } from "@/lib/auth";
 import fs from "fs";
 import path from "path";
 
@@ -8,7 +9,6 @@ function extractGoalsFromProfileYml(): Record<string, unknown> | null {
     const ymlPath = path.join(process.cwd(), "config", "profile.yml");
     if (!fs.existsSync(ymlPath)) return null;
     const content = fs.readFileSync(ymlPath, "utf-8");
-    // Simple YAML extraction for target_roles
     const goals: Record<string, unknown> = {};
     const targetMatch = content.match(/target_roles:[\s\S]*?primary:\s*\n(\s*- .+\n)*/);
     if (targetMatch) {
@@ -25,22 +25,51 @@ function extractGoalsFromProfileYml(): Record<string, unknown> | null {
   }
 }
 
+function getProfileByUser(userId: string) {
+  return getDb().prepare("SELECT * FROM profiles WHERE user_id = ? LIMIT 1").get(userId) as {
+    id?: number; data_json: string; goals_json: string; history_json: string;
+    last_updated: string; user_id?: string;
+  } | undefined;
+}
+
+function upsertProfileByUser(userId: string, dataJson: string, historyJson: string, goalsJson?: string): void {
+  const existing = getProfileByUser(userId);
+  if (existing) {
+    getDb().prepare(`
+      UPDATE profiles SET data_json = ?, goals_json = ?, history_json = ?, last_updated = datetime('now')
+      WHERE user_id = ?
+    `).run(dataJson, goalsJson || "{}", historyJson, userId);
+  } else {
+    getDb().prepare(`
+      INSERT INTO profiles (data_json, goals_json, history_json, user_id, last_updated)
+      VALUES (?, ?, ?, ?, datetime('now'))
+    `).run(dataJson, goalsJson || "{}", historyJson, userId);
+  }
+}
+
 export async function GET() {
   try {
-    // Auto-migrate on first access
-    const existing = getProfile();
+    const user = await getCurrentUser();
+    const sdb = scopedDb(user.userId);
+
+    // Auto-migrate on first access (for admin's legacy data)
+    const existing = getProfileByUser(user.userId);
     if (!existing) {
-      const migrated = migrateFromFiles();
-      if (migrated > 0 && !getProfile()) {
-        upsertProfile("{}", "[]");
-      }
-      // Extract goals from profile.yml on first migration
-      const goals = extractGoalsFromProfileYml();
-      if (goals) {
-        upsertProfileGoals(goals);
+      // Try legacy row (id=1, no user_id or user_id matches)
+      const legacy = getDb().prepare("SELECT * FROM profiles WHERE id = 1 AND (user_id IS NULL OR user_id = ?)").get(user.userId);
+      if (legacy) {
+        // Migrate legacy row to current user
+        getDb().prepare("UPDATE profiles SET user_id = ? WHERE id = 1 AND user_id IS NULL").run(user.userId);
+      } else {
+        upsertProfileByUser(user.userId, "{}", "[]");
+        const goals = extractGoalsFromProfileYml();
+        if (goals) {
+          getDb().prepare("UPDATE profiles SET goals_json = ? WHERE user_id = ?").run(JSON.stringify(goals), user.userId);
+        }
       }
     }
-    const profile = getProfile();
+
+    const profile = getProfileByUser(user.userId);
     return NextResponse.json({
       success: true,
       data: profile ? {
@@ -51,14 +80,18 @@ export async function GET() {
       } : null,
     });
   } catch (err: unknown) {
+    if ((err as Error).message === 'Not authenticated') {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
     return NextResponse.json({ success: false, error: `读取失败: ${err instanceof Error ? err.message : "unknown"}` }, { status: 500 });
   }
 }
 
 export async function PUT(request: Request) {
   try {
+    const user = await getCurrentUser();
     const body = await request.json() as { data?: Record<string, unknown>; goals?: Record<string, unknown>; history?: unknown[] };
-    const existing = getProfile();
+    const existing = getProfileByUser(user.userId);
     const currentData = existing ? JSON.parse(existing.data_json || "{}") : {};
     const currentGoals = existing ? JSON.parse(existing.goals_json || "{}") : {};
     const currentHistory = existing ? JSON.parse(existing.history_json || "[]") : [];
@@ -67,76 +100,67 @@ export async function PUT(request: Request) {
     const mergedGoals = body.goals ? { ...currentGoals, ...body.goals } : currentGoals;
     const mergedHistory = body.history ? body.history : currentHistory;
 
-    upsertProfile(
-      JSON.stringify(mergedData),
-      JSON.stringify(mergedHistory),
-      JSON.stringify(mergedGoals),
-    );
+    upsertProfileByUser(user.userId, JSON.stringify(mergedData), JSON.stringify(mergedHistory), JSON.stringify(mergedGoals));
     return NextResponse.json({ success: true });
   } catch (err: unknown) {
+    if ((err as Error).message === 'Not authenticated') {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
     return NextResponse.json({ success: false, error: `写入失败: ${err instanceof Error ? err.message : "unknown"}` }, { status: 500 });
   }
 }
 
-// PATCH: update goals/data with source/lockedFields support
 export async function PATCH(request: Request) {
   try {
+    const user = await getCurrentUser();
     const body = await request.json() as {
       goals?: Record<string, unknown>;
       data?: Record<string, unknown>;
       source?: string;
       lockedFields?: Record<string, string>;
     };
-
-    const existing = getProfile();
+    const existing = getProfileByUser(user.userId);
 
     if (body.goals) {
       const currentGoals = existing ? JSON.parse(existing.goals_json || "{}") : {};
-      // Inject source marker into goals
-      const goalsWithSource = {
-        ...body.goals,
-        ...(body.source ? { source: body.source } : {}),
-        ...(body.lockedFields ? { _lockedFields: body.lockedFields } : {}),
-      };
+      const goalsWithSource = { ...body.goals, ...(body.source ? { source: body.source } : {}), ...(body.lockedFields ? { _lockedFields: body.lockedFields } : {}) };
       const mergedGoals = { ...currentGoals, ...goalsWithSource };
-      upsertProfileGoals(mergedGoals);
+      upsertProfileByUser(user.userId, existing ? existing.data_json : "{}", existing ? existing.history_json : "[]", JSON.stringify(mergedGoals));
     }
 
     if (body.data) {
       const currentData = existing ? JSON.parse(existing.data_json || "{}") : {};
-      const dataWithSource = {
-        ...body.data,
-        ...(body.source ? { source: body.source } : {}),
-      };
+      const dataWithSource = { ...body.data, ...(body.source ? { source: body.source } : {}) };
       const mergedData = { ...currentData, ...dataWithSource };
       const currentGoals = existing ? JSON.parse(existing.goals_json || "{}") : {};
       const currentHistory = existing ? JSON.parse(existing.history_json || "[]") : [];
-      upsertProfile(JSON.stringify(mergedData), JSON.stringify(currentHistory), JSON.stringify(currentGoals));
+      upsertProfileByUser(user.userId, JSON.stringify(mergedData), JSON.stringify(currentHistory), JSON.stringify(currentGoals));
     }
 
     return NextResponse.json({ success: true });
   } catch (err: unknown) {
+    if ((err as Error).message === 'Not authenticated') {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
     return NextResponse.json({ success: false, error: `更新失败: ${err instanceof Error ? err.message : "unknown"}` }, { status: 500 });
   }
 }
 
-// DELETE: reset profile data
 export async function DELETE() {
   try {
-    const existing = getProfile();
+    const user = await getCurrentUser();
+    const existing = getProfileByUser(user.userId);
     if (existing) {
       const history = JSON.parse(existing.history_json || "[]");
-      history.push({
-        timestamp: new Date().toISOString(),
-        event: "画像已重置",
-        changes: ["所有目标、技能、偏好数据已被清空"],
-      });
-      upsertProfile("{}", JSON.stringify(history), "{}");
+      history.push({ timestamp: new Date().toISOString(), event: "画像已重置", changes: ["所有目标、技能、偏好数据已被清空"] });
+      upsertProfileByUser(user.userId, "{}", JSON.stringify(history), "{}");
     }
-    // Hard reset: also clear profile_signals table
-    const deletedSignals = clearProfileSignals();
+    const deletedSignals = getDb().prepare("DELETE FROM profile_signals WHERE user_id = ?").run(user.userId).changes;
     return NextResponse.json({ success: true, data: { data_json: "{}", goals_json: "{}", history_json: "[]", deletedSignals } });
   } catch (err: unknown) {
+    if ((err as Error).message === 'Not authenticated') {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
     return NextResponse.json({ success: false, error: `重置失败: ${err instanceof Error ? err.message : "unknown"}` }, { status: 500 });
   }
 }

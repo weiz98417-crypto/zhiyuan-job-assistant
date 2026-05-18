@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getCurrentUser } from "@/lib/auth";
 import fs from "fs";
 import path from "path";
 
@@ -81,6 +82,9 @@ function parseTsv(content: string): ScanHistoryEntry[] {
 
 export async function GET() {
   try {
+    let user;
+    try { user = await getCurrentUser(); } catch { return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 }); }
+
     // Read portals.yml → sources
     let sources: ScanSource[] = [];
     const portalsPath = path.join(PROJECT_ROOT, "portals.yml");

@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
+import { getCurrentUser } from "@/lib/auth";
 import { upsertApp, upsertReport, listReports, type AppRow, type ReportRow } from "@/lib/server-db";
 
 export async function POST(request: Request) {
   try {
+    let user;
+    try { user = await getCurrentUser(); } catch { return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 }); }
+
     const { jd_text, jd_url } = await request.json() as { jd_text?: string; jd_url?: string };
     let jdText = jd_text || "";
 
@@ -99,10 +103,10 @@ export async function POST(request: Request) {
               company, role, score: overallScore, status: "Evaluated",
               date, archetype, report_path: "",
             };
-            upsertApp(appRow as AppRow);
+            upsertApp(appRow as AppRow, user.userId);
 
             // Save report record with full blocks
-            const allReports = listReports();
+            const allReports = listReports(user.userId);
             const maxNum = allReports.reduce((max, r) => Math.max(max, r.report_num), 0);
             reportNum = maxNum + 1;
             const reportRow: ReportRow = {
@@ -111,7 +115,7 @@ export async function POST(request: Request) {
               blocks_json: JSON.stringify(blocks),
               keywords_json: JSON.stringify(keywords),
             };
-            upsertReport(reportRow);
+            upsertReport(reportRow, user.userId);
           } catch (e) { console.warn("[pipeline] persist failed:", e); }
 
           sse({

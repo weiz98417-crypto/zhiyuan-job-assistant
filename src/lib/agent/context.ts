@@ -37,12 +37,14 @@ export interface AssembleOptions {
   scenario: AgentScenario;
   knowledgeCtx?: KnowledgeContext;
   maxApplications?: number;
+  userId?: string;
 }
 
 /* ── Pipeline summary ── */
 
-async function buildPipelineSummary(): Promise<PipelineSummary> {
-  const apps = await db.applications.toArray();
+async function buildPipelineSummary(userId?: string): Promise<PipelineSummary> {
+  let apps = await db.applications.toArray();
+  if (userId) apps = apps.filter((a) => (a as Application & { userId?: string }).userId === userId);
   const byStatus: Record<string, number> = {};
   let recentActivity = 0;
   let staleCount = 0;
@@ -71,16 +73,20 @@ async function buildPipelineSummary(): Promise<PipelineSummary> {
 
 /* ── Dynamic data assembler (parallel queries) ── */
 
-async function assembleDynamicData(maxApps = 5): Promise<AgentDynamicData> {
-  const [profile, recentInteractions, pendingDecisions, preferences, pipelineSummary, applications] =
+async function assembleDynamicData(maxApps = 5, userId?: string): Promise<AgentDynamicData> {
+  const [profile, recentInteractions, pendingDecisions, preferences, pipelineSummary, rawApps] =
     await Promise.all([
       loadProfile(),
       getRecentInteractions(5),
       getPendingDecisions(),
       loadPreferences(),
-      buildPipelineSummary(),
+      buildPipelineSummary(userId),
       db.applications.orderBy("updatedAt").reverse().limit(maxApps).toArray(),
     ]);
+
+  const applications = userId
+    ? rawApps.filter((a) => (a as Application & { userId?: string }).userId === userId)
+    : rawApps;
 
   return {
     profile,
@@ -280,11 +286,11 @@ function pipelineHash(summary: PipelineSummary): string {
 /* ── Main assemble function ── */
 
 export async function assembleContext(options: AssembleOptions): Promise<AssembledContext> {
-  const { scenario, knowledgeCtx, maxApplications } = options;
+  const { scenario, knowledgeCtx, maxApplications, userId } = options;
 
   // Parallel: dynamic data + knowledge + tools
   const [dynamicData, knowledge, tools] = await Promise.all([
-    assembleDynamicData(maxApplications),
+    assembleDynamicData(maxApplications, userId),
     Promise.resolve(injectKnowledge(scenario, knowledgeCtx)),
     Promise.resolve(scenario !== "explore" ? buildToolListForLLM() : ""),
   ]);

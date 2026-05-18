@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getCurrentUser } from "@/lib/auth";
 import { createSession, nextAction, advance, getPhasePrompt, shouldFollowUp } from "@/lib/agent/interview/engine";
 import type { InterviewSession } from "@/lib/agent/interview/engine";
 
@@ -130,6 +131,9 @@ async function generateSummary(session: InterviewSession): Promise<string> {
 
 export async function POST(request: Request) {
   try {
+    let user;
+    try { user = await getCurrentUser(); } catch { return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 }); }
+
     const body = await request.json();
     const { sessionId, answer, company, role } = body as {
       sessionId?: string;

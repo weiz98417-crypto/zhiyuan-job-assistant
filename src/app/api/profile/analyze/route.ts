@@ -1,6 +1,7 @@
 import { checkApiKey } from "@/lib/stream-utils";
 import { runProfileEngine } from "@/lib/server-profile-engine";
 import { getProfile, upsertProfile, getProfileGoals, querySignals } from "@/lib/server-db";
+import { getCurrentUser } from "@/lib/auth";
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 
@@ -9,12 +10,13 @@ export async function POST(request: Request) {
   if (!keyCheck.valid) return keyCheck.error;
 
   try {
+    const user = await getCurrentUser();
     const body = await request.json().catch(() => ({}));
     const force = body.force === true;
 
     // Incremental check: skip if updated within 24h and not forced
     if (!force) {
-      const existing = getProfile();
+      const existing = getProfile(user.userId);
       if (existing) {
         const lastUpdate = new Date(existing.last_updated).getTime();
         const hoursSince = (Date.now() - lastUpdate) / (1000 * 60 * 60);
@@ -38,12 +40,12 @@ export async function POST(request: Request) {
     const profile = await runProfileEngine({ force });
 
     // Preserve existing goals (user-confirmed goals are not overwritten by engine)
-    const existingGoals = getProfileGoals();
-    const existingRow = getProfile();
+    const existingGoals = getProfileGoals(user.userId);
+    const existingRow = getProfile(user.userId);
     const existingHistory = existingRow ? JSON.parse(existingRow.history_json || "[]") : [];
 
     // Merge signal deal-breakers into goals.dealBreakers
-    const rawBreakers = querySignals({ signal_type: "dealbreaker", limit: 50 })
+    const rawBreakers = querySignals({ signal_type: "dealbreaker", limit: 50 }, user.userId)
       .map((s) => {
         try {
           const c = typeof s.content_json === "string" ? JSON.parse(s.content_json) : s.content_json;
@@ -88,6 +90,7 @@ export async function POST(request: Request) {
       }),
       JSON.stringify(mergedHistory),
       JSON.stringify(goalsToStore),
+      user.userId,
     );
 
     return Response.json({
@@ -105,6 +108,9 @@ export async function POST(request: Request) {
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "未知错误";
+    if (error instanceof Error && error.message === "Not authenticated") {
+      return Response.json({ success: false, error: "未登录" }, { status: 401 });
+    }
     console.error("Profile analyze error:", message);
     return Response.json(
       { success: false, error: `画像分析失败: ${message}` },

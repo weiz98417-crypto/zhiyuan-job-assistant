@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getCurrentUser } from '@/lib/auth';
 import Database from "better-sqlite3";
 import { resolve } from "path";
 
@@ -8,9 +9,12 @@ function getDb() {
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    let user;
+    try { user = await getCurrentUser(); } catch { return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 }); }
+
     const { id } = await params;
     const db = getDb();
-    const row = db.prepare("SELECT * FROM sessions WHERE id = ?").get(Number(id));
+    const row = db.prepare("SELECT * FROM sessions WHERE id = ? AND user_id = ?").get(Number(id), user.userId);
     db.close();
     if (!row) return NextResponse.json({ success: false, error: "Session not found" }, { status: 404 });
     return NextResponse.json({ success: true, data: row });
@@ -21,6 +25,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    let user;
+    try { user = await getCurrentUser(); } catch { return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 }); }
+
     const { id } = await params;
     const body = await request.json();
     const db = getDb();
@@ -43,8 +50,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
     sets.push("updated_at = datetime('now')");
     vals.push(Number(id));
+    vals.push(user.userId);
 
-    db.prepare(`UPDATE sessions SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
+    db.prepare(`UPDATE sessions SET ${sets.join(", ")} WHERE id = ? AND user_id = ?`).run(...vals);
     db.close();
     return NextResponse.json({ success: true });
   } catch (err) {

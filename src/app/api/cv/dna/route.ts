@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { readFileSync, existsSync } from "fs";
 import { resolve } from "path";
+import { getCurrentUser } from "@/lib/auth";
 
 export async function GET() {
   try {
+    const user = await getCurrentUser();
     const cvPath = resolve(process.cwd(), "cv.md");
     if (!existsSync(cvPath)) {
       return NextResponse.json({ success: false, error: "cv.md not found" }, { status: 404 });
@@ -49,6 +51,9 @@ export async function GET() {
     const summary = parts.length > 0 ? parts.join("\n") : "CV 摘要暂不可用";
     return NextResponse.json({ success: true, data: { summary } });
   } catch (err) {
+    if (err instanceof Error && err.message === "Not authenticated") {
+      return NextResponse.json({ success: false, error: "未登录" }, { status: 401 });
+    }
     return NextResponse.json({ success: false, error: String(err) }, { status: 500 });
   }
 }

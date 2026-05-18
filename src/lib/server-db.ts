@@ -28,6 +28,19 @@ export function getDb(): Database.Database {
     if (!prefCols.some((c) => c.name === "operation")) {
       _db.exec("ALTER TABLE optimization_preferences ADD COLUMN operation TEXT NOT NULL DEFAULT ''");
     }
+
+    // Migration: multi-user auth — add user_id to private + attribution tables
+    const userTables = [
+      'profiles', 'profile_signals', 'sessions', 'stories', 'cv_data',
+      'applications', 'agent_preferences', 'session_memory',
+      'optimization_preferences', 'reports',
+    ];
+    for (const table of userTables) {
+      const tCols = _db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+      if (!tCols.some((c) => c.name === 'user_id')) {
+        _db.exec(`ALTER TABLE ${table} ADD COLUMN user_id TEXT REFERENCES users(id)`);
+      }
+    }
   }
   return _db;
 }
@@ -39,10 +52,11 @@ export interface AppRow {
   score: number; status: string; pdf_generated: number; report_path: string; notes: string;
 }
 
-export function listApps(filters?: { status?: string; company?: string; limit?: number; offset?: number }): AppRow[] {
+export function listApps(filters?: { status?: string; company?: string; limit?: number; offset?: number }, userId?: string): AppRow[] {
   const db = getDb();
   let sql = "SELECT * FROM applications WHERE 1=1";
   const params: Record<string, unknown> = {};
+  if (userId) { sql += " AND user_id = @userId"; params.userId = userId; }
   if (filters?.status) { sql += " AND status = @status"; params.status = filters.status; }
   if (filters?.company) { sql += " AND company LIKE @company"; params.company = `%${filters.company}%`; }
   sql += " ORDER BY num DESC";
@@ -51,15 +65,15 @@ export function listApps(filters?: { status?: string; company?: string; limit?: 
   return db.prepare(sql).all(params) as AppRow[];
 }
 
-export function upsertApp(app: AppRow): void {
+export function upsertApp(app: AppRow, userId?: string): void {
   const db = getDb();
   db.prepare(`
-    INSERT INTO applications (num, date, company, role, score, status, pdf_generated, report_path, notes, updated_at)
-    VALUES (@num, @date, @company, @role, @score, @status, @pdf_generated, @report_path, @notes, datetime('now'))
+    INSERT INTO applications (user_id, num, date, company, role, score, status, pdf_generated, report_path, notes, updated_at)
+    VALUES (@userId, @num, @date, @company, @role, @score, @status, @pdf_generated, @report_path, @notes, datetime('now'))
     ON CONFLICT(company, role) DO UPDATE SET
       score=excluded.score, status=excluded.status, report_path=excluded.report_path,
       notes=excluded.notes, updated_at=datetime('now')
-  `).run(app);
+  `).run({ ...app, userId: userId || null });
 }
 
 /* ── Reports ── */
@@ -69,7 +83,10 @@ export interface ReportRow {
   archetype: string; overall_score: number; legitimacy: string; blocks_json: string; keywords_json: string;
 }
 
-export function listReports(): ReportRow[] {
+export function listReports(userId?: string): ReportRow[] {
+  if (userId) {
+    return getDb().prepare("SELECT * FROM reports WHERE user_id = ? ORDER BY report_num DESC").all(userId) as ReportRow[];
+  }
   return getDb().prepare("SELECT * FROM reports ORDER BY report_num DESC").all() as ReportRow[];
 }
 
@@ -77,14 +94,14 @@ export function getReport(reportNum: number): ReportRow | undefined {
   return getDb().prepare("SELECT * FROM reports WHERE report_num = ?").get(reportNum) as ReportRow | undefined;
 }
 
-export function upsertReport(r: ReportRow): void {
+export function upsertReport(r: ReportRow, userId?: string): void {
   getDb().prepare(`
-    INSERT INTO reports (report_num, date, company, role, archetype, overall_score, legitimacy, blocks_json, keywords_json)
-    VALUES (@report_num, @date, @company, @role, @archetype, @overall_score, @legitimacy, @blocks_json, @keywords_json)
+    INSERT INTO reports (user_id, report_num, date, company, role, archetype, overall_score, legitimacy, blocks_json, keywords_json)
+    VALUES (@userId, @report_num, @date, @company, @role, @archetype, @overall_score, @legitimacy, @blocks_json, @keywords_json)
     ON CONFLICT(report_num) DO UPDATE SET
       overall_score=excluded.overall_score, legitimacy=excluded.legitimacy,
       blocks_json=excluded.blocks_json, keywords_json=excluded.keywords_json
-  `).run(r);
+  `).run({ ...r, userId: userId || null });
 }
 
 /* ── JDs ── */
@@ -111,11 +128,27 @@ export interface ProfileRow {
   id: number; data_json: string; goals_json: string; history_json: string; last_updated: string;
 }
 
-export function getProfile(): ProfileRow | undefined {
+export function getProfile(userId?: string): ProfileRow | undefined {
+  if (userId) {
+    return getDb().prepare("SELECT * FROM profiles WHERE user_id = ?").get(userId) as ProfileRow | undefined;
+  }
   return getDb().prepare("SELECT * FROM profiles WHERE id = 1").get() as ProfileRow | undefined;
 }
 
-export function upsertProfile(dataJson: string, historyJson: string, goalsJson?: string): void {
+export function upsertProfile(dataJson: string, historyJson: string, goalsJson?: string, userId?: string): void {
+  if (userId) {
+    const existing = getDb().prepare("SELECT id FROM profiles WHERE user_id = ?").get(userId);
+    if (existing) {
+      getDb().prepare(
+        "UPDATE profiles SET data_json = ?, goals_json = ?, history_json = ?, last_updated = datetime('now') WHERE user_id = ?"
+      ).run(dataJson, goalsJson || "{}", historyJson, userId);
+    } else {
+      getDb().prepare(
+        "INSERT INTO profiles (user_id, data_json, goals_json, history_json, last_updated) VALUES (?, ?, ?, ?, datetime('now'))"
+      ).run(userId, dataJson, goalsJson || "{}", historyJson);
+    }
+    return;
+  }
   getDb().prepare(`
     INSERT INTO profiles (id, data_json, goals_json, history_json, last_updated)
     VALUES (1, @data, @goals, @history, datetime('now'))
@@ -127,7 +160,12 @@ export function upsertProfile(dataJson: string, historyJson: string, goalsJson?:
   `).run({ data: dataJson, goals: goalsJson || "{}", history: historyJson });
 }
 
-export function getProfileGoals(): Record<string, unknown> | null {
+export function getProfileGoals(userId?: string): Record<string, unknown> | null {
+  if (userId) {
+    const row = getDb().prepare("SELECT goals_json FROM profiles WHERE user_id = ?").get(userId) as { goals_json: string } | undefined;
+    if (!row) return null;
+    try { return JSON.parse(row.goals_json); } catch { return null; }
+  }
   const row = getDb().prepare("SELECT goals_json FROM profiles WHERE id = 1").get() as { goals_json: string } | undefined;
   if (!row) return null;
   try { return JSON.parse(row.goals_json); } catch { return null; }
@@ -161,11 +199,12 @@ export interface SignalQuery {
   limit?: number;
 }
 
-export function insertSignal(signal: Pick<SignalRow, "source" | "signal_type" | "content_json" | "session_id">): void {
+export function insertSignal(signal: Pick<SignalRow, "source" | "signal_type" | "content_json" | "session_id">, userId?: string): void {
   getDb().prepare(`
-    INSERT INTO profile_signals (source, signal_type, content_json, session_id)
-    VALUES (@source, @signal_type, @content_json, @session_id)
+    INSERT INTO profile_signals (user_id, source, signal_type, content_json, session_id)
+    VALUES (@user_id, @source, @signal_type, @content_json, @session_id)
   `).run({
+    user_id: userId || null,
     source: signal.source,
     signal_type: signal.signal_type,
     content_json: typeof signal.content_json === "string" ? signal.content_json : JSON.stringify(signal.content_json),
@@ -173,16 +212,17 @@ export function insertSignal(signal: Pick<SignalRow, "source" | "signal_type" | 
   });
 }
 
-export function insertSignals(signals: Pick<SignalRow, "source" | "signal_type" | "content_json" | "session_id">[]): void {
+export function insertSignals(signals: Pick<SignalRow, "source" | "signal_type" | "content_json" | "session_id">[], userId?: string): void {
   if (!signals.length) return;
   const db = getDb();
   const stmt = db.prepare(`
-    INSERT INTO profile_signals (source, signal_type, content_json, session_id)
-    VALUES (@source, @signal_type, @content_json, @session_id)
+    INSERT INTO profile_signals (user_id, source, signal_type, content_json, session_id)
+    VALUES (@user_id, @source, @signal_type, @content_json, @session_id)
   `);
   const tx = db.transaction(() => {
     for (const s of signals) {
       stmt.run({
+        user_id: userId || null,
         source: s.source,
         signal_type: s.signal_type,
         content_json: typeof s.content_json === "string" ? s.content_json : JSON.stringify(s.content_json),
@@ -193,10 +233,14 @@ export function insertSignals(signals: Pick<SignalRow, "source" | "signal_type" 
   tx();
 }
 
-export function querySignals(q: SignalQuery = {}): SignalRow[] {
+export function querySignals(q: SignalQuery = {}, userId?: string): SignalRow[] {
   const conditions: string[] = [];
   const params: Record<string, unknown> = {};
 
+  if (userId) {
+    conditions.push("user_id = @user_id");
+    params.user_id = userId;
+  }
   if (q.signal_type) {
     conditions.push("signal_type = @signal_type");
     params.signal_type = q.signal_type;
@@ -364,11 +408,12 @@ export interface PreferenceRow {
   optimized_text?: string;
 }
 
-export function recordPreference(p: PreferenceRow): void {
+export function recordPreference(p: PreferenceRow, userId?: string): void {
   getDb().prepare(`
-    INSERT INTO optimization_preferences (section_id, variant_type, action, original_text, optimized_text, operation)
-    VALUES (@section_id, @variant_type, @action, @original_text, @optimized_text, @operation)
+    INSERT INTO optimization_preferences (user_id, section_id, variant_type, action, original_text, optimized_text, operation)
+    VALUES (@user_id, @section_id, @variant_type, @action, @original_text, @optimized_text, @operation)
   `).run({
+    user_id: userId || null,
     section_id: p.section_id,
     variant_type: p.variant_type,
     action: p.action,

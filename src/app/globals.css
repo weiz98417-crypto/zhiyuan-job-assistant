@@ -225,3 +225,104 @@ body {
   color: #86efac;
   border-color: #14532d66;
 }
+
+/* ── Auth Pages: Keyframe Animations ── */
+
+/* Spinner */
+@keyframes auth-spin { to { transform: rotate(360deg); } }
+
+/* Kites */
+@keyframes auth-kiteSoar1 {
+  0%   { top: 28%; left: 4%; transform: rotate(-3deg); }
+  20%  { top: 14%; left: 8%; transform: rotate(5deg); }
+  40%  { top: 8%;  left: 12%; transform: rotate(10deg); }
+  60%  { top: 18%; left: 5%; transform: rotate(-4deg); }
+  80%  { top: 24%; left: 3%;  transform: rotate(-8deg); }
+  100% { top: 28%; left: 4%; transform: rotate(-3deg); }
+}
+@keyframes auth-kiteSoar2 {
+  0%   { top: 22%; right: 4%;  transform: rotate(4deg); }
+  25%  { top: 10%; right: 10%; transform: rotate(-6deg); }
+  50%  { top: 6%;  right: 14%; transform: rotate(-12deg); }
+  75%  { top: 16%; right: 6%; transform: rotate(2deg); }
+  100% { top: 22%; right: 4%;  transform: rotate(4deg); }
+}
+@keyframes auth-kiteSoar3 {
+  0%   { top: 35%; left: 8%; transform: rotate(-2deg); }
+  33%  { top: 20%; left: 14%; transform: rotate(7deg); }
+  66%  { top: 12%; left: 18%; transform: rotate(12deg); }
+  100% { top: 35%; left: 8%; transform: rotate(-2deg); }
+}
+@keyframes auth-kiteSoar4 {
+  0%   { top: 30%; right: 8%; transform: rotate(6deg); }
+  30%  { top: 16%; right: 14%; transform: rotate(-3deg); }
+  60%  { top: 8%;  right: 18%; transform: rotate(-8deg); }
+  100% { top: 30%; right: 8%; transform: rotate(6deg); }
+}
+@keyframes auth-kiteRise1 {
+  0%   { bottom: 5%; right: 4%;  transform: rotate(6deg) scale(0.6); opacity: 0; }
+  15%  { opacity: 0.24; transform: rotate(3deg) scale(0.8); }
+  45%  { bottom: 40%; right: 14%; transform: rotate(-6deg) scale(1); }
+  75%  { bottom: 55%; right: 8%;  transform: rotate(-10deg) scale(1); }
+  90%  { opacity: 0.24; }
+  100% { bottom: 65%; right: 12%; transform: rotate(-4deg) scale(0.8); opacity: 0; }
+}
+@keyframes auth-kiteRise2 {
+  0%   { bottom: 3%; right: 8%;  transform: rotate(-5deg) scale(0.5); opacity: 0; }
+  12%  { opacity: 0.28; transform: rotate(-2deg) scale(0.7); }
+  40%  { bottom: 35%; right: 5%;  transform: rotate(8deg) scale(1); }
+  68%  { bottom: 52%; right: 16%; transform: rotate(12deg) scale(1); }
+  88%  { opacity: 0.28; }
+  100% { bottom: 60%; right: 10%; transform: rotate(3deg) scale(0.7); opacity: 0; }
+}
+
+/* Ink washes */
+@keyframes auth-inkPulse1 {
+  0%, 100% { opacity: 0.5; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(1.15); }
+}
+@keyframes auth-inkPulse2 {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  50% { opacity: 0.55; transform: scale(1.1); }
+}
+@keyframes auth-inkPulse3 {
+  0%, 100% { opacity: 0.25; transform: scale(1); }
+  33% { opacity: 0.4; transform: scale(1.2); }
+  66% { opacity: 0.2; transform: scale(0.95); }
+}
+
+/* Bookmarks */
+@keyframes auth-bookmarkSway {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(1.5deg); }
+  75% { transform: rotate(-1deg); }
+}
+
+/* Book icon */
+@keyframes auth-bookFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+@keyframes auth-glowPulse {
+  0%, 100% { opacity: 0.6; transform: translate(-50%, -50%) scale(1); }
+  50% { opacity: 1; transform: translate(-50%, -50%) scale(1.3); }
+}
+
+/* Floating tags */
+@keyframes auth-tagEdgeL {
+  0%, 100% { transform: translate(0, 0); }
+  25% { transform: translate(6px, -5px); }
+  50% { transform: translate(-4px, -10px); }
+  75% { transform: translate(8px, -2px); }
+}
+@keyframes auth-tagEdgeR {
+  0%, 100% { transform: translate(0, 0); }
+  25% { transform: translate(-8px, -4px); }
+  50% { transform: translate(4px, -10px); }
+  75% { transform: translate(-6px, 2px); }
+}
+@keyframes auth-tagMidL {
+  0%, 100% { transform: translate(0, 0); }
+  33% { transform: translate(8px, -8px); }
+  66% { transform: translate(-4px, -3px); }
+}

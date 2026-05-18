@@ -1,14 +1,16 @@
 import { NextResponse } from "next/server";
 import Database from "better-sqlite3";
 import { resolve } from "path";
+import { getCurrentUser } from "@/lib/auth";
 
 function getDb() { return new Database(resolve(process.cwd(), "data", "zhiyuan.db")); }
 
 export async function GET() {
   try {
+    const user = await getCurrentUser();
     const db = getDb();
     // Apply time-based decay before returning
-    const rows = db.prepare("SELECT * FROM agent_preferences").all() as Array<{
+    const rows = db.prepare("SELECT * FROM agent_preferences WHERE user_id = ?").all(user.userId) as Array<{
       entity_type: string; entity_key: string; weight: number;
       decay_rate: number; last_updated: string;
     }>;
@@ -23,23 +25,30 @@ export async function GET() {
 
     return NextResponse.json({ success: true, data: effective });
   } catch (err) {
+    if (err instanceof Error && err.message === "Not authenticated") {
+      return NextResponse.json({ success: false, error: "未登录" }, { status: 401 });
+    }
     return NextResponse.json({ success: false, error: String(err) }, { status: 500 });
   }
 }
 
 export async function POST(request: Request) {
   try {
+    const user = await getCurrentUser();
     const { entity_type, entity_key, weight, decay_rate } = await request.json();
     const db = getDb();
     db.prepare(
-      `INSERT INTO agent_preferences (entity_type, entity_key, weight, decay_rate, last_updated)
-       VALUES (?,?,?,?,datetime('now'))
+      `INSERT INTO agent_preferences (user_id, entity_type, entity_key, weight, decay_rate, last_updated)
+       VALUES (?,?,?,?,?,datetime('now'))
        ON CONFLICT(entity_type, entity_key) DO UPDATE SET
          weight = excluded.weight, last_updated = datetime('now')`
-    ).run(entity_type, entity_key, weight || 1.0, decay_rate || 0.05);
+    ).run(user.userId, entity_type, entity_key, weight || 1.0, decay_rate || 0.05);
     db.close();
     return NextResponse.json({ success: true });
   } catch (err) {
+    if (err instanceof Error && err.message === "Not authenticated") {
+      return NextResponse.json({ success: false, error: "未登录" }, { status: 401 });
+    }
     return NextResponse.json({ success: false, error: String(err) }, { status: 500 });
   }
 }

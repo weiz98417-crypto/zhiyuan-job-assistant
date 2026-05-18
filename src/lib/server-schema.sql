@@ -1,6 +1,22 @@
 -- Zhiyuan SQLite Schema
 -- Single source of truth for all job search data
 
+-- Users (multi-user auth system)
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,              -- UUID
+  username TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  email TEXT DEFAULT '',
+  role TEXT NOT NULL DEFAULT 'member',   -- 'admin' | 'member'
+  status TEXT NOT NULL DEFAULT 'pending', -- 'pending' | 'active' | 'rejected'
+  token_version INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  approved_at TEXT,
+  approved_by TEXT,
+  last_login_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS applications (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   num INTEGER NOT NULL DEFAULT 0,

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Noto_Sans_SC } from "next/font/google";
 import { ThemeProvider } from "@/components/providers/ThemeProvider";
-import AppShell from "@/components/shell/AppShell";
+import AuthGate from "@/components/shell/AuthGate";
 import "./globals.css";
 
 const notoSansSC = Noto_Sans_SC({
@@ -36,7 +36,7 @@ export default function RootLayout({
       </head>
       <body className="h-full">
         <ThemeProvider>
-          <AppShell>{children}</AppShell>
+          <AuthGate>{children}</AuthGate>
         </ThemeProvider>
       </body>
     </html>

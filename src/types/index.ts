@@ -750,3 +750,49 @@ export interface ApiResponse<T> {
   data?: T;
   error?: string;
 }
+
+/* ── Auth & User Management ── */
+
+export interface JWTPayload {
+  userId: string;
+  username: string;
+  role: 'admin' | 'member';
+  tokenVersion: number;
+}
+
+export interface UserRecord {
+  id: string;
+  username: string;
+  password_hash: string;
+  display_name: string;
+  email: string;
+  role: 'admin' | 'member';
+  status: 'pending' | 'active' | 'rejected';
+  token_version: number;
+  created_at: string;
+  approved_at: string | null;
+  approved_by: string | null;
+  last_login_at: string | null;
+}
+
+export interface UserPublic {
+  id: string;
+  username: string;
+  displayName: string;
+  email: string;
+  role: 'admin' | 'member';
+  status: 'pending' | 'active' | 'rejected';
+  createdAt: string;
+  lastLoginAt: string | null;
+}
+
+export interface TeamInsights {
+  overview: {
+    totalUsers: number;
+    activeThisWeek: number;
+    pendingApprovals: number;
+  };
+  weeklyActivity: Array<{ displayName: string; count: number }>;
+  hotDirections: Array<{ archetype: string; count: number }>;
+  weeklyTrend: Array<{ week: string; count: number }>;
+}

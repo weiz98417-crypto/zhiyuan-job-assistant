@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { buildJudgePrompt, getTemperatureByEffort } from "@/lib/judge-engine";
 import type { Operation } from "@/types";
+import { getCurrentUser } from "@/lib/auth";
 
 const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
 const MODEL = "deepseek-v4-pro";
@@ -8,6 +9,7 @@ const FAST_MODEL = "deepseek-v4-flash";
 
 export async function POST(request: Request) {
   try {
+    const user = await getCurrentUser();
     const body = await request.json();
     const {
       sectionId,
@@ -149,6 +151,9 @@ export async function POST(request: Request) {
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "未知错误";
+    if (error instanceof Error && error.message === "Not authenticated") {
+      return NextResponse.json({ success: false, error: "未登录" }, { status: 401 });
+    }
     console.error("Optimize section API error:", message);
     return NextResponse.json(
       { success: false, error: `优化失败: ${message}` },

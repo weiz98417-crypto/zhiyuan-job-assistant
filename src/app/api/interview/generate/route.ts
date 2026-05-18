@@ -1,8 +1,12 @@
 /* ── POST /api/interview/generate — 基于 JD+简历生成动态面试题目 ── */
 
+import { getCurrentUser } from "@/lib/auth";
 import { callDeepSeekJson, parseJsonResponse, checkApiKey } from "@/lib/stream-utils";
 
 export async function POST(request: Request) {
+  let user;
+  try { user = await getCurrentUser(); } catch { return Response.json({ success: false, error: "Unauthorized" }, { status: 401 }); }
+
   const keyCheck = checkApiKey();
   if (!keyCheck.valid) return keyCheck.error;
 

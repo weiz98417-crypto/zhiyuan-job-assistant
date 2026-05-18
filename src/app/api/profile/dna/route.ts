@@ -2,9 +2,11 @@ import { NextResponse } from "next/server";
 import { readFileSync, existsSync } from "fs";
 import { resolve } from "path";
 import yaml from "js-yaml";
+import { getCurrentUser } from "@/lib/auth";
 
 export async function GET() {
   try {
+    const user = await getCurrentUser();
     const path = resolve(process.cwd(), "config", "profile.yml");
     if (!existsSync(path)) {
       return NextResponse.json({ success: false, error: "profile.yml not found" }, { status: 404 });
@@ -62,6 +64,9 @@ export async function GET() {
     const summary = parts.join("\n");
     return NextResponse.json({ success: true, data: { summary } });
   } catch (err) {
+    if (err instanceof Error && err.message === "Not authenticated") {
+      return NextResponse.json({ success: false, error: "未登录" }, { status: 401 });
+    }
     return NextResponse.json({ success: false, error: String(err) }, { status: 500 });
   }
 }

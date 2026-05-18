@@ -18,6 +18,48 @@ There are two layers. Read `DATA_CONTRACT.md` for the full list.
 
 AI-powered job search automation for the Chinese market: pipeline tracking, offer evaluation, CV generation, portal scanning, batch processing.
 
+## Multi-User Auth System
+
+筝筝纸鸢 supports team use with JWT-based authentication and per-user data isolation.
+
+### How It Works
+
+1. **Registration**: Users self-register at `/register` → status=pending → admin approves
+2. **Login**: JWT issued as httpOnly cookie (24h expiry), verified by middleware on every request
+3. **Data isolation**: Private data (profiles, sessions, stories, cv_data, applications, agent_preferences, session_memory, optimization_preferences) filtered by `user_id`. Public data (jds, reports, offers, offer_reports, reference_resumes, news_cache) shared team-wide.
+4. **Roles**: `admin` (user management, team insights) and `member` (normal access)
+5. **Admin management**: `/admin/users` — approve/reject registrations, reset passwords, change roles
+6. **Team insights**: `/admin/insights` — active users, evaluation counts, hot JD directions
+
+### First Admin Setup
+
+```bash
+node scripts/create-admin.mjs <username> <password> <displayName>
+```
+
+This creates the admin user and migrates all existing data to it.
+
+### Key Files
+
+| File | Function |
+|------|----------|
+| `src/lib/auth.ts` | JWT sign/verify, bcrypt hash, getCurrentUser, scopedDb |
+| `src/middleware.ts` | Global auth middleware (Edge Runtime, jose jwtVerify) |
+| `src/app/login/page.tsx` | Login page |
+| `src/app/register/page.tsx` | Registration page |
+| `src/app/admin/users/page.tsx` | User management (admin only) |
+| `src/app/admin/insights/page.tsx` | Team insights dashboard (admin only) |
+| `scripts/create-admin.mjs` | Admin user creation + data migration |
+| `scripts/check-isolation.mjs` | Compile-time data isolation check |
+
+### Security
+
+- JWT in httpOnly, Secure, SameSite=Lax cookie (never localStorage)
+- bcrypt (10 rounds) for password hashing
+- `token_version` for token revocation (admin reject/reset-password → old JWTs invalidated)
+- Defense in depth: middleware (Edge, signature only) + API route (DB token_version check for writes)
+- JWT_SECRET must be set in production (≥32 chars) — app refuses to start with default
+
 ### Main Files
 
 | File | Function |
