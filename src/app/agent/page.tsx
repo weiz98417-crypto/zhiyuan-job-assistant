@@ -180,24 +180,38 @@ function AgentPageInner() {
         }).catch(() => { /* fire-and-forget */ });
       }
 
+      // Show thinking indicator IMMEDIATELY — before potentially slow resume import
+      const assistantMsg: AgentMessage = {
+        role: "assistant",
+        content: "",
+        timestamp: new Date().toISOString(),
+      };
+      setMessages([...updated, assistantMsg]);
+      streamContentRef.current = "";
+      setStreamText("");
+      setStreaming(true);
+      setPhase("understanding");
+      setExecutingTool(undefined);
+      setThinkingContent("");
+      setStartTime(Date.now());
+      setEvalProgress([]);
+      setCompletionInfo(null);
+
       /* ── Resume upload detection ── */
       if (isResumeUpload(content, images)) {
         // Try to import resume from uploaded files
         let resumeSections: Record<string, string> | null = null;
         if (images?.length) {
           try {
-            // Convert first image base64 to blob and upload
             const base64 = images[0];
             const mime = base64.startsWith("data:application/pdf") ? "application/pdf"
               : base64.startsWith("data:image/png") ? "image/png"
               : base64.startsWith("data:image/jpeg") ? "image/jpeg"
               : base64.startsWith("data:image/webp") ? "image/webp"
               : "image/png";
-            const byteString = atob(base64.split(",")[1]);
-            const ab = new ArrayBuffer(byteString.length);
-            const ia = new Uint8Array(ab);
-            for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
-            const blob = new Blob([ab], { type: mime });
+            // Efficient base64 → Blob using fetch (avoids byte-by-byte loop for large files)
+            const res = await fetch(base64);
+            const blob = await res.blob();
             const formData = new FormData();
             formData.append("file", blob, `resume.${mime.split("/")[1]}`);
             const importRes = await fetch("/api/cv/import", { method: "POST", body: formData });
@@ -209,29 +223,14 @@ function AgentPageInner() {
         }
 
         if (resumeSections) {
-          // Add parsed resume sections to the message for Resume Agent
           const sectionText = Object.entries(resumeSections)
             .filter(([, v]) => v)
             .map(([k, v]) => `【${k === "summary" ? "个人概述" : k === "experience" ? "工作经历" : k === "projects" ? "项目经验" : k === "education" ? "教育背景" : k === "skills" ? "技能" : k}】\n${v}`)
             .join("\n\n");
-          // Set content to trigger Resume Agent + include parsed data, skip images to avoid JD eval shortcut
           content = `解析我的简历，填入对应栏位\n\n解析结果：\n${sectionText}\n\n请确认这些内容是否正确，并帮我把它们写入简历。`;
           images = undefined;
         }
       }
-
-      const assistantMsg: AgentMessage = {
-        role: "assistant",
-        content: "",
-        timestamp: new Date().toISOString(),
-      };
-      setMessages([...updated, assistantMsg]);
-
-      // Reset stream state
-      streamContentRef.current = "";
-      setStreamText("");
-      setStreaming(true);
-      setPhase(null);
       setExecutingTool(undefined);
       setThinkingContent("");
       setStartTime(undefined);
