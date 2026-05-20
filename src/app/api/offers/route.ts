@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { existsSync, readFileSync } from "fs";
+import { resolve } from "path";
 import { getDb } from "@/lib/server-db";
 
 function ensureSchema() {
@@ -10,7 +11,6 @@ function ensureSchema() {
     const sql = readFileSync(schemaPath, "utf-8");
     db.exec(sql);
   }
-  // ALTER TABLE for new columns (idempotent)
   const cols = [
     "ALTER TABLE offers ADD COLUMN months_per_year INTEGER NOT NULL DEFAULT 12",
     "ALTER TABLE offers ADD COLUMN annual_bonus REAL DEFAULT 0",
@@ -23,7 +23,6 @@ function ensureSchema() {
   for (const sql of cols) {
     try { db.exec(sql); } catch { /* column already exists */ }
   }
-  db.close();
 }
 
 export async function GET() {

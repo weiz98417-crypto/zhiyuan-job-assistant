@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { existsSync, readFileSync } from "fs";
+import { resolve } from "path";
 import { getDb } from "@/lib/server-db";
 
 // POST — save an offer comparison report
