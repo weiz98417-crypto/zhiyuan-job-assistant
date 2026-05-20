@@ -36,16 +36,28 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Auto-upgrade: if no active admin exists, upgrade this user to admin
     if (user.status !== 'active') {
-      return NextResponse.json(
-        {
-          error:
-            user.status === 'pending'
-              ? '账户尚未通过审批，请联系管理员'
-              : '账户已被拒绝，无法登录',
-        },
-        { status: 403 }
-      );
+      const activeAdminCount = (db.prepare(
+        "SELECT COUNT(*) as cnt FROM users WHERE status = 'active' AND role = 'admin'"
+      ).get() as { cnt: number }).cnt;
+
+      if (activeAdminCount === 0 && valid) {
+        // No admin — auto-upgrade this user
+        db.prepare("UPDATE users SET role = 'admin', status = 'active' WHERE id = ?").run(user.id);
+        user.role = 'admin';
+        user.status = 'active';
+      } else {
+        return NextResponse.json(
+          {
+            error:
+              user.status === 'pending'
+                ? '账户尚未通过审批，请联系管理员'
+                : '账户已被拒绝，无法登录',
+          },
+          { status: 403 }
+        );
+      }
     }
 
     // Update last_login_at
