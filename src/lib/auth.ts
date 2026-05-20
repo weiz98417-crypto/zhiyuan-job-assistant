@@ -3,19 +3,26 @@ import bcrypt from 'bcryptjs';
 import { cookies } from 'next/headers';
 import { getDb } from './server-db';
 
-// ── JWT Secret ──
-const JWT_SECRET_RAW = process.env.JWT_SECRET;
-if (!JWT_SECRET_RAW || JWT_SECRET_RAW === 'dev-secret-change-in-production-min-32-chars!!') {
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error(
-      'JWT_SECRET 未设置或使用默认值，生产环境禁止启动。请设置环境变量 JWT_SECRET（≥32字符随机字符串）。'
-    );
+// ── JWT Secret (lazy — defers validation to runtime, not build-time) ──
+let _jwtSecret: Uint8Array | null = null;
+
+function getJwtSecret(): Uint8Array {
+  if (_jwtSecret) return _jwtSecret;
+  const raw = process.env.JWT_SECRET;
+  if (!raw || raw === 'dev-secret-change-in-production-min-32-chars!!') {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error(
+        'JWT_SECRET 未设置或使用默认值，生产环境禁止启动。请设置环境变量 JWT_SECRET（≥32字符随机字符串）。'
+      );
+    }
+    console.warn('[auth] 使用默认 JWT_SECRET——仅开发环境安全');
   }
-  console.warn('[auth] 使用默认 JWT_SECRET——仅开发环境安全');
+  _jwtSecret = new TextEncoder().encode(
+    raw || 'dev-secret-change-in-production-min-32-chars!!'
+  );
+  return _jwtSecret;
 }
-const JWT_SECRET = new TextEncoder().encode(
-  JWT_SECRET_RAW || 'dev-secret-change-in-production-min-32-chars!!'
-);
+
 const JWT_EXPIRES_IN = '24h';
 
 // ── Types ──
@@ -42,12 +49,12 @@ export async function signToken(user: {
     .setProtectedHeader({ alg: 'HS256' })
     .setExpirationTime(JWT_EXPIRES_IN)
     .setIssuedAt()
-    .sign(JWT_SECRET);
+    .sign(getJwtSecret());
 }
 
 export async function verifyToken(token: string): Promise<JWTPayload | null> {
   try {
-    const { payload } = await jwtVerify(token, JWT_SECRET);
+    const { payload } = await jwtVerify(token, getJwtSecret());
     return payload as unknown as JWTPayload;
   } catch {
     return null;
