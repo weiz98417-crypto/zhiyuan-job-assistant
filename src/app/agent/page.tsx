@@ -186,19 +186,33 @@ function AgentPageInner() {
       setEvalProgress([]);
       setCompletionInfo(null);
 
-      // Attach uploaded files to message so agent tools can access them
-      // Agent decides when to call import_resume / evaluate_jd / etc.
+      // ── File preprocessing: extract text from PDFs, keep images as context ──
+      let fileContext = "";
       if (images?.length) {
-        const fileList = images.map((b64, i) => {
-          const mime = b64.startsWith("data:application/pdf") ? "PDF"
-            : b64.startsWith("data:image/") ? "截图" : "文件";
-          return `${mime} #${i + 1}`;
-        }).join("、");
+        for (const b64 of images) {
+          const isPdf = b64.startsWith("data:application/pdf");
+          if (isPdf) {
+            try {
+              const res = await fetch(b64);
+              const blob = await res.blob();
+              const fd = new FormData();
+              fd.append("file", blob, "resume.pdf");
+              const importRes = await fetch("/api/cv/import", { method: "POST", body: fd });
+              const importData = await importRes.json();
+              if (importData.success) {
+                const sections = importData.data.sections as Record<string, string>;
+                fileContext += "\n\n---\n已解析的简历内容：\n" + Object.entries(sections)
+                  .filter(([, v]) => v).map(([k, v]) => `【${k}】\n${v}`).join("\n\n");
+              }
+            } catch { /* preprocess failed, agent handles it */ }
+          }
+        }
+        // Keep image data attached for evaluate_jd tool
         (updated[updated.length - 1] as unknown as Record<string, unknown>).attachments = images;
-        // Let the agent know files are available
-        content = content
-          ? `${content}\n\n[用户上传了 ${images.length} 个文件: ${fileList}。如需使用请调用对应工具处理。]`
-          : `用户上传了 ${images.length} 个文件: ${fileList}`;
+      }
+
+      if (fileContext) {
+        content = content + fileContext;
       }
 
       const controller = new AbortController();
