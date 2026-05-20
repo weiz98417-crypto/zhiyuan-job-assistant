@@ -30,10 +30,20 @@ export async function POST(request: NextRequest) {
     const id = crypto.randomUUID();
     const passwordHash = await hashPassword(password);
 
+    // Auto-approve first user as admin (fresh deployment)
+    const userCount = (db.prepare('SELECT COUNT(*) as cnt FROM users').get() as { cnt: number }).cnt;
+    const isFirstUser = userCount === 0;
+    const role = isFirstUser ? 'admin' : 'member';
+    const status = isFirstUser ? 'active' : 'pending';
+
     db.prepare(`
       INSERT INTO users (id, username, password_hash, display_name, email, role, status, token_version)
-      VALUES (?, ?, ?, ?, ?, 'member', 'pending', 0)
-    `).run(id, username, passwordHash, displayName, email || '');
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+    `).run(id, username, passwordHash, displayName, email || '', role, status);
+
+    if (isFirstUser) {
+      return NextResponse.json({ message: '注册成功！你是第一位用户，已自动设为管理员，请登录。' });
+    }
 
     return NextResponse.json({
       message: '注册成功，等待管理员审批',
