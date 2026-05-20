@@ -100,17 +100,6 @@ function AgentPageInner() {
   const streamContentRef = useRef("");
   const seenSignalKeys = useRef<Set<string>>(new Set());
 
-  /* ── Detect if user is uploading a resume ── */
-  const isResumeUpload = useCallback((content: string, images?: string[]) => {
-    const resumeKeywords = /简历|CV|履历|resume|工作经历|教育背景|个人概述|求职意向/;
-    if (resumeKeywords.test(content)) return true;
-    // Also trigger for image uploads with resume-related prompts
-    if (images?.length && content.length < 50) {
-      // Short message + image = possibly a resume screenshot
-      return true;
-    }
-    return false;
-  }, []);
   const rafRef = useRef<number>(0);
 
   // rAF loop: copy ref → state at ~60fps for smooth typewriter effect
@@ -180,7 +169,7 @@ function AgentPageInner() {
         }).catch(() => { /* fire-and-forget */ });
       }
 
-      // Show thinking indicator IMMEDIATELY — before potentially slow resume import
+      // Show thinking indicator immediately
       const assistantMsg: AgentMessage = {
         role: "assistant",
         content: "",
@@ -197,45 +186,21 @@ function AgentPageInner() {
       setEvalProgress([]);
       setCompletionInfo(null);
 
-      /* ── Resume upload detection ── */
-      if (isResumeUpload(content, images)) {
-        // Try to import resume from uploaded files
-        let resumeSections: Record<string, string> | null = null;
-        if (images?.length) {
-          try {
-            const base64 = images[0];
-            const mime = base64.startsWith("data:application/pdf") ? "application/pdf"
-              : base64.startsWith("data:image/png") ? "image/png"
-              : base64.startsWith("data:image/jpeg") ? "image/jpeg"
-              : base64.startsWith("data:image/webp") ? "image/webp"
-              : "image/png";
-            // Efficient base64 → Blob using fetch (avoids byte-by-byte loop for large files)
-            const res = await fetch(base64);
-            const blob = await res.blob();
-            const formData = new FormData();
-            formData.append("file", blob, `resume.${mime.split("/")[1]}`);
-            const importRes = await fetch("/api/cv/import", { method: "POST", body: formData });
-            const importData = await importRes.json();
-            if (importData.success) {
-              resumeSections = importData.data.sections as Record<string, string>;
-            }
-          } catch { /* import failed, continue to normal flow */ }
-        }
-
-        if (resumeSections) {
-          const sectionText = Object.entries(resumeSections)
-            .filter(([, v]) => v)
-            .map(([k, v]) => `【${k === "summary" ? "个人概述" : k === "experience" ? "工作经历" : k === "projects" ? "项目经验" : k === "education" ? "教育背景" : k === "skills" ? "技能" : k}】\n${v}`)
-            .join("\n\n");
-          content = `解析我的简历，填入对应栏位\n\n解析结果：\n${sectionText}\n\n请确认这些内容是否正确，并帮我把它们写入简历。`;
-          images = undefined;
-        }
+      // Attach uploaded files to message so agent tools can access them
+      // Agent decides when to call import_resume / evaluate_jd / etc.
+      if (images?.length) {
+        const fileList = images.map((b64, i) => {
+          const mime = b64.startsWith("data:application/pdf") ? "PDF"
+            : b64.startsWith("data:image/") ? "截图" : "文件";
+          return `${mime} #${i + 1}`;
+        }).join("、");
+        (updated[updated.length - 1] as unknown as Record<string, unknown>).attachments = images;
+        // Let the agent know files are available
+        content = content
+          ? `${content}\n\n[用户上传了 ${images.length} 个文件: ${fileList}。如需使用请调用对应工具处理。]`
+          : `用户上传了 ${images.length} 个文件: ${fileList}`;
       }
-      setExecutingTool(undefined);
-      setThinkingContent("");
-      setStartTime(undefined);
-      setEvalProgress([]);
-      setCompletionInfo(null);
+
       const controller = new AbortController();
       abortRef.current = controller;
 
