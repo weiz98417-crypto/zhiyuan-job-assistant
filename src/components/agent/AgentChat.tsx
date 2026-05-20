@@ -756,12 +756,14 @@ function MessageBubble({
       );
     }
 
-    // Special handling for evaluate_jd (not evaluate_jd_full — that uses EvalCompletionNotice)
+    // evaluate_jd / evaluate_jd_full: don't show raw tool card — result goes to EvalConfirmCard / EvalCompletionNotice
     if (msg.toolName === "evaluate_jd") {
       return <EvalConfirmCard msg={msg} />;
     }
-    // evaluate_jd_full tool result is data-only (not rendered as card) —
-    // completion info is shown via EvalCompletionNotice
+    if (msg.toolName === "evaluate_jd_full") {
+      // Data-only tool — completion shown via EvalCompletionNotice in the assistant message
+      return null;
+    }
 
     // Export file — show download button when file is available
     if (msg.toolName === "export_file" || msg.toolName === "download_report_pdf") {
