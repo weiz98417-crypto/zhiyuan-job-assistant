@@ -1,9 +1,6 @@
 import { NextResponse } from "next/server";
-import Database from "better-sqlite3";
-import { resolve } from "path";
 import { getCurrentUser } from "@/lib/auth";
-
-function getDb() { return new Database(resolve(process.cwd(), "data", "zhiyuan.db")); }
+import { getDb } from "@/lib/server-db";
 
 export async function GET() {
   try {
@@ -43,8 +40,7 @@ export async function POST(request: Request) {
        ON CONFLICT(entity_type, entity_key) DO UPDATE SET
          weight = excluded.weight, last_updated = datetime('now')`
     ).run(user.userId, entity_type, entity_key, weight || 1.0, decay_rate || 0.05);
-    db.close();
-    return NextResponse.json({ success: true });
+return NextResponse.json({ success: true });
   } catch (err) {
     if (err instanceof Error && err.message === "Not authenticated") {
       return NextResponse.json({ success: false, error: "未登录" }, { status: 401 });

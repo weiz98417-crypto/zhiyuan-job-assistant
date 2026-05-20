@@ -1,9 +1,6 @@
 import { NextResponse } from "next/server";
-import Database from "better-sqlite3";
-import { resolve } from "path";
 import { existsSync, readFileSync } from "fs";
-
-function getDb() { return new Database(resolve(process.cwd(), "data", "zhiyuan.db")); }
+import { getDb } from "@/lib/server-db";
 
 // POST — save an offer comparison report
 export async function POST(request: Request) {
@@ -33,7 +30,6 @@ export async function POST(request: Request) {
     ).run(titleStr, JSON.stringify(offersArr), report_markdown, numOffers);
 
     const id = Number(result.lastInsertRowid);
-    db.close();
     return NextResponse.json({ success: true, data: { id } }, { status: 201 });
   } catch (err) {
     return NextResponse.json({ success: false, error: String(err) }, { status: 500 });
@@ -47,8 +43,7 @@ export async function GET() {
     const rows = db.prepare(
       "SELECT id, title, num_offers, created_at FROM offer_reports ORDER BY created_at DESC LIMIT 20"
     ).all();
-    db.close();
-    return NextResponse.json({ success: true, data: rows });
+return NextResponse.json({ success: true, data: rows });
   } catch (err) {
     return NextResponse.json({ success: false, error: String(err) }, { status: 500 });
   }

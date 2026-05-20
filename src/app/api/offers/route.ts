@@ -1,9 +1,6 @@
 import { NextResponse } from "next/server";
-import Database from "better-sqlite3";
-import { resolve } from "path";
 import { existsSync, readFileSync } from "fs";
-
-function getDb() { return new Database(resolve(process.cwd(), "data", "zhiyuan.db")); }
+import { getDb } from "@/lib/server-db";
 
 function ensureSchema() {
   const schemaPath = resolve(process.cwd(), "src", "lib", "server-schema.sql");
@@ -34,8 +31,7 @@ export async function GET() {
     ensureSchema();
     const db = getDb();
     const rows = db.prepare("SELECT * FROM offers ORDER BY created_at DESC").all();
-    db.close();
-    return NextResponse.json({ success: true, data: rows });
+return NextResponse.json({ success: true, data: rows });
   } catch (err) {
     return NextResponse.json({ success: false, error: String(err) }, { status: 500 });
   }
@@ -79,8 +75,7 @@ export async function POST(request: Request) {
         JSON.stringify(benefits || {}), application_id ?? null,
         existing.id,
       );
-      db.close();
-      return NextResponse.json({ success: true, data: { id: existing.id, updated: true } }, { status: 200 });
+    return NextResponse.json({ success: true, data: { id: existing.id, updated: true } }, { status: 200 });
     }
 
     const result = db.prepare(`
@@ -98,8 +93,7 @@ export async function POST(request: Request) {
       JSON.stringify(benefits || {}), application_id ?? null,
     );
     const id = result.lastInsertRowid;
-    db.close();
-    return NextResponse.json({ success: true, data: { id: Number(id), created: true } }, { status: 201 });
+return NextResponse.json({ success: true, data: { id: Number(id), created: true } }, { status: 201 });
   } catch (err) {
     return NextResponse.json({ success: false, error: String(err) }, { status: 500 });
   }

@@ -1,16 +1,12 @@
 import { NextResponse } from "next/server";
-import Database from "better-sqlite3";
-import { resolve } from "path";
 import { getCurrentUser } from "@/lib/auth";
-
-function getDb() { return new Database(resolve(process.cwd(), "data", "zhiyuan.db")); }
+import { getDb } from "@/lib/server-db";
 
 export async function GET() {
   try {
     const user = await getCurrentUser();
     const db = getDb();
     const row = db.prepare("SELECT data_json FROM cv_data WHERE user_id = ?").get(user.userId) as { data_json: string } | undefined;
-    db.close();
     if (!row) return NextResponse.json({ success: true, data: {} });
     return NextResponse.json({ success: true, data: JSON.parse(row.data_json) });
   } catch (err) {
@@ -36,7 +32,6 @@ export async function PUT(request: Request) {
         "INSERT INTO cv_data (user_id, data_json, updated_at) VALUES (?, ?, datetime('now'))"
       ).run(user.userId, JSON.stringify(body));
     }
-    db.close();
     return NextResponse.json({ success: true });
   } catch (err) {
     if (err instanceof Error && err.message === "Not authenticated") {
