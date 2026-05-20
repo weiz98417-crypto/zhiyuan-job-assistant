@@ -935,10 +935,18 @@ export default function AgentChat({
     if (!hasContent || streaming) return;
 
     let content = trimmed;
-    // If images are attached, include them in the message
+    // Label uploaded files by type (PDF vs image)
     if (images.length > 0) {
-      const imgNote = `[已上传${images.length}张截图]`;
-      content = content ? `${content}\n\n${imgNote}` : `请识别并评估这些JD截图`;
+      const fileLabels = images.map((f) =>
+        f.name.endsWith(".pdf") ? "PDF简历" : "截图"
+      );
+      const isPdf = fileLabels.some((l) => l === "PDF简历");
+      const isImg = fileLabels.some((l) => l === "截图");
+      const parts: string[] = [];
+      if (isPdf) parts.push(`${fileLabels.filter((l) => l === "PDF简历").length}份PDF`);
+      if (isImg) parts.push(`${fileLabels.filter((l) => l === "截图").length}张截图`);
+      const fileNote = `[已上传${parts.join("、")}]`;
+      content = content ? `${content}\n\n${fileNote}` : `请处理这些文件`;
     }
 
     setInput("");
