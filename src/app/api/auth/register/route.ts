@@ -30,11 +30,12 @@ export async function POST(request: NextRequest) {
     const id = crypto.randomUUID();
     const passwordHash = await hashPassword(password);
 
-    // Auto-approve first user as admin (fresh deployment)
+    // Auto-approve logic
     const userCount = (db.prepare('SELECT COUNT(*) as cnt FROM users').get() as { cnt: number }).cnt;
+    const autoApprove = process.env.AUTO_APPROVE === 'true';
     const isFirstUser = userCount === 0;
-    const role = isFirstUser ? 'admin' : 'member';
-    const status = isFirstUser ? 'active' : 'pending';
+    const role = (isFirstUser || autoApprove) ? 'admin' : 'member';
+    const status = (isFirstUser || autoApprove) ? 'active' : 'pending';
 
     db.prepare(`
       INSERT INTO users (id, username, password_hash, display_name, email, role, status, token_version)
