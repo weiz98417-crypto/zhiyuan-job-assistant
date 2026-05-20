@@ -23,6 +23,7 @@ import {
 import NavItem from "./NavItem";
 import { useTheme } from "@/components/providers/ThemeProvider";
 import { motion } from "framer-motion";
+import { ToastProvider } from "@/lib/use-toast";
 
 interface UserInfo {
   id: string;
@@ -85,6 +86,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   }
 
   return (
+    <ToastProvider>
     <div className="flex min-h-full">
       {/* Desktop Side Nav — the "table of contents" of the journal */}
       <aside className="hidden lg:flex flex-col fixed left-0 top-0 bottom-0 w-56 bg-[var(--color-surface)] border-r border-[var(--color-border)] px-3 py-6">
@@ -205,5 +207,6 @@ export default function AppShell({ children }: { children: ReactNode }) {
       {/* Mobile bottom padding */}
       <div className="lg:hidden h-16" />
     </div>
+    </ToastProvider>
   );
 }

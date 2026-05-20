@@ -15,6 +15,7 @@ import TodoReminders from "@/components/home/TodoReminders";
 import MiniPipeline from "@/components/home/MiniPipeline";
 import IndustryNews from "@/components/home/IndustryNews";
 import CompanyNews from "@/components/home/CompanyNews";
+import ErrorState from "@/components/design/ErrorState";
 import db from "@/lib/db";
 import type { Application, ApplicationStatus, InterviewSchedule } from "@/types";
 
@@ -58,6 +59,7 @@ export default function HomePage() {
   const [offerCount, setOfferCount] = useState(0);
   const [reportCount, setReportCount] = useState(0);
   const [mounted, setMounted] = useState(false);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -82,12 +84,16 @@ export default function HomePage() {
         }
       } catch { /* fallback to DexieDB */ }
       // Fallback: DexieDB if API failed
-      if (applications.length === 0) {
-        const apps = await db.applications.toArray();
-        setApplications(apps);
+      try {
+        if (applications.length === 0) {
+          const apps = await db.applications.toArray();
+          setApplications(apps);
+        }
+        const ivs = await db.interviews.toArray();
+        setInterviews(ivs);
+      } catch {
+        setError(true);
       }
-      const ivs = await db.interviews.toArray();
-      setInterviews(ivs);
       setMounted(true);
     }
     load();
@@ -157,6 +163,10 @@ export default function HomePage() {
       return isNaN(parsed.getTime()) ? a.date : parsed.toISOString().split("T")[0];
     })(),
   }));
+
+  if (error) {
+    return <ErrorState onRetry={() => { setError(false); setMounted(false); window.location.reload(); }} />;
+  }
 
   if (!mounted) {
     return (

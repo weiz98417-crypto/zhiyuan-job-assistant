@@ -1,6 +1,6 @@
 # 11 -- Agent 聊天页完整功能拆解
 
-> 页面: `src/app/agent/page.tsx` (约 700 行) | Agent 系统: `lib/agent/` 目录 (30+ 文件) | API: `/api/agent/run` 等 13 个端点
+> 页面: `src/app/agent/page.tsx` (约 700 行) | Agent 系统: `lib/agent/` 目录 (40+ 文件) | API: `/api/agent/run` 等 22 个端点
 
 ---
 
@@ -25,8 +25,8 @@
 │                          │                     │            │
 │                          ▼                     ▼            │
 │  ┌───────────────────────────────────────────────────────┐  │
-│  │              30+ 工具 (ToolRegistry)                    │  │
-│  │  Query(11) │ Action(17) │ Interview(2) │ MCP(5)        │  │
+│  │              38 工具 (ToolRegistry)                    │  │
+│  │  Query(13) │ Action(18) │ Interview(2) │ MCP(5)        │  │
 │  └───────────────────────────────────────────────────────┘  │
 │                          │                     │            │
 │                          ▼                     ▼            │
@@ -56,14 +56,14 @@
 |---|------|------|--------|
 | 1 | 意图分类路由 | `orchestrator/classifyIntent()` -- 6 个 Agent | 用户输入 |
 | 2 | 6 子 Agent 系统 | Agent Registry + 各自 System Prompt | Career DNA + Knowledge |
-| 3 | 30+ 工具生态 | ToolRegistry + 工具展示名 | 内部 + 外部 API |
+| 3 | 38 工具生态 | ToolRegistry + 工具展示名 | 内部 + 外部 API |
 | 4 | 双 Agent Loop | server-runner.ts / client-runner.ts | DeepSeek API (SSE) |
 | 5 | 流式响应 + 阶段指示 | AgentChat SSE events + 阶段状态栏 | `/api/agent/run` |
 | 6 | 会话管理 (SQLite) | 创建/列表/切换/删除/恢复/Pin | SQLite sessions 表 |
 | 7 | 分层记忆系统 | Layer 1 Working / Layer 2 Episodic / Layer 3 Semantic | SQLite |
 | 8 | 记忆摘要生成 | `memory/coordinator.ts` → DeepSeek 摘要 | SQLite |
 | 9 | 工具调用日志 + 阶段展示 | AgentChat 内联 ToolCallLog + Phase 指示器 | Agent Loop 输出 |
-| 10 | 工具展示名系统 | `tool-display-names.ts` (30+ 映射) | 硬编码 |
+| 10 | 工具展示名系统 | `tool-display-names.ts` (38 映射) | 硬编码 |
 | 11 | Claude 活动上下文 | `getClaudeAgentActivity()` | `/api/agent/claude-activity` → SQLite |
 | 12 | Agent 选择切换 | 自动路由 + AgentSelector | 6 个 Agent |
 | 13 | 建议快捷词 | `SuggestionChips` 组件 | 各 Agent 预设快捷提问 |
@@ -144,11 +144,11 @@ interface AgentDefinition {
 6. Semantic Context: 跨会话事实 → 语义记忆层
 ```
 
-### 3. 工具生态系统 (30+ Tools)
+### 3. 工具生态系统 (38 Tools)
 
 所有工具注册在 `src/lib/agent/tools/index.ts`，统一通过 `ToolRegistry` 管理。
 
-**Query 工具 (11)** -- 只读查询：
+**Query 工具 (13)** -- 只读查询：
 | 工具名 | 功能 | 展示标签 |
 |--------|------|---------|
 | `search_applications` | 搜索投递记录 | 📋 搜索投递记录 |
@@ -163,7 +163,7 @@ interface AgentDefinition {
 | `detect_skill_gaps` | 技能缺口分析 | 🔍 技能缺口分析 |
 | `check_ats_compatibility` | ATS 兼容检查 | 🤖 ATS 兼容检查 |
 
-**Action 工具 (17)** -- 有副作用的操作：
+**Action 工具 (18)** -- 有副作用的操作：
 | 工具名 | 功能 | 展示标签 |
 |--------|------|---------|
 | `evaluate_jd` | 基本 JD 评估 | 🔍 评估 JD |
@@ -213,7 +213,7 @@ interface AgentDefinition {
 ```
 while (iteration < maxIterations):
   ├─ Phase: understanding/reflecting → yield SSE phase event
-  ├─ 调用 DeepSeek API (model chain fallback: DeepSeek → Zhipu → Qwen)
+  ├─ 调用 DeepSeek API (4级模型降级: Flash → Pro → GLM-4.6V → Qwen-Long)
   │   ├─ 无 tool_calls → 流式输出文本 → done
   │   └─ 有 tool_calls → 执行每个工具
   │       ├─ Phase: executing → yield tool_call event
@@ -225,7 +225,7 @@ while (iteration < maxIterations):
   └─ autoRetryCount > 2 → 强制输出
 ```
 
-**Model Chain Fallback**: DeepSeek V4 Flash → GLM-4.6v FlashX → Qwen-Long
+**Model Chain Fallback**: DeepSeek V4 Flash → DeepSeek V4 Pro → GLM-4.6V FlashX → Qwen-Long (4级)
 - 服务端直接持有 API keys
 - 支持 429/503 状态码重试
 - 流式读取 + 原生 function calling 解析
@@ -416,7 +416,7 @@ Agent 执行过程中的工具调用链实时展示在聊天流中：
 将下划线命名（`evaluate_jd_full`）映射为中文标签（"JD 完整评估"）和 emoji（🛡️）：
 
 ```typescript
-// 30+ 条映射
+// 38 条映射
 const TOOL_DISPLAY: Record<string, ToolDisplay> = {
   evaluate_jd_full:     { label: "JD 完整评估",  emoji: "🛡️" },
   analyze_jd_risks:     { label: "JD 风险扫描",  emoji: "⚠️" },

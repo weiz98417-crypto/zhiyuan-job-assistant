@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { Download, Upload, Trash2, User, Target, Banknote, Loader2, Database, Sparkles, Wrench, Heart, AlertTriangle, FileText, BellRing, Plus, X } from "lucide-react";
 import { HandwritingTitle, WarmButton, PaperCard } from "@/components/design";
+import Skeleton from "@/components/design/Skeleton";
 import db from "@/lib/db";
 import { exportApplicationsMD, downloadAsFile } from "@/lib/exporters";
 import { parseApplicationsMD } from "@/lib/parsers";
@@ -229,7 +230,7 @@ export default function SettingsPage() {
     setProfile(DEFAULT_PROFILE);
   };
 
-  if (!mounted) return null;
+  if (!mounted) return <div className="py-8"><Skeleton lines={5} /></div>;
 
   return (
     <div className="max-w-2xl mx-auto space-y-8">

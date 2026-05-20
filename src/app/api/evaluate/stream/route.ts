@@ -4,6 +4,8 @@ import fs from "fs";
 import path from "path";
 import { listReports } from "@/lib/server-db";
 
+import { llmRetry, LLMError } from "@/lib/llm-retry";
+
 const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
 const DEEPSEEK_MODEL = "deepseek-v4-flash";
 const ZHIPU_API_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions";
@@ -81,20 +83,17 @@ async function streamLLM(
   const apiKey = process.env.DEEPSEEK_API_KEY;
   if (!apiKey) throw new Error("DEEPSEEK_API_KEY not configured");
 
-  const res = await fetch(DEEPSEEK_API_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model: DEEPSEEK_MODEL,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userMessage },
-      ],
-      temperature: 0.3,
-      max_tokens: blockKey === "f" ? 8000 : blockKey === "a" || blockKey === "b" ? 4000 : 3000,
-      stream: true,
-    }),
-    signal,
+  const res = await llmRetry(DEEPSEEK_API_URL, apiKey, {
+    model: DEEPSEEK_MODEL,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userMessage },
+    ],
+    temperature: 0.3,
+    max_tokens: blockKey === "f" ? 8000 : blockKey === "a" || blockKey === "b" ? 4000 : 3000,
+    stream: true,
+    retries: 1,
+    fallbackModel: process.env.DEEPSEEK_FALLBACK_MODEL,
   });
 
   if (!res.ok) {
@@ -102,16 +101,29 @@ async function streamLLM(
     throw new Error(`DeepSeek API ${res.status}: ${errText.slice(0, 200)}`);
   }
 
+  // ── Non-streaming fallback: llmRetry downgraded to stream:false ──
+  const isStreaming = (res.headers.get("content-type") || "").includes("text/event-stream");
+  if (!isStreaming) {
+    const json = await res.json();
+    const content = json?.choices?.[0]?.message?.content || "";
+    if (content && blockKey) {
+      emit(controller, { type: "block_chunk", block: blockKey, content });
+    }
+    return content;
+  }
+
   const reader = res.body!.getReader();
   const decoder = new TextDecoder();
   let fullText = "";
+  let lineBuf = "";
 
   try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      const text = decoder.decode(value, { stream: true });
-      const lines = text.split("\n");
+      lineBuf += decoder.decode(value, { stream: true });
+      const lines = lineBuf.split("\n");
+      lineBuf = lines.pop() || "";
       for (const line of lines) {
         if (!line.startsWith("data: ")) continue;
         const data = line.slice(6);
@@ -141,19 +153,17 @@ async function quickLLM(systemPrompt: string, userMessage: string, signal?: Abor
   const apiKey = process.env.DEEPSEEK_API_KEY;
   if (!apiKey) throw new Error("DEEPSEEK_API_KEY not configured");
 
-  const res = await fetch(DEEPSEEK_API_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model: DEEPSEEK_MODEL,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userMessage },
-      ],
-      temperature: 0.2,
-      max_tokens: 500,
-    }),
-    signal,
+  const res = await llmRetry(DEEPSEEK_API_URL, apiKey, {
+    model: DEEPSEEK_MODEL,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userMessage },
+    ],
+    temperature: 0.2,
+    max_tokens: 500,
+    retries: 1,
+    timeout: 15_000,
+    fallbackModel: process.env.DEEPSEEK_FALLBACK_MODEL,
   });
 
   if (!res.ok) throw new Error(`DeepSeek API ${res.status}`);
@@ -343,7 +353,9 @@ export async function POST(request: Request) {
             const arch = JSON.parse(archMatch[0]);
             state.archetype = arch.archetype || "未检测";
           }
-        } catch {
+        } catch (err) {
+          console.error("Archetype detection failed:", err instanceof Error ? err.message : String(err));
+          emit(controller, { type: "error", message: "Archetype 检测失败，使用默认分类" });
           state.archetype = "未检测";
         }
 
@@ -450,13 +462,19 @@ export async function POST(request: Request) {
             emit(controller, { type: "search_start", query: "风险信号扫描", source: "risk-scan" });
             try {
               const origin = request.headers.get("origin") || "http://localhost:3000";
-              const risksRes = await fetch(`${origin}/api/agent/scan-risks`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ jd_text: state.jdText }),
-                signal,
+              const risksRes = await Promise.race([
+                fetch(`${origin}/api/agent/scan-risks`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ jd_text: state.jdText }),
+                  signal,
+                }),
+                new Promise<Response>((_, reject) => setTimeout(() => reject(new Error('timeout')), 10_000)),
+              ]).catch((err) => {
+                if (err instanceof Error && err.message === 'timeout') return null;
+                throw err;
               });
-              if (risksRes.ok) {
+              if (risksRes?.ok) {
                 const risksData = await risksRes.json();
                 const riskSignals = (risksData.data || []) as Array<{ signal: string; excerpt?: string; severity: string }>;
                 if (riskSignals.length > 0) {

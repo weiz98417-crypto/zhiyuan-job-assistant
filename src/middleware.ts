@@ -12,8 +12,40 @@ const PUBLIC_PATHS = [
   '/api/auth/register',
 ];
 
+// Rate limiting: in-memory map (Edge Runtime — per-isolate, good enough for brute-force protection)
+interface RateEntry { count: number; resetAt: number; }
+const rateMap = new Map<string, RateEntry>();
+const RATE_WINDOW_MS = 60_000; // 1 minute
+const RATE_MAX = 5;            // max 5 attempts per window
+
+function getClientIp(request: NextRequest): string {
+  return request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+    || request.headers.get('x-real-ip')
+    || '127.0.0.1';
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // Rate limit on login endpoint
+  if (pathname === '/api/auth/login' && request.method === 'POST') {
+    const ip = getClientIp(request);
+    const now = Date.now();
+    const entry = rateMap.get(ip);
+
+    if (entry && now < entry.resetAt && entry.count >= RATE_MAX) {
+      return NextResponse.json(
+        { error: '请求过于频繁，请1分钟后再试' },
+        { status: 429 }
+      );
+    }
+
+    if (!entry || now >= entry.resetAt) {
+      rateMap.set(ip, { count: 1, resetAt: now + RATE_WINDOW_MS });
+    } else {
+      entry.count++;
+    }
+  }
 
   // Public paths — allow unauthenticated access
   if (PUBLIC_PATHS.some((p) => pathname.startsWith(p))) {

@@ -101,7 +101,7 @@ export async function POST(request: Request) {
             // Save application record
             const appRow: Partial<AppRow> = {
               company, role, score: overallScore, status: "Evaluated",
-              date, archetype, report_path: "",
+              date, report_path: "",
             };
             upsertApp(appRow as AppRow, user.userId);
 

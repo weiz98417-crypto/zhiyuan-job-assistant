@@ -33,6 +33,7 @@ export async function POST(request: Request) {
           const runner = orchestrateGen(userMessage, {
             sessionId: null,
             messages,
+            signal: request.signal,
           });
           for await (const event of runner) {
             if (aborted) break;

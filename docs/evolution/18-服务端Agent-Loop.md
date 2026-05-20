@@ -45,7 +45,7 @@ DeepSeek API                              │  │   ├─ executeTool (服务�
 
 自动重试与降级机制（MAX_AUTO_RETRY → force respond）的设计灵感来自**人类专家面对不确定性的应对策略**。一个资深研究员在搜索不到可靠信息时，不会反复搜索然后崩溃——她会调整搜索关键词尝试两三次，如果仍然无果，就会基于已有知识给出一份诚实的、带有限定条件的回答："根据目前可查的信息无法确认，但基于行业经验，我的判断是……"。Agent Loop 的两级停止机制（硬错误连续失败 ≥ 2 次立即停止，软错误空结果最多自动重试 2 次后降级回答）精确地复制了这个人类策略。这不是工程上的妥协，而是一种经过深思熟虑的鲁棒性设计——承认不确定性也比无休止地重试要好。
 
-把 Agent Loop 从客户端搬到服务端的决策是基于一个简单但重要的安全原则：**API Key 永远不应该暴露在前端**。在 client-runner 架构中，Agent 推理虽然通过 `/api/agent/think` 代理，但工具调用由浏览器发起——这意味着浏览器的网络面板中可以截获到完整的 Prompt 和响应内容。server-runner 将整个 Loop 放到服务端，前端只消费 SSE 事件流，API Key 和完整的上下文永远不出现在用户设备上。Model Chain 三级降级（DeepSeek → GLM → Qwen）进一步增强了可靠性——单模型不可用时系统能自动切换，用户无需关心底层用的是哪个模型。
+把 Agent Loop 从客户端搬到服务端的决策是基于一个简单但重要的安全原则：**API Key 永远不应该暴露在前端**。在 client-runner 架构中，Agent 推理虽然通过 `/api/agent/think` 代理，但工具调用由浏览器发起——这意味着浏览器的网络面板中可以截获到完整的 Prompt 和响应内容。server-runner 将整个 Loop 放到服务端，前端只消费 SSE 事件流，API Key 和完整的上下文永远不出现在用户设备上。Model Chain 四级降级（DeepSeek Flash → Pro → GLM-4.6V → Qwen-Long）进一步增强了可靠性——单模型不可用时系统能自动切换，用户无需关心底层用的是哪个模型。
 
 双 Runner 架构（client-runner + server-runner）的设计也体现了一个务实的工程原则：**渐进式迁移而非大爆炸重构**。保留 client-runner 作为调试和降级通道，意味着在生产环境切换到 server-runner 后，如果遇到未预见的边缘情况，系统可以随时回退到原有架构。这种"飞行中换引擎"的策略在分布式系统中被称为 Strangler Fig Pattern，在这里被应用到了一个 AI Agent 架构的升级中。
 
@@ -95,8 +95,12 @@ DeepSeek API                              │  │   ├─ executeTool (服务�
 **server-runner（route.ts）：**
 ```typescript
 // src/app/api/agent/run/route.ts
-const runner = agentLoopServer(systemPrompt, messages, undefined, tools, toolWhitelist);
+const runner = agentLoopServer({
+  agent, systemPrompt, messages,
+  tools, signal: request.signal
+});
 for await (const event of runner) {
+  if (aborted) break;
   controller.enqueue(encoder.encode(sse(event)));
 }
 ```
@@ -114,13 +118,14 @@ for await (const event of runner) {
 
 ## 3. 服务端 Loop 详细流程
 
-### 3.1 MODEL_CHAIN 降级链
+### 3.1 MODEL_CHAIN 四级降级链
 
-服务端直连三家国产大模型，按优先级依次尝试：
+服务端直连四家大模型，按优先级依次尝试：
 
 ```
 const MODEL_CHAIN = [
   { model: "deepseek-v4-flash",  url: "https://api.deepseek.com/chat/completions",    keyEnv: "DEEPSEEK_API_KEY" },
+  { model: "deepseek-v4-pro",    url: "https://api.deepseek.com/chat/completions",    keyEnv: "DEEPSEEK_API_KEY" },
   { model: "glm-4.6v-flashx",    url: "https://open.bigmodel.cn/api/paas/v4/chat/completions", keyEnv: "ZHIPU_API_KEY" },
   { model: "qwen-long",          url: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", keyEnv: "DASHSCOPE_API_KEY" },
 ];
@@ -133,15 +138,20 @@ callLLM(messages, systemPrompt, tools)
   │
   ├─ [1] deepseek-v4-flash
   │     ├─ API Key 存在？ → 否 → 跳过
-  │     ├─ fetch POST (含 tools 定义、stream: true)
+  │     ├─ fetch POST (含 tools 定义、stream: true, AbortSignal.timeout(60s))
+  │     ├─ 网络异常？ → catch → continue (切换到下一模型)
   │     ├─ 429/503？ → 重试 1 次（间隔 1s）
+  │     ├─ 超时 (AbortError)？ → 切换到下一模型
   │     ├─ 其他 4xx/5xx？ → 不重试，跳过
   │     └─ 200？ → 解析 stream → 返回 {text, toolCalls}
   │
-  ├─ [2] glm-4.6v-flashx   ← DeepSeek 失败后尝试
+  ├─ [2] deepseek-v4-pro   ← Flash 失败后尝试
   │     └─ 同上逻辑
   │
-  ├─ [3] qwen-long          ← GLM 失败后尝试
+  ├─ [3] glm-4.6v-flashx   ← Pro 失败后尝试
+  │     └─ 同上逻辑
+  │
+  ├─ [4] qwen-long          ← GLM 失败后尝试
   │     └─ 同上逻辑
   │
   └─ 全部失败 → throw Error("All models failed (last: {lastError})")
@@ -149,13 +159,15 @@ callLLM(messages, systemPrompt, tools)
 
 **关键细节：**
 - 每层内部对 429（限流）和 503（服务不可用）重试 1 次，间隔 1 秒
+- fetch 包裹 try/catch，网络异常（DNS/连接拒绝/超时）捕获后切换到下一模型
+- `AbortSignal.timeout(60_000)` 防止 TCP 层挂死
 - 非临时性错误（400/401/403/500）不重试，直接跳到下一层
 - 如果某层 API Key 环境变量未配置，静默跳过
 - 最终失败时抛出包含最后错误信息的异常，Loop 层捕获后发送 `text` 事件告知用户
 
-### 3.2 流式响应解析
+### 3.2 流式响应解析（行缓冲模式）
 
-API 均返回 `stream: true` 的 SSE 流。解析过程：
+API 均返回 `stream: true` 的 SSE 流。解析过程使用 line-buffer 模式防止 TCP 分包截断：
 
 ```
 SSE Stream Buffer 解析
@@ -166,13 +178,15 @@ SSE Stream Buffer 解析
   TextDecoder.decode(value, {stream: true})
       │
       ▼
-  buffer += chunk
+  lineBuf += chunk
       │
       ▼
-  buffer.split("\n")
-      │  ┌─ "data: {...JSON...}"  → JSON.parse → 提取 delta
-      │  ├─ "data: [DONE]"        → 忽略
-      │  └─ "" 或其他             → 忽略
+  lines = lineBuf.split("\n")
+  lineBuf = lines.pop() || ""    ← 保留跨 chunk 的碎片行
+      │
+      ├─ "data: {...JSON...}"  → JSON.parse → 提取 delta
+      ├─ "data: [DONE]"        → 忽略
+      └─ "" 或其他             → 忽略
       ▼
   delta 字段处理:
       │
@@ -182,6 +196,8 @@ SSE Stream Buffer 解析
             ├─ tc.id           → frag.id = tc.id
             ├─ tc.function.name     → frag.name += tc.function.name
             └─ tc.function.arguments → frag.arguments += tc.function.arguments
+
+  ← 流结束后 drain 残留 lineBuf，确保 finish_reason 不丢失
 
   返回 { text: fullText, toolCalls: Array.from(toolCallFragments.values()) }
 ```
@@ -219,7 +235,7 @@ SSE Stream Buffer 解析
 ### 3.3 完整 Loop 伪代码
 
 ```
-agentLoopServer(systemPrompt, messages, config, tools, toolWhitelist):
+agentLoopServer({ systemPrompt, messages, config, tools, agent, signal }):
 
   state = { iteration:0, consecutiveFailures:0, contextSize, phase:"understanding" }
   ctx = messages
@@ -227,6 +243,11 @@ agentLoopServer(systemPrompt, messages, config, tools, toolWhitelist):
   recentCalls = []
 
   while state.iteration < config.maxIterations (默认 5):
+
+    ┌─ Abort 检查 ──────────────────────────────┐
+    │ if signal?.aborted:                         │
+    │   yield { type:"done" }; return             │
+    └─────────────────────────────────────────────┘
 
     state.iteration++
 
@@ -395,9 +416,11 @@ checkResultQuality(formatted)
 | 常量 | 值 | 位置 | 说明 |
 |------|-----|------|------|
 | `DEFAULT_LOOP_CONFIG.maxIterations` | 5 | `types.ts` | 最大 ReAct 迭代轮数 |
-| `MAX_CONTEXT_TOKENS` | 64000 | 两个 runner | 上下文 token 上限（字符估算） |
+| `MAX_CONTEXT_TOKENS` | 64000 | 两个 runner | 上下文 token 上限（CJK 感知估算） |
 | `DEFAULT_TOOL_CTX_CAP` | 800 | 两个 runner | 工具结果推入 LLM 上下文的默认字符上限 |
 | `MAX_AUTO_RETRY` | 2 | 两个 runner | 空/不相关结果最大自动重试次数 |
+| `LLM_TIMEOUT` | 60s | `server-runner.ts` | 单次 API 请求超时 |
+| `TOOL_PARALLEL_TIMEOUT` | 30s | `client-runner.ts` | 并行工具执行超时 |
 | `maxDuration` | 180s | `route.ts` | API Route 最大执行时间 |
 
 ---
@@ -491,38 +514,43 @@ type ErrorCategory = "ok" | "transient" | "permanent" | "need_user_input";
   └──────────────┘          └──────────────────┘
 ```
 
-### 6.2 Token 估算
+### 6.2 Token 估算（CJK 感知）
 
 ```typescript
 function estimateTokens(messages: { role: string; content: string }[]): number {
-  return messages.reduce((sum, m) => sum + m.content.length, 0);
+  // Chinese chars ≈ 1.5-2 tokens, English chars ≈ 0.25 tokens
+  // Replace CJK with "aa" to bring ratio to ~1:1 for mixed text
+  return messages.reduce((sum, m) =>
+    sum + m.content.replace(/[\u4e00-\u9fff]/g, 'aa').length, 0);
 }
 ```
 
-**使用字符数作为 token 估算**（中文 1 字符约等于 1-2 token，实际安全余量充足）：
+**上下文预算包含系统 prompt 长度**：初始 `contextSize` 计算时加上 `systemPrompt.replace(/[\u4e00-\u9fff]/g, 'aa').length`。
 
-- 触发截断阈值：`state.contextSize > 64000`
+- 触发截断阈值：`state.contextSize > MAX_CONTEXT_TOKENS (64000)`
 - 截断方式：保留最近 15 条消息
 - 截断后重新估算：`state.contextSize = estimateTokens(ctx)`
 - 下一轮迭代时如果仍然超限，再次截断（循环安全）
 
-### 6.3 工具调用去重
+### 6.3 工具调用去重（安全模式）
 
 ```typescript
 const recentCalls: { name: string; params: string; result: string }[] = [];
 // 容量: 5，FIFO
 
 // 每次工具调用前检查:
-const paramsKey = JSON.stringify(params);   // 参数序列化为字符串做 key
+const paramsKey = JSON.stringify(params);
 const recent = recentCalls.find(
   (c) => c.name === tc.name && c.params === paramsKey
 );
 if (recent) {
-  // 直接复用缓存结果，不实际执行工具
+  // 复用缓存结果，不实际执行工具
   toolResult = { success: true, data: recent.result };
   formatted = recent.result;
 }
 ```
+
+**安全规则：只有成功/非降级结果才写入 `recentCalls`**。`degradeToUser` 路径（permanent / need_user_input）的结果不缓存，避免失败结果被重放为成功。写入时机在 error category 分发之后，不在工具执行后立即写入。
 
 **设计意图：** LLM 在后续迭代中可能重复调用同一工具（尤其是搜索工具），去重避免重复 API 请求和资源浪费。缓存容量 5 条覆盖最近一轮迭代的全部工具调用。
 
@@ -753,11 +781,16 @@ responding    ──→ done             (文本输出完毕)
 | **搜索进度追踪** | 无 | `buildSearchProgress` 列出已执行搜索 |
 | **思考文本流式输出** | 不输出（存入 ctx） | 截取前 200 字符逐 4 字符流式输出 |
 | **响应文本输出方式** | 整块 yield | 逐 8 字符流式 + 5ms 延迟模拟打字 |
-| **模型降级** | `MODEL_CHAIN` 三级降级 | 仅 DeepSeek（通过 think proxy） |
-| **LLM 重试** | 429/503 重试 1 次 | 无重试（由 think proxy 处理） |
+| **模型降级** | `MODEL_CHAIN` 四级降级 + 网络异常 fallback | 仅 DeepSeek（通过 think proxy） |
+| **LLM API 超时** | `AbortSignal.timeout(60s)` | `fetchFromThinkProxy` 120s 超时 |
+| **流式降级** | stream 失败→JSON fallback + SSE 包装 | 无（think proxy 处理） |
+| **行缓冲** | ✓ `lineBuf` 模式 | ✓ 已在 `collectThinkResponseStreaming` |
+| **CJK token 估算** | ✓ `replace(/[\u4e00-\u9fff]/g, 'aa')` | ✓ 同上 |
+| **Token 预算** | 含 systemPrompt 长度 | 含 systemPrompt 长度 |
+| **工具去重缓存** | 只缓存成功/非降级结果 | 只缓存成功/非降级结果 |
 | **消息截断** | `ctx.slice(-15)` | `truncateContext(ctx, 15)` |
-| **Abort 支持** | `request.signal` + `aborted` flag | `AbortSignal` 参数 + 每次 yield 前检查 |
-| **工具调用前导文本** | 无前置输出 | 先输出思考文本片段再执行工具 |
+| **Abort 支持** | `request.signal` 传入 orchestrator → Loop | `AbortSignal` + reader `Promise.race` |
+| **并行工具超时** | — | `Promise.race` 30s |
 | **maxDuration** | 180s（Next.js 限制） | 无限制 |
 
 ---

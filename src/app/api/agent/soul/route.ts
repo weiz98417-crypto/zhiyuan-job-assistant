@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { loadAgentMD } from "@/lib/agent/load-agent-md";
-import { getAgentById } from "@/lib/agent/registry";
+import { getAgentById, getAllAgents } from "@/lib/agent/registry";
 import { getCareerDNASummary } from "@/lib/agent/shared-memory";
 
 export async function GET(request: Request) {
@@ -13,6 +13,7 @@ export async function GET(request: Request) {
 
   const agent = getAgentById(agentId);
   if (!agent) {
+    const all = getAllAgents();
     return NextResponse.json({ success: false, error: `Agent not found: ${agentId}. Available: ${all.map(a => a.id).join(", ")}` }, { status: 404 });
   }
 

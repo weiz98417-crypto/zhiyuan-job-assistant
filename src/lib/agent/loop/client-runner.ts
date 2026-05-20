@@ -65,7 +65,7 @@ type NativeToolCall = { id: string; name: string; arguments: string };
 /* ── Context helpers ── */
 
 function estimateTokens(messages: { role: string; content: string }[]): number {
-  return messages.reduce((sum, m) => sum + m.content.length, 0);
+  return messages.reduce((sum, m) => sum + m.content.replace(/[\u4e00-\u9fff]/g, 'aa').length, 0);
 }
 
 function truncateContext(
@@ -160,12 +160,22 @@ async function fetchFromThinkProxy(
     withDirective = [...withDirective, { role: "user" as const, content: searchProgress }];
   }
   const truncated = withDirective.slice(-MAX_MESSAGES);
-  return fetch("/api/agent/think", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ systemPrompt, messages: truncated, ...(tools?.length ? { tools } : {}) }),
-    signal,
-  });
+  // Combine user abort signal with a 120s timeout
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(new Error('think proxy timeout')), 120_000);
+  if (signal) {
+    signal.addEventListener('abort', () => controller.abort(signal.reason), { once: true });
+  }
+  try {
+    return await fetch("/api/agent/think", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ systemPrompt, messages: truncated, ...(tools?.length ? { tools } : {}) }),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 /* ── Streaming Think Response Collector ── */
@@ -185,10 +195,22 @@ async function* collectThinkResponseStreaming(
   let finishReason = "";
   let buffer = "";
 
+  // Abort promise: resolves with a sentinel when signal fires
+  const abortPromise = signal
+    ? new Promise<'aborted'>((resolve) => {
+        if (signal.aborted) { resolve('aborted'); return; }
+        signal.addEventListener('abort', () => resolve('aborted'), { once: true });
+      })
+    : null;
+
   try {
     while (true) {
       if (signal?.aborted) break;
-      const { done, value } = await reader.read();
+      const result = abortPromise
+        ? await Promise.race([reader.read(), abortPromise])
+        : await reader.read();
+      if (result === 'aborted') break;
+      const { done, value } = result as ReadableStreamReadResult<Uint8Array>;
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split("\n");
@@ -238,7 +260,7 @@ export async function* agentLoopClient(
   const state: LoopState = {
     iteration: 0,
     consecutiveFailures: 0,
-    contextSize: estimateTokens(messages),
+    contextSize: estimateTokens(messages) + systemPrompt.replace(/[\u4e00-\u9fff]/g, 'aa').length,
     phase: "understanding",
   };
 
@@ -353,9 +375,14 @@ export async function* agentLoopClient(
       const parallelParams = toolCalls.map(tc => ({ tc, params: JSON.parse(tc.arguments) as Record<string, unknown> }));
       for (const { tc, params } of parallelParams) yield { type: "tool_call", name: tc.name, params };
 
-      const parallelResults = await Promise.all(parallelParams.map(({ tc, params }) =>
-        executeTool(tc.name, params).catch(err => ({ success: false, data: null, error: err instanceof Error ? err.message : "Tool error", errorCategory: "transient" as const, recoverable: true }))
-      ));
+      const timeoutResult = { success: false, data: null, error: '工具执行超时', errorCategory: 'transient' as const, recoverable: true };
+
+      const parallelResults = await Promise.race([
+        Promise.all(parallelParams.map(({ tc, params }) =>
+          executeTool(tc.name, params).catch(err => ({ success: false, data: null, error: err instanceof Error ? err.message : "Tool error", errorCategory: "transient" as const, recoverable: true }))
+        )),
+        new Promise<typeof timeoutResult[]>((resolve) => setTimeout(() => resolve(parallelParams.map(() => ({ ...timeoutResult }))), 30_000)),
+      ]);
 
       for (let i = 0; i < toolCalls.length; i++) {
         const tc = toolCalls[i];
@@ -577,8 +604,6 @@ export async function* agentLoopClient(
 
         // ── Non-streaming tool: existing logic ──
         formatted = formatToolResult(toolResult, tc.name);
-        recentCalls.push({ name: tc.name, params: paramsKey, result: formatted });
-        if (recentCalls.length > 5) recentCalls.shift();
       }
 
       yield { type: "tool_result", name: tc.name, result: formatted, success: toolResult.success, data: toolResult.data, uiPayload: toolResult.uiPayload };
@@ -612,10 +637,12 @@ export async function* agentLoopClient(
         state.contextSize = estimateTokens(ctx);
         forceTextOnly = true;
         intermediateSteps.push({ tool: tc.name, params: paramsKey, category, summary: (toolResult.error || "操作失败").slice(0, 100) });
-        recentCalls.push({ name: tc.name, params: paramsKey, result: formatted });
-        if (recentCalls.length > 5) recentCalls.shift();
-        continue; // Let the model process the error in next iteration
+        continue; // Let the model process the error in next iteration — DO NOT cache
       }
+
+      // Only cache successful / non-degraded results
+      recentCalls.push({ name: tc.name, params: paramsKey, result: formatted });
+      if (recentCalls.length > 5) recentCalls.shift();
 
       if (action.autoRetry) {
         autoRetryCount++;

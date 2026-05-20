@@ -2,7 +2,8 @@ import Database from "better-sqlite3";
 import path from "path";
 import fs from "fs";
 
-const DB_PATH = path.join(process.cwd(), "data", "zhiyuan.db");
+const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), "data");
+const DB_PATH = path.join(DATA_DIR, "zhiyuan.db");
 const SCHEMA_PATH = path.join(process.cwd(), "src", "lib", "server-schema.sql");
 
 let _db: Database.Database | null = null;
@@ -494,7 +495,7 @@ export function migrateFromFiles(): number {
   const root = path.join(process.cwd());
 
   // applications.md
-  const appsPath = path.join(root, "data", "applications.md");
+  const appsPath = path.join(DATA_DIR, "applications.md");
   if (fs.existsSync(appsPath)) {
     const content = fs.readFileSync(appsPath, "utf-8");
     const lines = content.split("\n");

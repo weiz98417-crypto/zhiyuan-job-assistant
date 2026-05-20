@@ -121,13 +121,15 @@ export async function POST(request: Request) {
         // Accumulate tool_call fragments by index (native function calling)
         const toolCallFragments = new Map<number, { id: string; name: string; arguments: string }>();
         let finishReason = "";
+        let lineBuf = "";
 
         try {
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
-            const text = decoder.decode(value, { stream: true });
-            const lines = text.split("\n");
+            lineBuf += decoder.decode(value, { stream: true });
+            const lines = lineBuf.split("\n");
+            lineBuf = lines.pop() || "";
             for (const line of lines) {
               if (!line.startsWith("data: ")) continue;
               const data = line.slice(6);
@@ -172,6 +174,20 @@ export async function POST(request: Request) {
               } catch {
                 /* skip */
               }
+            }
+          }
+
+          // Drain remaining buffer lines (could contain tool_calls/finish_reason SSE)
+          if (lineBuf.trim()) {
+            for (const line of lineBuf.split("\n")) {
+              if (!line.startsWith("data: ")) continue;
+              const data = line.slice(6);
+              if (data === "[DONE]") continue;
+              try {
+                const parsed = JSON.parse(data);
+                const fr = parsed.choices?.[0]?.finish_reason;
+                if (fr) finishReason = fr;
+              } catch { /* skip */ }
             }
           }
 

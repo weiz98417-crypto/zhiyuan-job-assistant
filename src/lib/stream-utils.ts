@@ -1,5 +1,7 @@
 /* ── Streaming utilities — reusable SSE/DeepSeek helpers ── */
 
+import { llmRetry, LLMError } from './llm-retry';
+
 const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
 const DEFAULT_MODEL = "deepseek-v4-flash";
 
@@ -33,28 +35,44 @@ export async function streamDeepSeekChunks(
 
   let response: Response;
   try {
-    response = await fetch(DEEPSEEK_API_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: config.model || DEFAULT_MODEL,
-        messages: config.messages,
-        temperature: config.temperature ?? 0.7,
-        max_tokens: config.max_tokens ?? 2000,
-        stream: true,
-      }),
+    response = await llmRetry(DEEPSEEK_API_URL, apiKey || '', {
+      model: config.model || DEFAULT_MODEL,
+      messages: config.messages,
+      stream: true,
+      temperature: config.temperature ?? 0.7,
+      max_tokens: config.max_tokens ?? 2000,
+      timeout: 30_000,
+      retries: 1, // stream retries: only 1 — retry connection, not mid-stream
+      fallbackModel: process.env.DEEPSEEK_FALLBACK_MODEL,
     });
   } catch (err) {
-    callbacks.onError(0, String(err));
+    if (err instanceof LLMError) {
+      callbacks.onError(0, err.userMessage);
+    } else {
+      callbacks.onError(0, String(err));
+    }
     return;
   }
 
   if (!response.ok) {
     const errText = await response.text().catch(() => "");
     callbacks.onError(response.status, errText);
+    return;
+  }
+
+  // ── Non-streaming fallback: llmRetry downgraded to stream:false ──
+  const isStreaming = (response.headers.get("content-type") || "").includes("text/event-stream");
+  if (!isStreaming) {
+    try {
+      const json = await response.json();
+      const content = json?.choices?.[0]?.message?.content;
+      if (content) {
+        callbacks.onContent(content);
+      }
+    } catch (err) {
+      callbacks.onError(0, `JSON parse error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    callbacks.onDone();
     return;
   }
 
@@ -106,22 +124,22 @@ export function createDeepSeekStream(config: DeepSeekStreamConfig): ReadableStre
     async start(controller) {
       let response: Response;
       try {
-        response = await fetch(DEEPSEEK_API_URL, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify({
-            model: config.model || DEFAULT_MODEL,
-            messages: config.messages,
-            temperature: config.temperature ?? 0.7,
-            max_tokens: config.max_tokens ?? 2000,
-            stream: true,
-          }),
+        response = await llmRetry(DEEPSEEK_API_URL, apiKey || '', {
+          model: config.model || DEFAULT_MODEL,
+          messages: config.messages,
+          stream: true,
+          temperature: config.temperature ?? 0.7,
+          max_tokens: config.max_tokens ?? 2000,
+          timeout: 30_000,
+          retries: 1,
+          fallbackModel: process.env.DEEPSEEK_FALLBACK_MODEL,
         });
       } catch (err) {
-        controller.error(err);
+        if (err instanceof LLMError) {
+          controller.error(new Error(err.userMessage));
+        } else {
+          controller.error(err);
+        }
         return;
       }
 
@@ -132,14 +150,31 @@ export function createDeepSeekStream(config: DeepSeekStreamConfig): ReadableStre
         return;
       }
 
+      // ── Non-streaming fallback: llmRetry downgraded to stream:false ──
+      const isStreaming = (response.headers.get("content-type") || "").includes("text/event-stream");
+      if (!isStreaming) {
+        try {
+          const json = await response.json();
+          const content = json?.choices?.[0]?.message?.content;
+          if (content) controller.enqueue(encoder.encode(content));
+        } catch (err) {
+          console.error("JSON parse error:", err);
+        }
+        controller.enqueue(encoder.encode("[DONE]\n"));
+        controller.close();
+        return;
+      }
+
       const reader = response.body!.getReader();
+      let lineBuf = "";
       try {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
 
-          const text = decoder.decode(value, { stream: true });
-          const lines = text.split("\n");
+          lineBuf += decoder.decode(value, { stream: true });
+          const lines = lineBuf.split("\n");
+          lineBuf = lines.pop() || "";
 
           for (const line of lines) {
             if (!line.startsWith("data: ")) continue;
@@ -193,19 +228,15 @@ export function sseEvent(event: string, data: unknown): string {
 export async function callDeepSeekJson(config: DeepSeekJsonConfig): Promise<string> {
   const apiKey = process.env.DEEPSEEK_API_KEY;
 
-  const response = await fetch(DEEPSEEK_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: config.model || DEFAULT_MODEL,
-      messages: config.messages,
-      temperature: config.temperature ?? 0.3,
-      max_tokens: config.max_tokens ?? 4000,
-      response_format: { type: "json_object" },
-    }),
+  const response = await llmRetry(DEEPSEEK_API_URL, apiKey || '', {
+    model: config.model || DEFAULT_MODEL,
+    messages: config.messages,
+    temperature: config.temperature ?? 0.3,
+    max_tokens: config.max_tokens ?? 4000,
+    response_format: { type: "json_object" },
+    retries: 2,
+    timeout: 30_000,
+    fallbackModel: process.env.DEEPSEEK_FALLBACK_MODEL,
   });
 
   if (!response.ok) {

@@ -18,7 +18,7 @@ Agent 工具系统是"真 Agent"的核心执行层，所有工具遵循统一的
      ┌────────▼────────┐   ┌────────▼────────┐   ┌────────▼────────┐
      │   Query Tools    │   │   Action Tools   │   │    MCP Shims    │
      │   (只读，不修改)  │   │  (修改数据/触发流)│   │ (代理到外部服务)  │
-     │      11 个       │   │      17 个       │   │      5 个       │
+     │      13 个       │   │      18 个       │   │      5 个       │
      └─────────────────┘   └─────────────────┘   └─────────────────┘
               │                      │                      │
               └──────────────────────┼──────────────────────┘
@@ -29,7 +29,7 @@ Agent 工具系统是"真 Agent"的核心执行层，所有工具遵循统一的
                           │       2 个            │
                           └─────────────────────┘
 
-共 41 个工具，覆盖查询、动作、面试、MCP 四大类别。
+共 38 个工具，覆盖查询、动作、面试、MCP 四大类别。
 ```
 
 ### 1.1 核心类型定义
@@ -107,7 +107,7 @@ clearActiveAgentTools()     → 清除白名单 (允许所有工具)
 
 ```
 启动阶段:
-  index.ts 导入所有工具 → registry.register(...) × 35
+  index.ts 导入所有工具 → registry.register(...) × 38
   populateAgentTools(agents) → 将 toolNames 解析为 tools 数组
 
 运行时:
@@ -132,15 +132,15 @@ Agent 工具生态的设计遵循一个看似朴素但极为强大的原则—�
 
 这种设计背后的深层逻辑是**组合优于配置**。工具本身不是"API 端点加了一层聊天包装"——而是可以被 LLM 编排的基础原语。一个复杂的求职评估任务可能涉及 5 个工具的链式调用：先 `fetch_jd_content` 抓取 JD 文本，再 `analyze_jd_risks` 扫描风险信号，然后 `evaluate_jd_full` 执行 7 维评估，如果用户对简历不放心，还可能调用 `check_ats_compatibility` 做格式检查。每一个工具独立可测试、独立可迭代，新增一个能力就是新增一个文件——定义 handler、写 formatResult、export 注册——不需要改动任何编排代码。
 
-工具的 **action/query 二分法**直接借鉴了 **CQRS（命令查询职责分离）** 模式。Query 工具（11 个）是纯读操作：不写入任何数据，不产生副作用，即使被 LLM 反复调用也不会造成数据污染。Action 工具（17 个）是写操作：会修改 SQLite、localStorage、触发网络请求或推进 SOP 状态机。这种分类不仅是文档层面的标注——ToolRegistry 的执行层可以利用这个分类做差异化处理：比如在测试环境中 stub 所有 Action 工具但让 Query 工具真实执行，从而安全地验证 Agent 的推理逻辑。
+工具的 **action/query 二分法**直接借鉴了 **CQRS（命令查询职责分离）** 模式。Query 工具（13 个）是纯读操作：不写入任何数据，不产生副作用，即使被 LLM 反复调用也不会造成数据污染。Action 工具（18 个）是写操作：会修改 SQLite、localStorage、触发网络请求或推进 SOP 状态机。这种分类不仅是文档层面的标注——ToolRegistry 的执行层可以利用这个分类做差异化处理：比如在测试环境中 stub 所有 Action 工具但让 Query 工具真实执行，从而安全地验证 Agent 的推理逻辑。
 
 新工具的注册流程也体现了极简设计原则。一个 `ToolDefinition` 只需要四个要素：name（唯一标识）、handler（执行逻辑）、formatResult（格式化输出给 LLM）、category（query/action）。没有复杂的配置文件，没有 XML 描述符，没有注解——就是一个 TypeScript 对象。`populateAgentTools()` 函数自动将工具按白名单注入到各个子 Agent，新工具被注册后 30 秒内就能在全系统中生效。这种轻量级的设计意味着扩展成本极低，鼓励"先做出来试试"的快速迭代节奏。
 
 ---
 
-## 2. 工具全景列表 (41 个)
+## 2. 工具全景列表 (38 个)
 
-### 2.1 Query 工具 (16 个 — 只读查询)
+### 2.1 Query 工具 (13 个 — 只读查询)
 
 | # | 工具名 | 中文名 | 描述 | 关键参数 |
 |---|--------|--------|------|----------|
@@ -161,7 +161,7 @@ Agent 工具生态的设计遵循一个看似朴素但极为强大的原则—�
 | 15 | `score_interview_answer` | 评分面试回答 | 对面试回答进行四维度评分 | `question*`, `answer*` |
 | 16 | — | — | — | — |
 
-### 2.2 Action 工具 (18 个 — 触发副作用)
+### 2.2 Action 工具 (18 个 — 触发副作用 / 流式输出)
 
 | # | 工具名 | 中文名 | 描述 | 关键参数 |
 |---|--------|--------|------|----------|
@@ -324,7 +324,7 @@ populateAgentTools(agents)
 
 | Agent | 工具数量 | 白名单 |
 |-------|---------|--------|
-| **general** (通用助手) | 35 (全部) | `toolNames: []` — 空数组 = 全部工具 |
+| **general** (通用助手) | 38 (全部) | `toolNames: []` — 空数组 = 全部工具 |
 | **evaluate** (JD 评估) | 10 | `evaluate_jd`, `evaluate_jd_full`, `fetch_jd_content`, `web_search`, `analyze_jd_risks`, `decode_black_market_terms`, `get_report_detail`, `export_file`, `download_report_pdf`, `get_profile` |
 | **interview** (面试教练) | 4 | `generate_interview_questions`, `score_interview_answer`, `start_interview_session`, `prepare_interview_full` |
 | **profile** (求职画像) | 7 | `get_profile`, `get_recommendations`, `get_profile_insights`, `self_positioning`, `check_pipeline_health`, `get_recent_activity`, `mine_profile` |

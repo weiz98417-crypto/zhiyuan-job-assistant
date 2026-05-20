@@ -124,11 +124,17 @@ async function callLLM(
 
     let response: Response | null = null;
     for (let attempt = 0; attempt < 2; attempt++) {
-      response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify(body),
-      });
+      try {
+        response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(60_000),
+        });
+      } catch (err) {
+        lastError = `${model} network: ${err instanceof Error ? err.message : String(err)}`;
+        break; // Network error → try next model
+      }
       if (response.ok) break;
       lastError = `${model} ${response.status}`;
       if (response.status !== 429 && response.status !== 503) break;
@@ -187,7 +193,9 @@ async function callLLM(
 const MAX_CONTEXT_TOKENS = 64000;
 
 function estimateTokens(messages: { role: string; content: string }[]): number {
-  return messages.reduce((sum, m) => sum + m.content.length, 0);
+  // CJK-aware: Chinese chars ≈ 1.5-2 tokens, English chars ≈ 0.25 tokens.
+  // Replacing CJK with "aa" brings chars-to-token ratio to ~1:1 for mixed text.
+  return messages.reduce((sum, m) => sum + m.content.replace(/[\u4e00-\u9fff]/g, 'aa').length, 0);
 }
 
 export async function* agentLoopServer(opts: {
@@ -196,14 +204,15 @@ export async function* agentLoopServer(opts: {
   messages: { role: string; content: string }[];
   config?: LoopConfig;
   tools?: Array<{ type: string; function: object }>;
+  signal?: AbortSignal;
 }): AsyncGenerator<SSEEvent> {
-  const { systemPrompt, messages, config = DEFAULT_LOOP_CONFIG, tools, agent } = opts;
+  const { systemPrompt, messages, config = DEFAULT_LOOP_CONFIG, tools, agent, signal } = opts;
   const modelPreference = agent?.model;
   const toolWhitelist = agent?.toolNames?.length ? agent.toolNames : undefined;
   const state: LoopState = {
     iteration: 0,
     consecutiveFailures: 0,
-    contextSize: estimateTokens(messages),
+    contextSize: estimateTokens(messages) + systemPrompt.replace(/[\u4e00-\u9fff]/g, 'aa').length,
     phase: "understanding",
   };
 
@@ -215,6 +224,10 @@ export async function* agentLoopServer(opts: {
   const intermediateSteps: { tool: string; params: string; category: ErrorCategory; summary: string }[] = [];
 
   while (state.iteration < config.maxIterations) {
+    if (signal?.aborted) {
+      yield { type: "done" };
+      return;
+    }
     state.iteration++;
 
     if (state.contextSize > MAX_CONTEXT_TOKENS) {
@@ -301,8 +314,6 @@ export async function* agentLoopServer(opts: {
           toolResult = { success: false, data: null, error: execErr instanceof Error ? execErr.message : "Tool execution error", errorCategory: "transient" as const };
         }
         formatted = formatToolResult(toolResult, tc.name);
-        recentCalls.push({ name: tc.name, params: paramsKey, result: formatted });
-        if (recentCalls.length > 5) recentCalls.shift();
       }
 
       yield { type: "tool_result", name: tc.name, result: formatted, success: toolResult.success };
@@ -335,10 +346,12 @@ export async function* agentLoopServer(opts: {
         state.contextSize = estimateTokens(ctx);
         state.consecutiveFailures++;
         intermediateSteps.push({ tool: tc.name, params: paramsKey, category, summary: (toolResult.error || "操作失败").slice(0, 100) });
-        recentCalls.push({ name: tc.name, params: paramsKey, result: formatted });
-        if (recentCalls.length > 5) recentCalls.shift();
-        continue;
+        continue; // DO NOT cache degraded results
       }
+
+      // Only cache successful / non-degraded results
+      recentCalls.push({ name: tc.name, params: paramsKey, result: formatted });
+      if (recentCalls.length > 5) recentCalls.shift();
 
       if (action.autoRetry) {
         autoRetryCount++;

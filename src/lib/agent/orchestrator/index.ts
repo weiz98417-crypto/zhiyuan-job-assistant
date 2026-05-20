@@ -28,6 +28,7 @@ export interface OrchestratorContext {
   sessionId: number | null;
   messages: { role: string; content: string }[];
   memoryDigest?: string;
+  signal?: AbortSignal;
 }
 
 export interface OrchestratorResult {
@@ -161,6 +162,7 @@ export async function* orchestrateGen(
     systemPrompt,
     messages: ctx.messages,
     tools,
+    signal: ctx.signal,
   });
 }
 

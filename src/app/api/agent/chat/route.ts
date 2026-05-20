@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSkillBody } from "@/lib/agent/skill-loader";
+import { llmRetry, LLMError } from "@/lib/llm-retry";
 
 /* ── SSE helpers ── */
 
@@ -21,22 +22,17 @@ async function callDeepSeekStream(
   apiKey: string,
 ): Promise<Response> {
   const truncated = messages.slice(-MAX_MESSAGES);
-  return fetch(DEEPSEEK_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      messages: [
-        { role: "system", content: systemPrompt },
-        ...truncated,
-      ],
-      temperature: 0.7,
-      max_tokens: 2000,
-      stream: true,
-    }),
+  return llmRetry(DEEPSEEK_API_URL, apiKey, {
+    model: MODEL,
+    messages: [
+      { role: "system", content: systemPrompt },
+      ...truncated,
+    ],
+    temperature: 0.7,
+    max_tokens: 2000,
+    stream: true,
+    retries: 1,
+    fallbackModel: process.env.DEEPSEEK_FALLBACK_MODEL,
   });
 }
 
@@ -76,20 +72,44 @@ export async function POST(request: Request) {
       );
     }
 
+    const isStreaming = (response.headers.get("content-type") || "").includes("text/event-stream");
+
     const stream = new ReadableStream({
       async start(controller) {
         controller.enqueue(encoder.encode(sse({ type: "phase", phase: "thinking" })));
 
+        // ── Non-streaming fallback: llmRetry downgraded to stream:false ──
+        if (!isStreaming) {
+          try {
+            const json = await response.json();
+            const content = json?.choices?.[0]?.message?.content;
+            if (content) {
+              controller.enqueue(encoder.encode(sse({ type: "phase", phase: "responding" })));
+              controller.enqueue(encoder.encode(sse({ type: "text", content })));
+            }
+          } catch (err) {
+            console.error("JSON parse error:", err);
+          }
+          controller.enqueue(encoder.encode(sse({ type: "done" })));
+          controller.close();
+          return;
+        }
+
+        // ── SSE streaming: line-buffer pattern ──
         const reader = response.body!.getReader();
         const decoder = new TextDecoder();
         let buffered = "";
+        let lineBuf = "";
+        let phaseSent = false;
 
         try {
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
-            const text = decoder.decode(value, { stream: true });
-            const lines = text.split("\n");
+            lineBuf += decoder.decode(value, { stream: true });
+            const lines = lineBuf.split("\n");
+            lineBuf = lines.pop() || "";
+
             for (const line of lines) {
               if (!line.startsWith("data: ")) continue;
               const data = line.slice(6);
@@ -100,7 +120,10 @@ export async function POST(request: Request) {
                 if (content) {
                   buffered += content;
                   if (buffered.length < 6) continue;
-                  controller.enqueue(encoder.encode(sse({ type: "phase", phase: "responding" })));
+                  if (!phaseSent) {
+                    controller.enqueue(encoder.encode(sse({ type: "phase", phase: "responding" })));
+                    phaseSent = true;
+                  }
                   controller.enqueue(encoder.encode(sse({ type: "text", content })));
                 }
               } catch {

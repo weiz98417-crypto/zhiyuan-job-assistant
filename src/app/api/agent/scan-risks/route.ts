@@ -4,6 +4,10 @@ import { resolve, join } from "path";
 
 const ROOT = process.cwd();
 
+interface Trigger { pattern: string; signal: string; severity: string; }
+interface Term { term: string; meaning: string; severity: string; }
+interface Pattern { pattern: string; description: string; signals: string[]; severity: string; }
+
 /* ── Helper: extract value after first colon ── */
 
 function afterColon(line: string): string {

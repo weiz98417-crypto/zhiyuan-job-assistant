@@ -9,13 +9,13 @@
 筝筝纸鸢的 Agent 系统经历了两个阶段：
 
 ```
-阶段 1 (2026-05-01 前)              阶段 2 (当前)
-─────────────────────────           ─────────────────────
-Claude Mode 文件 唯一智能层          TypeScript Agent 主力
-                                    Claude Mode 文件 降为 CLI 备选
-需要 Claude Code CLI                 浏览器打开即用
-Markdown = Prompt                    TypeScript ReAct Loop
-改 Prompt = 改文件                   改代码 = 改工具
+              阶段 2 (当前)
+           ─────────────────────
+          TypeScript Agent 主力
+                                   
+                 浏览器打开即用
+                   TypeScript ReAct Loop
+                   改代码 = 改工具
 ```
 
 **现在的真实情况：用户打开 `http://localhost:3000/agent`，浏览器里直接对话，完全不需要 Claude Code CLI。**
@@ -42,8 +42,9 @@ Claude Mode 文件（`modes/zh/*.md`）保留的原因是：
     │
     ▼
 Agent Loop (src/lib/agent/loop/)
-    ├── callLLM() → DeepSeek V4 → GLM-4 → Qwen-Long (模型降级)
-    ├── Native function calling → 38+ TypeScript 工具
+    ├── callLLM() → DeepSeek Flash → Pro → GLM-4 → Qwen-Long (4级降级)
+    ├── Native function calling → 38 TypeScript 工具
+    ├── CJK token 估算 + 流式降级 + 行缓冲 + 超时保护
     └── Quality gate → checkResultQuality → self-healing
     │
     ▼
@@ -56,7 +57,7 @@ Agent Loop (src/lib/agent/loop/)
 
 | Agent ID | 名称 | 工具白名单 | 触发条件 |
 |----------|------|-----------|---------|
-| `general` | 通用助手 | 全部 38-41 工具 | 兜底（`.*`） |
+| `general` | 通用助手 | 全部 38 工具 | 兜底（空白名单=全部） |
 | `evaluate` | JD 评估 | evaluate_jd, evaluate_jd_full, fetch_jd_content, web_search, analyze_jd_risks, decode_terms, get_report_detail, export_file, download_report_pdf | 评估/分析 JD |
 | `resume` | 简历优化 | read_file, import_resume, generate_cv, evaluate_jd, export_file, get_reference_detail, optimize_resume_section, save_resume_section, check_ats_compatibility | 简历/优化/CV |
 | `interview` | 面试教练 | generate_interview_questions, score_interview_answer, start_interview_session, prepare_interview_full, web_search, read_file, search_applications, get_report_detail | 面试/准备 |
@@ -134,14 +135,14 @@ CLAUDE.md (根路由器)
 
 ## 5. Web 路径 vs CLI 路径
 
-| 场景 | Web (TypeScript Agent) | CLI (Claude Mode) |
-|------|----------------------|-------------------|
-| JD 评估 | evaluate_jd_full 工具 → 浏览器展示 | CLI 直接跑 jianzhi.md |
-| 风险扫描 | /api/agent/scan-risks → scan-risks.mjs | CLI 直接跑 scan-risks.mjs |
-| CV 优化 | optimize_resume_section → 流式选方案 | - （CLI 无此功能） |
-| PDF 导出 | /api/cv/generate-pdf → 下载 | CLI Playwright 渲染 |
-| 面试模拟 | interview engine 状态机 → 实时评分 | - （CLI 无此功能） |
-| 投递追踪 | search_applications 工具 → 表格展示 | CLI 读 SQLite |
-| 求职画像 | get_profile_insights → 卡片展示 | CLI 读 YAML |
+| 场景 | Web (TypeScript Agent) |
+|:----:|----------------------|
+| JD 评估 | evaluate_jd_full 工具 → 浏览器展示 |
+| 风险扫描 | /api/agent/scan-risks → scan-risks.mjs |
+| CV 优化 | optimize_resume_section → 流式选方案 |
+| PDF 导出 | /api/cv/generate-pdf → 下载 |
+| 面试模拟 | interview engine 状态机 → 实时评分 |
+| 投递追踪 | search_applications 工具 → 表格展示 |
+| 求职画像 | get_profile_insights → 卡片展示 |
 
 **结论：Web 是完整产品，CLI 是开发者备选。**

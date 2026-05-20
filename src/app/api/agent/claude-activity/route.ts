@@ -1,21 +1,13 @@
 import { NextResponse } from "next/server";
-import Database from "better-sqlite3";
-import path from "path";
-import fs from "fs";
 import { getCurrentUser } from "@/lib/auth";
+import { getDb } from "@/lib/server-db";
 
 export async function GET() {
   try {
     let user;
     try { user = await getCurrentUser(); } catch { return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 }); }
 
-    const dbPath = path.join(process.cwd(), "data", "zhiyuan.db");
-    if (!fs.existsSync(dbPath)) {
-      return NextResponse.json({ activity: "" });
-    }
-
-    const db = new Database(dbPath, { readonly: true });
-    db.pragma("busy_timeout = 3000");
+    const db = getDb();
 
     const recent = db
       .prepare(
@@ -29,8 +21,6 @@ export async function GET() {
     const pipeline = db
       .prepare("SELECT status, COUNT(*) as cnt FROM applications WHERE user_id = ? GROUP BY status")
       .all(user.userId) as { status: string; cnt: number }[];
-
-    db.close();
 
     const parts: string[] = [];
     parts.push("[Claude Agent 最近活动]");

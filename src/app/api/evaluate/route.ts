@@ -3,6 +3,7 @@
 import { NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
+import { llmRetry } from "@/lib/llm-retry";
 
 const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
 const MODEL = "deepseek-v4-flash";
@@ -178,24 +179,21 @@ ${systemContext}
   ]
 }`;
 
-    const response = await fetch(DEEPSEEK_API_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: (isEnglish
-            ? `${userProfile ? `Candidate profile — Skills: ${userProfile.superpowers.join(", ") || "N/A"}. Headline: ${userProfile.headline || "N/A"}. Story: ${userProfile.exitStory || "N/A"}. Target roles: ${userProfile.targetRoles.map(r => r.name).join(", ") || "N/A"}.\n\n` : ""}${cvText ? `Candidate's full CV:\n${cvText}\n\n` : "NOTE: No CV data available. For Block B (CV Match), output a placeholder message (score b=0) stating that CV matching requires the user to first fill in their resume on the CV Optimization page.\n\n"}Evaluate this job description:\n\n${jdText}`
-            : `${userProfile ? `求职者信息 — 技能: ${userProfile.superpowers.join(", ") || "未知"}。头衔: ${userProfile.headline || "未知"}。职业故事: ${userProfile.exitStory || "未知"}。目标方向: ${userProfile.targetRoles.map(r => r.name).join(", ") || "未知"}。\n\n` : ""}${cvText ? `候选人完整简历：\n${cvText}\n\n` : "注意：没有简历数据。Block B（简历匹配）请输出占位说明（评分 b=0），提示用户需先在简历优化页面完善简历。\n\n"}请评估以下职位描述：\n\n${jdText}`) },
-        ],
-        temperature: 0.3,
-        max_tokens: 12000,
-        response_format: { type: "json_object" },
-      }),
+    const userContent = isEnglish
+      ? `${userProfile ? `Candidate profile — Skills: ${userProfile.superpowers.join(", ") || "N/A"}. Headline: ${userProfile.headline || "N/A"}. Story: ${userProfile.exitStory || "N/A"}. Target roles: ${userProfile.targetRoles.map(r => r.name).join(", ") || "N/A"}.\n\n` : ""}${cvText ? `Candidate's full CV:\n${cvText}\n\n` : "NOTE: No CV data available. For Block B (CV Match), output a placeholder message (score b=0) stating that CV matching requires the user to first fill in their resume on the CV Optimization page.\n\n"}Evaluate this job description:\n\n${jdText}`
+      : `${userProfile ? `求职者信息 — 技能: ${userProfile.superpowers.join(", ") || "未知"}。头衔: ${userProfile.headline || "未知"}。职业故事: ${userProfile.exitStory || "未知"}。目标方向: ${userProfile.targetRoles.map(r => r.name).join(", ") || "未知"}。\n\n` : ""}${cvText ? `候选人完整简历：\n${cvText}\n\n` : "注意：没有简历数据。Block B（简历匹配）请输出占位说明（评分 b=0），提示用户需先在简历优化页面完善简历。\n\n"}请评估以下职位描述：\n\n${jdText}`;
+
+    const response = await llmRetry(DEEPSEEK_API_URL, apiKey, {
+      model: MODEL,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userContent },
+      ],
+      temperature: 0.3,
+      max_tokens: 12000,
+      response_format: { type: "json_object" },
+      retries: 2,
+      fallbackModel: process.env.DEEPSEEK_FALLBACK_MODEL,
     });
 
     if (!response.ok) {
@@ -234,23 +232,47 @@ ${systemContext}
       }
     }
 
+    // Type guards: LLM may return string for numeric fields
+    const safeNum = (v: unknown, fallback = 0): number =>
+      typeof v === 'number' ? v : Number(v) || fallback;
+    const safeArr = (v: unknown): unknown[] =>
+      Array.isArray(v) ? v : [];
+    const safeScores = (s: unknown): BlockScores => {
+      if (!s || typeof s !== 'object') return { a: 0, b: 0, c: 0, d: 0, e: 0, f: 0, g: "" };
+      const o = s as Record<string, unknown>;
+      return {
+        a: safeNum(o.a),
+        b: safeNum(o.b),
+        c: safeNum(o.c),
+        d: safeNum(o.d),
+        e: safeNum(o.e),
+        f: safeNum(o.f),
+        g: typeof o.g === 'string' ? o.g : "",
+      };
+    };
+
     const result: EvalResult = {
       success: true,
       data: {
-        reportNum: 0, // Will be assigned by frontend
+        reportNum: 0,
         date: new Date().toISOString().split("T")[0],
-        company: parsed.company || "未知公司",
-        role: parsed.role || "未知岗位",
-        archetype: parsed.archetype || "未检测",
-        overallScore: parsed.overallScore || 0,
-        legitimacy: parsed.legitimacy || "不确定",
-        blocks: parsed.blocks || {},
-        scores: parsed.scores || { a: 0, b: 0, c: 0, d: 0, e: 0, f: 0, g: "" },
-        keywords: parsed.keywords || [],
-        keywordCoverage: parsed.keywordCoverage || { overall: 0, items: [] },
-        skillGaps: parsed.skillGaps || [],
-        levelMatch: parsed.levelMatch || { level: "", match: "unknown", note: "" },
-        differentiationTips: parsed.differentiationTips || [],
+        company: typeof parsed.company === 'string' ? parsed.company : "未知公司",
+        role: typeof parsed.role === 'string' ? parsed.role : "未知岗位",
+        archetype: typeof parsed.archetype === 'string' ? parsed.archetype : "未检测",
+        overallScore: safeNum(parsed.overallScore),
+        legitimacy: typeof parsed.legitimacy === 'string' ? parsed.legitimacy : "不确定",
+        blocks: parsed.blocks && typeof parsed.blocks === 'object' ? parsed.blocks as Record<string, string> : {},
+        scores: safeScores(parsed.scores),
+        keywords: safeArr(parsed.keywords) as unknown as string[],
+        keywordCoverage: {
+          overall: safeNum((parsed.keywordCoverage as Record<string, unknown>)?.overall),
+          items: safeArr((parsed.keywordCoverage as Record<string, unknown>)?.items) as unknown as { keyword: string; status: string }[],
+        },
+        skillGaps: safeArr(parsed.skillGaps) as unknown as { skill: string; importance: string; substitution: string }[],
+        levelMatch: (parsed.levelMatch && typeof parsed.levelMatch === 'object')
+          ? parsed.levelMatch as { level: string; match: string; note: string }
+          : { level: "", match: "unknown", note: "" },
+        differentiationTips: safeArr(parsed.differentiationTips) as unknown as { jdEmphasis: string; resumeWeakness: string; tip: string }[],
         fullMarkdown: content,
       },
     };

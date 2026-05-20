@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
+import { useToast } from '@/lib/use-toast';
 
 interface UserItem {
   id: string;
@@ -13,20 +14,13 @@ interface UserItem {
   lastLoginAt: string | null;
 }
 
-type ToastType = 'success' | 'error' | 'info';
-
 export default function AdminUsersPage() {
   const [users, setUsers] = useState<UserItem[]>([]);
   const [filter, setFilter] = useState<string>('all');
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<UserItem | null>(null);
-
-  const showToast = useCallback((message: string, type: ToastType = 'success') => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 2500);
-  }, []);
+  const { showToast } = useToast();
 
   useEffect(() => {
     loadUsers();
@@ -130,22 +124,6 @@ export default function AdminUsersPage() {
 
   return (
     <div>
-      {/* Toast */}
-      {toast && (
-        <div style={{
-          position: 'fixed', top: 20, right: 20, zIndex: 100,
-          padding: '10px 18px', borderRadius: 'var(--radius-sm)',
-          fontSize: '0.82rem', fontWeight: 500,
-          background: toast.type === 'success' ? '#EFF8F2' : toast.type === 'error' ? '#FDF2F2' : '#F0F4FF',
-          border: `1px solid ${toast.type === 'success' ? '#B7E4C7' : toast.type === 'error' ? '#F5C6C6' : '#C5D3F5'}`,
-          color: toast.type === 'success' ? '#4A8C6A' : toast.type === 'error' ? '#A85454' : '#4A6FA5',
-          boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
-          animation: 'fadeIn 0.2s ease',
-        }}>
-          {toast.message}
-        </div>
-      )}
-
       {/* Delete confirmation modal */}
       {deleteTarget && (
         <div style={{
