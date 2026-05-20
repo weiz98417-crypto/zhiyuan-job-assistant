@@ -15,7 +15,7 @@ import SuggestionChips from "./SuggestionChips";
 import type { SuggestionChip } from "./SuggestionChips";
 
 const MAX_IMAGES = 5;
-const VALID_IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"];
+const VALID_FILE_TYPES = ["image/png", "image/jpeg", "image/webp", "application/pdf"];
 
 /* ── Types ── */
 
@@ -892,15 +892,15 @@ export default function AgentChat({
       reader.readAsDataURL(file);
     });
 
-  const addImages = useCallback(async (files: File[]) => {
+  const addFiles = useCallback(async (files: File[]) => {
     const newItems: typeof images = [];
     for (const file of files) {
-      if (!VALID_IMAGE_TYPES.includes(file.type)) continue;
+      if (!VALID_FILE_TYPES.includes(file.type)) continue;
       if (file.size > 5 * 1024 * 1024) continue;
       if (images.length + newItems.length >= MAX_IMAGES) break;
       const id = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
       const base64 = await toBase64(file);
-      const previewUrl = URL.createObjectURL(file);
+      const previewUrl = file.type === "application/pdf" ? "" : URL.createObjectURL(file);
       newItems.push({ id, base64, previewUrl, name: file.name });
     }
     setImages((prev) => [...prev, ...newItems].slice(0, MAX_IMAGES));
@@ -923,11 +923,11 @@ export default function AgentChat({
           if (file) files.push(file);
         }
       }
-      if (files.length > 0) addImages(files);
+      if (files.length > 0) addFiles(files);
     };
     document.addEventListener("paste", handler);
     return () => document.removeEventListener("paste", handler);
-  }, [addImages]);
+  }, [addFiles]);
 
   const handleSend = async () => {
     const trimmed = input.trim();
@@ -955,7 +955,7 @@ export default function AgentChat({
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
-      addImages(Array.from(e.target.files));
+      addFiles(Array.from(e.target.files));
       e.target.value = "";
     }
   };
@@ -1057,25 +1057,31 @@ export default function AgentChat({
         {/* Screenshot preview strip */}
         {images.length > 0 && (
           <div className="mb-2 flex items-center gap-2 flex-wrap">
-            {images.map((img, i) => (
-              <div key={img.id} className="relative group">
-                <img
-                  src={img.previewUrl}
-                  alt={`截图 ${i + 1}`}
-                  className="w-12 h-12 object-cover rounded-[var(--radius-sm)] border border-[var(--color-border)]"
-                />
+            {images.map((item, i) => (
+              <div key={item.id} className="relative group">
+                {item.previewUrl ? (
+                  <img
+                    src={item.previewUrl}
+                    alt={`截图 ${i + 1}`}
+                    className="w-12 h-12 object-cover rounded-[var(--radius-sm)] border border-[var(--color-border)]"
+                  />
+                ) : (
+                  <div className="w-12 h-12 flex items-center justify-center rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-bg)]">
+                    <FileText size={18} className="text-[var(--color-primary)]" />
+                  </div>
+                )}
                 <span className="absolute -top-1 -left-1 text-[10px] bg-[var(--color-text)] text-[var(--color-surface)] w-4 h-4 rounded-full flex items-center justify-center">
                   {i + 1}
                 </span>
                 <button
-                  onClick={() => removeImage(img.id)}
+                  onClick={() => removeImage(item.id)}
                   className="absolute -top-1 -right-1 p-0.5 rounded-full bg-red-500 text-white opacity-0 group-hover:opacity-100 transition-opacity"
                 >
                   <X size={10} />
                 </button>
               </div>
             ))}
-            <span className="text-xs text-[var(--color-muted)]">共 {images.length} 张</span>
+            <span className="text-xs text-[var(--color-muted)]">共 {images.length} 个文件</span>
           </div>
         )}
 
@@ -1089,14 +1095,14 @@ export default function AgentChat({
                 ? "border-[var(--color-primary)] bg-[var(--color-primary-muted)] animate-pulse"
                 : "border-[var(--color-divider)] hover:border-[var(--color-primary)]"
             } disabled:opacity-30 disabled:cursor-not-allowed`}
-            title="上传截图"
+            title="上传截图或PDF简历"
           >
             <Plus size={16} className="text-[var(--color-muted)]" />
           </button>
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/png,image/jpeg,image/webp"
+            accept="image/png,image/jpeg,image/webp,.pdf"
             multiple
             onChange={handleFileSelect}
             className="hidden"

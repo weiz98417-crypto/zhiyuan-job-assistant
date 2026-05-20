@@ -188,7 +188,8 @@ function AgentPageInner() {
           try {
             // Convert first image base64 to blob and upload
             const base64 = images[0];
-            const mime = base64.startsWith("data:image/png") ? "image/png"
+            const mime = base64.startsWith("data:application/pdf") ? "application/pdf"
+              : base64.startsWith("data:image/png") ? "image/png"
               : base64.startsWith("data:image/jpeg") ? "image/jpeg"
               : base64.startsWith("data:image/webp") ? "image/webp"
               : "image/png";
