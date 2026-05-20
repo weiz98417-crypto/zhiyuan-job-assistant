@@ -5,6 +5,8 @@
   "description": "AI-powered job search assistant for the Chinese market",
   "scripts": {
     "dev": "next dev",
+    "prestart": "node scripts/turso-pull.mjs",
+    "turso-push": "node scripts/turso-push.mjs",
     "build": "next build",
     "build:railway": "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=1 next build",
     "start": "next start",
@@ -23,6 +25,7 @@
     "check-onboarding": "node scripts/check-onboarding.mjs"
   },
   "dependencies": {
+    "@libsql/client": "^0.17.3",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@napi-rs/canvas": "^1.0.0",
     "@types/better-sqlite3": "^7.6.13",

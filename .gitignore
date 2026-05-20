@@ -92,3 +92,5 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 openspec/changes/
+auth
+auth-wal
