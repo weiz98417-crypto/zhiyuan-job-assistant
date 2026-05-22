@@ -30,6 +30,41 @@ export function getDb(): Database.Database {
       _db.exec("ALTER TABLE optimization_preferences ADD COLUMN operation TEXT NOT NULL DEFAULT ''");
     }
 
+    // Migration: scan tables
+    _db.exec(`
+      CREATE TABLE IF NOT EXISTS scan_queue (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id),
+        status TEXT DEFAULT 'pending',
+        companies_total INTEGER DEFAULT 0,
+        companies_done INTEGER DEFAULT 0,
+        jobs_found INTEGER DEFAULT 0,
+        jobs_new INTEGER DEFAULT 0,
+        error_log TEXT DEFAULT '[]',
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+      );
+      CREATE TABLE IF NOT EXISTS scan_jobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        scan_id TEXT NOT NULL REFERENCES scan_queue(id),
+        user_id TEXT NOT NULL REFERENCES users(id),
+        company TEXT NOT NULL,
+        title TEXT NOT NULL,
+        url TEXT NOT NULL,
+        location TEXT DEFAULT '',
+        department TEXT DEFAULT '',
+        jd_snippet TEXT DEFAULT '',
+        status TEXT DEFAULT 'new',
+        dedup_key TEXT NOT NULL UNIQUE,
+        first_seen_at TEXT DEFAULT (datetime('now')),
+        last_interaction_at TEXT,
+        discovered_at TEXT DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_scan_jobs_user_status ON scan_jobs(user_id, status);
+      CREATE INDEX IF NOT EXISTS idx_scan_jobs_scan ON scan_jobs(scan_id);
+      CREATE INDEX IF NOT EXISTS idx_scan_queue_user ON scan_queue(user_id, status);
+    `);
+
     // Migration: multi-user auth — add user_id to private + attribution tables
     const userTables = [
       'profiles', 'profile_signals', 'sessions', 'stories', 'cv_data',

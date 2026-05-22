@@ -1,122 +1,202 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Search,
-  Plus,
-  X,
-  Settings,
-  Clock,
-  ExternalLink,
-  RefreshCw,
-  Zap,
-  Eye,
-  SkipForward,
+  Search, Zap, Clock, Building2, MapPin,
+  EyeOff, ChevronRight, RefreshCw, AlertTriangle,
+  X, Filter, Settings, ExternalLink, SkipForward,
+  Eye, Plus,
 } from "lucide-react";
 import {
-  HandwritingTitle,
-  WarmButton,
-  PaperCard,
+  HandwritingTitle, WarmButton, PaperCard,
+  StaggerList, StaggerItem,
 } from "@/components/design";
+import { useToast } from "@/lib/use-toast";
 
-interface ScanSource {
+// ── Types ───────────────────────────────────────────────────────────
+
+interface JobItem {
+  id: number;
   company: string;
-  platform: string;
-  enabled: boolean;
+  title: string;
+  url: string;
+  location: string;
+  department: string;
+  status: "new" | "dismissed" | "evaluated";
+  discovered_at: string;
 }
 
-interface ScanResult {
-  id: string;
-  company: string;
-  role: string;
-  platform: string;
-  url: string;
-  foundAt: string;
-  status: "new" | "evaluated" | "skipped";
-  snippet?: string;
+interface ScanStatus {
+  scanId: string;
+  status: "pending" | "running" | "done" | "failed";
+  companiesDone: number;
+  companiesTotal: number;
+  jobsFound: number;
+  jobsNew: number;
+  companies: { name: string; status: string; jobsFound: number; error?: string }[];
 }
 
 interface ScanHistoryEntry {
-  date: string;
-  resultsFound: number;
-  newCount: number;
+  scanId: string;
+  createdAt: string;
+  companiesDone: number;
+  jobsFound: number;
+  jobsNew: number;
+  totalJobs: number;
+  failedCompanies: { company: string; error: string; level: string }[];
 }
 
-export default function DiscoverPage() {
-  const [sources, setSources] = useState<ScanSource[]>([]);
-  const [keywords, setKeywords] = useState({
-    positive: ["AI产品经理", "AI运营", "大模型", "AI解决方案", "AI项目经理", "AI增长"],
-    negative: ["实习生", "实习", "数据分析师", "算法工程师", "Golang", "Java后端"],
-  });
-  const [results, setResults] = useState<ScanResult[]>([]);
-  const [history, setHistory] = useState<ScanHistoryEntry[]>([]);
-  const [hasCLIData, setHasCLIData] = useState(false);
-  const [lastScanDate, setLastScanDate] = useState<string | null>(null);
-  const [dataLoading, setDataLoading] = useState(true);
-  const [newKeyword, setNewKeyword] = useState("");
-  const [newNegKeyword, setNewNegKeyword] = useState("");
-  const [activeTab, setActiveTab] = useState<"results" | "sources" | "history">("results");
-  const [scanning, setScanning] = useState(false);
-  const [scanProgress, setScanProgress] = useState(0);
-  const [selectedResult, setSelectedResult] = useState<ScanResult | null>(null);
-  const [mounted, setMounted] = useState(false);
+// ── Helpers ─────────────────────────────────────────────────────────
 
-  useEffect(() => {
-    async function fetchScanStatus() {
-      try {
-        const res = await fetch("/api/scan/status");
-        if (res.ok) {
-          const result = await res.json();
-          if (result.success && result.data) {
-            setSources(result.data.sources || []);
-            setResults(result.data.results || []);
-            setHistory(result.data.history || []);
-            setHasCLIData(result.data.hasData || false);
-            setLastScanDate(result.data.lastScanDate || null);
-          }
-        }
-      } catch {
-        // API unavailable, stay with empty state
-      } finally {
-        setDataLoading(false);
-        setMounted(true);
-      }
-    }
-    fetchScanStatus();
+function timeAgo(dateStr: string) {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "刚刚";
+  if (mins < 60) return `${mins}分钟前`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}小时前`;
+  return `${Math.floor(hours / 24)}天前`;
+}
+
+// ── Page ────────────────────────────────────────────────────────────
+
+export default function DiscoverPage() {
+  const [mounted, setMounted] = useState(false);
+  const [jobs, setJobs] = useState<JobItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [scanStatus, setScanStatus] = useState<ScanStatus | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [activeTab, setActiveTab] = useState<"results" | "sources" | "history">("results");
+  const [history, setHistory] = useState<ScanHistoryEntry[]>([]);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyTotal, setHistoryTotal] = useState(0);
+  const [evalJob, setEvalJob] = useState<JobItem | null>(null);
+  const [dismissedIds, setDismissedIds] = useState<Set<number>>(new Set());
+  const [showScanIntro, setShowScanIntro] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const { showToast } = useToast();
+
+  useEffect(() => { setMounted(true); }, []);
+
+  // ── Data fetching ────────────────────────────────────────────
+
+  const fetchJobs = useCallback(async () => {
+    try {
+      const res = await fetch("/api/scan/jobs?status=new&limit=50");
+      if (!res.ok) return;
+      const data = await res.json();
+      setJobs(data?.data?.jobs || []);
+    } catch { /* ignore */ }
   }, []);
 
-  const triggerScan = () => {
-    // Scanning is CLI-only. Show instructions.
-    setScanning(true);
-    setTimeout(() => setScanning(false), 3000);
+  const fetchHistory = useCallback(async (page = 1) => {
+    try {
+      const res = await fetch(`/api/scan/history?page=${page}&limit=10`);
+      if (!res.ok) return;
+      const data = await res.json();
+      setHistory(data?.data?.history || []);
+      setHistoryTotal(data?.data?.total || 0);
+    } catch { /* ignore */ }
+  }, []);
+
+  const checkActiveScan = useCallback(async () => {
+    try {
+      const res = await fetch("/api/scan/status?active=true");
+      if (!res.ok) return false;
+      const data = await res.json();
+      const scan = data?.data;
+      if (scan && scan.status === "running") {
+        setScanStatus(scan);
+        setScanning(true);
+        return true;
+      }
+      return false;
+    } catch { return false; }
+  }, []);
+
+  const pollStatus = useCallback(async (scanId: string) => {
+    try {
+      const res = await fetch(`/api/scan/status?scanId=${scanId}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const st = data?.data;
+      if (!st) return;
+      setScanStatus(st);
+      if (st.status === "done" || st.status === "failed") {
+        setScanning(false);
+        if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+        await fetchJobs();
+        await fetchHistory();
+        if (st.status === "done" && st.jobsNew > 0) {
+          showToast(`扫描完成 — 发现 ${st.jobsFound} 个职位，${st.jobsNew} 个为新`);
+        }
+      }
+    } catch { /* ignore */ }
+  }, [fetchJobs, fetchHistory, showToast]);
+
+  // ── Init ─────────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!mounted) return;
+    (async () => {
+      setLoading(true);
+      await fetchJobs();
+      const active = await checkActiveScan();
+      if (!active) await fetchHistory();
+      setLoading(false);
+    })();
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [mounted, fetchJobs, checkActiveScan, fetchHistory]);
+
+  // ── Scan trigger ─────────────────────────────────────────────
+
+  const startScan = async () => {
+    try {
+      const res = await fetch("/api/scan", { method: "POST" });
+      if (res.status === 409) {
+        const data = await res.json();
+        showToast("扫描已在运行中");
+        setScanning(true);
+        pollRef.current = setInterval(() => pollStatus(data.existingScanId), 3000);
+        return;
+      }
+      if (!res.ok) {
+        showToast("启动扫描失败", "error");
+        return;
+      }
+      const data = await res.json();
+      setScanning(true);
+      setScanStatus({ scanId: data.scanId, status: "pending", companiesDone: 0, companiesTotal: 32, jobsFound: 0, jobsNew: 0, companies: [] });
+      pollRef.current = setInterval(() => pollStatus(data.scanId), 3000);
+      setShowScanIntro(false);
+    } catch {
+      showToast("网络错误", "error");
+    }
   };
 
-  const skipResult = (id: string) => {
-    setResults((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, status: "skipped" as const } : r))
-    );
+  // ── Job actions ──────────────────────────────────────────────
+
+  const dismissJob = (jobId: number) => {
+    setDismissedIds(prev => new Set(prev).add(jobId));
+    showToast("已跳过");
+    fetch(`/api/scan/jobs/${jobId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "dismissed" }),
+    }).catch(() => {});
   };
 
-  const addKeyword = (type: "positive" | "negative") => {
-    const val = type === "positive" ? newKeyword : newNegKeyword;
-    if (!val.trim()) return;
-    setKeywords((prev) => ({
-      ...prev,
-      [type]: [...prev[type], val.trim()],
-    }));
-    if (type === "positive") setNewKeyword("");
-    else setNewNegKeyword("");
+  const undoDismiss = (jobId: number) => {
+    setDismissedIds(prev => { const s = new Set(prev); s.delete(jobId); return s; });
+    fetch(`/api/scan/jobs/${jobId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "new" }),
+    }).catch(() => {});
   };
 
-  const removeKeyword = (type: "positive" | "negative", keyword: string) => {
-    setKeywords((prev) => ({
-      ...prev,
-      [type]: prev[type].filter((k) => k !== keyword),
-    }));
-  };
-
-  const activeResults = results.filter((r) => r.status === "new");
+  // ── Skeleton ─────────────────────────────────────────────────
 
   if (!mounted) {
     return (
@@ -127,44 +207,67 @@ export default function DiscoverPage() {
     );
   }
 
+  // ── Derived ──────────────────────────────────────────────────
+
+  const visibleJobs = jobs.filter(j => !dismissedIds.has(j.id));
+  const errorCompanies = scanStatus?.companies?.filter(c => c.status === "error") || [];
+  const hasErrors = errorCompanies.length > 0;
+  const allFailed = scanStatus?.status === "failed"
+    || (scanStatus?.companiesTotal || 0) > 0 && errorCompanies.length === scanStatus?.companiesTotal;
+
   return (
     <div className="space-y-6">
-      {/* Header */}
+      {/* ── Header ─────────────────────────────────────────────── */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <p className="text-[var(--color-muted)] text-sm mb-1">
-            {dataLoading ? "加载中..." : `${activeResults.length} 个新机会${lastScanDate ? ` · 上次扫描 ${lastScanDate}` : ""}`}
+            {loading ? "加载中..."
+              : visibleJobs.length > 0 ? `${visibleJobs.length} 个新机会`
+              : "企业招聘官网 · 自动发现"}
           </p>
           <HandwritingTitle as="h1">职位发现</HandwritingTitle>
         </div>
-        <WarmButton variant="primary" size="sm" onClick={triggerScan}>
-          <RefreshCw size={16} className="mr-1.5" />
-          扫描说明
-        </WarmButton>
+        <div className="flex items-center gap-2">
+          <WarmButton variant="ghost" size="sm" onClick={() => setShowScanIntro(!showScanIntro)}>
+            <Settings size={14} className="mr-1" />
+            说明
+          </WarmButton>
+          <WarmButton
+            variant="primary"
+            size="sm"
+            onClick={startScan}
+            disabled={scanning}
+          >
+            {scanning ? (
+              <span className="flex items-center gap-2">
+                <RefreshCw size={14} className="animate-spin" />
+                扫描中 ({scanStatus?.companiesDone || 0}/{scanStatus?.companiesTotal || "?"})
+              </span>
+            ) : (
+              <span className="flex items-center gap-2">
+                <Search size={14} />
+                开始扫描
+              </span>
+            )}
+          </WarmButton>
+        </div>
       </div>
 
-      {/* CLI Instructions */}
+      {/* ── Scan intro banner ──────────────────────────────────── */}
       <AnimatePresence>
-        {scanning && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            className="overflow-hidden"
-          >
+        {showScanIntro && (
+          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
             <PaperCard padding="md">
               <div className="flex items-start gap-3">
                 <Zap size={16} className="text-[var(--color-primary)] mt-0.5" />
                 <div>
-                  <p className="text-sm font-medium text-[var(--color-text)] mb-2">扫描通过 CLI 执行</p>
+                  <p className="text-sm font-medium text-[var(--color-text)] mb-2">扫描说明</p>
                   <p className="text-xs text-[var(--color-muted)] mb-2">
-                    职位扫描是命令行操作，不在浏览器中运行。使用以下命令：
+                    点击「开始扫描」后，后台 Worker 会自动打开浏览器抓取 portals.yml 中配置的 32 家公司招聘官网。
+                    扫描过程约 2-5 分钟，你可以离开页面，回来刷新即可。
                   </p>
-                  <code className="block text-xs bg-[var(--color-bg)] rounded-[var(--radius-sm)] p-2 text-[var(--color-text)] mb-2">
-                    node scan.mjs
-                  </code>
                   <p className="text-xs text-[var(--color-muted)]">
-                    扫描结果会写入 data/pipeline.md 和 data/scan-history.tsv，页面会自动读取显示。
+                    也可以命令行执行: <code className="text-[var(--color-text)] bg-[var(--color-bg)] px-1 rounded">npm run scan:once</code>
                   </p>
                 </div>
               </div>
@@ -173,326 +276,277 @@ export default function DiscoverPage() {
         )}
       </AnimatePresence>
 
-      {/* No CLI data banner */}
-      {!dataLoading && !hasCLIData && (
-        <PaperCard padding="md">
-          <div className="flex items-start gap-3">
-            <Settings size={16} className="text-[var(--color-muted)] mt-0.5" />
-            <div>
-              <p className="text-sm font-medium text-[var(--color-text)] mb-1">暂无扫描数据</p>
-              <p className="text-xs text-[var(--color-muted)]">
-                配置 portals.yml 和 keywords 后，运行 <code className="text-[var(--color-text)]">node scan.mjs</code> 开始扫描。
-                扫描结果会自动出现在这里。
-              </p>
-            </div>
+      {/* ── Summary bar ────────────────────────────────────────── */}
+      {!loading && visibleJobs.length > 0 && !scanning && (
+        <PaperCard padding="sm">
+          <div className="flex items-center gap-6 flex-wrap text-sm">
+            <span className="flex items-center gap-1.5 text-[var(--color-text)] font-medium">
+              <Zap size={14} className="text-[var(--color-primary)]" />
+              {visibleJobs.length} 个新职位
+            </span>
+            <span className="flex items-center gap-1.5 text-[var(--color-muted)]">
+              <Building2 size={14} />
+              {new Set(visibleJobs.map(j => j.company)).size} 家公司
+            </span>
+            <span className="flex items-center gap-1.5 text-[var(--color-muted)]">
+              <Filter size={14} />
+              过滤: 含&ldquo;AI产品经理&rdquo; / 排除&ldquo;实习&rdquo;
+            </span>
           </div>
         </PaperCard>
       )}
 
-      {/* Tabs */}
+      {/* ── Scanning progress ──────────────────────────────────── */}
+      <AnimatePresence>
+        {scanning && scanStatus && (
+          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}>
+            <PaperCard padding="sm">
+              <div className="flex items-center gap-4">
+                <RefreshCw size={16} className="animate-spin text-[var(--color-primary)]" />
+                <div className="flex-1">
+                  <div className="flex justify-between text-xs text-[var(--color-muted)] mb-1">
+                    <span>正在扫描 {scanStatus.companiesDone}/{scanStatus.companiesTotal} 家公司</span>
+                    <span>已发现 {scanStatus.jobsFound} 个职位</span>
+                  </div>
+                  <div className="h-1.5 bg-[var(--color-divider)] rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-[var(--color-primary)] rounded-full transition-all duration-500"
+                      style={{ width: `${scanStatus.companiesTotal ? (scanStatus.companiesDone / scanStatus.companiesTotal) * 100 : 0}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+              {scanStatus.companies?.length > 0 && (
+                <div className="flex gap-1.5 mt-2 flex-wrap">
+                  {scanStatus.companies.slice(0, 12).map(c => (
+                    <span key={c.name}
+                      className={`text-xs px-1.5 py-0.5 rounded-full ${
+                        c.status === "error" ? "bg-red-50 text-red-600"
+                        : c.jobsFound > 0 ? "bg-green-50 text-green-700"
+                        : "bg-[var(--color-divider)] text-[var(--color-muted)]"
+                      }`}>
+                      {c.name.slice(0, 3)} {c.jobsFound || ""}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </PaperCard>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Error banner ───────────────────────────────────────── */}
+      <AnimatePresence>
+        {hasErrors && !scanning && (
+          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}>
+            <PaperCard padding="md" className={allFailed ? "!border-red-200" : "!border-amber-200"}>
+              <div className="flex items-start gap-3">
+                <AlertTriangle size={18} className={allFailed ? "text-red-500 mt-0.5" : "text-amber-500 mt-0.5"} />
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-[var(--color-text)]">
+                    {allFailed ? "所有公司扫描失败" : `${errorCompanies.length} 家公司扫描失败`}
+                  </p>
+                  <div className="mt-2 space-y-1">
+                    {errorCompanies.slice(0, 5).map(c => (
+                      <p key={c.name} className="text-xs text-[var(--color-muted)]">
+                        {c.name}: {c.error || "未知错误"}
+                      </p>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </PaperCard>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Tab bar ────────────────────────────────────────────── */}
       <div className="flex gap-1 p-0.5 bg-[var(--color-divider)] rounded-[var(--radius-md)] w-fit">
         {[
           { id: "results" as const, label: "新职位" },
           { id: "sources" as const, label: "扫描源" },
           { id: "history" as const, label: "扫描历史" },
-        ].map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
+        ].map(tab => (
+          <button key={tab.id} onClick={() => setActiveTab(tab.id)}
             className={`px-4 py-2 rounded-[var(--radius-sm)] text-sm transition-colors ${
               activeTab === tab.id
                 ? "bg-[var(--color-surface)] text-[var(--color-text)] font-medium"
                 : "text-[var(--color-muted)] hover:text-[var(--color-text)]"
-            }`}
-          >
+            }`}>
             {tab.label}
           </button>
         ))}
       </div>
 
-      {/* ── Results Tab ── */}
+      {/* ── Tab: Results ───────────────────────────────────────── */}
       {activeTab === "results" && (
-        <div className="space-y-4">
-          {/* Keywords */}
-          <PaperCard padding="sm">
+        <>
+          {loading ? (
             <div className="space-y-3">
-              {/* Positive keywords */}
-              <div>
-                <p className="text-xs text-[var(--color-muted)] mb-2">正向关键词</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {keywords.positive.map((kw) => (
-                    <span
-                      key={kw}
-                      className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-[var(--color-primary-muted)] text-[var(--color-text)]"
-                    >
-                      {kw}
-                      <button onClick={() => removeKeyword("positive", kw)}>
-                        <X size={12} className="text-[var(--color-muted)]" />
-                      </button>
-                    </span>
-                  ))}
-                </div>
-                <div className="flex gap-2 mt-2">
-                  <input
-                    value={newKeyword}
-                    onChange={(e) => setNewKeyword(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && addKeyword("positive")}
-                    placeholder="添加正向关键词..."
-                    className="flex-1 bg-[var(--color-bg)] border border-[var(--color-border)] rounded-[var(--radius-sm)] px-3 py-1.5 text-xs text-[var(--color-text)] placeholder:text-[var(--color-muted)] focus:outline-none focus:border-[var(--color-primary)]"
-                  />
-                  <WarmButton variant="soft" size="sm" onClick={() => addKeyword("positive")}>
-                    <Plus size={12} />
-                  </WarmButton>
-                </div>
-              </div>
-
-              {/* Negative keywords */}
-              <div>
-                <p className="text-xs text-[var(--color-muted)] mb-2">排除关键词</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {keywords.negative.map((kw) => (
-                    <span
-                      key={kw}
-                      className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-red-50 text-red-500 dark:bg-red-950/30 dark:text-red-300"
-                    >
-                      {kw}
-                      <button onClick={() => removeKeyword("negative", kw)}>
-                        <X size={12} />
-                      </button>
-                    </span>
-                  ))}
-                </div>
-                <div className="flex gap-2 mt-2">
-                  <input
-                    value={newNegKeyword}
-                    onChange={(e) => setNewNegKeyword(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && addKeyword("negative")}
-                    placeholder="添加排除关键词..."
-                    className="flex-1 bg-[var(--color-bg)] border border-[var(--color-border)] rounded-[var(--radius-sm)] px-3 py-1.5 text-xs text-[var(--color-text)] placeholder:text-[var(--color-muted)] focus:outline-none focus:border-[var(--color-primary)]"
-                  />
-                  <WarmButton variant="ghost" size="sm" onClick={() => addKeyword("negative")}>
-                    <Plus size={12} />
-                  </WarmButton>
-                </div>
-              </div>
+              {[...Array(4)].map((_, i) => (
+                <PaperCard key={i} padding="md" className="animate-pulse">
+                  <div className="h-4 bg-[var(--color-divider)] rounded w-24 mb-2" />
+                  <div className="h-5 bg-[var(--color-divider)] rounded w-64 mb-2" />
+                  <div className="h-3 bg-[var(--color-divider)] rounded w-40" />
+                </PaperCard>
+              ))}
             </div>
-          </PaperCard>
-
-          {/* Results */}
-          <div className="grid gap-3 sm:grid-cols-2">
-            {results.map((result) => (
-              <PaperCard
-                key={result.id}
-                padding="md"
-                hover="lift"
-                className={result.status !== "new" ? "opacity-60" : ""}
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <h3 className="font-[family-name:var(--font-display)] font-bold text-[var(--color-text)] text-sm">
-                        {result.company}
-                      </h3>
-                      <span className="text-xs px-1.5 py-0.5 rounded-[var(--radius-sm)] bg-[var(--color-divider)] text-[var(--color-muted)]">
-                        {result.platform}
+          ) : visibleJobs.length === 0 ? (
+            <div className="max-w-xl mx-auto py-16 text-center space-y-6">
+              <div className="w-16 h-16 mx-auto rounded-full bg-[var(--color-primary-muted)] flex items-center justify-center">
+                <Search size={24} className="text-[var(--color-primary)]" />
+              </div>
+              <HandwritingTitle as="h2">尚未扫描职位</HandwritingTitle>
+              <p className="text-[var(--color-muted)] text-sm">点击「开始扫描」自动抓取 32 家目标公司的招聘官网</p>
+              <WarmButton variant="primary" size="sm" onClick={startScan}>开始扫描</WarmButton>
+            </div>
+          ) : (
+            <StaggerList className="grid gap-3 sm:grid-cols-2">
+              {visibleJobs.map(job => (
+                <StaggerItem key={job.id}>
+                  <PaperCard padding="md" hover="lift" className="relative">
+                    {/* NEW badge */}
+                    {job.status === "new" && (
+                      <span className="absolute top-3 right-3 text-xs px-2 py-0.5 rounded-full bg-[var(--color-primary)] text-white font-medium">
+                        NEW
                       </span>
+                    )}
+                    <div className="space-y-2">
+                      <p className="text-xs text-[var(--color-muted)] font-medium uppercase tracking-wide">{job.company}</p>
+                      <p className="text-sm font-medium text-[var(--color-text)] line-clamp-2 leading-snug">{job.title}</p>
+                      <div className="flex items-center gap-3 text-xs text-[var(--color-muted)] flex-wrap">
+                        {job.location && <span className="flex items-center gap-1"><MapPin size={11} />{job.location}</span>}
+                        {job.department && <span className="flex items-center gap-1"><Building2 size={11} />{job.department}</span>}
+                        <span className="flex items-center gap-1"><Clock size={11} />{timeAgo(job.discovered_at)}</span>
+                      </div>
+                      <div className="flex items-center gap-2 pt-1">
+                        <WarmButton variant="soft" size="sm" onClick={() => setEvalJob(job)}>
+                          <Eye size={12} className="mr-1" />评估
+                        </WarmButton>
+                        <WarmButton variant="ghost" size="sm" onClick={() => dismissJob(job.id)}>
+                          <SkipForward size={12} className="mr-1" />跳过
+                        </WarmButton>
+                        <a href={job.url} target="_blank" rel="noopener noreferrer"
+                          className="text-xs text-[var(--color-muted)] hover:text-[var(--color-text)] flex items-center gap-0.5 ml-auto">
+                          <ExternalLink size={11} />
+                        </a>
+                      </div>
                     </div>
-                    <p className="text-sm text-[var(--color-text-soft)]">{result.role}</p>
-                    {result.snippet && (
-                      <p className="text-xs text-[var(--color-muted)] mt-1 line-clamp-2">
-                        {result.snippet}
-                      </p>
-                    )}
-                  </div>
-                </div>
-                <div className="flex items-center justify-between mt-3">
-                  <span className="text-xs text-[var(--color-muted)] flex items-center gap-1">
-                    <Clock size={10} />
-                    {new Date(result.foundAt).toLocaleDateString("zh-CN")}
-                  </span>
-                  <div className="flex gap-2">
-                    {result.status === "new" && (
-                      <>
-                        <WarmButton
-                          variant="soft"
-                          size="sm"
-                          onClick={() => skipResult(result.id)}
-                        >
-                          <SkipForward size={12} className="mr-1" />
-                          跳过
-                        </WarmButton>
-                        <WarmButton
-                          variant="primary"
-                          size="sm"
-                          onClick={() => setSelectedResult(result)}
-                        >
-                          <Eye size={12} className="mr-1" />
-                          评估
-                        </WarmButton>
-                      </>
-                    )}
-                    {result.status === "skipped" && (
-                      <span className="text-xs text-[var(--color-muted)]">已跳过</span>
-                    )}
-                    {result.status === "evaluated" && (
-                      <span className="text-xs text-[var(--color-primary)]">已评估</span>
-                    )}
-                  </div>
-                </div>
-              </PaperCard>
-            ))}
-          </div>
-        </div>
+                  </PaperCard>
+                </StaggerItem>
+              ))}
+            </StaggerList>
+          )}
+        </>
       )}
 
-      {/* ── Sources Tab ── */}
+      {/* ── Tab: Sources ────────────────────────────────────────── */}
       {activeTab === "sources" && (
         <div className="space-y-3">
-          <p className="text-sm text-[var(--color-muted)]">
-            {sources.length} 个扫描源 · {sources.filter((s) => s.enabled).length} 个已启用
-          </p>
+          <p className="text-sm text-[var(--color-muted)]">32 家公司 · 3 种 ATS 类型</p>
           <div className="grid gap-2 sm:grid-cols-2">
-            {sources.map((source) => (
-              <PaperCard key={`${source.company}-${source.platform}`} padding="sm">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-[var(--color-text)]">{source.company}</p>
-                    <p className="text-xs text-[var(--color-muted)]">{source.platform}</p>
-                  </div>
-                  <button
-                    onClick={() =>
-                      setSources((prev) =>
-                        prev.map((s) =>
-                          s.company === source.company && s.platform === source.platform
-                            ? { ...s, enabled: !s.enabled }
-                            : s
-                        )
-                      )
-                    }
-                    className={`w-10 h-5 rounded-full transition-colors ${
-                      source.enabled ? "bg-[var(--color-primary)]" : "bg-[var(--color-divider)]"
-                    } relative`}
-                  >
-                    <span
-                      className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
-                        source.enabled ? "translate-x-5" : "translate-x-0.5"
-                      }`}
-                    />
-                  </button>
-                </div>
+            {[
+              { name: "Moka 系 (12家)", desc: "字节/美团/快手/滴滴/小米/B站/小红书/网易/知乎/理想/蔚来/得物", color: "bg-blue-50 text-blue-700" },
+              { name: "北森系 (5家)", desc: "京东/比亚迪/贝壳/携程/唯品会", color: "bg-purple-50 text-purple-700" },
+              { name: "自定义 (15家)", desc: "腾讯/阿里/蚂蚁/百度/拼多多/米哈游/大疆/DeepSeek等 — LLM提取", color: "bg-amber-50 text-amber-700" },
+            ].map(g => (
+              <PaperCard key={g.name} padding="sm">
+                <p className={`text-xs px-2 py-0.5 rounded-full inline-block mb-2 ${g.color}`}>{g.name}</p>
+                <p className="text-xs text-[var(--color-muted)]">{g.desc}</p>
               </PaperCard>
             ))}
           </div>
         </div>
       )}
 
-      {/* ── History Tab ── */}
+      {/* ── Tab: History ────────────────────────────────────────── */}
       {activeTab === "history" && (
         <div className="space-y-3">
-          {history.map((entry) => (
-            <PaperCard key={entry.date} padding="sm">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <Clock size={16} className="text-[var(--color-muted)]" />
-                  <span className="text-sm font-medium text-[var(--color-text)]">{entry.date}</span>
+          {history.length === 0 ? (
+            <p className="text-center text-[var(--color-muted)] text-sm py-8">暂无扫描历史</p>
+          ) : (
+            <>
+              {history.map(entry => (
+                <PaperCard key={entry.scanId} padding="md" hover="lift">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium text-[var(--color-text)]">
+                        {new Date(entry.createdAt).toLocaleString("zh-CN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                      </p>
+                      <div className="flex items-center gap-4 text-xs text-[var(--color-muted)]">
+                        <span>发现 {entry.jobsFound} 个（+{entry.jobsNew} 新）</span>
+                        <span>{entry.companiesDone} 家公司</span>
+                        {entry.failedCompanies?.length > 0 && (
+                          <span className="text-amber-600">{entry.failedCompanies.length} 家失败</span>
+                        )}
+                      </div>
+                    </div>
+                    <ChevronRight size={16} className="text-[var(--color-muted)]" />
+                  </div>
+                </PaperCard>
+              ))}
+              {historyTotal > history.length && (
+                <div className="text-center pt-2">
+                  <WarmButton variant="ghost" size="sm" onClick={() => { const np = historyPage + 1; setHistoryPage(np); fetchHistory(np); }}>
+                    加载更多
+                  </WarmButton>
                 </div>
-                <div className="flex items-center gap-4 text-sm">
-                  <span className="text-[var(--color-text-soft)]">
-                    发现 {entry.resultsFound} 个职位
-                  </span>
-                  <span className="text-[var(--color-primary)]">
-                    +{entry.newCount} 新
-                  </span>
-                </div>
-              </div>
-            </PaperCard>
-          ))}
-          {history.length === 0 && (
-            <p className="text-center text-[var(--color-muted)] text-sm py-8">
-              暂无扫描历史
-            </p>
+              )}
+            </>
           )}
         </div>
       )}
 
-      {/* ── Result Detail Modal ── */}
+      {/* ── Eval slide-over panel ──────────────────────────────── */}
       <AnimatePresence>
-        {selectedResult && (
+        {evalJob && (
           <>
+            <motion.div className="fixed inset-0 bg-black/20 z-40" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setEvalJob(null)} />
             <motion.div
-              className="fixed inset-0 bg-black/20 z-40"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setSelectedResult(null)}
-            />
-            <motion.div
-              className="fixed inset-0 z-50 flex items-center justify-center p-4"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+              className="fixed right-0 top-0 bottom-0 w-full max-w-md bg-[var(--color-surface)] border-l border-[var(--color-border)] z-50 shadow-[var(--shadow-lg)] overflow-y-auto"
+              initial={{ x: 320 }} animate={{ x: 0 }} exit={{ x: 320 }}
+              transition={{ type: "spring", damping: 25, stiffness: 200 }}
             >
-              <motion.div
-                className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-[var(--radius-xl)] p-6 w-full max-w-md shadow-[var(--shadow-lg)]"
-                initial={{ scale: 0.95, y: 16 }}
-                animate={{ scale: 1, y: 0 }}
-                exit={{ scale: 0.95, y: 16 }}
-              >
-                <div className="flex items-center justify-between mb-4">
-                  <HandwritingTitle as="h2">职位详情</HandwritingTitle>
-                  <button onClick={() => setSelectedResult(null)}>
-                    <X size={20} className="text-[var(--color-muted)]" />
+              <div className="p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <HandwritingTitle as="h2" className="text-lg">职位评估</HandwritingTitle>
+                  <button onClick={() => setEvalJob(null)} className="p-1 rounded-full hover:bg-[var(--color-divider)] transition-colors">
+                    <X size={18} className="text-[var(--color-muted)]" />
                   </button>
                 </div>
-
-                <div className="space-y-4">
-                  <div>
-                    <h3 className="font-[family-name:var(--font-display)] text-lg font-bold text-[var(--color-text)]">
-                      {selectedResult.company}
-                    </h3>
-                    <p className="text-sm text-[var(--color-text-soft)]">{selectedResult.role}</p>
+                <PaperCard padding="md">
+                  <p className="text-xs text-[var(--color-muted)] mb-1">{evalJob.company}</p>
+                  <p className="text-sm font-medium text-[var(--color-text)]">{evalJob.title}</p>
+                  <div className="flex items-center gap-3 mt-2 text-xs">
+                    {evalJob.location && <span className="text-[var(--color-muted)]">{evalJob.location}</span>}
+                    <a href={evalJob.url} target="_blank" rel="noopener noreferrer" className="text-[var(--color-primary)] hover:underline">
+                      查看原链接 <ExternalLink size={10} className="inline" />
+                    </a>
                   </div>
-
-                  <div className="flex gap-2">
-                    <span className="text-xs px-2 py-1 rounded-[var(--radius-sm)] bg-[var(--color-divider)] text-[var(--color-muted)]">
-                      {selectedResult.platform}
-                    </span>
-                    <span className="text-xs px-2 py-1 rounded-[var(--radius-sm)] bg-[var(--color-divider)] text-[var(--color-muted)]">
-                      {new Date(selectedResult.foundAt).toLocaleString("zh-CN")}
-                    </span>
-                  </div>
-
-                  {selectedResult.snippet && (
-                    <div>
-                      <p className="text-sm text-[var(--color-muted)] mb-1">JD 摘要</p>
-                      <p className="text-sm text-[var(--color-text-soft)] bg-[var(--color-bg)] rounded-[var(--radius-sm)] p-3">
-                        {selectedResult.snippet}
-                      </p>
-                    </div>
-                  )}
-
-                  <div className="flex gap-3 pt-2">
-                    <WarmButton
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        skipResult(selectedResult.id);
-                        setSelectedResult(null);
-                      }}
-                    >
-                      跳过
-                    </WarmButton>
-                    <WarmButton
-                      variant="primary"
-                      size="sm"
-                      onClick={() => setSelectedResult(null)}
-                    >
-                      <ExternalLink size={14} className="mr-1" />
-                      一键评估
-                    </WarmButton>
-                  </div>
+                </PaperCard>
+                <div className="text-center py-8 text-sm text-[var(--color-muted)]">
+                  <p>评估功能由 AI Agent 处理</p>
+                  <p className="mt-1">点击下方按钮送入评估管道</p>
                 </div>
-              </motion.div>
+                <WarmButton variant="primary" size="md" className="w-full"
+                  onClick={async () => {
+                    try {
+                      await fetch("/api/pipeline/enqueue", {
+                        method: "POST", headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ url: evalJob.url, company: evalJob.company, title: evalJob.title }),
+                      });
+                      showToast("已送入评估管道");
+                      await fetch(`/api/scan/jobs/${evalJob.id}`, {
+                        method: "PATCH", headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ status: "evaluated" }),
+                      });
+                      setEvalJob(null);
+                      fetchJobs();
+                    } catch { showToast("发送失败", "error"); }
+                  }}>
+                  <ExternalLink size={14} className="mr-1" />送入评估管道
+                </WarmButton>
+              </div>
             </motion.div>
           </>
         )}
