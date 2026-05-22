@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
 
     const companies = await loadPortals();
     const db = getDb();
-    const { scanId, conflict } = createScanEntry(db, String(user.userId), companies, companyFilter);
+    const { scanId, conflict, companiesTotal } = createScanEntry(db, String(user.userId), companies, companyFilter);
 
     if (conflict) {
       return NextResponse.json(
@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    return NextResponse.json({ scanId }, { status: 201 });
+    return NextResponse.json({ scanId, companiesTotal }, { status: 201 });
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : "未知错误";
     console.error("POST /api/scan error:", msg);

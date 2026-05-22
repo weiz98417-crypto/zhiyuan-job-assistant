@@ -158,6 +158,7 @@ export default function DiscoverPage() {
         const data = await res.json();
         showToast("扫描已在运行中");
         setScanning(true);
+        if (pollRef.current) clearInterval(pollRef.current);
         pollRef.current = setInterval(() => pollStatus(data.existingScanId), 3000);
         return;
       }
@@ -167,7 +168,8 @@ export default function DiscoverPage() {
       }
       const data = await res.json();
       setScanning(true);
-      setScanStatus({ scanId: data.scanId, status: "pending", companiesDone: 0, companiesTotal: 32, jobsFound: 0, jobsNew: 0, companies: [] });
+      if (pollRef.current) clearInterval(pollRef.current);
+      setScanStatus({ scanId: data.scanId, status: "pending", companiesDone: 0, companiesTotal: data.companiesTotal || 32, jobsFound: 0, jobsNew: 0, companies: [] });
       pollRef.current = setInterval(() => pollStatus(data.scanId), 3000);
       setShowScanIntro(false);
     } catch {

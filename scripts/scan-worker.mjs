@@ -31,7 +31,7 @@ const DB_PATH = path.join(DATA_DIR, 'zhiyuan.db');
 // ── Load adapters ──────────────────────────────────────────────────
 
 import { getAdapter } from '../lib/scan/adapters/router.mjs';
-import { loadPortals, makeDedupKey } from '../lib/scan/orchestrator.mjs';
+import { loadPortals, loadTitleFilter, applyTitleFilter, makeDedupKey } from '../lib/scan/orchestrator.mjs';
 
 // ── DB ─────────────────────────────────────────────────────────────
 
@@ -72,20 +72,13 @@ function saveDebugHTML(companyName, html) {
 // ── Crash recovery ─────────────────────────────────────────────────
 
 function recoverStaleScans() {
+  // Only recover scans that have been running >10 min (genuinely stale)
   const result = db.prepare(`
     UPDATE scan_queue SET status = 'failed', error_log = '[{"error":"worker restarted - stale scan recovered"}]'
     WHERE status = 'running' AND updated_at < datetime('now', '-10 minutes')
   `).run();
   if (result.changes > 0) {
     log(`recovered ${result.changes} stale scan(s)`);
-  }
-  // Also immediately recover any 'running' scans on startup (crash recovery)
-  const immediate = db.prepare(`
-    UPDATE scan_queue SET status = 'failed', error_log = '[{"error":"worker crashed - scan lost"}]'
-    WHERE status = 'running'
-  `).run();
-  if (immediate.changes > 0) {
-    log(`recovered ${immediate.changes} running scan(s) from crash`);
   }
 }
 
@@ -143,11 +136,12 @@ async function executeScan(scanId) {
   }
 
   const companies = await loadPortals(PROJECT_ROOT);
+  const titleFilter = await loadTitleFilter(PROJECT_ROOT);
   const filtered = COMPANY_FILTER
     ? companies.filter(c => c.name === COMPANY_FILTER)
     : companies;
 
-  log(`total: ${filtered.length} companies`);
+  log(`total: ${filtered.length} companies (filter: +${titleFilter.positive.join(',') || 'none'} / -${titleFilter.negative.join(',') || 'none'})`);
 
   let browser = null;
   let companiesDone = 0;
@@ -166,27 +160,39 @@ async function executeScan(scanId) {
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
     });
 
+    // Fetch userId once (not per-company N+1)
+    const { user_id: userId } = db.prepare("SELECT user_id FROM scan_queue WHERE id = ?").get(scanId);
+
+    const insertStmt = db.prepare(`
+      INSERT OR IGNORE INTO scan_jobs
+        (scan_id, user_id, company, title, url, location, department, jd_snippet, status, dedup_key)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'new', ?)
+    `);
+
     for (const company of filtered) {
       const page = await context.newPage();
       try {
-        const { jobs, error } = await scanCompany(company, page);
+        // Per-company timeout: 60s max
+        const { jobs, error } = await Promise.race([
+          scanCompany(company, page),
+          new Promise((_, reject) => setTimeout(() => reject(new Error(`timeout after 60s`)), 60000))
+        ]);
 
         if (error) {
           errorLog.push({ company: company.name, error, level: 'ERROR' });
-        } else if (jobs.length === 0) {
+          continue;
+        }
+
+        // Apply title filter
+        const filteredJobs = applyTitleFilter(jobs, titleFilter);
+        if (jobs.length > 0 && filteredJobs.length === 0) {
+          log(`[${company.name}] all ${jobs.length} jobs filtered out by title_filter`);
+          errorLog.push({ company: company.name, error: `all ${jobs.length} jobs filtered out`, level: 'WARN' });
+        } else if (filteredJobs.length === 0) {
           errorLog.push({ company: company.name, error: 'zero results', level: 'WARN' });
         }
 
-        // Write jobs to DB
-        const insertStmt = db.prepare(`
-          INSERT OR IGNORE INTO scan_jobs
-            (scan_id, user_id, company, title, url, location, department, jd_snippet, status, dedup_key)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'new', ?)
-        `);
-
-        const userId = db.prepare("SELECT user_id FROM scan_queue WHERE id = ?").get(scanId).user_id;
-
-        for (const job of jobs) {
+        for (const job of filteredJobs) {
           const dedupKey = makeDedupKey(job.url);
           const result = insertStmt.run(
             scanId, userId, company.name, job.title, job.url,

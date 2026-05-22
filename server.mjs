@@ -43,11 +43,34 @@ function startWorker() {
 
     const delay = Math.min(5000 * Math.pow(2, restartCount - 1), 60000);
     console.error(`[server] Worker exited with code ${code}, restarting in ${delay / 1000}s... (attempt ${restartCount}/5)`);
-    setTimeout(startWorker, delay);
+    setTimeout(() => { currentWorker = startWorker(); }, delay);
   });
 
-  console.log(`[server] Worker started (PID: ${worker.pid})`);
+    console.log(`[server] Worker started (PID: ${worker.pid})`);
+  return worker;
 }
+
+let currentWorker = null;
+
+// ── Graceful shutdown ──────────────────────────────────────────
+
+function shutdown(signal) {
+  console.log(`[server] Received ${signal}, shutting down gracefully...`);
+  if (currentWorker) {
+    currentWorker.kill('SIGTERM');
+    // Give worker 5s to finish, then force kill
+    setTimeout(() => {
+      if (currentWorker && !currentWorker.killed) {
+        console.log('[server] Worker did not exit, force killing...');
+        currentWorker.kill('SIGKILL');
+      }
+    }, 5000);
+  }
+  process.exit(0);
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
 // ── Start Next.js ──────────────────────────────────────────────────
 
@@ -60,7 +83,7 @@ async function main() {
   await app.prepare();
 
   // Start worker
-  startWorker();
+  currentWorker = startWorker();
 
   // Start HTTP server
   createServer(handle).listen(PORT, () => {

@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Missing scanId or active=true param" }, { status: 400 });
     }
 
-    const status = getScanStatus(db, scanId);
+    const status = getScanStatus(db, scanId, String(user.userId));
     if (!status) {
       return NextResponse.json({ error: "Scan not found" }, { status: 404 });
     }
