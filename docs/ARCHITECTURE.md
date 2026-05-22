@@ -87,6 +87,55 @@ templates/cv-template.html → PDF generation template
 - PDFs: `cv-candidate-{company-slug}-{YYYY-MM-DD}.pdf`
 - Tracker TSVs: `batch/tracker-additions/{id}.tsv`
 
+## Job Scan System (NEW)
+
+Automated job discovery from 32 Chinese company career sites (Moka/Beisen/custom pages) with dual-channel architecture:
+
+```
+  /discover UI
+       │
+  POST /api/scan  ──►  scan_queue (SQLite)
+       │                    │
+       └────────────────────┼──────────────────┐
+                            ▼                   │
+                    scan-worker.mjs              │
+                    (poll + CAS claim)           │
+                            │                   │
+              ┌─────────────┼─────────────┐     │
+              ▼             ▼             ▼     │
+         Moka Adapter  Beisen Adapter  LLM Ext  │
+         (12 companies) (5 companies)  (15 cust)│
+              │             │             │     │
+              └─────────────┼─────────────┘     │
+                            ▼                   │
+                    scan_jobs (SQLite)          │
+                    (dedup by URL hash)         │
+                            │                   │
+              ┌─────────────┼─────────────┐     │
+              ▼             ▼             ▼     │
+        GET /api/scan/jobs   PATCH dismiss  POST pipeline/enqueue
+        GET /api/scan/status  GET /api/scan/history
+```
+
+**Adapter architecture:**
+- `lib/scan/adapters/router.mjs` — registry mapping `ats_type` → adapter
+- API channel: Greenhouse/Lever (public JSON APIs, zero Playwright)
+- Playwright channel: Moka (scroll extraction), Beisen (pagination), Custom (LLM-based)
+- `lib/scan/orchestrator.mjs` — shared logic for API routes + worker
+- `scripts/scan-worker.mjs` — background daemon, polls `scan_queue`, CAS task claiming
+- `server.mjs` — custom Next.js entry that forks the worker with crash recovery
+
+**Key files:**
+| File | Purpose |
+|------|---------|
+| `lib/scan/adapters/*.mjs` | 5 adapters + router + types + LLM extractor |
+| `lib/scan/orchestrator.mjs` | Scan lifecycle: create, status, jobs CRUD, history |
+| `scripts/scan-worker.mjs` | Background worker daemon |
+| `server.mjs` | Custom server entry with worker supervision |
+| `src/app/api/scan/*` | 6 REST endpoints (POST trigger, GET status/jobs/history, PATCH dismiss) |
+| `src/app/api/pipeline/enqueue` | Bridge from scan results to evaluation pipeline |
+| `src/app/discover/page.tsx` | Job Discovery UI with real-time scan progress |
+
 ## Pipeline Integrity
 
 Scripts maintain data consistency:
