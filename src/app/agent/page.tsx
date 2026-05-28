@@ -15,6 +15,8 @@ import { logInteraction } from "@/lib/agent/memory";
 import { migrateExploreToAgent } from "@/lib/agent/migrate";
 import { orchestrate } from "@/lib/agent/orchestrator";
 import { agentLoopClient } from "@/lib/agent/loop/client-runner";
+import { inferPreferredDocumentTypeFromText, type ImageIntakeResult } from "@/lib/agent/image-intake";
+import { buildImageIntakeStatusText, buildImageIntakeToolSummary, routeImageIntake } from "@/lib/agent/image-intake-router";
 import type { AgentDefinition } from "@/lib/agent/registry/types";
 import { triggerProfileUpdate } from "@/lib/profile-update";
 import { scanMessage, deduplicateSignals, maybeRawContext } from "@/lib/agent/signal-extractor";
@@ -107,6 +109,7 @@ function AgentPageInner() {
 
   const abortRef = useRef<AbortController | null>(null);
   const streamContentRef = useRef("");
+  const interviewBootstrapRef = useRef<number | null>(null);
   const seenSignalKeys = useRef<Set<string>>(new Set());
   const handoffKeyRef = useRef<string>("");
 
@@ -183,16 +186,17 @@ function AgentPageInner() {
   }, [mounted, searchParams, currentSessionId]);
 
   const sendMessage = useCallback(
-    async (content: string, images?: string[]) => {
+    async (content: string, images?: string[], options?: { hideUserMessage?: boolean }) => {
+      const hideUserMessage = options?.hideUserMessage === true;
       const userMsg: AgentMessage = {
         role: "user",
         content,
         timestamp: new Date().toISOString(),
       } as AgentMessage;
-      if (images?.length) (userMsg as unknown as Record<string, unknown>).images = images;
+      if (images?.length) userMsg.images = images;
       const updated = [...messages, userMsg];
-      setMessages(updated);
-      if (currentSessionId) {
+      if (!hideUserMessage) setMessages(updated);
+      if (currentSessionId && !hideUserMessage) {
         const isFirstUserMsg = messages.filter((m) => m.role === "user").length === 0;
         if (isFirstUserMsg) {
           renameSessionFromFirstUserMessage(currentSessionId, content).catch(() => {});
@@ -224,7 +228,7 @@ function AgentPageInner() {
         content: "",
         timestamp: new Date().toISOString(),
       };
-      setMessages([...updated, assistantMsg]);
+      setMessages([...(hideUserMessage ? messages : updated), assistantMsg]);
       streamContentRef.current = "";
       setStreamText("");
       setStreaming(true);
@@ -234,6 +238,51 @@ function AgentPageInner() {
       setStartTime(Date.now());
       setEvalProgress([]);
       setCompletionInfo(null);
+
+      const imageDataUris = (images || []).filter((src) => typeof src === "string" && src.startsWith("data:image/"));
+      const imageIntakeToolTimestamp = imageDataUris.length ? new Date().toISOString() : "";
+      let imageIntakeToolMessage: AgentMessage | null = null;
+
+      const upsertImageIntakeToolMessage = (message: AgentMessage) => {
+        imageIntakeToolMessage = message;
+        setMessages((prev) => {
+          const copy = [...prev];
+          const existingIndex = copy.findIndex((item) =>
+            item.role === "tool" &&
+            item.toolName === "recognize_document_image" &&
+            item.timestamp === imageIntakeToolTimestamp
+          );
+          if (existingIndex >= 0) {
+            copy[existingIndex] = message;
+            return copy;
+          }
+          const anchorIndex = copy.length > 0 && copy[copy.length - 1]?.role === "assistant" && copy[copy.length - 1]?.content === ""
+            ? copy.length - 1
+            : copy.length;
+          copy.splice(anchorIndex, 0, message);
+          return copy;
+        });
+      };
+
+      if (imageDataUris.length > 0) {
+        setPhase("extracting_ocr");
+        setExecutingTool("recognize_document_image");
+        upsertImageIntakeToolMessage({
+          role: "tool",
+          toolName: "recognize_document_image",
+          content: `正在识别 ${imageDataUris.length} 张图片...`,
+          toolResult: {
+            success: true,
+            result: `正在识别 ${imageDataUris.length} 张图片...`,
+            uiPayload: {
+              type: "image_intake",
+              status: "running",
+              imagesCount: imageDataUris.length,
+            },
+          },
+          timestamp: imageIntakeToolTimestamp,
+        });
+      }
 
       // ── File preprocessing: extract text from PDFs, keep images as context ──
       let fileContext = "";
@@ -256,8 +305,6 @@ function AgentPageInner() {
             } catch { /* preprocess failed, agent handles it */ }
           }
         }
-        // Keep image data attached for evaluate_jd tool
-        (updated[updated.length - 1] as unknown as Record<string, unknown>).attachments = images;
       }
 
       if (fileContext) {
@@ -276,16 +323,117 @@ function AgentPageInner() {
 
         const currentSessionForRun = currentSessionId ? await getSession(currentSessionId) : undefined;
         const memoryDigest = currentSessionForRun?.memoryDigest;
+        const agentState = currentSessionForRun?.agentState;
 
-        const { agent, systemPrompt, toolWhitelist, tools } = await orchestrate(content, {
+        const preferredDocumentType = imageDataUris.length
+          ? inferPreferredDocumentTypeFromText(content)
+          : undefined;
+        let imageIntake: ImageIntakeResult | null = null;
+        if (imageDataUris.length > 0) {
+          const intakeController = new AbortController();
+          const intakeTimeout = window.setTimeout(() => intakeController.abort(), 35_000);
+          let intakeFailure = "";
+          try {
+            const intakeRes = await fetch("/api/agent/image-intake", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              signal: intakeController.signal,
+              body: JSON.stringify({
+                images: imageDataUris,
+                userText: content,
+              }),
+            });
+            const intakeJson = await intakeRes.json().catch(() => ({}));
+            if (intakeRes.ok && intakeJson.success) {
+              imageIntake = intakeJson.data as ImageIntakeResult;
+            } else {
+              intakeFailure = String(intakeJson.error || `image intake HTTP ${intakeRes.status}`);
+            }
+          } catch (err) {
+            intakeFailure = err instanceof Error ? err.message : "image intake failed";
+          } finally {
+            window.clearTimeout(intakeTimeout);
+          }
+          if (!imageIntake) {
+            imageIntake = {
+              documentType: "unknown",
+              confidence: 0,
+              extractedText: "",
+              quality: "unknown",
+              reason: intakeFailure || "图片识别失败",
+              errors: [intakeFailure || "图片识别失败"],
+              perImage: [],
+            };
+          }
+          const intakeDecision = routeImageIntake(content, imageIntake);
+          upsertImageIntakeToolMessage({
+            role: "tool",
+            toolName: "recognize_document_image",
+            content: buildImageIntakeStatusText(content, imageIntake),
+            toolResult: {
+              success: intakeDecision.route !== "retry_image",
+              result: buildImageIntakeToolSummary(intakeDecision, imageIntake),
+              data: imageIntake,
+              uiPayload: {
+                type: "image_intake",
+                status: intakeDecision.route === "retry_image" ? "failed" : "done",
+                imagesCount: imageDataUris.length,
+                documentType: intakeDecision.documentType,
+                route: intakeDecision.route,
+                confidence: intakeDecision.confidence,
+                quality: intakeDecision.quality || "unknown",
+                reason: intakeDecision.reason,
+                clarificationQuestion: intakeDecision.clarificationQuestion,
+                retryHint: intakeDecision.retryHint,
+                preview: imageIntake.extractedText ? imageIntake.extractedText.slice(0, 180) : "",
+                perImage: imageIntake.perImage || [],
+              },
+            },
+            timestamp: imageIntakeToolTimestamp,
+          });
+          setPhase("understanding");
+          setExecutingTool(undefined);
+        }
+
+        const routedContent = content;
+
+        const { agent, systemPrompt, toolWhitelist, tools } = await orchestrate(routedContent, {
           sessionId: currentSessionId,
           messages: sessionMessages,
           memoryDigest,
+          agentState,
+          imageIntake,
+          preferredDocumentType,
+          forcedAgentId: currentSessionForRun?.interviewState?.planSnapshot
+            ? "interview"
+            : undefined,
         });
 
         const interviewState = currentSessionForRun?.interviewState;
         const interviewContext = interviewState?.planSnapshot
-          ? `\n\n## Active Interview Session\nThis chat is running a mock interview. Treat the following snapshot as the source of truth and do not silently switch materials.\nCompany: ${interviewState.planSnapshot.jdSnapshot?.company || "unknown"}\nRole: ${interviewState.planSnapshot.jdSnapshot?.role || "unknown"}\nMode: ${interviewState.planSnapshot.mode}\nDifficulty: ${interviewState.planSnapshot.difficulty}\nFocus areas: ${interviewState.planSnapshot.focusAreas.join(", ") || "none"}\nAllow follow-ups: ${interviewState.planSnapshot.allowFollowUps ? "yes" : "no"}\nAnswered turns: ${interviewState.transcript.filter((t) => t.role === "user").length}\nRules: ask like a real interviewer, but attach every follow-up to the current question; do not ask the user to repost answers already in this session; if the user mentions another JD/resume, only switch when intent is explicit.`
+          ? `\n\n## Active Interview Session
+This chat is running a mock interview. Treat the following snapshot as the source of truth and do not silently switch materials.
+Company: ${interviewState.planSnapshot.jdSnapshot?.company || "unknown"}
+Role: ${interviewState.planSnapshot.jdSnapshot?.role || "unknown"}
+Mode: ${interviewState.planSnapshot.mode}
+Difficulty: ${interviewState.planSnapshot.difficulty}
+Focus areas: ${interviewState.planSnapshot.focusAreas.join(", ") || "none"}
+Allow follow-ups: ${interviewState.planSnapshot.allowFollowUps ? "yes" : "no"}
+Answered user turns: ${interviewState.transcript.filter((t) => t.role === "user").length}
+
+JD snapshot excerpt:
+${(interviewState.planSnapshot.jdSnapshot?.body || "").slice(0, 1600) || "No JD snapshot available."}
+
+Resume snapshot excerpt:
+${(interviewState.planSnapshot.resumeSnapshot?.body || "").slice(0, 1600) || "No resume snapshot available."}
+
+Rules:
+- This JD and resume remain binding across the whole mock interview, including after the user corrects your format.
+- Ask exactly one interview question per assistant turn. Never list a batch of questions.
+- Before the question, include four concise coaching lines: 题型, 考察点, JD 关联, 简历关联.
+- Then ask exactly one question and stop. Wait for the user's answer.
+- Attach follow-ups to the current question and the original JD/resume snapshot.
+- Do not ask the user to repost JD/resume unless the snapshot is empty and no recent JD can be read.`
           : "";
         const activeSystemPrompt = `${systemPrompt}${interviewContext}`;
 
@@ -293,13 +441,19 @@ function AgentPageInner() {
 
         let toolResultInfo: { name: string; result: string; success: boolean; data?: unknown; uiPayload?: Record<string, unknown> } | null = null;
         let assistantText = "";
+        let nextOfferState = currentSessionForRun?.agentState?.offer;
 
-        const msgList = updated.map((m) => ({ role: m.role, content: m.content }));
+        const msgList = updated.map((m, index) => ({
+          role: m.role,
+          content: m.content,
+          images: m.images,
+        }));
 
         let firstEvent = true;
         for await (const event of agentLoopClient(
           activeSystemPrompt, msgList, undefined, controller.signal, undefined,
           toolWhitelist.length > 0 ? toolWhitelist : undefined, tools,
+          { imageIntake, preferredDocumentType },
         )) {
           if (firstEvent) { setStartTime(Date.now()); firstEvent = false; }
           switch (event.type) {
@@ -310,6 +464,38 @@ function AgentPageInner() {
             case "tool_call": setExecutingTool(event.name); setResultQuality(null); break;
             case "tool_result":
               toolResultInfo = { name: event.name, result: event.result, success: event.success, data: event.data, uiPayload: (event as { uiPayload?: Record<string, unknown> }).uiPayload };
+              const offerPayload = (event as { uiPayload?: Record<string, unknown> }).uiPayload;
+              if (offerPayload?.type === "offer_evaluation" || offerPayload?.type === "offer_report") {
+                nextOfferState = {
+                  activeOfferId: Number(offerPayload.offerId || offerPayload.activeOfferId || 0) || nextOfferState?.activeOfferId,
+                  activeOfferReportId: Number(offerPayload.reportId || offerPayload.reportNum || 0) || nextOfferState?.activeOfferReportId,
+                  lastUserIntent: "evaluate",
+                  lastEvaluationSummary: {
+                    company: String(offerPayload.company || ""),
+                    role: String(offerPayload.role || ""),
+                    overallScore: Number(offerPayload.overallScore || 0),
+                    verdict: String(offerPayload.verdict || "proceed_cautiously") as "accept" | "accept_after_negotiation" | "proceed_cautiously" | "decline",
+                    summary: String(offerPayload.summary || ""),
+                  },
+                  missingInfo: Array.isArray(offerPayload.missingInfo) ? (offerPayload.missingInfo as string[]) : nextOfferState?.missingInfo,
+                  redFlags: Array.isArray(offerPayload.redFlags) ? (offerPayload.redFlags as string[]) : nextOfferState?.redFlags,
+                  updatedAt: new Date().toISOString(),
+                };
+              } else if (offerPayload?.type === "offer_negotiation_strategy") {
+                nextOfferState = {
+                  ...(nextOfferState || {}),
+                  lastUserIntent: "negotiate",
+                  activeOfferReportId: Number(offerPayload.reportId || nextOfferState?.activeOfferReportId || 0) || nextOfferState?.activeOfferReportId,
+                  updatedAt: new Date().toISOString(),
+                };
+              } else if (offerPayload?.type === "offer_hr_question_list") {
+                nextOfferState = {
+                  ...(nextOfferState || {}),
+                  lastUserIntent: "ask_hr",
+                  activeOfferReportId: Number(offerPayload.reportId || nextOfferState?.activeOfferReportId || 0) || nextOfferState?.activeOfferReportId,
+                  updatedAt: new Date().toISOString(),
+                };
+              }
               // Show tool cards: use uiPayload if available (structured rendering), else fall back to text
               setMessages((prev) => {
                 const copy = [...prev];
@@ -320,7 +506,7 @@ function AgentPageInner() {
                     role: "tool" as const,
                     toolName: event.name,
                     content: event.result,
-                    toolResult: { uiPayload, data: event.data },
+                    toolResult: { uiPayload, data: event.data, success: event.success },
                     timestamp: new Date().toISOString(),
                   };
                   const lastIdx = copy.length - 1;
@@ -345,7 +531,13 @@ function AgentPageInner() {
                   });
                 } else {
                   // Plain text tool result
-                  const toolMsg: AgentMessage = { role: "tool", content: event.result, toolResult: event.result, toolName: event.name, timestamp: new Date().toISOString() };
+                  const toolMsg: AgentMessage = {
+                    role: "tool",
+                    content: event.result,
+                    toolResult: { success: event.success, result: event.result, data: event.data },
+                    toolName: event.name,
+                    timestamp: new Date().toISOString(),
+                  };
                   const lastIdx = copy.length - 1;
                   if (copy[lastIdx]?.role === "tool" && copy[lastIdx]?.toolName === event.name) copy[lastIdx] = toolMsg;
                   else copy.push(toolMsg);
@@ -423,22 +615,30 @@ function AgentPageInner() {
           if (currentSessionId) {
             const currentSession = await getSession(currentSessionId);
             if (currentSession) {
+              const currentAgentState = currentSession.agentState || currentSessionForRun?.agentState || {};
               const fullMessages = [...currentSession.messages];
               // Tag user message with agent_id
               const taggedUserMsg = agent.id !== "general"
                 ? { ...userMsg, agent_id: agent.id }
                 : userMsg;
-              fullMessages.push(taggedUserMsg);
+              if (!hideUserMessage) fullMessages.push(taggedUserMsg);
+              const persistedImageIntakeToolMessage = imageIntakeToolMessage as AgentMessage | null;
+              if (!hideUserMessage && persistedImageIntakeToolMessage) {
+                fullMessages.push({
+                  ...persistedImageIntakeToolMessage,
+                  agent_id: agent.id !== "general" ? agent.id : undefined,
+                });
+              }
               if (toolResultInfo) {
                 fullMessages.push({
                   role: "tool",
                   content: toolResultInfo.result,
                   toolName: toolResultInfo.name,
                   toolResult: toolResultInfo.uiPayload
-                    ? { uiPayload: toolResultInfo.uiPayload }
+                    ? { uiPayload: toolResultInfo.uiPayload, success: toolResultInfo.success }
                     : toolResultInfo.name === "get_profile" && toolResultInfo.data
-                      ? { data: toolResultInfo.data }
-                      : toolResultInfo.result,
+                      ? { data: toolResultInfo.data, success: toolResultInfo.success }
+                      : { success: toolResultInfo.success, result: toolResultInfo.result, data: toolResultInfo.data },
                   agent_id: agent.id !== "general" ? agent.id : undefined,
                   timestamp: new Date().toISOString(),
                 });
@@ -448,11 +648,13 @@ function AgentPageInner() {
                 : finalAssistant;
               fullMessages.push(taggedAssistant);
 
-              const nextInterviewState = updateInterviewStateWithExchange(
-                currentSession.interviewState,
-                taggedUserMsg,
-                taggedAssistant,
-              );
+              const nextInterviewState = hideUserMessage
+                ? currentSession.interviewState
+                : updateInterviewStateWithExchange(
+                    currentSession.interviewState,
+                    taggedUserMsg,
+                    taggedAssistant,
+                  );
               const isFirstUserMsg = currentSession.messages.filter((m) => m.role === "user").length === 0;
               const userMsgCount = fullMessages.filter((m) => m.role === "user").length;
               const memoryDigest = userMsgCount >= 5 ? generateMemoryDigest(fullMessages) : undefined;
@@ -475,6 +677,10 @@ function AgentPageInner() {
                 title: sessionTitle,
                 memoryDigest: memoryDigest ?? undefined,
                 interviewState: nextInterviewState,
+                agentState: {
+                  ...currentAgentState,
+                  offer: nextOfferState,
+                },
               });
               // Refresh sessions list
               setSessions(await listSessions());
@@ -485,7 +691,9 @@ function AgentPageInner() {
           triggerProfileUpdate({ force: true }).catch(() => {});
 
           // Best-effort legacy persist
-          try { persistMessages([...updated, finalAssistant]); } catch { /* ok */ }
+          if (!hideUserMessage) {
+            try { persistMessages([...updated, finalAssistant]); } catch { /* ok */ }
+          }
         }
       } catch (err: unknown) {
         if (err instanceof DOMException && err.name === "AbortError") return;
@@ -512,6 +720,26 @@ function AgentPageInner() {
     },
     [messages, currentSessionId, makeSessionTitle, renameSessionFromFirstUserMessage],
   );
+
+  useEffect(() => {
+    if (!mounted || streaming || !currentSessionId || messages.length > 0) return;
+
+    let cancelled = false;
+    const bootstrapInterview = async () => {
+      const session = await getSession(currentSessionId);
+      if (cancelled || !session?.interviewState?.planSnapshot) return;
+      if (session.messages.some((m) => m.role === "user" || m.role === "assistant")) return;
+      if (interviewBootstrapRef.current === currentSessionId) return;
+
+      interviewBootstrapRef.current = currentSessionId;
+      await sendMessage("开始模拟面试：请根据当前面试准备快照直接出第一题，不要先解释。", undefined, { hideUserMessage: true });
+    };
+
+    bootstrapInterview().catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [mounted, streaming, currentSessionId, messages.length, sendMessage]);
 
   const handleStopStreaming = useCallback(() => {
     abortRef.current?.abort();
@@ -558,6 +786,34 @@ function AgentPageInner() {
     if (handoffKeyRef.current === handoffKey) return;
     handoffKeyRef.current = handoffKey;
     sendMessage(`请结合我的简历评估 JD 库里的这份职位。先调用 get_recent_jd_context 读取 jdId=${jdId}，不要让我重新粘贴 JD。`).catch(() => {});
+  }, [mounted, streaming, currentSessionId, searchParams, sendMessage]);
+
+  useEffect(() => {
+    if (!mounted || streaming || !currentSessionId) return;
+    const offerId = searchParams.get("offerId");
+    const offerReportId = searchParams.get("offerReportId");
+    const intent = searchParams.get("intent");
+    if (!offerId && !offerReportId) return;
+
+    const handoffKey = `${currentSessionId}:offer:${intent || "open"}:${offerId || ""}:${offerReportId || ""}`;
+    if (handoffKeyRef.current === handoffKey) return;
+    handoffKeyRef.current = handoffKey;
+
+    if (offerId && intent === "evaluate") {
+      sendMessage(`请评估 Offer 工作台里的 offerId=${offerId}。直接调用 evaluate_offer，不要让我重新粘贴 Offer。`, undefined, { hideUserMessage: true }).catch(() => {});
+      return;
+    }
+    if (offerReportId && intent === "negotiate") {
+      sendMessage(`请基于已保存的 Offer 报告 offerReportId=${offerReportId} 生成谈判策略。优先调用 generate_offer_negotiation_strategy，不要重新评估 Offer。`, undefined, { hideUserMessage: true }).catch(() => {});
+      return;
+    }
+    if (offerReportId && intent === "ask_hr") {
+      sendMessage(`请基于已保存的 Offer 报告 offerReportId=${offerReportId} 生成 HR 问询清单。优先调用 generate_offer_hr_question_list，不要重新评估 Offer。`, undefined, { hideUserMessage: true }).catch(() => {});
+      return;
+    }
+    if (offerReportId) {
+      sendMessage(`请读取并解释已保存的 Offer 报告 offerReportId=${offerReportId}。优先调用 read_offer_report，不要重新评估 Offer。`, undefined, { hideUserMessage: true }).catch(() => {});
+    }
   }, [mounted, streaming, currentSessionId, searchParams, sendMessage]);
 
   const handleSelectSession = useCallback(async (id: number) => {
@@ -642,9 +898,9 @@ function AgentPageInner() {
   }
 
   return (
-    <div className="flex gap-0 flex-1 min-h-0">
+    <div className="flex h-[calc(100vh-(var(--space-section)*2))] min-h-[560px] max-h-[calc(100vh-(var(--space-section)*2))] flex-1 gap-0 overflow-hidden">
       {/* Desktop SessionList Sidebar (>=1280px) */}
-      <div className="hidden lg:flex w-[220px] flex-shrink-0 border-r border-[var(--color-divider)] bg-[var(--color-bg)]/50 overflow-hidden pr-3">
+      <div className="hidden h-full w-[220px] flex-shrink-0 overflow-hidden border-r border-[var(--color-divider)] bg-[var(--color-bg)]/50 pr-3 lg:flex">
         <SessionList
           sessions={sessions}
           currentSessionId={currentSessionId}
@@ -688,9 +944,9 @@ function AgentPageInner() {
       </AnimatePresence>
 
       {/* Chat Area */}
-      <div className="flex-1 flex flex-col min-w-0 min-h-0 ml-4 mr-2" style={{ cursor: "default" }}>
+      <div className="ml-4 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" style={{ cursor: "default" }}>
         {/* Header + Tab bar */}
-        <div className="flex items-center justify-between flex-wrap gap-3 pb-3 border-b border-[var(--color-divider)]">
+        <div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-3 border-b border-[var(--color-divider)] pb-3">
           <div className="flex items-center gap-3">
             <button
               onClick={() => setSessionSidebarOpen(true)}
