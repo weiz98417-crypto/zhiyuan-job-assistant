@@ -1,5 +1,5 @@
 import db from "@/lib/db";
-import type { AgentMessage, ChatSession, InterviewSessionState } from "@/types";
+import type { AgentMessage, AgentSessionState, ChatSession, InterviewSessionState } from "@/types";
 
 const MAX_MESSAGES_PER_SESSION = 200;
 
@@ -17,6 +17,7 @@ interface ServerSessionRow {
   messages_json?: string;
   memory_digest?: string | null;
   interview_state_json?: string | null;
+  agent_state_json?: string | null;
   pinned?: number | boolean;
   deleted_at?: string | null;
   created_at: string;
@@ -39,12 +40,21 @@ function parseServerSession(row: ServerSessionRow): ChatSession {
     interviewState = undefined;
   }
 
+  let agentState: AgentSessionState | undefined;
+  try {
+    const parsed = JSON.parse(row.agent_state_json || "{}") as AgentSessionState;
+    if (parsed && typeof parsed === "object") agentState = parsed;
+  } catch {
+    agentState = undefined;
+  }
+
   return {
     id: Number(row.id),
     title: row.title || makeTitle(messages),
     messages,
     memoryDigest: row.memory_digest || undefined,
     interviewState,
+    agentState,
     pinned: Boolean(row.pinned),
     deletedAt: row.deleted_at || undefined,
     createdAt: row.created_at,
@@ -54,13 +64,14 @@ function parseServerSession(row: ServerSessionRow): ChatSession {
 
 export async function createSession(
   messages: AgentMessage[] = [],
-  options: { title?: string; interviewState?: InterviewSessionState } = {},
+  options: { title?: string; interviewState?: InterviewSessionState; agentState?: AgentSessionState } = {},
 ): Promise<number> {
   const now = new Date().toISOString();
   const session: ChatSession = {
     title: options.title || (messages.length > 0 ? makeTitle(messages) : "新对话"),
     messages,
     interviewState: options.interviewState,
+    agentState: options.agentState,
     pinned: false,
     createdAt: now,
     updatedAt: now,
@@ -74,6 +85,7 @@ export async function createSession(
         title: session.title,
         messages: session.messages,
         interviewState: session.interviewState,
+        agentState: session.agentState,
       }),
     });
     if (res.ok) {
@@ -145,6 +157,7 @@ export async function updateSession(id: number, updates: Partial<ChatSession>): 
       pinned: updates.pinned,
       memoryDigest: updates.memoryDigest,
       interviewState: updates.interviewState,
+      agentState: updates.agentState,
     }),
   }).catch(() => {});
 }
@@ -207,7 +220,7 @@ export function generateMemoryDigest(messages: AgentMessage[]): string | null {
 
   const parts: string[] = [];
 
-  const roleMatch = userText.match(/(?:岗位|职位|角色|方向|投递|申请)[，,]?\s*([^\s，。；]{2,20})/g);
+  const roleMatch = userText.match(/(?:岗位|职位|角色|方向|投递申请)[，,]?\s*([^\s，。；]{2,20})/g);
   if (roleMatch) {
     const unique = [...new Set(roleMatch)].slice(0, 3);
     parts.push(`关注方向: ${unique.join(" / ")}`);
@@ -230,4 +243,3 @@ export function generateMemoryDigest(messages: AgentMessage[]): string | null {
   if (parts.length === 0) return null;
   return parts.join("; ");
 }
-

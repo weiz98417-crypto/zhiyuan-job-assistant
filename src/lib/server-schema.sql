@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS jds (
   source_url TEXT,
   body TEXT NOT NULL DEFAULT '',
   keywords_json TEXT NOT NULL DEFAULT '[]',
-  report_id INTEGER REFERENCES reports(id),
+  report_id INTEGER REFERENCES reports(report_num),
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -151,6 +151,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   messages_json TEXT NOT NULL DEFAULT '[]',
   memory_digest TEXT,
   interview_state_json TEXT NOT NULL DEFAULT '{}',
+  agent_state_json TEXT NOT NULL DEFAULT '{}',
   pinned INTEGER NOT NULL DEFAULT 0,
   deleted_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -181,9 +182,21 @@ CREATE TABLE IF NOT EXISTS offers (
   other_benefits TEXT,
   location TEXT,
   level TEXT,
+  employment_form TEXT NOT NULL DEFAULT 'unknown',
+  employer_name TEXT,
+  contract_months INTEGER,
+  overtime_policy TEXT NOT NULL DEFAULT 'unknown',
+  bonus_guarantee TEXT NOT NULL DEFAULT 'unknown',
+  equity_type TEXT,
+  equity_vesting TEXT,
+  commute_minutes INTEGER,
+  city_cost_level TEXT NOT NULL DEFAULT 'unknown',
+  job_nature TEXT,
   benefits_json TEXT NOT NULL DEFAULT '{}',
   application_id INTEGER REFERENCES applications(id),
+  latest_report_id INTEGER,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(company, role)
 );
 
@@ -191,11 +204,26 @@ CREATE TABLE IF NOT EXISTS offers (
 CREATE TABLE IF NOT EXISTS offer_reports (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   title TEXT NOT NULL DEFAULT 'Offer 对比报告',
+  report_type TEXT NOT NULL DEFAULT 'comparison',
+  model_version TEXT NOT NULL DEFAULT '',
+  offer_id INTEGER REFERENCES offers(id),
+  overall_score REAL NOT NULL DEFAULT 0,
+  verdict TEXT NOT NULL DEFAULT '',
+  summary TEXT NOT NULL DEFAULT '',
+  offer_snapshot_json TEXT NOT NULL DEFAULT '{}',
+  modules_json TEXT NOT NULL DEFAULT '[]',
+  red_flags_json TEXT NOT NULL DEFAULT '[]',
+  missing_info_json TEXT NOT NULL DEFAULT '[]',
+  negotiation_levers_json TEXT NOT NULL DEFAULT '[]',
+  hr_questions_json TEXT NOT NULL DEFAULT '[]',
+  assumptions_json TEXT NOT NULL DEFAULT '[]',
+  take_home_json TEXT NOT NULL DEFAULT '{}',
   offers_json TEXT NOT NULL DEFAULT '[]',
   report_markdown TEXT NOT NULL DEFAULT '',
   num_offers INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE INDEX IF NOT EXISTS idx_offer_reports_offer ON offer_reports(offer_id, created_at);
 
 -- STAR Stories (P2: interview story bank)
 CREATE TABLE IF NOT EXISTS stories (

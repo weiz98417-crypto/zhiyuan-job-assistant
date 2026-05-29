@@ -1,0 +1,104 @@
+# Personal data (user fills these)
+cv.md
+data/applications.md
+data/pipeline.md
+data/scan-history.tsv
+data/zhiyuan.db
+data/zhiyuan.db-shm
+data/zhiyuan.db-wal
+reports/*.md
+!reports/.gitkeep
+reports/.locks/
+output/*
+!output/.gitkeep
+batch/logs/*
+!batch/logs/.gitkeep
+batch/batch-state.tsv
+batch/batch-input.tsv
+batch/tracker-additions/**/*.tsv
+!batch/tracker-additions/.gitkeep
+jds/*
+!jds/.gitkeep
+
+# User config and customization (never auto-updated)
+config/profile.yml
+portals.yml
+modes/_profile.md
+.update-dismissed
+.update-lock
+
+# Secrets (never commit — use .env.example as template)
+.env
+.env.local
+!.env.example
+
+# Generated
+.resolved-prompt-*
+node_modules/
+bun.lock
+
+# OS
+.DS_Store
+*.mov
+*.mp4
+
+# Claude Code local
+.claude/settings.local.json
+.claude/memory/
+career-dashboard
+package-lock.json
+tmp-open-source/
+tmp-*.jpg
+tmp-*.png
+.tmp-*.png
+zhiyuan-server.*.log
+*.tsbuildinfo
+
+# Openspec archive
+openspec/changes/archive/
+.gstack/
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+!.env.example
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+openspec/changes/
+auth
+auth-wal

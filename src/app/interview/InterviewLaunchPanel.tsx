@@ -24,11 +24,27 @@ export default function InterviewLaunchPanel() {
   const [loading, setLoading] = useState(false);
 
   const refresh = async () => {
-    const allJds = await getAllJDs();
+    let allJds = await getAllJDs();
+    try {
+      const res = await fetch("/api/data/jds", { cache: "no-store" });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          allJds = json.data;
+        }
+      }
+    } catch {
+      /* keep local fallback */
+    }
     const text = getCVFullText();
     setJds(allJds);
     setCvText(text);
-    if (selectedJdId === "" && allJds.length > 0) setSelectedJdId(allJds[0].id || "");
+    if (allJds.length > 0) {
+      const selectedStillExists = allJds.some((jd) => jd.id === selectedJdId);
+      if (selectedJdId === "" || !selectedStillExists) {
+        setSelectedJdId(allJds[0].id || "");
+      }
+    }
   };
 
   useEffect(() => {
@@ -194,4 +210,3 @@ export default function InterviewLaunchPanel() {
     </PaperCard>
   );
 }
-

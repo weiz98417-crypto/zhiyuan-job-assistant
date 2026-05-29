@@ -1,0 +1,328 @@
+@import "tailwindcss";
+
+/* ── Design System: 筝筝纸鸢 Frontend ── */
+/* Creative North Star: "一页翻开的手帳" */
+/* Color Strategy: Committed — Warm Amber Glow 30-50% surface */
+
+/* ── Light Mode (Default) ── */
+/* Scene: 周六早晨，阳光从窗户斜照进来，一本精装布面Moleskine */
+:root {
+  /* Primary — Warm Amber Glow: the committed voice */
+  --color-primary: oklch(75% 0.12 75);
+  --color-primary-hover: oklch(72% 0.13 75);
+  --color-primary-soft: oklch(88% 0.06 75);
+  --color-primary-muted: oklch(93% 0.03 75);
+
+  /* Surface — Cream Paper baseline, never pure white */
+  --color-bg: oklch(97% 0.005 85);
+  --color-surface: oklch(99% 0.003 85);
+  --color-surface-raised: oklch(100% 0 0);
+
+  /* Text — Warm Ink, never pure black */
+  --color-text: oklch(25% 0.01 260);
+  --color-text-soft: oklch(40% 0.008 260);
+  --color-muted: oklch(65% 0.005 85);
+
+  /* Borders & Dividers */
+  --color-border: oklch(88% 0.008 85);
+  --color-divider: oklch(92% 0.005 85);
+
+  /* Elevation — warm paper shadows, not dark box-shadows */
+  --shadow-sm: 0 1px 2px oklch(50% 0.01 85 / 0.04);
+  --shadow-md: 0 2px 8px oklch(50% 0.01 85 / 0.06);
+  --shadow-lg: 0 4px 16px oklch(50% 0.01 85 / 0.08);
+
+  /* Border Radius — organic, ascending with hierarchy */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-2xl: 24px;
+
+  /* Typography */
+  --font-display: "LXGW WenKai", "Zen Maru Gothic", "KaiTi", "STKaiti", serif;
+  --font-body: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+
+  /* Spacing rhythm */
+  --space-page: clamp(1rem, 4vw, 2rem);
+  --space-section: clamp(1.5rem, 3vw, 2.5rem);
+  --space-card-pad: clamp(1rem, 2vw, 1.5rem);
+
+  /* Animation */
+  --ease-out-expo: cubic-bezier(0.19, 1, 0.22, 1);
+  --duration-fast: 150ms;
+  --duration-normal: 300ms;
+  --duration-slow: 500ms;
+  --duration-reveal: 800ms;
+}
+
+/* ── Dark Mode ── */
+/* Scene: 晚间台灯下翻开手帳 — 深灰纸张 + 温暖墨水，不冷 */
+.dark {
+  --color-primary: oklch(72% 0.13 75);
+  --color-primary-hover: oklch(70% 0.14 75);
+  --color-primary-soft: oklch(30% 0.06 75);
+  --color-primary-muted: oklch(25% 0.03 75);
+
+  --color-bg: oklch(18% 0.005 85);
+  --color-surface: oklch(22% 0.005 85);
+  --color-surface-raised: oklch(26% 0.005 85);
+
+  --color-text: oklch(88% 0.005 85);
+  --color-text-soft: oklch(75% 0.005 85);
+  --color-muted: oklch(55% 0.005 85);
+
+  --color-border: oklch(32% 0.005 85);
+  --color-divider: oklch(26% 0.005 85);
+
+  --shadow-sm: 0 1px 2px oklch(0% 0 0 / 0.12);
+  --shadow-md: 0 2px 8px oklch(0% 0 0 / 0.18);
+  --shadow-lg: 0 4px 16px oklch(0% 0 0 / 0.24);
+}
+
+/* ── Tailwind Theme ── */
+@theme inline {
+  --color-primary: oklch(var(--color-primary) / <alpha-value>);
+  --color-primary-hover: oklch(var(--color-primary-hover) / <alpha-value>);
+  --color-primary-soft: oklch(var(--color-primary-soft) / <alpha-value>);
+  --color-primary-muted: oklch(var(--color-primary-muted) / <alpha-value>);
+  --color-bg: var(--color-bg);
+  --color-surface: var(--color-surface);
+  --color-surface-raised: var(--color-surface-raised);
+  --color-text: var(--color-text);
+  --color-text-soft: var(--color-text-soft);
+  --color-muted: var(--color-muted);
+  --color-border: var(--color-border);
+  --color-divider: var(--color-divider);
+  --font-display: var(--font-display);
+  --font-body: var(--font-body);
+}
+
+/* ── Base ── */
+body {
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-weight: 400;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ── Report Content (Agent Chat) ── */
+.report-content table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+  margin: 0.5rem 0;
+}
+.report-content th {
+  background: var(--color-bg);
+  font-weight: 600;
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 2px solid var(--color-divider);
+  color: var(--color-text);
+  white-space: nowrap;
+}
+.report-content td {
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--color-divider);
+  color: var(--color-text-soft);
+  vertical-align: top;
+}
+.report-content tr:nth-child(even) td {
+  background: var(--color-bg);
+}
+.report-content h2, .report-content h3, .report-content h4 {
+  color: var(--color-text);
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+}
+.report-content strong {
+  color: var(--color-text);
+  font-weight: 600;
+}
+.report-content li {
+  margin: 0.25rem 0;
+  padding-left: 0.5rem;
+}
+.report-content p {
+  margin: 0.5rem 0;
+  line-height: 1.6;
+}
+
+/* ── Scrollbar ── */
+.scrollbar-thin::-webkit-scrollbar { width: 4px; }
+.scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+.scrollbar-thin::-webkit-scrollbar-thumb { background: var(--color-divider); border-radius: 2px; }
+.scrollbar-thin::-webkit-scrollbar-thumb:hover { background: var(--color-muted); }
+.scrollbar-thin { scrollbar-width: thin; scrollbar-color: var(--color-divider) transparent; }
+
+/* ── Risk Badge Styles (for JD evaluation risk signals) ── */
+.risk-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.4;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+.risk-badge.risk-critical {
+  background: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fecaca;
+}
+.risk-badge.risk-high {
+  background: #fff7ed;
+  color: #ea580c;
+  border: 1px solid #fed7aa;
+}
+.risk-badge.risk-medium {
+  background: #fefce8;
+  color: #ca8a04;
+  border: 1px solid #fef08a;
+}
+.risk-badge.risk-low {
+  background: #f0fdf4;
+  color: #16a34a;
+  border: 1px solid #bbf7d0;
+}
+
+/* Dark mode risk badges */
+.dark .risk-badge.risk-critical,
+[data-theme="dark"] .risk-badge.risk-critical {
+  background: #7f1d1d33;
+  color: #fca5a5;
+  border-color: #7f1d1d66;
+}
+.dark .risk-badge.risk-high,
+[data-theme="dark"] .risk-badge.risk-high {
+  background: #7c2d1233;
+  color: #fdba74;
+  border-color: #7c2d1266;
+}
+.dark .risk-badge.risk-medium,
+[data-theme="dark"] .risk-badge.risk-medium {
+  background: #713f1233;
+  color: #fde047;
+  border-color: #713f1266;
+}
+.dark .risk-badge.risk-low,
+[data-theme="dark"] .risk-badge.risk-low {
+  background: #14532d33;
+  color: #86efac;
+  border-color: #14532d66;
+}
+
+/* ── Auth Pages: Keyframe Animations ── */
+
+/* Spinner */
+@keyframes auth-spin { to { transform: rotate(360deg); } }
+
+/* Kites */
+@keyframes auth-kiteSoar1 {
+  0%   { top: 28%; left: 4%; transform: rotate(-3deg); }
+  20%  { top: 14%; left: 8%; transform: rotate(5deg); }
+  40%  { top: 8%;  left: 12%; transform: rotate(10deg); }
+  60%  { top: 18%; left: 5%; transform: rotate(-4deg); }
+  80%  { top: 24%; left: 3%;  transform: rotate(-8deg); }
+  100% { top: 28%; left: 4%; transform: rotate(-3deg); }
+}
+@keyframes auth-kiteSoar2 {
+  0%   { top: 22%; right: 4%;  transform: rotate(4deg); }
+  25%  { top: 10%; right: 10%; transform: rotate(-6deg); }
+  50%  { top: 6%;  right: 14%; transform: rotate(-12deg); }
+  75%  { top: 16%; right: 6%; transform: rotate(2deg); }
+  100% { top: 22%; right: 4%;  transform: rotate(4deg); }
+}
+@keyframes auth-kiteSoar3 {
+  0%   { top: 35%; left: 8%; transform: rotate(-2deg); }
+  33%  { top: 20%; left: 14%; transform: rotate(7deg); }
+  66%  { top: 12%; left: 18%; transform: rotate(12deg); }
+  100% { top: 35%; left: 8%; transform: rotate(-2deg); }
+}
+@keyframes auth-kiteSoar4 {
+  0%   { top: 30%; right: 8%; transform: rotate(6deg); }
+  30%  { top: 16%; right: 14%; transform: rotate(-3deg); }
+  60%  { top: 8%;  right: 18%; transform: rotate(-8deg); }
+  100% { top: 30%; right: 8%; transform: rotate(6deg); }
+}
+@keyframes auth-kiteRise1 {
+  0%   { bottom: 5%; right: 4%;  transform: rotate(6deg) scale(0.6); opacity: 0; }
+  15%  { opacity: 0.24; transform: rotate(3deg) scale(0.8); }
+  45%  { bottom: 40%; right: 14%; transform: rotate(-6deg) scale(1); }
+  75%  { bottom: 55%; right: 8%;  transform: rotate(-10deg) scale(1); }
+  90%  { opacity: 0.24; }
+  100% { bottom: 65%; right: 12%; transform: rotate(-4deg) scale(0.8); opacity: 0; }
+}
+@keyframes auth-kiteRise2 {
+  0%   { bottom: 3%; right: 8%;  transform: rotate(-5deg) scale(0.5); opacity: 0; }
+  12%  { opacity: 0.28; transform: rotate(-2deg) scale(0.7); }
+  40%  { bottom: 35%; right: 5%;  transform: rotate(8deg) scale(1); }
+  68%  { bottom: 52%; right: 16%; transform: rotate(12deg) scale(1); }
+  88%  { opacity: 0.28; }
+  100% { bottom: 60%; right: 10%; transform: rotate(3deg) scale(0.7); opacity: 0; }
+}
+
+/* Ink washes */
+@keyframes auth-inkPulse1 {
+  0%, 100% { opacity: 0.5; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(1.15); }
+}
+@keyframes auth-inkPulse2 {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  50% { opacity: 0.55; transform: scale(1.1); }
+}
+@keyframes auth-inkPulse3 {
+  0%, 100% { opacity: 0.25; transform: scale(1); }
+  33% { opacity: 0.4; transform: scale(1.2); }
+  66% { opacity: 0.2; transform: scale(0.95); }
+}
+
+/* Bookmarks */
+@keyframes auth-bookmarkSway {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(1.5deg); }
+  75% { transform: rotate(-1deg); }
+}
+
+/* Book icon */
+@keyframes auth-bookFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+@keyframes auth-glowPulse {
+  0%, 100% { opacity: 0.6; transform: translate(-50%, -50%) scale(1); }
+  50% { opacity: 1; transform: translate(-50%, -50%) scale(1.3); }
+}
+
+/* Floating tags */
+@keyframes auth-tagEdgeL {
+  0%, 100% { transform: translate(0, 0); }
+  25% { transform: translate(6px, -5px); }
+  50% { transform: translate(-4px, -10px); }
+  75% { transform: translate(8px, -2px); }
+}
+@keyframes auth-tagEdgeR {
+  0%, 100% { transform: translate(0, 0); }
+  25% { transform: translate(-8px, -4px); }
+  50% { transform: translate(4px, -10px); }
+  75% { transform: translate(-6px, 2px); }
+}
+@keyframes auth-tagMidL {
+  0%, 100% { transform: translate(0, 0); }
+  33% { transform: translate(8px, -8px); }
+  66% { transform: translate(-4px, -3px); }
+}

@@ -1,0 +1,9 @@
+# Snapshot 002: 可疑 JD — 常见黑话密集
+# Expected: signals=8, risk_total=14, risk_tier=🔴高风险 (no critical, total>=6)
+# Key signals: "亲自带"(high=4), "弹性工作制"(medium=2), "有激情/上进心"(medium=2), "薪资上不封顶"(medium=2), "扁平化管理"(low=1), "年轻团队"(low=1), "包三餐"(low=1), "零食随便吃"(low=1)
+# Date: 2026-05-09
+
+某快速成长互联网公司招聘产品经理，leader亲自带快速成长。
+弹性工作制结果导向，薪资上不封顶凭能力拿。
+扁平化管理年轻有活力团队，期待有激情有上进心的你加入！
+薪资面议，包三餐零食随便吃。

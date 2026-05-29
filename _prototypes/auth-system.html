@@ -1,0 +1,868 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<!-- 筝筝纸鸢 — 登录系统 v3 · 粒子动画 + 手帳美学 -->
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>筝筝纸鸢 — 登录</title>
+<style>
+/* ═══════════════════ Design System ═══════════════════ */
+:root {
+  --primary: oklch(75% 0.12 75);
+  --primary-hover: oklch(72% 0.13 75);
+  --primary-soft: oklch(88% 0.06 75);
+  --primary-muted: oklch(94% 0.04 75);
+  --bg: oklch(97% 0.005 85);
+  --surface: oklch(99.5% 0.002 85);
+  --text: oklch(25% 0.01 260);
+  --text-soft: oklch(40% 0.008 260);
+  --muted: oklch(60% 0.006 85);
+  --border: oklch(88% 0.008 85);
+  --divider: oklch(93% 0.005 85);
+  --success: #4A8C6A; --success-bg: #EFF8F2;
+  --error: #A85454; --error-bg: #FDF2F2;
+  --warning: #B8863A; --warning-bg: #FFFBF0;
+  --shadow-sm: 0 1px 2px oklch(50% 0.01 85 / 0.04);
+  --shadow-md: 0 2px 8px oklch(50% 0.01 85 / 0.06);
+  --radius-sm: 6px; --radius-md: 10px; --radius-lg: 16px;
+  --font-display: "LXGW WenKai", "Zen Maru Gothic", "KaiTi", "STKaiti", serif;
+  --font-body: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --ease-expo: cubic-bezier(0.19, 1, 0.22, 1);
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  font-family: var(--font-body); background: var(--bg);
+  color: var(--text); -webkit-font-smoothing: antialiased; overflow: hidden;
+}
+input, button { font-family: inherit; font-size: inherit; }
+
+/* ═══════════════════ Split Layout ═══════════════════ */
+.login-container { display: grid; grid-template-columns: 1fr 1fr; height: 100vh; }
+
+/* ── Left Hero ── */
+.hero {
+  background: var(--surface); position: relative; overflow: hidden;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+/* Vignette */
+.hero::after {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none; z-index: 1;
+  background: radial-gradient(ellipse at center, transparent 55%, oklch(25% 0.01 85 / 0.06) 100%);
+}
+
+/* Canvas particle layer */
+#particle-canvas {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+  pointer-events: none; z-index: 2;
+}
+
+/* Paper kites (纸鸢) — the brand namesake, soaring gently */
+.kite {
+  position: absolute; pointer-events: none; z-index: 3;
+}
+.kite svg { width: 48px; height: 60px; opacity: 0.3; }
+.kite-1 { animation: kiteSoar1 14s ease-in-out infinite; }
+.kite-2 { animation: kiteSoar2 16s ease-in-out 3s infinite; }
+.kite-3 { animation: kiteSoar3 12s ease-in-out 7s infinite; }
+.kite-4 { animation: kiteSoar4 18s ease-in-out 5s infinite; }
+.kite-2 svg { width: 32px; height: 40px; opacity: 0.22; }
+.kite-3 svg { width: 56px; height: 70px; opacity: 0.28; }
+.kite-4 svg { width: 38px; height: 48px; opacity: 0.25; }
+.kite-5 { bottom: 6%; right: 3%; animation: kiteRise1 9s ease-in-out infinite; }
+.kite-6 { bottom: 3%; right: 8%; animation: kiteRise2 12s ease-in-out 3s infinite; }
+.kite-5 svg { width: 34px; height: 42px; opacity: 0.22; }
+.kite-6 svg { width: 44px; height: 55px; opacity: 0.26; }
+
+@keyframes kiteSoar1 {
+  0%   { top: 28%; left: 10%; transform: rotate(-3deg); }
+  20%  { top: 14%; left: 18%; transform: rotate(5deg); }
+  40%  { top: 8%;  left: 24%; transform: rotate(10deg); }
+  60%  { top: 18%; left: 12%; transform: rotate(-4deg); }
+  80%  { top: 24%; left: 6%;  transform: rotate(-8deg); }
+  100% { top: 28%; left: 10%; transform: rotate(-3deg); }
+}
+@keyframes kiteSoar2 {
+  0%   { top: 22%; right: 8%;  transform: rotate(4deg); }
+  25%  { top: 10%; right: 14%; transform: rotate(-6deg); }
+  50%  { top: 6%;  right: 20%; transform: rotate(-12deg); }
+  75%  { top: 16%; right: 10%; transform: rotate(2deg); }
+  100% { top: 22%; right: 8%;  transform: rotate(4deg); }
+}
+@keyframes kiteSoar3 {
+  0%   { top: 35%; left: 20%; transform: rotate(-2deg); }
+  33%  { top: 20%; left: 28%; transform: rotate(7deg); }
+  66%  { top: 12%; left: 32%; transform: rotate(12deg); }
+  100% { top: 35%; left: 20%; transform: rotate(-2deg); }
+}
+@keyframes kiteSoar4 {
+  0%   { top: 30%; right: 16%; transform: rotate(6deg); }
+  30%  { top: 16%; right: 22%; transform: rotate(-3deg); }
+  60%  { top: 8%;  right: 26%; transform: rotate(-8deg); }
+  100% { top: 30%; right: 16%; transform: rotate(6deg); }
+}
+/* Rising kites — from bottom-right corner flying upward */
+@keyframes kiteRise1 {
+  0%   { bottom: 5%; right: 4%;  transform: rotate(6deg) scale(0.6); opacity: 0; }
+  15%  { opacity: 0.24; transform: rotate(3deg) scale(0.8); }
+  45%  { bottom: 40%; right: 14%; transform: rotate(-6deg) scale(1); }
+  75%  { bottom: 55%; right: 8%;  transform: rotate(-10deg) scale(1); }
+  90%  { opacity: 0.24; }
+  100% { bottom: 65%; right: 12%; transform: rotate(-4deg) scale(0.8); opacity: 0; }
+}
+@keyframes kiteRise2 {
+  0%   { bottom: 3%; right: 8%;  transform: rotate(-5deg) scale(0.5); opacity: 0; }
+  12%  { opacity: 0.28; transform: rotate(-2deg) scale(0.7); }
+  40%  { bottom: 35%; right: 5%;  transform: rotate(8deg) scale(1); }
+  68%  { bottom: 52%; right: 16%; transform: rotate(12deg) scale(1); }
+  88%  { opacity: 0.28; }
+  100% { bottom: 60%; right: 10%; transform: rotate(3deg) scale(0.7); opacity: 0; }
+}
+
+/* Journal lines background */
+.journal-lines {
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none; z-index: 0;
+  opacity: 0.06;
+  background: repeating-linear-gradient(to bottom, transparent, transparent 27px, oklch(70% 0.01 85) 27px, oklch(70% 0.01 85) 28px);
+}
+.journal-lines::before {
+  content: ''; position: absolute; top: 0; left: 56px; bottom: 0; width: 1px;
+  background: oklch(75% 0.04 10 / 0.25);
+}
+
+/* Ink washes — slowly animated */
+.ink-wash {
+  position: absolute; border-radius: 50%; pointer-events: none; z-index: 0;
+}
+.ink-wash-1 {
+  top: -100px; right: -60px; width: 350px; height: 350px;
+  background: radial-gradient(circle, var(--primary-muted) 0%, transparent 70%);
+  opacity: 0.5;
+  animation: inkPulse1 8s ease-in-out infinite;
+}
+.ink-wash-2 {
+  bottom: -80px; left: -40px; width: 280px; height: 280px;
+  background: radial-gradient(circle, oklch(88% 0.04 85) 0%, transparent 70%);
+  opacity: 0.4;
+  animation: inkPulse2 10s ease-in-out infinite;
+}
+.ink-wash-3 {
+  top: 40%; left: 20%; width: 200px; height: 200px;
+  background: radial-gradient(circle, oklch(82% 0.08 80) 0%, transparent 70%);
+  opacity: 0.25;
+  animation: inkPulse3 12s ease-in-out infinite;
+}
+@keyframes inkPulse1 {
+  0%, 100% { opacity: 0.5; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(1.15); }
+}
+@keyframes inkPulse2 {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  50% { opacity: 0.55; transform: scale(1.1); }
+}
+@keyframes inkPulse3 {
+  0%, 100% { opacity: 0.25; transform: scale(1); }
+  33% { opacity: 0.4; transform: scale(1.2); }
+  66% { opacity: 0.2; transform: scale(0.95); }
+}
+
+/* Bookmarks */
+.bookmark {
+  position: absolute; pointer-events: none; z-index: 2;
+  border-radius: 0 0 4px 4px; box-shadow: var(--shadow-sm);
+}
+.bookmark-1 {
+  top: -6px; right: 80px; width: 30px; height: 70px;
+  background: linear-gradient(180deg, var(--primary-soft), var(--primary-muted));
+  animation: bookmarkSway 6s ease-in-out infinite;
+}
+.bookmark-2 {
+  top: -10px; right: 48px; width: 26px; height: 54px;
+  background: linear-gradient(180deg, oklch(90% 0.03 200), oklch(95% 0.02 200));
+  animation: bookmarkSway 7s ease-in-out 1s infinite;
+}
+@keyframes bookmarkSway {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(1.5deg); }
+  75% { transform: rotate(-1deg); }
+}
+
+/* Central content */
+.hero-content {
+  position: relative; z-index: 3; text-align: center;
+  display: flex; flex-direction: column; align-items: center;
+  padding: 0 48px;
+}
+
+/* Open book SVG — centerpiece with glow */
+.book-icon-wrap {
+  position: relative; margin-bottom: 32px;
+}
+.book-icon-wrap svg {
+  width: 80px; height: 80px;
+  animation: bookFloat 4s ease-in-out infinite;
+  filter: drop-shadow(0 4px 20px oklch(75% 0.12 75 / 0.2));
+}
+.book-glow {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: 100px; height: 100px; border-radius: 50%;
+  background: radial-gradient(circle, var(--primary-muted) 0%, transparent 70%);
+  animation: glowPulse 3s ease-in-out infinite;
+}
+@keyframes bookFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+@keyframes glowPulse {
+  0%, 100% { opacity: 0.6; transform: translate(-50%, -50%) scale(1); }
+  50% { opacity: 1; transform: translate(-50%, -50%) scale(1.3); }
+}
+
+.brand-label {
+  font-size: 0.65rem; font-weight: 600; color: var(--muted);
+  letter-spacing: 0.25em; text-transform: uppercase; margin-bottom: 12px;
+}
+.brand-title {
+  font-family: var(--font-display); font-size: 3.75rem; font-weight: 700;
+  color: var(--text); letter-spacing: 0.04em; line-height: 1.1; margin-bottom: 6px;
+}
+.brand-title .accent { color: var(--primary); }
+.brand-subtitle {
+  font-size: 1rem; color: var(--text-soft); margin-bottom: 16px;
+  opacity: 0.85;
+}
+
+/* Floating tag words — drift around the title */
+.floating-tags {
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  pointer-events: none; z-index: 2;
+}
+.floating-tag {
+  position: absolute; font-size: 0.68rem; font-weight: 500;
+  color: var(--primary); pointer-events: none;
+  padding: 4px 12px; border-radius: 999px;
+  background: var(--primary-muted);
+  border: 1px solid var(--primary-soft);
+  white-space: nowrap;
+}
+/* Pinned to extreme edges — each tag pushed to its corner */
+.ft-1 { top: 2%; left: -1%; animation: tagDrift1 8s ease-in-out infinite; }
+.ft-2 { top: 3%; right: -1%; animation: tagDrift2 9s ease-in-out 1s infinite; }
+.ft-3 { top: 18%; left: 14%; animation: tagDrift3 7s ease-in-out 2s infinite; font-size: 0.62rem; }
+.ft-4 { bottom: 10%; left: -1%; animation: tagDrift1 10s ease-in-out 3s infinite; }
+.ft-5 { bottom: 6%; right: -1%; animation: tagDrift2 8.5s ease-in-out 0.5s infinite; font-size: 0.62rem; }
+@keyframes tagDrift1 {
+  0%, 100% { transform: translate(0, 0); }
+  25% { transform: translate(8px, -6px); }
+  50% { transform: translate(-4px, -10px); }
+  75% { transform: translate(-8px, -2px); }
+}
+@keyframes tagDrift2 {
+  0%, 100% { transform: translate(0, 0); }
+  25% { transform: translate(-10px, -4px); }
+  50% { transform: translate(6px, -8px); }
+  75% { transform: translate(10px, 0); }
+}
+@keyframes tagDrift3 {
+  0%, 100% { transform: translate(0, 0); }
+  33% { transform: translate(8px, -8px); }
+  66% { transform: translate(-6px, -4px); }
+}
+
+/* Stats at bottom */
+.hero-footer {
+  position: relative; z-index: 3; margin-top: 48px;
+  display: flex; gap: 40px;
+}
+.hero-footer .stat {
+  text-align: center;
+}
+.hero-footer .stat-value {
+  font-family: var(--font-display); font-size: 1.5rem; font-weight: 700; color: var(--primary);
+}
+.hero-footer .stat-label {
+  font-size: 0.68rem; color: var(--muted); margin-top: 2px;
+}
+
+/* ── Right Form ── */
+.form-side {
+  background: var(--bg); display: flex; align-items: center; justify-content: center; padding: 48px;
+}
+.form-wrap { width: 100%; max-width: 400px; }
+.form-header { margin-bottom: 32px; }
+.form-header h2 { font-family: var(--font-display); font-size: 1.6rem; font-weight: 700; margin-bottom: 4px; }
+.form-header p { font-size: 0.82rem; color: var(--text-soft); }
+
+.form-panel { display: none; }
+.form-panel.active { display: block; }
+
+.form-group { margin-bottom: 18px; }
+.form-label { display: block; font-size: 0.8rem; font-weight: 500; color: var(--text); margin-bottom: 7px; }
+.form-label .optional { color: var(--muted); font-weight: 400; font-size: 0.7rem; }
+.form-input {
+  width: 100%; padding: 11px 14px; font-size: 0.9rem; color: var(--text);
+  background: var(--surface); border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm); transition: all 0.2s var(--ease-expo); outline: none;
+}
+.form-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-muted); }
+.form-input.error { border-color: var(--error); }
+.form-input.error:focus { box-shadow: 0 0 0 3px var(--error-bg); }
+.form-input::placeholder { color: var(--muted); }
+
+.form-error { font-size: 0.72rem; color: var(--error); margin-top: 5px; display: none; }
+.form-error.visible { display: block; }
+.form-success {
+  padding: 12px 16px; background: var(--success-bg); border-radius: var(--radius-sm);
+  border-left: 3px solid var(--success); margin-bottom: 20px;
+}
+.form-success p { font-size: 0.82rem; color: var(--success); font-weight: 500; }
+
+.btn-submit {
+  width: 100%; padding: 13px 24px; background: var(--primary); color: #fff;
+  border: none; border-radius: var(--radius-sm); font-size: 0.92rem; font-weight: 600;
+  cursor: pointer; transition: all 0.2s var(--ease-expo); box-shadow: var(--shadow-sm);
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  font-family: var(--font-body); letter-spacing: 0.04em;
+}
+.btn-submit:hover { background: var(--primary-hover); box-shadow: var(--shadow-md); transform: translateY(-1px); }
+.btn-submit:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+.spinner {
+  width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: #fff; border-radius: 50%; animation: spin 0.6s linear infinite; display: none;
+}
+.btn-submit.loading .spinner { display: block; }
+.btn-submit.loading .btn-text { display: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.form-footer {
+  text-align: center; margin-top: 20px; font-size: 0.8rem; color: var(--muted);
+}
+.form-footer a {
+  color: var(--primary); text-decoration: none; font-weight: 500;
+  cursor: pointer; transition: color 0.2s;
+}
+.form-footer a:hover { text-decoration: underline; }
+
+/* ── App Shell ── */
+.app-layout { display: none; min-height: 100vh; }
+.app-layout.visible { display: flex; }
+.app-sidebar {
+  width: 224px; background: var(--surface); border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; padding: 1.5rem 0.75rem;
+  position: fixed; left: 0; top: 0; bottom: 0; z-index: 10; overflow-y: auto;
+}
+.app-sidebar .brand { padding: 0 1rem; margin-bottom: 2rem; }
+.app-sidebar .brand h2 { font-family: var(--font-display); font-size: 1.25rem; font-weight: 700; }
+.app-sidebar .brand .sub { font-size: 0.7rem; color: var(--muted); margin-top: 2px; }
+.nav-section { flex: 1; overflow-y: auto; }
+.nav-group-label { margin-top: 0.75rem; margin-bottom: 0.25rem; padding: 0 1rem; }
+.nav-group-label hr { border: none; border-top: 1px solid var(--divider); margin-bottom: 0.5rem; }
+.nav-group-label span { font-size: 0.625rem; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.nav-item {
+  display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 1rem; margin: 0.1rem 0;
+  border-radius: var(--radius-sm); color: var(--text-soft); font-size: 0.82rem;
+  cursor: pointer; text-decoration: none; transition: all 0.15s var(--ease-expo);
+}
+.nav-item:hover { background: var(--primary-muted); color: var(--text); }
+.nav-item.active { background: var(--primary-soft); color: var(--primary-hover); font-weight: 600; }
+.nav-item svg { width: 18px; height: 18px; flex-shrink: 0; }
+
+.sidebar-user { border-top: 1px solid var(--divider); padding: 0.75rem; margin-top: 0.5rem; }
+.sidebar-user .user-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem; border-radius: var(--radius-sm); }
+.sidebar-user .user-avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--primary-soft); color: var(--primary); display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; flex-shrink: 0; }
+.sidebar-user .user-info { flex: 1; min-width: 0; }
+.sidebar-user .user-name { font-size: 0.78rem; font-weight: 600; color: var(--text); }
+.sidebar-user .user-role { font-size: 0.65rem; color: var(--muted); }
+.sidebar-user .user-actions { margin-top: 0.4rem; }
+.sidebar-user .admin-link { display: flex; align-items: center; gap: 0.4rem; padding: 0.35rem 0.5rem; border-radius: var(--radius-sm); color: var(--primary); font-size: 0.72rem; font-weight: 500; text-decoration: none; transition: background 0.2s; }
+.sidebar-user .admin-link:hover { background: var(--primary-muted); }
+.sidebar-user .logout-btn { display: flex; align-items: center; gap: 0.4rem; padding: 0.35rem 0.5rem; width: 100%; border: none; background: none; color: var(--muted); font-size: 0.72rem; cursor: pointer; border-radius: var(--radius-sm); transition: all 0.2s; }
+.sidebar-user .logout-btn:hover { color: var(--error); background: var(--error-bg); }
+
+.app-main { flex: 1; margin-left: 224px; padding: 2rem 2rem; max-width: 1600px; }
+.page-header { margin-bottom: 1.5rem; }
+.page-header h2 { font-family: var(--font-display); font-size: 1.5rem; font-weight: 700; }
+.page-header p { font-size: 0.8rem; color: var(--muted); margin-top: 0.25rem; }
+
+.filter-tabs { display: flex; gap: 0.5rem; margin-bottom: 1.25rem; }
+.filter-tab { padding: 0.4rem 0.85rem; border-radius: var(--radius-sm); font-size: 0.78rem; font-weight: 500; border: 1px solid var(--border); background: var(--surface); color: var(--text-soft); cursor: pointer; transition: all 0.15s; display: flex; align-items: center; gap: 0.4rem; }
+.filter-tab:hover { border-color: var(--primary); color: var(--primary); }
+.filter-tab.active { background: var(--primary-soft); border-color: var(--primary); color: var(--primary-hover); font-weight: 600; }
+.filter-tab .badge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; border-radius: 999px; background: var(--error); color: #fff; font-size: 0.65rem; font-weight: 700; padding: 0 0.3rem; }
+
+.data-table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; box-shadow: var(--shadow-sm); }
+.data-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+.data-table th { text-align: left; padding: 0.7rem 0.85rem; background: var(--bg); font-weight: 600; font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 2px solid var(--divider); }
+.data-table td { padding: 0.65rem 0.85rem; border-bottom: 1px solid var(--divider); color: var(--text-soft); }
+.data-table tr:last-child td { border-bottom: none; }
+.data-table tr:hover td { background: var(--bg); }
+
+.status-badge { display: inline-block; padding: 0.15rem 0.55rem; border-radius: 999px; font-size: 0.68rem; font-weight: 600; }
+.status-pending { background: var(--warning-bg); color: var(--warning); }
+.status-active { background: var(--success-bg); color: var(--success); }
+.status-rejected { background: var(--bg); color: var(--muted); }
+.role-badge { display: inline-block; padding: 0.15rem 0.55rem; border-radius: 999px; font-size: 0.68rem; font-weight: 600; }
+.role-admin { background: var(--primary-muted); color: var(--primary-hover); }
+.role-member { background: var(--bg); color: var(--text-soft); }
+.action-btns { display: flex; gap: 0.35rem; }
+.btn-sm { padding: 0.25rem 0.55rem; border-radius: var(--radius-sm); font-size: 0.7rem; font-weight: 500; border: 1px solid var(--border); background: var(--surface); color: var(--text-soft); cursor: pointer; transition: all 0.15s; white-space: nowrap; }
+.btn-sm:hover { background: var(--bg); }
+.btn-sm.approve { color: var(--success); border-color: #B7E4C7; }
+.btn-sm.approve:hover { background: var(--success-bg); }
+.btn-sm.reject { color: var(--error); border-color: #F5C6C6; }
+.btn-sm.reject:hover { background: var(--error-bg); }
+
+.insight-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
+.insight-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 1.25rem; box-shadow: var(--shadow-sm); }
+.insight-card .ic-label { font-size: 0.72rem; color: var(--muted); font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem; }
+.insight-card .ic-value { font-family: var(--font-display); font-size: 2rem; font-weight: 700; color: var(--text); }
+.insight-panels { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+.insight-panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 1.25rem; box-shadow: var(--shadow-sm); }
+.insight-panel h3 { font-size: 0.85rem; font-weight: 600; color: var(--text); margin-bottom: 0.85rem; }
+.user-rank-item { display: flex; align-items: center; gap: 0.6rem; padding: 0.45rem 0; border-bottom: 1px solid var(--divider); }
+.user-rank-item:last-child { border-bottom: none; }
+.user-rank-pos { font-size: 0.72rem; font-weight: 700; color: var(--muted); width: 20px; }
+.user-rank-name { flex: 1; font-size: 0.8rem; color: var(--text); }
+.user-rank-count { font-size: 0.78rem; font-weight: 600; color: var(--primary); }
+.user-rank-bar { height: 4px; background: var(--primary-muted); border-radius: 2px; margin-top: 0.3rem; }
+.user-rank-bar-inner { height: 100%; background: var(--primary); border-radius: 2px; }
+.dir-tags { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.dir-tag { padding: 0.25rem 0.6rem; border-radius: 999px; font-size: 0.72rem; font-weight: 500; background: var(--primary-muted); color: var(--primary-hover); }
+.week-bars { display: flex; gap: 0.5rem; align-items: flex-end; height: 80px; margin-top: 0.5rem; }
+.week-bar { flex: 1; background: var(--primary); border-radius: 3px 3px 0 0; opacity: 0.6; min-height: 4px; position: relative; transition: opacity 0.2s; }
+.week-bar:hover { opacity: 1; }
+.week-bar-label { position: absolute; bottom: -20px; left: 50%; transform: translateX(-50%); font-size: 0.6rem; color: var(--muted); white-space: nowrap; }
+
+.login-container.hidden { display: none; }
+
+@media (max-width: 768px) {
+  .hero { display: none; }
+  .login-container { grid-template-columns: 1fr; }
+  .app-sidebar { display: none; }
+  .app-main { margin-left: 0; padding: 1rem; }
+  .insight-cards, .insight-panels { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════ Login / Register ═══════════════════ -->
+<div class="login-container" id="login-container">
+  <!-- Left: Hero with particle canvas -->
+  <div class="hero">
+    <div class="journal-lines"></div>
+    <div class="ink-wash ink-wash-1"></div>
+    <div class="ink-wash ink-wash-2"></div>
+    <div class="ink-wash ink-wash-3"></div>
+    <div class="bookmark bookmark-1"></div>
+    <div class="bookmark bookmark-2"></div>
+    <!-- Paper kites (纸鸢) — the brand namesake, soaring at different heights -->
+    <div class="kite kite-1">
+      <svg viewBox="0 0 48 60" fill="none">
+        <polygon points="24,4 42,30 24,56 6,30" fill="none" stroke="var(--primary)" stroke-width="1.2"/>
+        <line x1="24" y1="4" x2="24" y2="30" stroke="var(--primary)" stroke-width="0.5"/>
+        <line x1="6" y1="30" x2="42" y2="30" stroke="var(--primary)" stroke-width="0.5"/>
+        <path d="M24,56 Q28,62 22,70 Q18,78 24,86" fill="none" stroke="var(--primary)" stroke-width="0.8"/>
+        <circle cx="22" cy="70" r="2" fill="none" stroke="var(--primary)" stroke-width="0.6"/>
+        <circle cx="24" cy="82" r="1.5" fill="none" stroke="var(--primary)" stroke-width="0.5"/>
+      </svg>
+    </div>
+    <div class="kite kite-2">
+      <svg viewBox="0 0 48 60" fill="none">
+        <polygon points="24,4 42,30 24,56 6,30" fill="none" stroke="var(--primary)" stroke-width="1.2"/>
+        <line x1="24" y1="4" x2="24" y2="30" stroke="var(--primary)" stroke-width="0.5"/>
+        <line x1="6" y1="30" x2="42" y2="30" stroke="var(--primary)" stroke-width="0.5"/>
+        <path d="M24,56 Q28,62 22,70 Q18,78 24,86" fill="none" stroke="var(--primary)" stroke-width="0.8"/>
+      </svg>
+    </div>
+    <div class="kite kite-3">
+      <svg viewBox="0 0 48 60" fill="none">
+        <polygon points="24,4 42,30 24,56 6,30" fill="none" stroke="var(--primary)" stroke-width="1.2"/>
+        <line x1="24" y1="4" x2="24" y2="30" stroke="var(--primary)" stroke-width="0.5"/>
+        <line x1="6" y1="30" x2="42" y2="30" stroke="var(--primary)" stroke-width="0.5"/>
+        <path d="M24,56 Q28,62 22,70 Q18,78 24,86" fill="none" stroke="var(--primary)" stroke-width="0.8"/>
+        <circle cx="22" cy="70" r="2" fill="none" stroke="var(--primary)" stroke-width="0.6"/>
+      </svg>
+    </div>
+    <div class="kite kite-4">
+      <svg viewBox="0 0 48 60" fill="none">
+        <polygon points="24,4 42,30 24,56 6,30" fill="none" stroke="var(--primary)" stroke-width="1.2"/>
+        <line x1="24" y1="4" x2="24" y2="30" stroke="var(--primary)" stroke-width="0.5"/>
+        <line x1="6" y1="30" x2="42" y2="30" stroke="var(--primary)" stroke-width="0.5"/>
+        <path d="M24,56 Q28,62 22,70 Q18,78 24,86" fill="none" stroke="var(--primary)" stroke-width="0.8"/>
+      </svg>
+    </div>
+    <!-- Rising kites — from bottom-right flying upward -->
+    <div class="kite kite-5">
+      <svg viewBox="0 0 48 60" fill="none">
+        <polygon points="24,4 42,30 24,56 6,30" fill="none" stroke="var(--primary)" stroke-width="1.2"/>
+        <line x1="24" y1="4" x2="24" y2="30" stroke="var(--primary)" stroke-width="0.5"/>
+        <line x1="6" y1="30" x2="42" y2="30" stroke="var(--primary)" stroke-width="0.5"/>
+        <path d="M24,56 Q28,62 22,70 Q18,78 24,86" fill="none" stroke="var(--primary)" stroke-width="0.8"/>
+      </svg>
+    </div>
+    <div class="kite kite-6">
+      <svg viewBox="0 0 48 60" fill="none">
+        <polygon points="24,4 42,30 24,56 6,30" fill="none" stroke="var(--primary)" stroke-width="1.2"/>
+        <line x1="24" y1="4" x2="24" y2="30" stroke="var(--primary)" stroke-width="0.5"/>
+        <line x1="6" y1="30" x2="42" y2="30" stroke="var(--primary)" stroke-width="0.5"/>
+        <path d="M24,56 Q28,62 22,70 Q18,78 24,86" fill="none" stroke="var(--primary)" stroke-width="0.8"/>
+        <circle cx="22" cy="70" r="2" fill="none" stroke="var(--primary)" stroke-width="0.6"/>
+      </svg>
+    </div>
+    <canvas id="particle-canvas"></canvas>
+
+    <div class="hero-content">
+      <!-- Animated open book icon -->
+      <div class="book-icon-wrap">
+        <div class="book-glow"></div>
+        <svg viewBox="0 0 80 80" fill="none" stroke="var(--primary)" stroke-width="2">
+          <rect x="16" y="10" width="22" height="60" rx="3" fill="none"/>
+          <rect x="42" y="10" width="22" height="60" rx="3" fill="none"/>
+          <line x1="40" y1="14" x2="40" y2="66" stroke-width="1" stroke-dasharray="3 4" opacity="0.6"/>
+          <line x1="20" y1="28" x2="36" y2="28" stroke-width="1" opacity="0.5"/>
+          <line x1="20" y1="36" x2="36" y2="36" stroke-width="1" opacity="0.5"/>
+          <line x1="20" y1="44" x2="32" y2="44" stroke-width="1" opacity="0.5"/>
+          <line x1="46" y1="32" x2="60" y2="32" stroke-width="1" opacity="0.5"/>
+          <line x1="46" y1="40" x2="62" y2="40" stroke-width="1" opacity="0.5"/>
+          <line x1="46" y1="48" x2="56" y2="48" stroke-width="1" opacity="0.5"/>
+        </svg>
+      </div>
+
+      <div class="brand-label">AI × Career Journal</div>
+      <h1 class="brand-title">筝筝<span class="accent">纸鸢</span></h1>
+
+      <!-- Floating skill/role tags -->
+      <div class="floating-tags">
+        <span class="floating-tag ft-1">AI 评估</span>
+        <span class="floating-tag ft-2">面试教练</span>
+        <span class="floating-tag ft-3">简历优化</span>
+        <span class="floating-tag ft-4">Offer 对比</span>
+        <span class="floating-tag ft-5">求职画像</span>
+      </div>
+
+      <p class="brand-subtitle">翻开这一页，写你的下一个篇章</p>
+    </div>
+
+    <div class="hero-footer">
+      <div class="stat"><div class="stat-value">42</div><div class="stat-label">协作报告</div></div>
+      <div class="stat"><div class="stat-value">5</div><div class="stat-label">本周活跃</div></div>
+      <div class="stat"><div class="stat-value">15</div><div class="stat-label">方向覆盖</div></div>
+    </div>
+  </div>
+
+  <!-- Right: Form -->
+  <div class="form-side">
+    <div class="form-wrap">
+      <div class="form-panel active" id="panel-login">
+        <div class="form-header"><h2>欢迎回来</h2><p>登录你的求职手帳</p></div>
+        <div id="login-error" class="form-error"></div>
+        <div class="form-group"><label class="form-label">用户名</label><input type="text" id="login-username" class="form-input" placeholder="输入用户名" autocomplete="username"></div>
+        <div class="form-group"><label class="form-label">密码</label><input type="password" id="login-password" class="form-input" placeholder="输入密码" autocomplete="current-password"></div>
+        <button class="btn-submit" id="login-btn" onclick="handleLogin()"><span class="btn-text">登 录</span><span class="spinner"></span></button>
+        <div class="form-footer">
+          还没有账户？<a onclick="switchForm('register')">立即注册</a>
+        </div>
+      </div>
+      <div class="form-panel" id="panel-register">
+        <div class="form-header"><h2>创建账户</h2><p>开始你的求职手帳</p></div>
+        <div id="register-error" class="form-error"></div>
+        <div id="register-success" class="form-success" style="display:none;"><p>注册成功！等待管理员审批后即可登录。</p></div>
+        <div class="form-group"><label class="form-label">用户名</label><input type="text" id="reg-username" class="form-input" placeholder="字母开头，4-20位"></div>
+        <div class="form-group"><label class="form-label">显示名</label><input type="text" id="reg-displayname" class="form-input" placeholder="你的真实姓名或昵称"></div>
+        <div class="form-group"><label class="form-label">密码</label><input type="password" id="reg-password" class="form-input" placeholder="至少 6 位"></div>
+        <div class="form-group"><label class="form-label">邮箱 <span class="optional">— 可选</span></label><input type="email" id="reg-email" class="form-input" placeholder="name@company.com"></div>
+        <button class="btn-submit" id="register-btn" onclick="handleRegister()"><span class="btn-text">注 册</span><span class="spinner"></span></button>
+        <div class="form-footer">
+          已有账户？<a onclick="switchForm('login')">去登录</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ App Shell ═══════════════════ -->
+<div class="app-layout" id="app-shell">
+  <aside class="app-sidebar">
+    <div class="brand"><h2>筝筝纸鸢</h2><div class="sub">AI 求职手帳</div></div>
+    <nav class="nav-section">
+      <a class="nav-item active" href="#" onclick="showApp('home')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>今日手帳</a>
+      <a class="nav-item" href="#" onclick="showApp('agent')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="5"/><path d="M12 8v8M8 12h8"/></svg>纸鸢Agent</a>
+      <div class="nav-group-label"><hr><span>准备 · Prepare</span></div>
+      <a class="nav-item" href="#" onclick="showApp('discover')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>职位发现</a>
+      <a class="nav-item" href="#" onclick="showApp('evaluate')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/></svg>JD 管理</a>
+      <a class="nav-item" href="#" onclick="showApp('profile')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>求职画像</a>
+      <a class="nav-item" href="#" onclick="showApp('cv')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/></svg>简历管理</a>
+      <div class="nav-group-label"><hr><span>行动 · Act</span></div>
+      <a class="nav-item" href="#" onclick="showApp('tracker')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg>投递追踪</a>
+      <a class="nav-item" href="#" onclick="showApp('interview')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>面试准备</a>
+      <div class="nav-group-label"><hr><span>收尾 · Close</span></div>
+      <a class="nav-item" href="#" onclick="showApp('compare')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>Offer 对比</a>
+      <a class="nav-item" href="#" onclick="showApp('analytics')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>数据分析</a>
+      <a class="nav-item" href="#" onclick="showApp('settings')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>个人设置</a>
+    </nav>
+    <div class="sidebar-user" id="sidebar-user-area"></div>
+  </aside>
+  <main class="app-main" id="app-main-content"></main>
+</div>
+
+<script>
+/* ═══════════════════ Particle Canvas ═══════════════════ */
+(function(){
+  const canvas = document.getElementById('particle-canvas');
+  const ctx = canvas.getContext('2d');
+  let W, H, particles = [];
+
+  function resize() {
+    const rect = canvas.parentElement.getBoundingClientRect();
+    W = canvas.width = rect.width;
+    H = canvas.height = rect.height;
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  // Particle types: 'ember' (rising warm dots), 'paper' (fragments), 'sunbeam' (top-edge falling light dust)
+  const COLORS = [
+    'oklch(75% 0.12 75 / 0.55)',
+    'oklch(80% 0.10 82 / 0.45)',
+    'oklch(70% 0.13 72 / 0.35)',
+    'oklch(84% 0.07 88 / 0.5)',
+    'oklch(72% 0.10 78 / 0.3)',
+  ];
+
+  class Particle {
+    constructor() { this.reset(); }
+    reset() {
+      this.type = Math.random() < 0.45 ? 'ember' : (Math.random() < 0.55 ? 'sunbeam' : 'paper');
+      if (this.type === 'sunbeam') {
+        // Start from top edge, drift down
+        this.x = Math.random() * W;
+        this.y = -20 - Math.random() * 80;
+        this.size = Math.random() * 1.8 + 0.5;
+        this.vx = (Math.random() - 0.5) * 0.3;
+        this.vy = Math.random() * 0.35 + 0.15; // gentle downward drift
+        this.opacity = Math.random() * 0.4 + 0.1;
+      } else if (this.type === 'ember') {
+        this.x = Math.random() * W;
+        this.y = Math.random() * H;
+        this.size = Math.random() * 2.2 + 0.8;
+        this.vx = (Math.random() - 0.5) * 0.35;
+        this.vy = -(Math.random() * 0.4 + 0.08);
+        this.opacity = Math.random() * 0.45 + 0.12;
+      } else {
+        this.x = Math.random() * W;
+        this.y = Math.random() * H;
+        this.size = Math.random() * 2.5 + 1.2;
+        this.vx = (Math.random() - 0.5) * 0.25;
+        this.vy = -(Math.random() * 0.3 + 0.05);
+        this.opacity = Math.random() * 0.35 + 0.1;
+      }
+      this.color = COLORS[Math.floor(Math.random() * COLORS.length)];
+      this.life = this.type === 'sunbeam' ? Math.random() * 350 + 250 : Math.random() * 300 + 200;
+      this.age = Math.random() * this.life; // stagger
+      this.rotation = Math.random() * Math.PI * 2;
+      this.rotSpeed = (Math.random() - 0.5) * 0.006;
+    }
+    update() {
+      this.age++;
+      this.vx += (Math.random() - 0.5) * 0.015;
+      this.vx *= 0.996;
+      this.x += this.vx;
+      this.y += this.vy;
+      this.rotation += this.rotSpeed;
+
+      const fadeRatio = Math.min(this.age / 50, (this.life - this.age) / 70, 1);
+      this.displayOpacity = this.opacity * fadeRatio;
+
+      if (this.type === 'sunbeam') {
+        if (this.y > H + 20) { this.y = -20; this.x = Math.random() * W; }
+      } else {
+        if (this.y < -20) { this.y = H + 20; this.x = Math.random() * W; }
+      }
+      if (this.x < -20) this.x = W + 20;
+      if (this.x > W + 20) this.x = -20;
+      if (this.age > this.life) { this.age = 0; this.y = this.type === 'sunbeam' ? -20 : (Math.random() * H); this.x = Math.random() * W; }
+    }
+    draw(ctx) {
+      ctx.save();
+      ctx.globalAlpha = this.displayOpacity;
+      if (this.type === 'sunbeam') {
+        // Warm light dust mote — radial gradient glow
+        const grad = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.size * 3.5);
+        grad.addColorStop(0, 'oklch(80% 0.10 82 / 0.8)');
+        grad.addColorStop(0.3, this.color);
+        grad.addColorStop(1, 'transparent');
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size * 3.5, 0, Math.PI * 2);
+        ctx.fillStyle = grad;
+        ctx.fill();
+      } else if (this.type === 'ember') {
+        ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2); ctx.fillStyle = this.color; ctx.fill();
+        ctx.beginPath(); ctx.arc(this.x, this.y, this.size * 2.5, 0, Math.PI * 2);
+        ctx.fillStyle = 'oklch(75% 0.12 75 / 0.07)';
+        ctx.fill();
+      } else {
+        ctx.translate(this.x, this.y); ctx.rotate(this.rotation);
+        ctx.fillStyle = this.color;
+        ctx.fillRect(-this.size, -this.size * 0.35, this.size * 2, this.size * 0.7);
+        ctx.strokeStyle = 'oklch(75% 0.12 75 / 0.25)';
+        ctx.lineWidth = 0.5;
+        ctx.strokeRect(-this.size, -this.size * 0.35, this.size * 2, this.size * 0.7);
+      }
+      ctx.restore();
+    }
+  }
+
+  const PARTICLE_COUNT = 70;
+  for (let i = 0; i < PARTICLE_COUNT; i++) particles.push(new Particle());
+
+  function animate() {
+    ctx.clearRect(0, 0, W, H);
+
+    // Draw constellation lines between nearby particles
+    for (let i = 0; i < particles.length; i++) {
+      for (let j = i + 1; j < particles.length; j++) {
+        const dx = particles[i].x - particles[j].x;
+        const dy = particles[i].y - particles[j].y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 90 && particles[i].displayOpacity > 0.08 && particles[j].displayOpacity > 0.08) {
+          const alpha = Math.min(particles[i].displayOpacity, particles[j].displayOpacity) * 0.25 * (1 - dist / 90);
+          ctx.strokeStyle = `oklch(75% 0.12 75 / ${alpha})`;
+          ctx.lineWidth = 0.4;
+          ctx.beginPath();
+          ctx.moveTo(particles[i].x, particles[i].y);
+          ctx.lineTo(particles[j].x, particles[j].y);
+          ctx.stroke();
+        }
+      }
+    }
+
+    for (const p of particles) { p.update(); p.draw(ctx); }
+    requestAnimationFrame(animate);
+  }
+  animate();
+})();
+
+/* ═══════════════════ App Logic ═══════════════════ */
+let currentUser = null;
+const mockUsers = [
+  { id:'u1', username:'admin', displayName:'管理员', email:'admin@zhiyuan.cn', role:'admin', status:'active', createdAt:'2026-05-01', lastLoginAt:'2026-05-15 09:30' },
+  { id:'u2', username:'zhangsan', displayName:'张三', email:'zhangsan@company.com', role:'member', status:'active', createdAt:'2026-05-10', lastLoginAt:'2026-05-14 16:20' },
+  { id:'u3', username:'lisi', displayName:'李四', email:'lisi@company.com', role:'member', status:'pending', createdAt:'2026-05-13', lastLoginAt:null },
+  { id:'u4', username:'wangwu', displayName:'王五', email:'wangwu@company.com', role:'member', status:'active', createdAt:'2026-05-12', lastLoginAt:'2026-05-15 08:00' },
+  { id:'u5', username:'zhaoliu', displayName:'赵六', email:'zhao@company.com', role:'member', status:'rejected', createdAt:'2026-05-08', lastLoginAt:null },
+  { id:'u6', username:'sunqi', displayName:'孙七', email:'sun@company.com', role:'member', status:'pending', createdAt:'2026-05-14', lastLoginAt:null },
+];
+
+function switchForm(form) {
+  document.querySelectorAll('.form-panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + form));
+  document.getElementById('login-error').classList.remove('visible');
+  document.getElementById('register-error').classList.remove('visible');
+  document.getElementById('register-success').style.display = 'none';
+}
+
+function handleLogin() {
+  const u = document.getElementById('login-username'), p = document.getElementById('login-password');
+  const err = document.getElementById('login-error'), btn = document.getElementById('login-btn');
+  err.classList.remove('visible'); err.textContent = ''; u.classList.remove('error'); p.classList.remove('error');
+  if (!u.value.trim()) { u.classList.add('error'); err.textContent = '请输入用户名'; err.classList.add('visible'); return; }
+  if (!p.value.trim()) { p.classList.add('error'); err.textContent = '请输入密码'; err.classList.add('visible'); return; }
+  btn.classList.add('loading'); btn.disabled = true;
+  setTimeout(() => {
+    btn.classList.remove('loading'); btn.disabled = false;
+    const user = mockUsers.find(x => x.username === u.value.trim());
+    if (!user) { err.textContent = '用户名不存在'; err.classList.add('visible'); u.classList.add('error'); return; }
+    if (user.status === 'pending') { err.textContent = '账户尚未通过审批，请联系管理员'; err.classList.add('visible'); return; }
+    if (user.status === 'rejected') { err.textContent = '账户已被拒绝，无法登录'; err.classList.add('visible'); return; }
+    if (p.value.length < 3) { err.textContent = '密码错误'; err.classList.add('visible'); p.classList.add('error'); return; }
+    currentUser = user; enterApp();
+  }, 600);
+}
+
+function handleRegister() {
+  const un = document.getElementById('reg-username').value.trim();
+  const dn = document.getElementById('reg-displayname').value.trim();
+  const pw = document.getElementById('reg-password').value.trim();
+  const em = document.getElementById('reg-email').value.trim();
+  const err = document.getElementById('register-error'), sc = document.getElementById('register-success'), btn = document.getElementById('register-btn');
+  err.classList.remove('visible'); sc.style.display = 'none';
+  if (!un || !dn || !pw) { err.textContent = '请填写所有必填字段'; err.classList.add('visible'); return; }
+  if (mockUsers.some(x => x.username === un)) { err.textContent = '用户名已存在'; err.classList.add('visible'); return; }
+  btn.classList.add('loading'); btn.disabled = true;
+  setTimeout(() => {
+    btn.classList.remove('loading'); btn.disabled = false;
+    mockUsers.push({ id:'u'+(mockUsers.length+1), username:un, displayName:dn, email:em, role:'member', status:'pending', createdAt:new Date().toISOString().slice(0,10), lastLoginAt:null });
+    sc.style.display = 'block';
+    setTimeout(() => {
+      ['reg-username','reg-displayname','reg-password','reg-email'].forEach(id => document.getElementById(id).value = '');
+      sc.style.display = 'none';
+      switchForm('login');
+    }, 1500);
+  }, 500);
+}
+
+function enterApp() {
+  document.getElementById('login-container').classList.add('hidden');
+  document.getElementById('app-shell').classList.add('visible');
+  updateSidebar(); showApp('home');
+}
+function handleLogout() {
+  currentUser = null;
+  document.getElementById('app-shell').classList.remove('visible');
+  document.getElementById('login-container').classList.remove('hidden');
+  document.getElementById('login-username').value = '';
+  document.getElementById('login-password').value = '';
+}
+function updateSidebar() {
+  if (!currentUser) return;
+  const init = currentUser.displayName.charAt(0), admin = currentUser.role === 'admin';
+  document.getElementById('sidebar-user-area').innerHTML = `
+    <div class="user-row"><div class="user-avatar">${init}</div><div class="user-info"><div class="user-name">${currentUser.displayName}</div><div class="user-role">${admin?'管理员':'成员'}</div></div></div>
+    ${admin?`<div class="user-actions">
+      <a class="admin-link" href="#" onclick="showApp('admin-users');return false;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>管理后台</a>
+      <a class="admin-link" href="#" onclick="showApp('admin-insights');return false;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>团队洞察</a>
+    </div>`:''}
+    <button class="logout-btn" onclick="handleLogout()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>退出登录</button>`;
+}
+function showApp(name) {
+  const m = document.getElementById('app-main-content');
+  if (name === 'home') m.innerHTML = `<div class="page-header"><h2>今日手帳</h2><p>欢迎回来，${currentUser.displayName}</p></div><div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-md);padding:2rem;text-align:center;color:var(--muted);"><p style="font-family:var(--font-display);font-size:1.2rem;margin-bottom:0.5rem;">新的一天</p><p style="font-size:0.82rem;">你的求职手帳已就绪。选择左侧导航开始。</p></div>`;
+  else if (name === 'admin-users') renderUsers('all');
+  else if (name === 'admin-insights') renderInsights();
+  else m.innerHTML = `<div class="page-header"><h2>${name}</h2><p>页面内容建设中</p></div>`;
+}
+function renderUsers(filter) {
+  const m = document.getElementById('app-main-content');
+  const pc = mockUsers.filter(u=>u.status==='pending').length, ac = mockUsers.filter(u=>u.status==='active').length, rc = mockUsers.filter(u=>u.status==='rejected').length;
+  let users = mockUsers;
+  if (filter==='pending') users=mockUsers.filter(u=>u.status==='pending'); if (filter==='active') users=mockUsers.filter(u=>u.status==='active'); if (filter==='rejected') users=mockUsers.filter(u=>u.status==='rejected');
+  const sl={pending:'待审批',active:'已通过',rejected:'已拒绝'}, sc={pending:'status-pending',active:'status-active',rejected:'status-rejected'};
+  const rl={admin:'管理员',member:'成员'}, rc2={admin:'role-admin',member:'role-member'};
+  m.innerHTML = `<div class="page-header"><h2>用户管理</h2><p>管理所有注册用户，审批新注册申请</p></div>
+    <div class="filter-tabs">
+      <button class="filter-tab ${filter==='all'?'active':''}" onclick="renderUsers('all')">全部 <span style="color:var(--muted);font-size:0.7rem;margin-left:2px">${mockUsers.length}</span></button>
+      <button class="filter-tab ${filter==='pending'?'active':''}" onclick="renderUsers('pending')">待审批 ${pc>0?`<span class="badge">${pc}</span>`:''}</button>
+      <button class="filter-tab ${filter==='active'?'active':''}" onclick="renderUsers('active')">已通过 <span style="color:var(--muted);font-size:0.7rem;margin-left:2px">${ac}</span></button>
+      <button class="filter-tab ${filter==='rejected'?'active':''}" onclick="renderUsers('rejected')">已拒绝 <span style="color:var(--muted);font-size:0.7rem;margin-left:2px">${rc}</span></button></div>
+    <div class="data-table-wrap"><table class="data-table"><thead><tr><th>用户名</th><th>显示名</th><th>邮箱</th><th>角色</th><th>状态</th><th>注册时间</th><th>最近登录</th><th>操作</th></tr></thead>
+    <tbody>${users.map(u=>`<tr><td style="font-weight:500;color:var(--text)">${u.username}</td><td>${u.displayName}</td><td style="font-size:0.75rem">${u.email||'—'}</td><td><span class="role-badge ${rc2[u.role]}">${rl[u.role]}</span></td><td><span class="status-badge ${sc[u.status]}">${sl[u.status]}</span></td><td style="font-size:0.72rem">${u.createdAt}</td><td style="font-size:0.72rem">${u.lastLoginAt||'从未登录'}</td><td><div class="action-btns">${u.status==='pending'?`<button class="btn-sm approve" onclick="approve('${u.id}')">通过</button><button class="btn-sm reject" onclick="reject('${u.id}')">拒绝</button>`:(u.status==='active'?`<button class="btn-sm" onclick="resetPw('${u.id}')">重置密码</button><button class="btn-sm" onclick="toggleRole('${u.id}')">改角色</button>`:`<button class="btn-sm approve" onclick="approve('${u.id}')">重新通过</button>`)}</div></td></tr>`).join('')||'<tr><td colspan="8" style="text-align:center;padding:2rem;color:var(--muted)">暂无数据</td></tr>'}</tbody></table></div>`;
+}
+function approve(id){ const u=mockUsers.find(x=>x.id===id); if(u){u.status='active';u.approvedAt=new Date().toISOString().slice(0,10);} renderUsers('all'); }
+function reject(id){ const u=mockUsers.find(x=>x.id===id); if(u) u.status='rejected'; renderUsers('all'); }
+function resetPw(id){ alert('密码已重置（管理员通过 IM 告知用户新密码）'); }
+function toggleRole(id){ const u=mockUsers.find(x=>x.id===id); if(u) u.role=u.role==='admin'?'member':'admin'; renderUsers('all'); }
+
+function renderInsights() {
+  const m = document.getElementById('app-main-content');
+  const actives = mockUsers.filter(u=>u.status==='active').length, pendings = mockUsers.filter(u=>u.status==='pending').length;
+  m.innerHTML = `<div class="page-header"><h2>团队洞察</h2><p>团队整体活跃度一览</p></div>
+    <div class="insight-cards"><div class="insight-card"><div class="ic-label">总用户数</div><div class="ic-value">${actives}</div></div><div class="insight-card"><div class="ic-label">本周活跃</div><div class="ic-value">3</div></div><div class="insight-card"><div class="ic-label">待审批</div><div class="ic-value">${pendings}</div></div></div>
+    <div class="insight-panels">
+      <div class="insight-panel"><h3>个人活跃度排行</h3>${[{n:'张三',c:18},{n:'王五',c:14},{n:'管理员',c:10},{n:'李四',c:0}].map((a,i)=>`<div class="user-rank-item"><span class="user-rank-pos">${i+1}</span><div style="flex:1"><div class="user-rank-name">${a.n}</div><div class="user-rank-bar"><div class="user-rank-bar-inner" style="width:${(a.c/18)*100}%"></div></div></div><span class="user-rank-count">${a.c} 次</span></div>`).join('')}</div>
+      <div class="insight-panel"><h3>热门 JD 方向（近30天）</h3><div class="dir-tags">${[{n:'AI产品经理',c:15},{n:'后端开发',c:12},{n:'数据分析',c:9},{n:'前端开发',c:7},{n:'算法工程师',c:5},{n:'测试开发',c:3},{n:'运维工程师',c:2}].map(d=>`<span class="dir-tag">${d.n} · ${d.c}</span>`).join('')}</div><h3 style="margin-top:1rem;">近4周评估趋势</h3><div class="week-bars">${[{l:'W17',h:30},{l:'W18',h:50},{l:'W19',h:40},{l:'W20',h:65}].map(w=>`<div class="week-bar" style="height:${w.h}px"><span class="week-bar-label">${w.l}</span></div>`).join('')}</div></div></div>`;
+}
+
+document.addEventListener('keydown',(e)=>{ if(e.key==='Enter'){ if(!document.getElementById('app-shell').classList.contains('visible')){ if(document.getElementById('panel-login').classList.contains('active')) handleLogin(); else handleRegister(); }}});
+</script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+{
+  "name": "lingji-ai",
+  "metadata": {
+    "description": "筝筝纸鸢 — AI 求职助手"
+  },
+  "owner": {
+    "name": "筝筝纸鸢"
+  },
+  "plugins": [
+    {
+      "name": "lingji-ai",
+      "source": "./",
+      "description": "筝筝纸鸢 — AI 求职管道：职位评估、简历生成、投递追踪",
+      "category": "productivity"
+    }
+  ]
+}

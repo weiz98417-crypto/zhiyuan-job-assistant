@@ -1,0 +1,55 @@
+# Scoring Dimensions — Single source of truth for evaluation structure
+# ALL language modes read this file. Do NOT edit manually unless you
+# intend to change the scoring system for ALL languages.
+#
+# Total weight MUST sum to 100.
+#
+# Version: 1.0.0 (2026-05-09)
+# Increment MAJOR when removing/renaming dimensions
+# Increment MINOR when changing weights by >5
+# Increment PATCH when adjusting labels or descriptions
+# Run test/snapshots/ after any change to verify no regression.
+
+version: "1.0.0"
+dimensions:
+  - id: A
+    key: role_summary
+    label_zh: 岗位摘要与公司背景
+    label_en: Role Summary & Company Context
+    weight: 10
+
+  - id: B
+    key: cv_match
+    label_zh: 简历匹配度
+    label_en: CV Match
+    weight: 20
+
+  - id: C
+    key: level_strategy
+    label_zh: 级别定位与竞争策略
+    label_en: Level & Strategy
+    weight: 15
+
+  - id: D
+    key: compensation
+    label_zh: 薪酬福利评估
+    label_en: Compensation & Benefits
+    weight: 15
+
+  - id: E
+    key: personalization
+    label_zh: 个性化申请方案
+    label_en: Personalization
+    weight: 15
+
+  - id: F
+    key: interview_prep
+    label_zh: 面试准备
+    label_en: Interview Prep
+    weight: 15
+
+  - id: G
+    key: legitimacy
+    label_zh: 发布合法性与风险提示
+    label_en: Posting Legitimacy & Risk
+    weight: 10

@@ -18,6 +18,45 @@ export function getDb(): Database.Database {
     const schema = fs.readFileSync(SCHEMA_PATH, "utf-8");
     _db.exec(schema);
 
+    // Migration: jds.report_id stores the public report_num used by the UI,
+    // not the internal reports.id primary key.
+    const jdForeignKeys = _db.prepare("PRAGMA foreign_key_list(jds)").all() as { from: string; table: string; to: string }[];
+    const jdReportIdReferencesInternalId = jdForeignKeys.some(
+      (fk) => fk.from === "report_id" && fk.table === "reports" && fk.to === "id",
+    );
+    if (jdReportIdReferencesInternalId) {
+      _db.pragma("foreign_keys = OFF");
+      _db.exec(`
+        DROP TABLE IF EXISTS jds_new;
+        CREATE TABLE jds_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          company TEXT NOT NULL DEFAULT '',
+          role TEXT NOT NULL DEFAULT '',
+          source_type TEXT NOT NULL DEFAULT 'paste',
+          source_url TEXT,
+          body TEXT NOT NULL DEFAULT '',
+          keywords_json TEXT NOT NULL DEFAULT '[]',
+          report_id INTEGER REFERENCES reports(report_num),
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        INSERT INTO jds_new (id, company, role, source_type, source_url, body, keywords_json, report_id, created_at)
+        SELECT
+          j.id,
+          j.company,
+          j.role,
+          j.source_type,
+          j.source_url,
+          j.body,
+          j.keywords_json,
+          COALESCE((SELECT r.report_num FROM reports r WHERE r.id = j.report_id), j.report_id),
+          j.created_at
+        FROM jds j;
+        DROP TABLE jds;
+        ALTER TABLE jds_new RENAME TO jds;
+      `);
+      _db.pragma("foreign_keys = ON");
+    }
+
     // Migration: add goals_json column to existing profiles table
     const cols = _db.prepare("PRAGMA table_info(profiles)").all() as { name: string }[];
     if (!cols.some((c) => c.name === "goals_json")) {
@@ -119,6 +158,50 @@ export function getDb(): Database.Database {
     if (!sessionCols.some((c) => c.name === "interview_state_json")) {
       _db.exec("ALTER TABLE sessions ADD COLUMN interview_state_json TEXT NOT NULL DEFAULT '{}'");
     }
+    if (!sessionCols.some((c) => c.name === "agent_state_json")) {
+      _db.exec("ALTER TABLE sessions ADD COLUMN agent_state_json TEXT NOT NULL DEFAULT '{}'");
+    }
+
+    const offerCols = _db.prepare("PRAGMA table_info(offers)").all() as { name: string }[];
+    const offerMigrations = [
+      ["employment_form", "ALTER TABLE offers ADD COLUMN employment_form TEXT NOT NULL DEFAULT 'unknown'"],
+      ["employer_name", "ALTER TABLE offers ADD COLUMN employer_name TEXT"],
+      ["contract_months", "ALTER TABLE offers ADD COLUMN contract_months INTEGER"],
+      ["overtime_policy", "ALTER TABLE offers ADD COLUMN overtime_policy TEXT NOT NULL DEFAULT 'unknown'"],
+      ["bonus_guarantee", "ALTER TABLE offers ADD COLUMN bonus_guarantee TEXT NOT NULL DEFAULT 'unknown'"],
+      ["equity_type", "ALTER TABLE offers ADD COLUMN equity_type TEXT"],
+      ["equity_vesting", "ALTER TABLE offers ADD COLUMN equity_vesting TEXT"],
+      ["commute_minutes", "ALTER TABLE offers ADD COLUMN commute_minutes INTEGER"],
+      ["city_cost_level", "ALTER TABLE offers ADD COLUMN city_cost_level TEXT NOT NULL DEFAULT 'unknown'"],
+      ["job_nature", "ALTER TABLE offers ADD COLUMN job_nature TEXT"],
+      ["latest_report_id", "ALTER TABLE offers ADD COLUMN latest_report_id INTEGER"],
+      ["updated_at", "ALTER TABLE offers ADD COLUMN updated_at TEXT NOT NULL DEFAULT (datetime('now'))"],
+    ];
+    for (const [name, sql] of offerMigrations) {
+      if (!offerCols.some((c) => c.name === name)) _db.exec(sql);
+    }
+
+    const offerReportCols = _db.prepare("PRAGMA table_info(offer_reports)").all() as { name: string }[];
+    const offerReportMigrations = [
+      ["report_type", "ALTER TABLE offer_reports ADD COLUMN report_type TEXT NOT NULL DEFAULT 'comparison'"],
+      ["model_version", "ALTER TABLE offer_reports ADD COLUMN model_version TEXT NOT NULL DEFAULT ''"],
+      ["offer_id", "ALTER TABLE offer_reports ADD COLUMN offer_id INTEGER REFERENCES offers(id)"],
+      ["overall_score", "ALTER TABLE offer_reports ADD COLUMN overall_score REAL NOT NULL DEFAULT 0"],
+      ["verdict", "ALTER TABLE offer_reports ADD COLUMN verdict TEXT NOT NULL DEFAULT ''"],
+      ["summary", "ALTER TABLE offer_reports ADD COLUMN summary TEXT NOT NULL DEFAULT ''"],
+      ["offer_snapshot_json", "ALTER TABLE offer_reports ADD COLUMN offer_snapshot_json TEXT NOT NULL DEFAULT '{}'"],
+      ["modules_json", "ALTER TABLE offer_reports ADD COLUMN modules_json TEXT NOT NULL DEFAULT '[]'"],
+      ["red_flags_json", "ALTER TABLE offer_reports ADD COLUMN red_flags_json TEXT NOT NULL DEFAULT '[]'"],
+      ["missing_info_json", "ALTER TABLE offer_reports ADD COLUMN missing_info_json TEXT NOT NULL DEFAULT '[]'"],
+      ["negotiation_levers_json", "ALTER TABLE offer_reports ADD COLUMN negotiation_levers_json TEXT NOT NULL DEFAULT '[]'"],
+      ["hr_questions_json", "ALTER TABLE offer_reports ADD COLUMN hr_questions_json TEXT NOT NULL DEFAULT '[]'"],
+      ["assumptions_json", "ALTER TABLE offer_reports ADD COLUMN assumptions_json TEXT NOT NULL DEFAULT '[]'"],
+      ["take_home_json", "ALTER TABLE offer_reports ADD COLUMN take_home_json TEXT NOT NULL DEFAULT '{}'"],
+    ];
+    for (const [name, sql] of offerReportMigrations) {
+      if (!offerReportCols.some((c) => c.name === name)) _db.exec(sql);
+    }
+    _db.exec("CREATE INDEX IF NOT EXISTS idx_offer_reports_offer ON offer_reports(offer_id, created_at)");
   }
   return _db;
 }
@@ -203,7 +286,11 @@ export function insertJD(jd: JDRow): number {
   const result = getDb().prepare(`
     INSERT INTO jds (company, role, source_type, source_url, body, keywords_json, report_id)
     VALUES (@company, @role, @source_type, @source_url, @body, @keywords_json, @report_id)
-  `).run(jd);
+  `).run({
+    ...jd,
+    source_url: jd.source_url || "",
+    report_id: jd.report_id ?? null,
+  });
   return Number(result.lastInsertRowid);
 }
 

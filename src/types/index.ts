@@ -132,18 +132,118 @@ export interface Offer {
   id?: number;
   company: string;
   role: string;
-  monthlySalary: number; // 税前月薪 (K)
-  monthsPerYear: number; // 发薪月数 (12/13/14)
-  annualBonus?: number; // 年终奖 (月数)
-  hasSocialInsurance: boolean; // 五险一金全额缴纳
-  housingFundRate: number; // 公积金比例
-  options?: string; // 期权/股票
-  probationMonths: number; // 试用期月数
+  location?: string;
+  level?: string;
+  monthlySalary: number;
+  monthsPerYear: number;
+  annualBonus?: number;
+  hasSocialInsurance: boolean;
+  housingFundRate: number;
+  options?: string;
+  probationMonths: number;
   startDate?: string;
   otherBenefits?: string;
   applicationId?: number;
   reportId?: number;
   createdAt: Date;
+  employmentForm?: "direct_hire" | "dispatch" | "outsourcing" | "intern" | "contractor" | "unknown";
+  employerName?: string;
+  contractMonths?: number;
+  overtimePolicy?: "none" | "occasional" | "common" | "intense" | "unknown";
+  bonusGuarantee?: "guaranteed" | "partial" | "uncertain" | "none" | "unknown";
+  equityType?: string;
+  equityVesting?: string;
+  commuteMinutes?: number;
+  cityCostLevel?: "low" | "medium" | "high" | "very_high" | "unknown";
+  jobNature?: string;
+  latestReportId?: number;
+  updatedAt?: string;
+}
+
+export type OfferEmploymentForm =
+  | "direct_hire"
+  | "dispatch"
+  | "outsourcing"
+  | "intern"
+  | "contractor"
+  | "unknown";
+
+export type OfferVerdict =
+  | "accept"
+  | "accept_after_negotiation"
+  | "proceed_cautiously"
+  | "decline";
+
+export type OfferRiskLevel = "low" | "medium" | "high" | "critical";
+
+export interface OfferSnapshot {
+  offerId?: number;
+  company: string;
+  role: string;
+  location?: string;
+  level?: string;
+  monthlySalary: number;
+  monthsPerYear: number;
+  annualBonus?: number;
+  hasSocialInsurance: boolean;
+  housingFundRate: number;
+  probationMonths: number;
+  startDate?: string;
+  otherBenefits?: string;
+  options?: string;
+  employmentForm?: OfferEmploymentForm;
+  employerName?: string;
+  contractMonths?: number;
+  overtimePolicy?: "none" | "occasional" | "common" | "intense" | "unknown";
+  bonusGuarantee?: "guaranteed" | "partial" | "uncertain" | "none" | "unknown";
+  equityType?: string;
+  equityVesting?: string;
+  commuteMinutes?: number;
+  cityCostLevel?: "low" | "medium" | "high" | "very_high" | "unknown";
+  jobNature?: string;
+  applicationId?: number;
+  sourceLabel?: string;
+  evaluatedAt?: string;
+}
+
+export interface OfferEvaluationModule {
+  id: string;
+  label: string;
+  score: number; // 1-5
+  weight: number; // percentage weight
+  confidence: number; // 0-1
+  evidence: string[];
+  risks: string[];
+  missingInfo: string[];
+  notes: string;
+}
+
+export interface OfferEvaluationReport {
+  id?: number;
+  reportType: "single" | "comparison";
+  modelVersion: string;
+  offerId?: number;
+  company: string;
+  role: string;
+  overallScore: number;
+  verdict: OfferVerdict;
+  summary: string;
+  assumptions: string[];
+  redFlags: string[];
+  missingInfo: string[];
+  negotiationLevers: string[];
+  hrQuestions: string[];
+  modules: OfferEvaluationModule[];
+  takeHomeEstimate?: {
+    monthlyNetMin: number;
+    monthlyNetMax: number;
+    annualNetMin: number;
+    annualNetMax: number;
+    assumptions: string[];
+  };
+  offerSnapshot: OfferSnapshot;
+  createdAt: string;
+  updatedAt?: string;
 }
 
 /* ── Interview Prep ── */
@@ -724,6 +824,8 @@ export interface AgentTool {
 export interface AgentMessage {
   role: "user" | "assistant" | "tool";
   content: string;
+  /** Data URL attachments for user-uploaded JD screenshots or files. */
+  images?: string[];
   mode?: "explore" | "execute" | "interview-coach";
   /** Which sub-agent produced this message (V2: multi-agent architecture) */
   agent_id?: string;
@@ -738,10 +840,42 @@ export interface ChatSession {
   messages: AgentMessage[];
   memoryDigest?: string;
   interviewState?: InterviewSessionState;
+  agentState?: AgentSessionState;
   pinned: boolean;
   deletedAt?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface AgentSessionState {
+  offer?: OfferAgentSessionState;
+  [key: string]: unknown;
+}
+
+export interface OfferAgentSessionState {
+  activeOfferId?: number;
+  activeOfferReportId?: number;
+  activeCompareSet?: number[];
+  lastUserIntent?: "evaluate" | "compare" | "negotiate" | "ask_hr" | "explain" | "edit_offer";
+  lastOfferSnapshot?: OfferSnapshot;
+  lastEvaluationSummary?: {
+    company: string;
+    role: string;
+    overallScore: number;
+    verdict: OfferVerdict;
+    summary: string;
+  };
+  missingInfo?: string[];
+  redFlags?: string[];
+  userPriorities?: {
+    salary?: number;
+    stability?: number;
+    growth?: number;
+    workLifeBalance?: number;
+    cityPreference?: string[];
+  };
+  staleReportReason?: string;
+  updatedAt?: string;
 }
 
 export type InterviewSessionStatus = "active" | "paused" | "completed" | "abandoned";
