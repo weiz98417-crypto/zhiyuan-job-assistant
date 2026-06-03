@@ -99,6 +99,18 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
-openspec/changes/
+openspec/changes/*
+!openspec/changes/add-postgres-pgvector-foundation/
+!openspec/changes/add-postgres-pgvector-foundation/**
+!openspec/changes/migrate-sqlite-to-postgres-data/
+!openspec/changes/migrate-sqlite-to-postgres-data/**
+!openspec/changes/cutover-server-data-to-postgres/
+!openspec/changes/cutover-server-data-to-postgres/**
+!openspec/changes/add-vector-long-term-memory-store/
+!openspec/changes/add-vector-long-term-memory-store/**
+!openspec/changes/harden-profile-signal-quality-gate/
+!openspec/changes/harden-profile-signal-quality-gate/**
+!openspec/changes/wire-agents-to-long-term-memory/
+!openspec/changes/wire-agents-to-long-term-memory/**
 auth
 auth-wal
