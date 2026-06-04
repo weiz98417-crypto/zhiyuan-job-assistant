@@ -290,4 +290,18 @@ describe("Interview session state", () => {
     expect(rebound?.rebindHistory[0].to).toMatchObject({ jdId: 99, resumeId: "v2" });
     expect(rebound?.rebindHistory[0].reason).toContain("explicitly switched");
   });
+
+  it("records explicit resume restart rebinds in session history", () => {
+    const state = interviewState();
+    const rebound = recordInterviewRebind(state, {
+      to: { resumeId: "23" },
+      reason: "User explicitly switched to resume #23 and restarted the interview.",
+      createdAt: "2026-06-04T10:05:00.000Z",
+    });
+
+    expect(rebound?.rebindHistory).toHaveLength(1);
+    expect(rebound?.rebindHistory[0].from).toMatchObject({ jdId: 12, resumeId: "Main resume" });
+    expect(rebound?.rebindHistory[0].to).toMatchObject({ resumeId: "23" });
+    expect(rebound?.rebindHistory[0].reason).toContain("restarted");
+  });
 });

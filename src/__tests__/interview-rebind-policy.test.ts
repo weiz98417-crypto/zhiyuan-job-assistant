@@ -120,6 +120,17 @@ describe("interview material reference classifier", () => {
     expect(resolution.match?.record.id).toBe(8);
   });
 
+  it("auto-restarts on explicit high-confidence resume restart requests", () => {
+    const decision = classifyInterviewMaterialReference("切换到 #23 这份简历并重新开始一场模拟面试");
+    const match = matchInterviewMaterialReference(decision, records);
+    const resolution = resolveInterviewRebindAction(decision, match);
+
+    expect(decision.intent).toBe("restart_as_new_interview");
+    expect(decision.materialKind).toBe("resume");
+    expect(match?.record.id).toBe(23);
+    expect(resolution.action).toBe("auto_restart_interview");
+  });
+
   it("asks one clarification for medium-confidence references", () => {
     const decision = classifyInterviewMaterialReference("用另一份简历吧");
     const resolution = resolveInterviewRebindAction(decision, null);
