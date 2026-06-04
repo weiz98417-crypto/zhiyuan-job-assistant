@@ -65,6 +65,35 @@ interface ScanHistoryEntry {
   maxResults?: number;
 }
 
+const DISCOVERY_VISIBLE_STATUSES: JobItem["status"][] = ["new", "viewed", "saved", "evaluating", "evaluated"];
+
+const DISCOVERY_JOB_STATUS_BADGES: Record<JobItem["status"], { label: string; className: string }> = {
+  new: {
+    label: "新发现",
+    className: "bg-[var(--color-primary)] text-white",
+  },
+  viewed: {
+    label: "已查看",
+    className: "bg-sky-50 text-sky-700 border border-sky-100",
+  },
+  saved: {
+    label: "已保存",
+    className: "bg-emerald-50 text-emerald-700 border border-emerald-100",
+  },
+  evaluating: {
+    label: "评估中",
+    className: "bg-amber-50 text-amber-700 border border-amber-100",
+  },
+  evaluated: {
+    label: "已评估",
+    className: "bg-violet-50 text-violet-700 border border-violet-100",
+  },
+  dismissed: {
+    label: "已跳过",
+    className: "bg-[var(--color-surface)] text-[var(--color-muted)] border border-[var(--color-border)]",
+  },
+};
+
 // ── Helpers ─────────────────────────────────────────────────────────
 
 function timeAgo(dateStr: string) {
@@ -75,6 +104,10 @@ function timeAgo(dateStr: string) {
   const hours = Math.floor(mins / 60);
   if (hours < 24) return `${hours}小时前`;
   return `${Math.floor(hours / 24)}天前`;
+}
+
+function jobStatusBadge(status: JobItem["status"]) {
+  return DISCOVERY_JOB_STATUS_BADGES[status] || DISCOVERY_JOB_STATUS_BADGES.new;
 }
 
 // ── Page ────────────────────────────────────────────────────────────
@@ -111,10 +144,21 @@ export default function DiscoverPage() {
 
   const fetchJobs = useCallback(async () => {
     try {
-      const res = await fetch("/api/scan/jobs?status=new&limit=50");
-      if (!res.ok) return;
-      const data = await res.json();
-      setJobs(data?.data?.jobs || []);
+      const batches = await Promise.all(
+        DISCOVERY_VISIBLE_STATUSES.map(async (status) => {
+          const res = await fetch(`/api/scan/jobs?status=${status}&limit=50`);
+          if (!res.ok) return [] as JobItem[];
+          const data = await res.json();
+          return (data?.data?.jobs || []) as JobItem[];
+        }),
+      );
+      const deduped = new Map<number, JobItem>();
+      batches.flat().forEach((job) => deduped.set(job.id, job));
+      setJobs(
+        Array.from(deduped.values()).sort((a, b) =>
+          new Date(b.discovered_at).getTime() - new Date(a.discovered_at).getTime()
+        ),
+      );
     } catch { /* ignore */ }
   }, []);
 
@@ -642,13 +686,15 @@ export default function DiscoverPage() {
               {visibleJobs.map(job => (
                 <StaggerItem key={job.id}>
                   <PaperCard padding="md" hover="lift" className="relative">
-                    {/* NEW badge */}
-                    {job.status === "new" && (
-                      <span className="absolute top-3 right-3 text-xs px-2 py-0.5 rounded-full bg-[var(--color-primary)] text-white font-medium">
-                        NEW
-                      </span>
-                    )}
-                    <div className="space-y-2">
+                    {(() => {
+                      const badge = jobStatusBadge(job.status);
+                      return (
+                        <span className={`absolute top-3 right-3 text-xs px-2 py-0.5 rounded-full font-medium ${badge.className}`}>
+                          {badge.label}
+                        </span>
+                      );
+                    })()}
+                    <div className="space-y-2 pr-16">
                       <p className="text-xs text-[var(--color-muted)] font-medium uppercase tracking-wide">{job.company}</p>
                       <p className="text-sm font-medium text-[var(--color-text)] line-clamp-2 leading-snug">{job.title}</p>
                       <div className="flex items-center gap-3 text-xs text-[var(--color-muted)] flex-wrap">
