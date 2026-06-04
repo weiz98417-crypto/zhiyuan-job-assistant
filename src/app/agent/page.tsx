@@ -925,6 +925,10 @@ Rules:
     );
   }
 
+  const currentSession = currentSessionId
+    ? sessions.find((session) => session.id === currentSessionId)
+    : undefined;
+
   return (
     <div className="flex h-[calc(100vh-(var(--space-section)*2))] min-h-[560px] max-h-[calc(100vh-(var(--space-section)*2))] flex-1 gap-0 overflow-hidden">
       {/* Desktop SessionList Sidebar (>=1280px) */}
@@ -1047,6 +1051,7 @@ Rules:
           evalProgress={evalProgress}
           completionInfo={completionInfo}
           resultQuality={resultQuality}
+          interviewState={currentSession?.interviewState}
           suggestions={activeAgent?.suggestions?.length ? activeAgent.suggestions.map(s => ({ icon: null as unknown as React.ReactNode, label: s.label, prompt: s.prompt })) : DEFAULT_SUGGESTIONS}
           onSend={sendMessage}
           onStop={handleStopStreaming}

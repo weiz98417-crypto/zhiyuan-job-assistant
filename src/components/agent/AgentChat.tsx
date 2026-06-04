@@ -7,7 +7,7 @@ import { WarmButton, ScoreBadge } from "@/components/design";
 import MarkdownRenderer from "@/components/MarkdownRenderer";
 import { getToolDisplay } from "@/lib/agent/tool-display-names";
 import { getAgentById } from "@/lib/agent/registry";
-import type { AgentMessage, CoachMode, InterviewQuestion } from "@/types";
+import type { AgentMessage, CoachMode, InterviewQuestion, InterviewSessionState } from "@/types";
 import { createJD } from "@/lib/jd-storage";
 
 import SuggestionChips from "./SuggestionChips";
@@ -53,6 +53,8 @@ interface AgentChatProps {
   completionInfo?: CompletionInfo | null;
   /** Tool result quality (good/empty/irrelevant/garbled) — drives verification indicator */
   resultQuality?: string | null;
+  /** Active mock interview binding from the persisted chat session. */
+  interviewState?: InterviewSessionState;
 
   suggestions?: SuggestionChip[];
   onSend: (content: string, images?: string[]) => Promise<void>;
@@ -84,6 +86,48 @@ function estimateDataUrlBytes(src: string): number | undefined {
   if (!base64) return undefined;
   const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
   return Math.max(0, Math.floor((base64.length * 3) / 4) - padding);
+}
+
+function statusLabel(status?: string): string {
+  if (status === "completed") return "已完成";
+  if (status === "paused") return "已暂停";
+  if (status === "abandoned") return "已中止";
+  return "进行中";
+}
+
+function InterviewBindingBar({ state }: { state?: InterviewSessionState }) {
+  const plan = state?.planSnapshot;
+  if (!plan) return null;
+  const answered = state.transcript.filter((turn) => turn.role === "user").length;
+  const currentQuestion = state.currentQuestionId
+    ? state.questionGraph.find((node) => node.id === state.currentQuestionId)
+    : state.questionGraph.at(-1);
+
+  return (
+    <div className="mb-3 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2">
+      <div className="flex items-center gap-2 text-xs text-[var(--color-muted)] flex-wrap">
+        <span className="inline-flex items-center gap-1 text-[var(--color-primary)] font-medium">
+          <Target size={12} />
+          当前面试绑定
+        </span>
+        <span className="inline-flex items-center gap-1 text-[var(--color-text-soft)]">
+          <Briefcase size={12} />
+          {plan.jdSnapshot?.company || "未知公司"} · {plan.jdSnapshot?.role || "目标岗位"}
+        </span>
+        <span className="inline-flex items-center gap-1 text-[var(--color-text-soft)]">
+          <User size={12} />
+          {plan.resumeSnapshot?.title || "未绑定简历"}
+        </span>
+        <span>{plan.mode} · {plan.difficulty}</span>
+        <span>{statusLabel(state.status)} · 已答 {answered} 轮</span>
+        {currentQuestion && (
+          <span className="truncate max-w-[360px]">
+            当前题：{currentQuestion.kind} · {currentQuestion.question}
+          </span>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function formatBytes(size?: number): string {
@@ -1252,6 +1296,7 @@ export default function AgentChat({
   evalProgress,
   completionInfo,
   resultQuality,
+  interviewState,
   suggestions,
   onSend,
   onStop,
@@ -1385,6 +1430,8 @@ export default function AgentChat({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <InterviewBindingBar state={interviewState} />
+
       {/* Messages */}
       <div className="flex-1 min-h-0 overflow-y-auto py-4 space-y-4 cursor-default">
         {messages.map((msg, i) => {

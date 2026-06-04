@@ -24,7 +24,7 @@
 ## 3. AgentChat Interview Runtime
 
 - [x] Add session bootstrap support for `interviewPlanId` or serialized `InterviewPlanSnapshot`.
-- [ ] Show the active interview binding in AgentChat.
+- [x] Show the active interview binding in AgentChat.
 - [x] Route "start mock interview based on my JD/resume" through the interview session runtime, not the loose question-generation flow.
 - [x] Track the current main question and follow-up stack in state.
 - [x] Classify assistant questions as `main`, `follow_up`, `probe`, `clarification`, or `reverse_question`.
