@@ -82,6 +82,17 @@ const INTERVIEW_INTENT_PATTERNS = [
   /帮我.*(评分|打分).*(回答|面试)/,
 ];
 
+const SESSION_STATE_RULES = `
+## 面试会话状态优先级
+
+- 如果提示里存在 "Active Interview Session"，它就是当前模拟面试的事实源。
+- 只能使用该 session 的 planSnapshot、questionGraph、transcript、scoreArtifacts 和 recap 推进面试。
+- 不要因为用户纠正“一次一题”等格式问题而丢失原 JD/简历绑定。
+- 已有 active session 时，不要重新生成整套题目计划；每轮只推进当前题、一个追问或一个新的主问题。
+- 用户请求评分或复盘时，优先使用已保存 transcript 和 questionGraph，不要要求用户重新粘贴已经回答过的内容。
+- 用户提到另一份 JD/简历时，不能静默切换；只有显式且高置信匹配时才允许切换或重开，否则作为补充上下文或先问一句澄清。
+`;
+
 // ── Agent definition ──
 
 export const interviewAgent: AgentDefinition = {
@@ -115,7 +126,7 @@ export const interviewAgent: AgentDefinition = {
     try { const raw = localStorage.getItem("cvData"); if (raw) { const cv = JSON.parse(raw); cvText = cv.sections?.map((s: { title: string; content: string }) => `## ${s.title}\n${s.content}`).join("\n\n") || ""; } } catch { /* */ }
     const coachOverlay = buildInterviewCoachOverlay({ jdCompany: companyMatch, jdRole: roleMatch, cvText: cvText || undefined, mode });
 
-    const parts = [soul.body, "", coachOverlay, "", "## 用户画像 (Career DNA)", ctx.careerDNA || "暂无画像数据", ""];
+    const parts = [soul.body, "", SESSION_STATE_RULES, "", coachOverlay, "", "## 用户画像 (Career DNA)", ctx.careerDNA || "暂无画像数据", ""];
     if (ctx.agentKnowledge) parts.push("## 面试知识", ctx.agentKnowledge, "");
     if (ctx.memoryDigest) parts.push("## 会话记忆", ctx.memoryDigest, "");
 

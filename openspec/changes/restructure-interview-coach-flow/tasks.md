@@ -47,7 +47,7 @@
 
 ## 5. Coach Prompt And Tool Policy
 
-- [ ] Update the interview agent prompt so it treats the session state as the source of truth.
+- [x] Update the interview agent prompt so it treats the session state as the source of truth.
 - [ ] Prevent tools from regenerating a full question plan when the active session already has one.
 - [ ] Scoring tools must consume stored question/answer turns rather than asking for pasted answers.
 - [ ] Recap generation must summarize from `InterviewSessionState`.
