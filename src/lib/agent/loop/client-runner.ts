@@ -5,6 +5,7 @@ import { executeTool, formatToolResult, getTool } from "@/lib/agent/tools";
 import type { ToolResult, ErrorCategory } from "@/lib/agent/tools/types";
 import { enforceToolPolicy, inferCompanyFromMessages, isToolAllowedInMode } from "./tool-policy";
 import type { InterviewSessionState } from "@/types";
+import type { InterviewRebindAction } from "@/lib/agent/interview-rebind-policy";
 import db from "@/lib/db";
 import { createJD } from "@/lib/jd-storage";
 import { buildImageIntakeToolCall, inferPreferredDocumentTypeFromText, type ImageDocumentType, type ImageIntakeResult } from "@/lib/agent/image-intake";
@@ -18,6 +19,7 @@ interface AgentLoopRuntimeContext {
   imageIntake?: ImageIntakeResult | null;
   preferredDocumentType?: ImageDocumentType;
   interviewState?: InterviewSessionState;
+  interviewRebindAction?: InterviewRebindAction;
 }
 
 /* ── Result quality check ── */
@@ -652,6 +654,7 @@ export async function* agentLoopClient(
             messages: ctx,
             toolWhitelist,
             interviewState: runtimeContext?.interviewState,
+            interviewRebindAction: runtimeContext?.interviewRebindAction,
           });
         } catch {
           return false;
@@ -776,6 +779,7 @@ export async function* agentLoopClient(
           messages: ctx,
           toolWhitelist,
           interviewState: runtimeContext?.interviewState,
+          interviewRebindAction: runtimeContext?.interviewRebindAction,
         });
         if (policyResult) {
           toolResult = policyResult;

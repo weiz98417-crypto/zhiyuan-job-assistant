@@ -1,5 +1,6 @@
 import type { ToolResult } from "@/lib/agent/tools/types";
 import type { InterviewQuestionNode, InterviewSessionState, InterviewTurn } from "@/types";
+import type { InterviewRebindAction } from "@/lib/agent/interview-rebind-policy";
 
 export interface ToolPolicyInput {
   toolName: string;
@@ -7,11 +8,13 @@ export interface ToolPolicyInput {
   messages: { role: string; content: string }[];
   toolWhitelist?: string[];
   interviewState?: InterviewSessionState;
+  interviewRebindAction?: InterviewRebindAction;
 }
 
 export const GLOBAL_CONTEXT_TOOLS = new Set([
   "read_file",
   "get_profile",
+  "get_reference_detail",
   "get_recent_jd_context",
   "get_report_detail",
 ]);
@@ -69,6 +72,12 @@ function hasActiveInterviewSession(state?: InterviewSessionState): state is Inte
 
 function explicitlyAskedToRestartInterview(text: string): boolean {
   return /(重新开始|重开|重启|重新模拟|重新出题|重新生成|从头来|新开一场|另开一场|切换.*(重新|重开|重启)|restart|start over|new interview|regenerate)/i.test(text);
+}
+
+function mentionsMaterialRebindIntent(text: string): boolean {
+  const mentionsMaterial = /\bJD\b|岗位|职位|招聘|简历|履历|resume|cv/i.test(text);
+  const asksSwitch = /切换|换成|改用|用这份|使用这份|绑定|重新开始|重开|重启|新开|另开|restart|start over|new interview/i.test(text);
+  return mentionsMaterial && asksSwitch;
 }
 
 function hydrateSingleQuestionFromActiveSession(input: ToolPolicyInput): void {
@@ -188,6 +197,21 @@ export function enforceToolPolicy(input: ToolPolicyInput): ToolResult | null {
   if (hasActiveInterview && input.toolName === "score_interview_answer") {
     const scorePolicyResult = hydrateScoreFromActiveSession(input);
     if (scorePolicyResult) return scorePolicyResult;
+  }
+
+  if (
+    hasActiveInterview &&
+    (input.toolName === "prepare_interview_full" || input.toolName === "start_interview_session") &&
+    mentionsMaterialRebindIntent(userText) &&
+    input.interviewRebindAction !== "auto_restart_interview"
+  ) {
+    return {
+      success: false,
+      data: null,
+      error: "Material rebinding or restart must pass the interview rebind policy before changing the active session.",
+      errorCategory: "need_user_input",
+      llmSummary: "Do not start or regenerate a new interview from another JD/resume unless rebind arbitration approved auto_restart_interview. Ask the policy clarification question or keep the current binding.",
+    };
   }
 
   if (

@@ -51,7 +51,7 @@
 - [x] Prevent tools from regenerating a full question plan when the active session already has one.
 - [x] Scoring tools must consume stored question/answer turns rather than asking for pasted answers.
 - [x] Recap generation must summarize from `InterviewSessionState`.
-- [ ] Keep JD/resume read tools flexible enough for real use, but gate state-changing rebinds through the rebind policy.
+- [x] Keep JD/resume read tools flexible enough for real use, but gate state-changing rebinds through the rebind policy.
 
 ## 6. Recap Experience
 

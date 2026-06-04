@@ -102,7 +102,7 @@ export const interviewAgent: AgentDefinition = {
   intentPatterns: INTERVIEW_INTENT_PATTERNS,
   explicitSwitchPatterns: [/用面试教练/, /切换到面试/, /面试模式/],
   tools: INTERVIEW_TOOLS,
-  toolNames: [...INTERVIEW_TOOLS.map(t => t.name), "start_interview_session", "prepare_interview_full", "read_file", "get_recent_jd_context", "search_applications", "get_report_detail"],
+  toolNames: [...INTERVIEW_TOOLS.map(t => t.name), "start_interview_session", "prepare_interview_full", "read_file", "get_reference_detail", "get_recent_jd_context", "search_applications", "get_report_detail"],
   knowledgeSubset: ["interview-styles"],
   priority: 10,
   suggestions: INTERVIEW_SUGGESTIONS,

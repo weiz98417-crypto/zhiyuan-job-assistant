@@ -321,3 +321,24 @@ export function resolveInterviewRebindAction(
     reason: "The material reference is weak or unmatched, so the active binding should remain unchanged.",
   };
 }
+
+export function formatInterviewRebindRuntimeDirective(resolution: InterviewRebindResolution): string {
+  const matched = resolution.match?.record;
+  const matchedLabel = matched
+    ? `${matched.kind} #${String(matched.id || "unknown")} ${matched.title || matched.name || matched.company || ""} ${matched.role || ""}`.trim()
+    : "none";
+  return [
+    "## Interview Material Rebind Arbitration",
+    `Action: ${resolution.action}`,
+    `Material kind: ${resolution.materialKind}`,
+    `Matched local record: ${matchedLabel}`,
+    `Reason: ${resolution.reason}`,
+    resolution.clarificationQuestion ? `Clarification question: ${resolution.clarificationQuestion}` : "",
+    "",
+    "Rules:",
+    "- Read-only JD/resume tools remain allowed for context: get_recent_jd_context, read_file, get_reference_detail.",
+    "- Do not change the active interview binding unless Action is auto_switch_material or auto_restart_interview.",
+    "- If Action is ask_clarification, ask exactly the clarification question and stop.",
+    "- If Action is use_as_supporting_context or keep_current_binding, keep the current planSnapshot as the source of truth.",
+  ].filter(Boolean).join("\n");
+}

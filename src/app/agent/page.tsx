@@ -39,6 +39,14 @@ import {
   updateInterviewStateWithExchange,
   updateInterviewStateWithToolResult,
 } from "@/lib/agent/interview-session-state";
+import {
+  classifyInterviewMaterialReference,
+  formatInterviewRebindRuntimeDirective,
+  matchInterviewMaterialReference,
+  resolveInterviewRebindAction,
+  type InterviewMaterialRecord,
+  type InterviewRebindResolution,
+} from "@/lib/agent/interview-rebind-policy";
 import { markOfferStateStaleFromText } from "@/lib/agent/offer-session-state";
 import type { AgentMessage, AgentInteraction, ChatSession } from "@/types";
 
@@ -46,6 +54,45 @@ import type { AgentMessage, AgentInteraction, ChatSession } from "@/types";
 /* ── Agent phase ── */
 
 type AgentPhase = "understanding" | "executing" | "verifying" | "reflecting" | "responding" | "done" | "extracting_ocr" | "extracting_jd" | "jd_extracted" | "detecting_archetype" | "archetype_detected" | null;
+
+async function loadInterviewMaterialRecords(): Promise<InterviewMaterialRecord[]> {
+  const [jdResult, refResult] = await Promise.allSettled([
+    fetch("/api/data/jds", { cache: "no-store" }).then((res) => res.json()),
+    fetch("/api/cv/references", { cache: "no-store" }).then((res) => res.json()),
+  ]);
+  const records: InterviewMaterialRecord[] = [];
+
+  if (jdResult.status === "fulfilled" && jdResult.value?.success && Array.isArray(jdResult.value.data)) {
+    for (const jd of jdResult.value.data as Array<Record<string, unknown>>) {
+      records.push({
+        id: jd.id as number | undefined,
+        kind: "jd",
+        title: `${jd.company || ""} ${jd.role || ""} JD`.trim(),
+        company: String(jd.company || ""),
+        role: String(jd.role || ""),
+        body: String(jd.body || ""),
+        keywords: Array.isArray(jd.keywords) ? jd.keywords.filter((item): item is string => typeof item === "string") : [],
+      });
+    }
+  }
+
+  if (refResult.status === "fulfilled" && refResult.value?.success && Array.isArray(refResult.value.data)) {
+    for (const resume of refResult.value.data as Array<Record<string, unknown>>) {
+      const tags = Array.isArray(resume.tags) ? resume.tags.filter((item): item is string => typeof item === "string") : [];
+      records.push({
+        id: resume.id as number | undefined,
+        kind: "resume",
+        title: String(resume.name || ""),
+        name: String(resume.name || ""),
+        label: String(resume.source || ""),
+        body: [resume.notes, tags.join(" ")].filter(Boolean).join("\n"),
+        keywords: tags,
+      });
+    }
+  }
+
+  return records;
+}
 
 /* ── Welcome message ── */
 
@@ -336,6 +383,15 @@ function AgentPageInner() {
         const currentSessionForRun = currentSessionId ? await getSession(currentSessionId) : undefined;
         const memoryDigest = currentSessionForRun?.memoryDigest;
         const agentState = markOfferStateStaleFromText(currentSessionForRun?.agentState, content) || currentSessionForRun?.agentState;
+        let rebindResolution: InterviewRebindResolution | null = null;
+        if (currentSessionForRun?.interviewState?.planSnapshot) {
+          const decision = classifyInterviewMaterialReference(content);
+          if (decision.intent !== "continue_current_session") {
+            const materialRecords = await loadInterviewMaterialRecords();
+            const match = matchInterviewMaterialReference(decision, materialRecords);
+            rebindResolution = resolveInterviewRebindAction(decision, match);
+          }
+        }
 
         const preferredDocumentType = imageDataUris.length
           ? inferPreferredDocumentTypeFromText(content)
@@ -447,7 +503,10 @@ Rules:
 - Attach follow-ups to the current question and the original JD/resume snapshot.
 - Do not ask the user to repost JD/resume unless the snapshot is empty and no recent JD can be read.`
           : "";
-        const activeSystemPrompt = `${systemPrompt}${interviewContext}`;
+        const rebindContext = rebindResolution
+          ? `\n\n${formatInterviewRebindRuntimeDirective(rebindResolution)}`
+          : "";
+        const activeSystemPrompt = `${systemPrompt}${interviewContext}${rebindContext}`;
 
         setActiveAgent(agent);
 
@@ -465,7 +524,7 @@ Rules:
         for await (const event of agentLoopClient(
           activeSystemPrompt, msgList, undefined, controller.signal, undefined,
           toolWhitelist.length > 0 ? toolWhitelist : undefined, tools,
-          { imageIntake, preferredDocumentType, interviewState },
+          { imageIntake, preferredDocumentType, interviewState, interviewRebindAction: rebindResolution?.action },
         )) {
           if (firstEvent) { setStartTime(Date.now()); firstEvent = false; }
           switch (event.type) {

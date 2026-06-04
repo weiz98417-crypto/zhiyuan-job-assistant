@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   classifyInterviewMaterialReference,
+  formatInterviewRebindRuntimeDirective,
   matchInterviewMaterialReference,
   resolveInterviewRebindAction,
   type InterviewMaterialRecord,
@@ -133,5 +134,16 @@ describe("interview material reference classifier", () => {
     const resolution = resolveInterviewRebindAction(decision, null);
 
     expect(resolution.action).toBe("use_as_supporting_context");
+  });
+
+  it("formats runtime directives that keep read tools flexible but gate state changes", () => {
+    const decision = classifyInterviewMaterialReference("用另一份简历吧");
+    const resolution = resolveInterviewRebindAction(decision, null);
+    const directive = formatInterviewRebindRuntimeDirective(resolution);
+
+    expect(directive).toContain("Read-only JD/resume tools remain allowed");
+    expect(directive).toContain("get_reference_detail");
+    expect(directive).toContain("Do not change the active interview binding");
+    expect(directive).toContain("ask exactly the clarification question");
   });
 });

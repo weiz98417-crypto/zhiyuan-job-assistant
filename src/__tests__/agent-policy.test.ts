@@ -127,6 +127,29 @@ describe("agent tool policy", () => {
     expect(result).toBeNull();
   });
 
+  it("blocks material restart tools unless rebind arbitration approves restart", () => {
+    const blocked = enforceToolPolicy({
+      toolName: "start_interview_session",
+      params: { company: "ByteDance", role: "AI Product Manager" },
+      messages: [{ role: "user", content: "换成字节 AI 产品经理 JD 并重新开始一场模拟面试" }],
+      toolWhitelist: interviewAgent.toolNames,
+      interviewState: activeInterviewState(),
+      interviewRebindAction: "ask_clarification",
+    });
+    expect(blocked?.success).toBe(false);
+    expect(blocked?.llmSummary).toContain("rebind arbitration");
+
+    const allowed = enforceToolPolicy({
+      toolName: "start_interview_session",
+      params: { company: "ByteDance", role: "AI Product Manager" },
+      messages: [{ role: "user", content: "换成字节 AI 产品经理 JD 并重新开始一场模拟面试" }],
+      toolWhitelist: interviewAgent.toolNames,
+      interviewState: activeInterviewState(),
+      interviewRebindAction: "auto_restart_interview",
+    });
+    expect(allowed).toBeNull();
+  });
+
   it("hydrates active interview question generation from the stored snapshot and forces one question", () => {
     const params: Record<string, unknown> = { count: 8 };
     const result = enforceToolPolicy({
@@ -202,6 +225,7 @@ describe("agent tool whitelists", () => {
   it("global context tools remain executable even when a stale mode whitelist is narrower", () => {
     expect(isToolAllowedInMode("read_file", ["evaluate_jd_full"])).toBe(true);
     expect(isToolAllowedInMode("get_profile", ["evaluate_jd_full"])).toBe(true);
+    expect(isToolAllowedInMode("get_reference_detail", ["generate_interview_questions"])).toBe(true);
     expect(isToolAllowedInMode("get_recent_jd_context", ["generate_interview_questions"])).toBe(true);
     expect(isToolAllowedInMode("web_search", ["evaluate_jd_full"])).toBe(false);
   });
