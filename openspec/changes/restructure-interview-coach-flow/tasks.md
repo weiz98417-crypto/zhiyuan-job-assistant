@@ -34,7 +34,7 @@
 
 ## 4. Smart JD/Resume Rebind
 
-- [ ] Add an intent classifier for material references in interview chat:
+- [x] Add an intent classifier for material references in interview chat:
   - continue current session;
   - use another JD/resume as supporting context;
   - switch active material;
