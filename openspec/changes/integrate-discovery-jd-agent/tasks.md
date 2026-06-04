@@ -62,7 +62,7 @@
 
 - [x] JD Management should show discovery-sourced JDs with a small `来自职位发现` source badge.
 - [x] JD Management should remain the place for opening saved JD details and related reports.
-- [ ] Add "去 JD 管理" affordance from Discovery only after a job is saved.
+- [x] Add "去 JD 管理" affordance from Discovery only after a job is saved.
 - [x] Ensure deleting a JD does not delete the scan lead; it should clear or orphan `scan_jobs.jd_id` safely.
 
 ## 6. Verification

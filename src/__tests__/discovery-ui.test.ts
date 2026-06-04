@@ -37,4 +37,16 @@ describe("Discovery UI", () => {
     expect(portals).not.toContain("OpenAI");
     expect(portals).not.toContain("Anthropic");
   });
+
+  it("only shows JD management affordance after a discovery job is saved", () => {
+    const page = source("src/app/discover/page.tsx");
+
+    expect(page).toContain("const goToJDManagement");
+    expect(page).toContain('router.push("/evaluate/jds")');
+    expect(page).toContain("{job.jd_id ? (");
+    expect(page).toContain("{evalJob.jd_id ? (");
+    expect(page).toContain("setEvalJob((prev) => prev && prev.id === jobId");
+    expect(page).toContain("setJobs((prev) => prev.map((job) => job.id === jobId");
+    expect(page).toContain("去 JD 管理");
+  });
 });

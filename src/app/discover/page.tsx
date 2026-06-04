@@ -349,6 +349,7 @@ export default function DiscoverPage() {
 
   const saveDiscoveryJD = async (evaluate = false) => {
     if (!evalJob) return null;
+    const jobId = evalJob.id;
     const jdBody = (manualBody || detail?.body || "").trim();
     if (jdBody.length < 50) {
       showToast("JD 正文太短，请先粘贴完整 JD", "error");
@@ -368,8 +369,12 @@ export default function DiscoverPage() {
       });
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.error || "保存 JD 失败");
+      const jdId = Number(json.jdId);
+      const nextStatus: JobItem["status"] = evaluate ? "evaluating" : "saved";
+      setEvalJob((prev) => prev && prev.id === jobId ? { ...prev, jd_id: jdId, status: nextStatus } : prev);
+      setJobs((prev) => prev.map((job) => job.id === jobId ? { ...job, jd_id: jdId, status: nextStatus } : job));
       await fetchJobs();
-      return Number(json.jdId);
+      return jdId;
     } catch (err) {
       showToast(err instanceof Error ? err.message : "保存 JD 失败", "error");
       return null;
@@ -387,6 +392,10 @@ export default function DiscoverPage() {
     const jdId = await saveDiscoveryJD(true);
     if (!jdId) return;
     router.push(`/agent?jdId=${jdId}&intent=evaluate`);
+  };
+
+  const goToJDManagement = () => {
+    router.push("/evaluate/jds");
   };
 
   // ── Skeleton ─────────────────────────────────────────────────
@@ -715,6 +724,11 @@ export default function DiscoverPage() {
                         <WarmButton variant="ghost" size="sm" onClick={() => dismissJob(job.id)}>
                           <SkipForward size={12} className="mr-1" />跳过
                         </WarmButton>
+                        {job.jd_id ? (
+                          <WarmButton variant="ghost" size="sm" onClick={goToJDManagement}>
+                            <ChevronRight size={12} className="mr-1" />去 JD 管理
+                          </WarmButton>
+                        ) : null}
                         <a href={job.url} target="_blank" rel="noopener noreferrer"
                           className="text-xs text-[var(--color-muted)] hover:text-[var(--color-text)] flex items-center gap-0.5 ml-auto">
                           <ExternalLink size={11} />
@@ -846,6 +860,11 @@ export default function DiscoverPage() {
                     <WarmButton variant="ghost" size="sm" className="w-full" onClick={() => dismissJob(evalJob.id)}>
                       <SkipForward size={14} className="mr-1" />跳过
                     </WarmButton>
+                    {evalJob.jd_id ? (
+                      <WarmButton variant="ghost" size="sm" className="w-full" onClick={goToJDManagement}>
+                        <ChevronRight size={14} className="mr-1" />去 JD 管理
+                      </WarmButton>
+                    ) : null}
                   </div>
                 )}
               </div>
