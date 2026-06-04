@@ -50,6 +50,7 @@ export async function POST(request: Request) {
       .map((s) => {
         try {
           const c = typeof s.content_json === "string" ? JSON.parse(s.content_json) : s.content_json;
+          if ((c as { status?: string }).status === "rejected") return "";
           const raw = (c as { value?: string }).value || "";
           return raw.replace(/[，,。.！!、\s]+$/g, "").replace(/^[，,。.！!、\s]+/g, "").trim();
         } catch { return ""; }

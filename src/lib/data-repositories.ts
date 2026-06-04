@@ -138,6 +138,9 @@ export interface DataRepositories {
     insert(signal: Pick<SignalRow, "source" | "signal_type" | "content_json" | "session_id">, userId: string): Promise<void>;
     insertMany(signals: Pick<SignalRow, "source" | "signal_type" | "content_json" | "session_id">[], userId: string): Promise<void>;
     query(query: SignalQuery, userId: string): Promise<SignalRow[]>;
+    get(id: number, userId: string): Promise<SignalRow | undefined>;
+    update(id: number, signal: Partial<Pick<SignalRow, "source" | "signal_type" | "content_json" | "session_id">>, userId: string): Promise<boolean>;
+    delete(id: number, userId: string): Promise<boolean>;
   };
   referenceResumes: {
     insert(row: {
@@ -761,6 +764,22 @@ function createSqliteSignalRepository(): DataRepositories["signals"] {
       if (query.limit) { sql += " LIMIT @limit"; params.limit = query.limit; }
       return getDb().prepare(sql).all(params) as SignalRow[];
     },
+    async get(id, userId) {
+      return getDb().prepare("SELECT * FROM profile_signals WHERE id = ? AND user_id = ?").get(id, userId) as SignalRow | undefined;
+    },
+    async update(id, signal, userId) {
+      const sets: string[] = [];
+      const params: Record<string, unknown> = { id, user_id: userId };
+      if (signal.source !== undefined) { sets.push("source = @source"); params.source = signal.source; }
+      if (signal.signal_type !== undefined) { sets.push("signal_type = @signal_type"); params.signal_type = signal.signal_type; }
+      if (signal.content_json !== undefined) { sets.push("content_json = @content_json"); params.content_json = signal.content_json; }
+      if (signal.session_id !== undefined) { sets.push("session_id = @session_id"); params.session_id = signal.session_id || null; }
+      if (!sets.length) return false;
+      return getDb().prepare(`UPDATE profile_signals SET ${sets.join(", ")} WHERE id = @id AND user_id = @user_id`).run(params).changes > 0;
+    },
+    async delete(id, userId) {
+      return getDb().prepare("DELETE FROM profile_signals WHERE id = ? AND user_id = ?").run(id, userId).changes > 0;
+    },
   };
 }
 
@@ -789,6 +808,30 @@ function createPostgresSignalRepository(): DataRepositories["signals"] {
         if (query.limit) { params.push(query.limit); sql += ` LIMIT $${params.length}`; }
         return rows<SignalRow>((await client.query(sql, params)).rows);
       });
+    },
+    async get(id, userId) {
+      return withPostgresClient(async (client) => one<SignalRow>(await client.query("SELECT * FROM profile_signals WHERE id=$1 AND user_id=$2", [id, userId])));
+    },
+    async update(id, signal, userId) {
+      const sets: string[] = [];
+      const params: unknown[] = [];
+      const add = (column: string, value: unknown, json = false) => {
+        params.push(value);
+        sets.push(`${column} = $${params.length}${json ? "::jsonb" : ""}`);
+      };
+      if (signal.source !== undefined) add("source", signal.source);
+      if (signal.signal_type !== undefined) add("signal_type", signal.signal_type);
+      if (signal.content_json !== undefined) add("content_json", signal.content_json, true);
+      if (signal.session_id !== undefined) add("session_id", signal.session_id || null);
+      if (!sets.length) return false;
+      params.push(id, userId);
+      return withPostgresClient(async (client) => Boolean((await client.query(
+        `UPDATE profile_signals SET ${sets.join(", ")} WHERE id=$${params.length - 1} AND user_id=$${params.length}`,
+        params,
+      )).rowCount));
+    },
+    async delete(id, userId) {
+      return withPostgresClient(async (client) => Boolean((await client.query("DELETE FROM profile_signals WHERE id=$1 AND user_id=$2", [id, userId])).rowCount));
     },
   };
 }

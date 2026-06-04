@@ -30,6 +30,7 @@ interface SignalContent {
   min?: number;
   max?: number;
   text?: string;
+  status?: string;
 }
 
 interface BehavioralStats {
@@ -82,12 +83,15 @@ async function extractSignals(userId: string): Promise<SignalSummary> {
         });
       }
 
+      if (content.status === "rejected") continue;
+
       if (signal.signal_type === "skill_claim" && content.skill) {
+        if (content.status !== "confirmed") continue;
         const normalized = normalizeSkillClaim({
           skill: content.skill,
           evidence: content.evidence || "",
           confidence: content.confidence,
-          source: "auto",
+          source: signal.source === "user_confirmed" ? "manual" : "auto",
         });
         if (normalized) {
           skillClaims.push({
@@ -107,7 +111,7 @@ async function extractSignals(userId: string): Promise<SignalSummary> {
         if (content.min) salaryMin = content.min;
         if (content.max) salaryMax = content.max;
       }
-      if (signal.signal_type === "raw_context" && content.text) {
+      if (signal.signal_type === "raw_context" && content.text && content.status === "confirmed") {
         rawContexts.push(content.text.slice(0, 800));
       }
     } catch {

@@ -56,6 +56,20 @@ interface CompanySignal {
   signal_type: string;
 }
 
+interface SkillCandidateSignal {
+  id: number;
+  source?: string;
+  created_at?: string;
+  content_json: {
+    skill?: string;
+    evidence?: string;
+    confidence?: number;
+    category?: string;
+    sourceType?: string;
+    status?: string;
+  };
+}
+
 export default function ProfilePage() {
   const [profile, setProfile] = useState<ZhiyuanProfile | null>(null);
   const [reportCount, setReportCount] = useState(0);
@@ -67,6 +81,7 @@ export default function ProfilePage() {
   const [resetConfirm, setResetConfirm] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [companySignals, setCompanySignals] = useState<CompanySignal[]>([]);
+  const [pendingSkillCandidates, setPendingSkillCandidates] = useState<SkillCandidateSignal[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const { isLocked } = useLockedFields(profile);
@@ -98,6 +113,15 @@ export default function ProfilePage() {
       if (sigRes.ok) {
         const sigJson = await sigRes.json();
         if (sigJson.success) setCompanySignals(sigJson.data || []);
+      }
+    } catch { /* ignore */ }
+    try {
+      const skillRes = await fetch("/api/data/signals?signal_type=skill_claim&status=candidate&limit=50");
+      if (skillRes.ok) {
+        const skillJson = await skillRes.json();
+        if (skillJson.success) {
+          setPendingSkillCandidates((skillJson.data || []).filter((s: SkillCandidateSignal) => s.content_json?.skill));
+        }
       }
     } catch { /* ignore */ }
   }, []);
@@ -164,6 +188,50 @@ export default function ProfilePage() {
   const handleHistoryClick = (entry: ProfileHistoryEntry, index: number) => {
     setSelectedHistory({ entry, index });
     setHistoryOpen(true);
+  };
+
+  const handleCandidateAction = async (
+    id: number,
+    action: "confirm" | "reject" | "edit",
+    content_json?: Record<string, unknown>,
+  ) => {
+    try {
+      const res = await fetch("/api/data/signals", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, action, content_json }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.success) throw new Error(json.error || "操作失败");
+      setToast(action === "confirm" ? "技能已确认" : action === "reject" ? "候选已拒绝" : "候选已更新");
+      await fetchProfile();
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "操作失败");
+    }
+  };
+
+  const handleEditCandidate = async (candidate: SkillCandidateSignal) => {
+    const currentSkill = candidate.content_json.skill || "";
+    const nextSkill = window.prompt("编辑技能名称", currentSkill);
+    if (nextSkill === null) return;
+    const nextEvidence = window.prompt("编辑证据", candidate.content_json.evidence || "");
+    if (nextEvidence === null) return;
+    await handleCandidateAction(candidate.id, "edit", {
+      skill: nextSkill.trim(),
+      evidence: nextEvidence.trim(),
+    });
+  };
+
+  const handleDeleteCandidate = async (id: number) => {
+    try {
+      const res = await fetch(`/api/data/signals?id=${id}`, { method: "DELETE" });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.success) throw new Error(json.error || "删除失败");
+      setToast("候选已删除");
+      await fetchProfile();
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "删除失败");
+    }
   };
 
   /* ── Empty state: no profile at all ── */
@@ -340,6 +408,66 @@ export default function ProfilePage() {
             <Zap size={20} className="mx-auto mb-2 text-[var(--color-primary)]" />
             <p>尚未识别到技能信息</p>
             <p className="text-xs mt-1">在 Agent 对话中提及你的技能（如"我精通 React"），系统会自动提取</p>
+          </div>
+        )}
+        {pendingSkillCandidates.length > 0 && (
+          <div className="mt-4 border-t border-[var(--color-divider)] pt-3">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-xs font-medium text-[var(--color-text)]">待确认技能</p>
+              <span className="text-[10px] text-[var(--color-muted)]">{pendingSkillCandidates.length} 项</span>
+            </div>
+            <div className="space-y-2">
+              {pendingSkillCandidates.slice(0, 8).map((candidate) => (
+                <div key={candidate.id} className="flex items-start gap-2 rounded border border-[var(--color-divider)] px-2.5 py-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-sm text-[var(--color-text)]">{candidate.content_json.skill}</span>
+                      <span className="text-[10px] px-1.5 py-px rounded-full bg-amber-50 text-amber-700 border border-amber-100">候选</span>
+                      {candidate.content_json.confidence !== undefined && (
+                        <span className="text-[10px] text-[var(--color-muted)]">
+                          {Math.round((candidate.content_json.confidence || 0) * 100)}
+                        </span>
+                      )}
+                    </div>
+                    {candidate.content_json.evidence && (
+                      <p className="mt-1 truncate text-xs text-[var(--color-muted)]" title={candidate.content_json.evidence}>
+                        {candidate.content_json.evidence}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex flex-shrink-0 items-center gap-1">
+                    <button
+                      onClick={() => handleCandidateAction(candidate.id, "confirm")}
+                      className="p-1 rounded text-emerald-600 hover:bg-emerald-50"
+                      title="确认"
+                    >
+                      <Check size={13} />
+                    </button>
+                    <button
+                      onClick={() => handleEditCandidate(candidate)}
+                      className="p-1 rounded text-[var(--color-muted)] hover:bg-[var(--color-bg-alt)] hover:text-[var(--color-primary)]"
+                      title="编辑"
+                    >
+                      <Pencil size={13} />
+                    </button>
+                    <button
+                      onClick={() => handleCandidateAction(candidate.id, "reject")}
+                      className="p-1 rounded text-amber-600 hover:bg-amber-50"
+                      title="拒绝"
+                    >
+                      <EyeOff size={13} />
+                    </button>
+                    <button
+                      onClick={() => handleDeleteCandidate(candidate.id)}
+                      className="p-1 rounded text-red-500 hover:bg-red-50"
+                      title="删除"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </PaperCard>

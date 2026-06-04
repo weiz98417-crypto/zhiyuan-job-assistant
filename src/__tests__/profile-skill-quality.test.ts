@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  normalizeProfileSignalForStorage,
   normalizeSkillClaim,
+  PROFILE_SIGNAL_CATEGORIES,
+  PROFILE_SIGNAL_SOURCE_WEIGHTS,
   sanitizeProfileSkills,
   sanitizeSkillClaims,
 } from "@/lib/profile-skill-quality";
@@ -58,6 +61,77 @@ describe("profile skill quality gate", () => {
     ]);
 
     expect(skills.map((skill) => skill.name)).toEqual(["数据分析", "RAG"]);
+  });
+
+  it("enriches valid chat skills as candidates with evidence and source metadata", () => {
+    const decision = normalizeProfileSignalForStorage({
+      source: "auto_scan",
+      signal_type: "skill_claim",
+      content_json: {
+        skill: "YOLOv8",
+        evidence: "我参与过 YOLOv8 模型落地",
+        confidence: 0.76,
+      },
+      session_id: "s1",
+    });
+
+    expect(decision.accepted).toBe(true);
+    expect(decision.signal?.content_json).toMatchObject({
+      skill: "YOLOv8",
+      status: "candidate",
+      sourceType: "ordinary_chat",
+      evidenceCount: 1,
+    });
+    expect(decision.signal?.content_json.sourceWeight).toBe(PROFILE_SIGNAL_SOURCE_WEIGHTS.ordinary_chat);
+    expect(PROFILE_SIGNAL_CATEGORIES).toContain(decision.signal?.content_json.category);
+  });
+
+  it("keeps JD-only requirements out of user profile signals", () => {
+    const decision = normalizeProfileSignalForStorage({
+      source: "jd",
+      signal_type: "skill_claim",
+      content_json: {
+        skill: "主数据管理",
+        evidence: "任职要求：理解主数据、数据集、数仓等基础技术概念",
+        confidence: 0.9,
+      },
+    });
+
+    expect(decision.accepted).toBe(false);
+    expect(decision.rejectedReason).toBe("jd_requirement_is_not_user_skill");
+  });
+
+  it("allows resume-backed skills to become confirmed candidates", () => {
+    const decision = normalizeProfileSignalForStorage({
+      source: "resume_import",
+      signal_type: "skill_claim",
+      content_json: {
+        skill: "RAG",
+        evidence: "简历：我做过 RAG 知识库检索增强项目",
+        confidence: 0.82,
+      },
+    });
+
+    expect(decision.accepted).toBe(true);
+    expect(decision.signal?.content_json).toMatchObject({
+      skill: "RAG",
+      status: "confirmed",
+      sourceType: "resume",
+    });
+  });
+
+  it("keeps confirmed user edits ahead of model-inferred duplicates", () => {
+    const skills = sanitizeProfileSkills([
+      { name: "API 设计", proficiency: 65, evidence: ["我确认 API 设计是核心技能"], source: "manual" },
+      { name: "API", proficiency: 95, evidence: ["我在项目中设计过 REST API"], source: "auto" },
+    ]);
+
+    expect(skills).toHaveLength(1);
+    expect(skills[0]).toMatchObject({
+      name: "API 设计",
+      proficiency: 65,
+      source: "manual",
+    });
   });
 });
 
