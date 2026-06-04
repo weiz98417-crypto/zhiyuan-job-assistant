@@ -55,7 +55,7 @@
 
 ## 6. Recap Experience
 
-- [ ] Define recap sections:
+- [x] Define recap sections:
   - overall verdict;
   - question-by-question feedback;
   - follow-up performance;

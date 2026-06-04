@@ -336,6 +336,21 @@ export function buildInterviewRecapFromState(
       : "",
     answeredQuestions.length === 0 ? "尚未沉淀可复盘的用户回答。" : "",
   ].filter(Boolean);
+  const weakSpots = weaknesses.length
+    ? weaknesses
+    : ["暂未发现明显薄弱项；建议继续用更高难度追问验证稳定性。"];
+  const followUpPerformance = [
+    followUpAnswered > 0
+      ? `已回答 ${followUpAnswered} 个追问/探针，能看到面试进入细节深挖。`
+      : "本轮尚未形成已回答的追问/探针，后续需要增加细节深挖。",
+    ...answeredQuestions
+      .filter((node) => node.kind === "follow_up" || node.kind === "probe")
+      .slice(0, 2)
+      .map((node) => {
+        const parent = node.parentId ? state.questionGraph.find((item) => item.id === node.parentId) : undefined;
+        return `追问「${compactText(node.question, 42)}」关联主问题「${compactText(parent?.question || "未记录", 42)}」。`;
+      }),
+  ];
 
   const derivedNextPracticePlan = [
     lowDimensions.includes("具体程度") ? "下一轮回答每题至少补 1 个量化结果或业务影响。" : "",
@@ -348,6 +363,25 @@ export function buildInterviewRecapFromState(
   const nextPracticePlan = derivedNextPracticePlan.length
     ? derivedNextPracticePlan
     : ["选择最贴近 JD 的一道题做二次回答，并补充业务结果、个人贡献和可量化指标。"];
+  const questionFeedback = state.questionGraph.map((node) => {
+    const answers = answerTurnsForNode(state, node);
+    const score = scoreForNode(state, node);
+    const parent = node.parentId ? state.questionGraph.find((item) => item.id === node.parentId) : undefined;
+    return {
+      questionNodeId: node.id,
+      question: node.question,
+      kind: node.kind,
+      parentQuestion: parent?.question,
+      answerExcerpt: compactText(answers.map((turn) => turn.content).join("\n"), 160),
+      sourceTurnIds: answers.map((turn) => turn.id),
+      score: score?.overall,
+      feedback: summarizeScore(score),
+    };
+  });
+  const evidenceFromAnswers = questionFeedback
+    .filter((item) => item.answerExcerpt)
+    .slice(0, 4)
+    .map((item, index) => `证据 ${index + 1}：${item.answerExcerpt}`);
 
   return {
     generatedAt: new Date().toISOString(),
@@ -356,22 +390,11 @@ export function buildInterviewRecapFromState(
       : `${company} ${role} 模拟面试已记录 ${answeredQuestions.length} 道已回答问题，尚未生成结构化评分。`,
     strengths,
     weaknesses,
+    followUpPerformance,
+    evidenceFromAnswers,
+    weakSpots,
     nextPracticePlan,
-    questionFeedback: state.questionGraph.map((node) => {
-      const answers = answerTurnsForNode(state, node);
-      const score = scoreForNode(state, node);
-      const parent = node.parentId ? state.questionGraph.find((item) => item.id === node.parentId) : undefined;
-      return {
-        questionNodeId: node.id,
-        question: node.question,
-        kind: node.kind,
-        parentQuestion: parent?.question,
-        answerExcerpt: compactText(answers.map((turn) => turn.content).join("\n"), 160),
-        sourceTurnIds: answers.map((turn) => turn.id),
-        score: score?.overall,
-        feedback: summarizeScore(score),
-      };
-    }),
+    questionFeedback,
     sourceTurnIds: state.transcript.map((turn) => turn.id),
     rawText,
   };

@@ -129,6 +129,9 @@ describe("Interview session state", () => {
     expect(recapped?.recap?.questionFeedback?.[0].answerExcerpt).toContain("指标体系");
     expect(recapped?.recap?.questionFeedback?.[0].sourceTurnIds).toHaveLength(1);
     expect(recapped?.recap?.weaknesses.length).toBeGreaterThanOrEqual(0);
+    expect(recapped?.recap?.weakSpots?.length).toBeGreaterThan(0);
+    expect(recapped?.recap?.evidenceFromAnswers?.[0]).toContain("指标体系");
+    expect(recapped?.recap?.followUpPerformance?.[0]).toContain("追问");
     expect(recapped?.recap?.nextPracticePlan.length).toBeGreaterThan(0);
     expect(recapped?.recap?.overallVerdict).toContain("平均评分 4/5");
     expect(recapped?.recap?.overallVerdict).not.toContain("整体不错");

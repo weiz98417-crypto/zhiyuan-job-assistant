@@ -952,6 +952,9 @@ export interface InterviewRecap {
   overallVerdict: string;
   strengths: string[];
   weaknesses: string[];
+  followUpPerformance?: string[];
+  evidenceFromAnswers?: string[];
+  weakSpots?: string[];
   nextPracticePlan: string[];
   questionFeedback?: {
     questionNodeId?: string;
