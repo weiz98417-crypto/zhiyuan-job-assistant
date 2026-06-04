@@ -14,6 +14,7 @@ import type { ToolResult, ErrorCategory } from "@/lib/agent/tools/types";
 import type { AgentDefinition } from "@/lib/agent/registry/types";
 import { enforceToolPolicy, inferCompanyFromMessages, isToolAllowedInMode } from "./tool-policy";
 import { ZHIPU_API_URL, ZHIPU_FALLBACK_MODEL } from "@/lib/zhipu";
+import type { InterviewSessionState } from "@/types";
 
 /* ── Context cap (per-tool) ── */
 const DEFAULT_TOOL_CTX_CAP = 800;
@@ -218,8 +219,9 @@ export async function* agentLoopServer(opts: {
   config?: LoopConfig;
   tools?: Array<{ type: string; function: object }>;
   signal?: AbortSignal;
+  interviewState?: InterviewSessionState;
 }): AsyncGenerator<SSEEvent> {
-  const { systemPrompt, messages, config = DEFAULT_LOOP_CONFIG, tools, agent, signal } = opts;
+  const { systemPrompt, messages, config = DEFAULT_LOOP_CONFIG, tools, agent, signal, interviewState } = opts;
   const modelPreference = agent?.model;
   const toolWhitelist = agent?.toolNames?.length ? agent.toolNames : undefined;
   const state: LoopState = {
@@ -333,7 +335,7 @@ export async function* agentLoopServer(opts: {
           continue;
         }
 
-        const policyResult = enforceToolPolicy({ toolName: tc.name, params, messages: ctx, toolWhitelist });
+        const policyResult = enforceToolPolicy({ toolName: tc.name, params, messages: ctx, toolWhitelist, interviewState });
         if (policyResult) {
           toolResult = policyResult;
           formatted = formatToolResult(toolResult, tc.name);

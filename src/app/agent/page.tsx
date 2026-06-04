@@ -465,7 +465,7 @@ Rules:
         for await (const event of agentLoopClient(
           activeSystemPrompt, msgList, undefined, controller.signal, undefined,
           toolWhitelist.length > 0 ? toolWhitelist : undefined, tools,
-          { imageIntake, preferredDocumentType },
+          { imageIntake, preferredDocumentType, interviewState },
         )) {
           if (firstEvent) { setStartTime(Date.now()); firstEvent = false; }
           switch (event.type) {

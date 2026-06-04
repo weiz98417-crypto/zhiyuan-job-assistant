@@ -4,6 +4,7 @@ import { isGarbledText } from "./text-quality";
 import { executeTool, formatToolResult, getTool } from "@/lib/agent/tools";
 import type { ToolResult, ErrorCategory } from "@/lib/agent/tools/types";
 import { enforceToolPolicy, inferCompanyFromMessages, isToolAllowedInMode } from "./tool-policy";
+import type { InterviewSessionState } from "@/types";
 import db from "@/lib/db";
 import { createJD } from "@/lib/jd-storage";
 import { buildImageIntakeToolCall, inferPreferredDocumentTypeFromText, type ImageDocumentType, type ImageIntakeResult } from "@/lib/agent/image-intake";
@@ -16,6 +17,7 @@ type LoopMessage = { role: string; content: string; images?: string[] };
 interface AgentLoopRuntimeContext {
   imageIntake?: ImageIntakeResult | null;
   preferredDocumentType?: ImageDocumentType;
+  interviewState?: InterviewSessionState;
 }
 
 /* ── Result quality check ── */
@@ -644,7 +646,13 @@ export async function* agentLoopClient(
     }) && toolCalls.every(tc => isToolAllowedInMode(tc.name, toolWhitelist))
       && toolCalls.every(tc => {
         try {
-          return !enforceToolPolicy({ toolName: tc.name, params: JSON.parse(tc.arguments) as Record<string, unknown>, messages: ctx, toolWhitelist });
+          return !enforceToolPolicy({
+            toolName: tc.name,
+            params: JSON.parse(tc.arguments) as Record<string, unknown>,
+            messages: ctx,
+            toolWhitelist,
+            interviewState: runtimeContext?.interviewState,
+          });
         } catch {
           return false;
         }
@@ -762,7 +770,13 @@ export async function* agentLoopClient(
           continue;
         }
 
-        const policyResult = enforceToolPolicy({ toolName: tc.name, params, messages: ctx, toolWhitelist });
+        const policyResult = enforceToolPolicy({
+          toolName: tc.name,
+          params,
+          messages: ctx,
+          toolWhitelist,
+          interviewState: runtimeContext?.interviewState,
+        });
         if (policyResult) {
           toolResult = policyResult;
           formatted = formatToolResult(toolResult, tc.name);

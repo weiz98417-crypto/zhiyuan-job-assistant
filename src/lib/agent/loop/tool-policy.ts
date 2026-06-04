@@ -1,10 +1,12 @@
 import type { ToolResult } from "@/lib/agent/tools/types";
+import type { InterviewSessionState } from "@/types";
 
 export interface ToolPolicyInput {
   toolName: string;
   params: Record<string, unknown>;
   messages: { role: string; content: string }[];
   toolWhitelist?: string[];
+  interviewState?: InterviewSessionState;
 }
 
 export const GLOBAL_CONTEXT_TOOLS = new Set([
@@ -61,6 +63,34 @@ function latestUserText(messages: { role: string; content: string }[]): string {
   return "";
 }
 
+function hasActiveInterviewSession(state?: InterviewSessionState): state is InterviewSessionState {
+  return !!state?.planSnapshot && state.status !== "completed" && state.status !== "abandoned";
+}
+
+function explicitlyAskedToRestartInterview(text: string): boolean {
+  return /(重新开始|重开|重启|重新模拟|重新出题|重新生成|从头来|新开一场|另开一场|切换.*(重新|重开|重启)|restart|start over|new interview|regenerate)/i.test(text);
+}
+
+function hydrateSingleQuestionFromActiveSession(input: ToolPolicyInput): void {
+  const state = input.interviewState;
+  if (!hasActiveInterviewSession(state) || input.toolName !== "generate_interview_questions") return;
+
+  input.params.count = 1;
+  const plan = state.planSnapshot;
+  if (typeof input.params.jdText !== "string" || !input.params.jdText.trim()) {
+    input.params.jdText = plan.jdSnapshot?.body || "";
+  }
+  if (typeof input.params.cvText !== "string" || !input.params.cvText.trim()) {
+    input.params.cvText = plan.resumeSnapshot?.body || "";
+  }
+  if (typeof input.params.company !== "string" || !input.params.company.trim()) {
+    input.params.company = plan.jdSnapshot?.company || "";
+  }
+  if (typeof input.params.role !== "string" || !input.params.role.trim()) {
+    input.params.role = plan.jdSnapshot?.role || "";
+  }
+}
+
 function hasUrl(text: string): boolean {
   return /https?:\/\/\S+/i.test(text);
 }
@@ -83,6 +113,25 @@ function explicitlyAskedForWeb(text: string): boolean {
 
 export function enforceToolPolicy(input: ToolPolicyInput): ToolResult | null {
   const userText = latestUserText(input.messages);
+  const hasActiveInterview = hasActiveInterviewSession(input.interviewState);
+
+  if (hasActiveInterview && input.toolName === "generate_interview_questions") {
+    hydrateSingleQuestionFromActiveSession(input);
+  }
+
+  if (
+    hasActiveInterview &&
+    (input.toolName === "prepare_interview_full" || input.toolName === "start_interview_session") &&
+    !explicitlyAskedToRestartInterview(userText)
+  ) {
+    return {
+      success: false,
+      data: null,
+      error: "Active interview session already has a fixed plan snapshot; do not regenerate a full interview plan.",
+      errorCategory: "need_user_input",
+      llmSummary: "Active interview session is already bound to stored JD/resume snapshots. Do not call full prep/start-session tools. Continue from the stored transcript, ask exactly one next question, or ask one clarification if the user wants to restart.",
+    };
+  }
 
   if ((isEvaluateAgent(input.toolWhitelist) || isInterviewAgent(input.toolWhitelist) || isOfferAgent(input.toolWhitelist)) && input.toolName === "web_search" && !explicitlyAskedForWeb(userText)) {
     return {

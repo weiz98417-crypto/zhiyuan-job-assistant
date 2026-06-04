@@ -4,6 +4,52 @@ import { buildAgentContextState, formatAgentContextState } from "@/lib/agent/mem
 import { evaluateAgent } from "@/lib/agent/registry/agents/evaluate-agent";
 import { interviewAgent } from "@/lib/agent/registry/agents/interview-agent";
 import { getReportDetail } from "@/lib/agent/tools/query/get-report-detail";
+import type { InterviewSessionState } from "@/types";
+
+function activeInterviewState(): InterviewSessionState {
+  return {
+    status: "active",
+    planSnapshot: {
+      snapshotId: "plan_1",
+      source: { jdId: 10, resumeId: "resume_1" },
+      jdSnapshot: {
+        company: "Acme",
+        role: "AI Product Manager",
+        body: "JD snapshot body: build AI product workflows and data products.",
+      },
+      resumeSnapshot: {
+        title: "Main resume",
+        body: "Resume snapshot body: AI hardware, computer vision, and product projects.",
+      },
+      mode: "realistic",
+      difficulty: "normal",
+      focusAreas: ["jd-match"],
+      allowFollowUps: true,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    },
+    currentQuestionId: "q1",
+    questionGraph: [
+      {
+        id: "q1",
+        kind: "main",
+        question: "Tell me about one relevant project.",
+        answerTurnIds: ["turn_user_1"],
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    transcript: [
+      {
+        id: "turn_user_1",
+        role: "user",
+        content: "I led an AI product prototype.",
+        questionNodeId: "q1",
+        createdAt: "2026-01-01T00:01:00.000Z",
+      },
+    ],
+    scoreArtifacts: [],
+    rebindHistory: [],
+  };
+}
 
 describe("agent tool policy", () => {
   it("blocks evaluate agent web search unless explicitly requested", () => {
@@ -45,6 +91,49 @@ describe("agent tool policy", () => {
       toolWhitelist: evaluateAgent.toolNames,
     });
     expect(result?.error).toContain("没有提供新的 JD 链接");
+  });
+  it("blocks full interview prep tools when an active interview session already exists", () => {
+    const result = enforceToolPolicy({
+      toolName: "prepare_interview_full",
+      params: { company: "Acme", role: "AI Product Manager" },
+      messages: [{ role: "user", content: "give me a complete interview prep plan" }],
+      toolWhitelist: interviewAgent.toolNames,
+      interviewState: activeInterviewState(),
+    });
+
+    expect(result?.success).toBe(false);
+    expect(result?.errorCategory).toBe("need_user_input");
+    expect(result?.llmSummary).toContain("Active interview session");
+  });
+
+  it("allows explicit interview restart wording to pass through full prep tools", () => {
+    const result = enforceToolPolicy({
+      toolName: "start_interview_session",
+      params: { company: "Acme", role: "AI Product Manager" },
+      messages: [{ role: "user", content: "restart this mock interview from scratch" }],
+      toolWhitelist: interviewAgent.toolNames,
+      interviewState: activeInterviewState(),
+    });
+
+    expect(result).toBeNull();
+  });
+
+  it("hydrates active interview question generation from the stored snapshot and forces one question", () => {
+    const params: Record<string, unknown> = { count: 8 };
+    const result = enforceToolPolicy({
+      toolName: "generate_interview_questions",
+      params,
+      messages: [{ role: "user", content: "ask the next question" }],
+      toolWhitelist: interviewAgent.toolNames,
+      interviewState: activeInterviewState(),
+    });
+
+    expect(result).toBeNull();
+    expect(params.count).toBe(1);
+    expect(params.company).toBe("Acme");
+    expect(params.role).toBe("AI Product Manager");
+    expect(params.jdText).toContain("JD snapshot body");
+    expect(params.cvText).toContain("Resume snapshot body");
   });
 });
 
