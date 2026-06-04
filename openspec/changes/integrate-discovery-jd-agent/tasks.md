@@ -67,7 +67,7 @@
 
 ## 6. Verification
 
-- [ ] Add regression tests for JD dedup by source URL and body hash.
+- [x] Add regression tests for JD dedup by source URL and body hash.
 - [ ] Add API tests or route-level checks for save-from-discovery.
 - [ ] Manually verify:
   - scan job -> view JD -> save to JD library;
