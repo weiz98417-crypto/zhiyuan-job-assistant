@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AgentMessage, JDRecord } from "@/types";
+import type { AgentMessage, InterviewQuestionNode, JDRecord } from "@/types";
 import {
   buildInterviewPlanSnapshot,
   createInterviewState,
@@ -145,6 +145,35 @@ describe("Interview session state", () => {
     expect(followUp?.kind).toBe("follow_up");
     expect(followUp?.parentId).toBe(parentId);
     expect(parent?.answerTurnIds).toHaveLength(1);
+  });
+
+  it("stores a follow-up after Q3 as a child of Q3 instead of the last planned question", () => {
+    const questions: InterviewQuestionNode[] = Array.from({ length: 9 }, (_, index) => ({
+      id: `q${index + 1}`,
+      kind: "main",
+      question: `第 ${index + 1} 题：主问题 ${index + 1}？`,
+      answerTurnIds: [],
+      createdAt: "2026-06-04T09:00:00.000Z",
+    }));
+    const state = {
+      ...interviewState(),
+      currentQuestionId: "q3",
+      questionGraph: questions,
+    };
+
+    const next = updateInterviewStateWithExchange(
+      state,
+      msg("user", "我回答第三题，重点讲了需求拆解和上线结果。"),
+      msg("assistant", "追问：你刚才提到需求拆解，能否展开讲一个冲突处理细节？"),
+    );
+
+    const followUp = next?.questionGraph.at(-1);
+    const q3 = next?.questionGraph.find((node) => node.id === "q3");
+    const q9 = next?.questionGraph.find((node) => node.id === "q9");
+    expect(followUp?.kind).toBe("follow_up");
+    expect(followUp?.parentId).toBe("q3");
+    expect(q3?.answerTurnIds).toHaveLength(1);
+    expect(q9?.answerTurnIds).toHaveLength(0);
   });
 
   it("persists score artifacts separately from raw tool text", () => {
