@@ -237,30 +237,141 @@ export function shouldPersistInterviewRecap(userContent: string): boolean {
   return /复盘|总结|回顾|结束面试|结束模拟|recap|summary/i.test(userContent);
 }
 
+const SCORE_DIMENSION_LABELS: Record<string, string> = {
+  structure: "结构完整度",
+  specificity: "具体程度",
+  highlight: "亮点突出",
+  timing: "时间控制",
+};
+
+function compactText(text: string, max = 120): string {
+  const clean = text.replace(/\s+/g, " ").trim();
+  return clean.length > max ? `${clean.slice(0, max)}...` : clean;
+}
+
+function answerTurnsForNode(state: InterviewSessionState, node: InterviewQuestionNode): InterviewTurn[] {
+  const ids = new Set(node.answerTurnIds);
+  return state.transcript.filter((turn) => turn.role === "user" && ids.has(turn.id));
+}
+
+function scoreForNode(state: InterviewSessionState, node: InterviewQuestionNode): InterviewScore | undefined {
+  if (node.score) return node.score;
+  return [...(state.scoreArtifacts || [])].reverse().find((artifact) => artifact.questionNodeId === node.id)?.score;
+}
+
+function summarizeScore(score?: InterviewScore): string | undefined {
+  if (!score) return undefined;
+  const dimensions = score.dimensions || {};
+  const lows = Object.entries(dimensions)
+    .filter(([, value]) => typeof value === "number" && value < 3.5)
+    .map(([key]) => SCORE_DIMENSION_LABELS[key] || key);
+  if (score.feedback) return score.feedback;
+  if (lows.length) return `需要提升：${lows.join("、")}。`;
+  return `本题结构化评分 ${score.overall}/5。`;
+}
+
+function average(values: number[]): number | undefined {
+  const valid = values.filter((value) => Number.isFinite(value));
+  if (!valid.length) return undefined;
+  return Math.round((valid.reduce((sum, value) => sum + value, 0) / valid.length) * 10) / 10;
+}
+
+function dimensionAverages(scores: InterviewScore[]): Record<string, number> {
+  const buckets = new Map<string, number[]>();
+  for (const score of scores) {
+    for (const [key, value] of Object.entries(score.dimensions || {})) {
+      if (typeof value !== "number" || !Number.isFinite(value)) continue;
+      buckets.set(key, [...(buckets.get(key) || []), value]);
+    }
+  }
+  return Object.fromEntries([...buckets.entries()].map(([key, values]) => [key, average(values) || 0]));
+}
+
 export function buildInterviewRecapFromState(
   state: InterviewSessionState,
   rawText?: string,
 ): InterviewRecap {
   const answeredQuestions = state.questionGraph.filter((node) => node.answerTurnIds.length > 0);
-  const scores = (state.scoreArtifacts || []).map((item) => item.score.overall).filter(Number.isFinite);
-  const average = scores.length
-    ? Math.round((scores.reduce((sum, score) => sum + score, 0) / scores.length) * 10) / 10
-    : undefined;
+  const questionScores = state.questionGraph
+    .map((node) => scoreForNode(state, node))
+    .filter((score): score is InterviewScore => Boolean(score));
+  const averageScore = average(questionScores.map((score) => score.overall));
+  const dimensionScores = dimensionAverages(questionScores);
+  const highDimensions = Object.entries(dimensionScores)
+    .filter(([, value]) => value >= 4)
+    .map(([key]) => SCORE_DIMENSION_LABELS[key] || key);
+  const lowDimensions = Object.entries(dimensionScores)
+    .filter(([, value]) => value > 0 && value < 3.5)
+    .map(([key]) => SCORE_DIMENSION_LABELS[key] || key);
+  const mainAnswered = answeredQuestions.filter((node) => node.kind === "main").length;
+  const followUpAnswered = answeredQuestions.filter((node) => node.kind === "follow_up" || node.kind === "probe").length;
+  const company = state.planSnapshot.jdSnapshot?.company || "目标公司";
+  const role = state.planSnapshot.jdSnapshot?.role || "目标岗位";
+  const scoredWeakQuestions = state.questionGraph
+    .map((node, index) => ({ node, index, score: scoreForNode(state, node) }))
+    .filter((item): item is { node: InterviewQuestionNode; index: number; score: InterviewScore } => Boolean(item.score))
+    .filter((item) => item.score.overall < 3.5);
+  const scoredStrongQuestions = state.questionGraph
+    .map((node, index) => ({ node, index, score: scoreForNode(state, node) }))
+    .filter((item): item is { node: InterviewQuestionNode; index: number; score: InterviewScore } => Boolean(item.score))
+    .filter((item) => item.score.overall >= 4);
+
+  const strengths = [
+    highDimensions.length ? `高分维度：${highDimensions.join("、")}。` : "",
+    ...scoredStrongQuestions.slice(0, 2).map((item) =>
+      `第 ${item.index + 1} 题表现较强（${item.score.overall}/5）：${compactText(item.node.question, 48)}`
+    ),
+    !questionScores.length && answeredQuestions.length
+      ? `已完成 ${answeredQuestions.length} 轮回答，可继续补充结构化评分来沉淀强项。`
+      : "",
+  ].filter(Boolean);
+
+  const weaknesses = [
+    lowDimensions.length ? `待提升维度：${lowDimensions.join("、")}。` : "",
+    ...scoredWeakQuestions.slice(0, 2).map((item) =>
+      `第 ${item.index + 1} 题得分偏低（${item.score.overall}/5）：${compactText(item.node.question, 48)}`
+    ),
+    !questionScores.length && answeredQuestions.length
+      ? "本轮已有回答但缺少结构化评分，复盘深度会受限。"
+      : "",
+    answeredQuestions.length === 0 ? "尚未沉淀可复盘的用户回答。" : "",
+  ].filter(Boolean);
+
+  const derivedNextPracticePlan = [
+    lowDimensions.includes("具体程度") ? "下一轮回答每题至少补 1 个量化结果或业务影响。" : "",
+    lowDimensions.includes("结构完整度") ? "用 STAR/项目复盘结构重答得分最低的一题。" : "",
+    lowDimensions.includes("亮点突出") ? "提前准备 2 个能体现个人贡献的高光案例。" : "",
+    lowDimensions.includes("时间控制") ? "把核心回答压缩到 90-120 秒，再保留 1 个可展开细节。" : "",
+    !questionScores.length && answeredQuestions.length ? "先对最近 1-2 个回答做结构化评分，再生成更精确的提升计划。" : "",
+    answeredQuestions.length === 0 ? "先完成至少 1 道主问题回答，再生成复盘。" : "",
+  ].filter(Boolean).slice(0, 4);
+  const nextPracticePlan = derivedNextPracticePlan.length
+    ? derivedNextPracticePlan
+    : ["选择最贴近 JD 的一道题做二次回答，并补充业务结果、个人贡献和可量化指标。"];
 
   return {
     generatedAt: new Date().toISOString(),
-    overallVerdict: average
-      ? `已完成 ${answeredQuestions.length} 道题，平均评分 ${average}/5。`
-      : `已完成 ${answeredQuestions.length} 道题，尚未生成结构化评分。`,
-    strengths: [],
-    weaknesses: [],
-    nextPracticePlan: [],
-    questionFeedback: state.questionGraph.map((node) => ({
-      questionNodeId: node.id,
-      question: node.question,
-      score: node.score?.overall,
-      feedback: node.score?.feedback,
-    })),
+    overallVerdict: averageScore
+      ? `${company} ${role} 模拟面试已完成 ${answeredQuestions.length} 道已回答问题（主问题 ${mainAnswered}，追问/探针 ${followUpAnswered}），平均评分 ${averageScore}/5。`
+      : `${company} ${role} 模拟面试已记录 ${answeredQuestions.length} 道已回答问题，尚未生成结构化评分。`,
+    strengths,
+    weaknesses,
+    nextPracticePlan,
+    questionFeedback: state.questionGraph.map((node) => {
+      const answers = answerTurnsForNode(state, node);
+      const score = scoreForNode(state, node);
+      const parent = node.parentId ? state.questionGraph.find((item) => item.id === node.parentId) : undefined;
+      return {
+        questionNodeId: node.id,
+        question: node.question,
+        kind: node.kind,
+        parentQuestion: parent?.question,
+        answerExcerpt: compactText(answers.map((turn) => turn.content).join("\n"), 160),
+        sourceTurnIds: answers.map((turn) => turn.id),
+        score: score?.overall,
+        feedback: summarizeScore(score),
+      };
+    }),
     sourceTurnIds: state.transcript.map((turn) => turn.id),
     rawText,
   };

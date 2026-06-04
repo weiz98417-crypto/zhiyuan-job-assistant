@@ -956,6 +956,10 @@ export interface InterviewRecap {
   questionFeedback?: {
     questionNodeId?: string;
     question: string;
+    kind?: InterviewQuestionKind;
+    parentQuestion?: string;
+    answerExcerpt?: string;
+    sourceTurnIds?: string[];
     score?: number;
     feedback?: string;
   }[];

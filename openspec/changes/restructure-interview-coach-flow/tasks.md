@@ -50,7 +50,7 @@
 - [x] Update the interview agent prompt so it treats the session state as the source of truth.
 - [x] Prevent tools from regenerating a full question plan when the active session already has one.
 - [x] Scoring tools must consume stored question/answer turns rather than asking for pasted answers.
-- [ ] Recap generation must summarize from `InterviewSessionState`.
+- [x] Recap generation must summarize from `InterviewSessionState`.
 - [ ] Keep JD/resume read tools flexible enough for real use, but gate state-changing rebinds through the rebind policy.
 
 ## 6. Recap Experience
