@@ -89,6 +89,8 @@ npm run check:postgres
 
 The app still runs on SQLite until the cutover change is applied, so this step only prepares the future database foundation.
 
+When you are ready to copy existing SQLite data into PostgreSQL without changing the runtime driver, follow [POSTGRES_MIGRATION.md](POSTGRES_MIGRATION.md).
+
 ## Build Dashboard (Optional)
 
 ```bash
