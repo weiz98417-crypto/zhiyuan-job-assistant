@@ -27,7 +27,18 @@ describe("Interview Prep UI surfaces", () => {
     expect(history).toContain("有复盘");
     expect(history).toContain("plan?.jdSnapshot?.company");
     expect(history).toContain("plan?.resumeSnapshot?.title");
-    expect(recap).toContain("recap?.overallVerdict");
+    expect(recap).toContain("recap.overallVerdict");
     expect(recap).toContain("state?.transcript?.length");
+  });
+
+  it("renders recap review from structured recap fields", () => {
+    const recap = source("src/app/interview/InterviewRecapReview.tsx");
+
+    expect(recap).toContain("StructuredRecap");
+    expect(recap).toContain("recap.followUpPerformance");
+    expect(recap).toContain("recap.evidenceFromAnswers");
+    expect(recap).toContain("recap.questionFeedback");
+    expect(recap).toContain("recap.nextPracticePlan");
+    expect(recap).not.toContain("rawText");
   });
 });

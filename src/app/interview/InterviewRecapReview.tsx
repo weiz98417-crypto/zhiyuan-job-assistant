@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { BookOpenText, Clock, ExternalLink, FileText, MessageSquare, Star } from "lucide-react";
 import { PaperCard } from "@/components/design";
-import type { ChatSession, InterviewSessionState } from "@/types";
+import type { ChatSession, InterviewRecap, InterviewSessionState } from "@/types";
 import { isInterviewSession } from "@/lib/agent/interview-session-state";
 
 interface InterviewRecapReviewProps {
@@ -33,6 +33,71 @@ function lastTranscriptText(session: ChatSession): string {
     .reverse()
     .find((item) => item.role !== "tool" && item.content?.trim());
   return (message?.content || "暂无转录内容").replace(/\s+/g, " ").trim();
+}
+
+function StructuredRecapSection({
+  title,
+  items,
+  limit = 2,
+}: {
+  title: string;
+  items?: string[];
+  limit?: number;
+}) {
+  const visible = (items || []).filter(Boolean).slice(0, limit);
+  if (!visible.length) return null;
+  return (
+    <section className="space-y-1">
+      <p className="text-xs font-medium text-[var(--color-primary)]">{title}</p>
+      <ul className="space-y-1 text-xs text-[var(--color-text-soft)]">
+        {visible.map((item, index) => (
+          <li key={`${title}-${index}`} className="leading-relaxed">
+            {item}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function StructuredRecap({ recap }: { recap: InterviewRecap }) {
+  const questionFeedback = (recap.questionFeedback || []).slice(0, 2);
+  return (
+    <div className="space-y-3 text-sm text-[var(--color-text)]">
+      <section>
+        <p className="text-xs font-medium text-[var(--color-primary)] mb-1">复盘摘要</p>
+        <p className="leading-relaxed">{recap.overallVerdict}</p>
+      </section>
+
+      <div className="grid gap-2 sm:grid-cols-2">
+        <StructuredRecapSection title="优势" items={recap.strengths} />
+        <StructuredRecapSection title="薄弱点" items={recap.weakSpots || recap.weaknesses} />
+      </div>
+
+      <StructuredRecapSection title="追问表现" items={recap.followUpPerformance} />
+      <StructuredRecapSection title="回答证据" items={recap.evidenceFromAnswers} />
+
+      {questionFeedback.length ? (
+        <section className="space-y-1">
+          <p className="text-xs font-medium text-[var(--color-primary)]">逐题反馈</p>
+          <div className="space-y-2">
+            {questionFeedback.map((item, index) => (
+              <div key={item.questionNodeId || index} className="text-xs text-[var(--color-text-soft)] leading-relaxed">
+                <p className="font-medium text-[var(--color-text)]">
+                  {index + 1}. {item.question}
+                  {typeof item.score === "number" ? ` · ${item.score}/5` : ""}
+                </p>
+                {item.answerExcerpt ? <p>答题证据：{item.answerExcerpt}</p> : null}
+                {item.feedback ? <p>反馈：{item.feedback}</p> : null}
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      <StructuredRecapSection title="下一步" items={recap.nextPracticePlan} limit={3} />
+    </div>
+  );
 }
 
 export default function InterviewRecapReview({
@@ -121,20 +186,18 @@ export default function InterviewRecapReview({
                     )}
                   </div>
 
-                  <div className="text-sm text-[var(--color-text)]">
-                    <p className="text-xs font-medium text-[var(--color-primary)] mb-1">
-                      {recap ? "复盘摘要" : "最近转录"}
-                    </p>
-                    <p className="line-clamp-4">
-                      {recap?.overallVerdict || lastTranscriptText(session)}
-                    </p>
-                  </div>
-
-                  {recap?.nextPracticePlan?.length ? (
-                    <div className="text-xs text-[var(--color-muted)]">
-                      下一步：{recap.nextPracticePlan.slice(0, 2).join("；")}
+                  {recap ? (
+                    <StructuredRecap recap={recap} />
+                  ) : (
+                    <div className="text-sm text-[var(--color-text)]">
+                      <p className="text-xs font-medium text-[var(--color-primary)] mb-1">
+                        最近转录
+                      </p>
+                      <p className="line-clamp-4">
+                        {lastTranscriptText(session)}
+                      </p>
                     </div>
-                  ) : null}
+                  )}
                 </article>
               );
             })}

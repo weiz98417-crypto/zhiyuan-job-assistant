@@ -62,7 +62,7 @@
   - evidence from answers;
   - weak spots;
   - next practice plan.
-- [ ] Render recap from structured data, not as a raw assistant blob.
+- [x] Render recap from structured data, not as a raw assistant blob.
 - [ ] Link recap back to the exact session transcript and plan snapshot.
 - [ ] Make recap visible from Interview Prep history.
 
