@@ -10,7 +10,7 @@
 
 ## 2. Interview Prep Page
 
-- [ ] Refactor Interview Prep into three clear surfaces:
+- [x] Refactor Interview Prep into three clear surfaces:
   - preparation controls;
   - saved mock interview history;
   - recap/transcript review.
@@ -18,7 +18,7 @@
 - [x] Generate an `InterviewPlanSnapshot` only when the user starts a mock interview.
 - [x] Open AgentChat with the new snapshot/session context.
 - [x] Ensure changes made in Interview Prep after a session starts affect only future sessions.
-- [ ] Show past Agent interview sessions with title, company, role, status, score, date, and recap entry.
+- [x] Show past Agent interview sessions with title, company, role, status, score, date, and recap entry.
 - [x] Allow opening a historical session in AgentChat or opening a read-only recap view.
 
 ## 3. AgentChat Interview Runtime

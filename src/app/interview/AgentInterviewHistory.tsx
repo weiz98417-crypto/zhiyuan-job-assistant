@@ -2,9 +2,9 @@
 
 import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronDown, ChevronUp, Clock, ExternalLink, MessageSquare, Search, Trash2 } from "lucide-react";
+import { BadgeCheck, ChevronDown, ChevronUp, Clock, ExternalLink, FileText, MessageSquare, Search, Star, Trash2 } from "lucide-react";
 import { PaperCard } from "@/components/design";
-import type { AgentMessage, ChatSession } from "@/types";
+import type { ChatSession, InterviewSessionState } from "@/types";
 import { isInterviewSession } from "@/lib/agent/interview-session-state";
 
 interface AgentInterviewHistoryProps {
@@ -29,6 +29,22 @@ function countUserTurns(session: ChatSession): number {
   return (session.messages || []).filter((m) => m.role === "user").length;
 }
 
+function averageScore(state?: InterviewSessionState): number | null {
+  const scores = [
+    ...(state?.scoreArtifacts || []).map((item) => item.score.overall),
+    ...(state?.questionGraph || []).map((item) => item.score?.overall),
+  ].filter((score): score is number => typeof score === "number" && Number.isFinite(score));
+  if (!scores.length) return null;
+  return Math.round((scores.reduce((sum, score) => sum + score, 0) / scores.length) * 10) / 10;
+}
+
+function statusLabel(status?: string): string {
+  if (status === "completed") return "已完成";
+  if (status === "paused") return "已暂停";
+  if (status === "abandoned") return "已中止";
+  return "进行中";
+}
+
 export default function AgentInterviewHistory({
   sessions,
   onOpenSession,
@@ -44,7 +60,8 @@ export default function AgentInterviewHistory({
       .filter((session) => isInterviewSession(session))
       .filter((session) => {
         if (!q) return true;
-        const haystack = `${session.title} ${sessionPreview(session)}`.toLowerCase();
+        const plan = session.interviewState?.planSnapshot;
+        const haystack = `${session.title} ${plan?.jdSnapshot?.company || ""} ${plan?.jdSnapshot?.role || ""} ${sessionPreview(session)}`.toLowerCase();
         return haystack.includes(q);
       })
       .sort((a, b) => sessionDate(b).getTime() - sessionDate(a).getTime());
@@ -87,6 +104,10 @@ export default function AgentInterviewHistory({
               const isExpanded = expandedId === id;
               const preview = sessionPreview(session);
               const date = sessionDate(session);
+              const state = session.interviewState;
+              const plan = state?.planSnapshot;
+              const score = averageScore(state);
+              const hasRecap = Boolean(state?.recap);
               return (
                 <div
                   key={id}
@@ -110,6 +131,10 @@ export default function AgentInterviewHistory({
                           <MessageSquare size={10} />
                           Agent
                         </span>
+                        <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text-soft)]">
+                          <BadgeCheck size={10} />
+                          {statusLabel(state?.status)}
+                        </span>
                         <span className="text-xs text-[var(--color-muted)] flex items-center gap-1">
                           <Clock size={10} />
                           {date.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
@@ -117,9 +142,22 @@ export default function AgentInterviewHistory({
                         <span className="text-xs text-[var(--color-muted)]">
                           {countUserTurns(session)} 轮
                         </span>
+                        {score != null && (
+                          <span className="inline-flex items-center gap-1 text-xs text-[var(--color-primary)]">
+                            <Star size={10} />
+                            {score}/5
+                          </span>
+                        )}
+                        <span className={`inline-flex items-center gap-1 text-xs ${hasRecap ? "text-emerald-600" : "text-[var(--color-muted)]"}`}>
+                          <FileText size={10} />
+                          {hasRecap ? "有复盘" : "未复盘"}
+                        </span>
                       </div>
                       <p className="text-sm font-medium text-[var(--color-text)] line-clamp-1">
                         {session.title || "面试模拟"}
+                      </p>
+                      <p className="text-xs text-[var(--color-text-soft)] line-clamp-1 mt-0.5">
+                        {plan?.jdSnapshot?.company || "未知公司"} · {plan?.jdSnapshot?.role || "目标岗位"} · {plan?.resumeSnapshot?.title || "未绑定简历"}
                       </p>
                       <p className="text-xs text-[var(--color-muted)] line-clamp-1 mt-0.5">
                         {preview}
@@ -160,6 +198,12 @@ export default function AgentInterviewHistory({
                         className="overflow-hidden"
                       >
                         <div className="px-3 pb-3 border-t border-[var(--color-divider)] pt-3 space-y-2">
+                          {state?.recap && (
+                            <div className="rounded-[var(--radius-sm)] bg-[var(--color-primary-muted)] px-3 py-2 text-sm text-[var(--color-text)]">
+                              <p className="text-xs font-medium text-[var(--color-primary)] mb-1">结构化复盘</p>
+                              <p className="line-clamp-3">{state.recap.overallVerdict}</p>
+                            </div>
+                          )}
                           {(session.messages || [])
                             .filter((m) => m.role !== "tool" && m.content?.trim())
                             .slice(-6)
@@ -186,4 +230,3 @@ export default function AgentInterviewHistory({
     </PaperCard>
   );
 }
-

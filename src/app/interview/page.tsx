@@ -18,6 +18,7 @@ import db from "@/lib/db";
 import InterviewLaunchPanel from "./InterviewLaunchPanel";
 import PracticeRecords from "./PracticeRecords";
 import AgentInterviewHistory from "./AgentInterviewHistory";
+import InterviewRecapReview from "./InterviewRecapReview";
 import { listSessions, softDeleteSession } from "@/lib/agent/sessions";
 import type {
   PracticeRecord,
@@ -103,6 +104,23 @@ const CATEGORY_LABELS: Record<string, string> = {
   "case-study": "案例分析",
   "culture": "文化匹配",
 };
+
+function SurfaceHeader({
+  eyebrow,
+  title,
+}: {
+  eyebrow: string;
+  title: string;
+}) {
+  return (
+    <div className="space-y-1">
+      <p className="text-xs text-[var(--color-muted)]">{eyebrow}</p>
+      <h2 className="font-[family-name:var(--font-display)] text-lg font-bold text-[var(--color-text)]">
+        {title}
+      </h2>
+    </div>
+  );
+}
 
 /* ── Main page ── */
 
@@ -280,8 +298,36 @@ export default function InterviewPage() {
         </PaperCard>
       )}
 
-      {/* ── Practice stats ── */}
-      <InterviewLaunchPanel />
+      <section className="space-y-3">
+        <SurfaceHeader
+          eyebrow="准备区"
+          title="准备下一场模拟"
+        />
+        <InterviewLaunchPanel />
+      </section>
+
+      <section className="space-y-3">
+        <SurfaceHeader
+          eyebrow="历史区"
+          title="历史模拟面试"
+        />
+        <AgentInterviewHistory
+          sessions={agentSessions}
+          onOpenSession={openAgentSession}
+          onDeleteSession={deleteAgentSession}
+        />
+      </section>
+
+      <section className="space-y-3">
+        <SurfaceHeader
+          eyebrow="回看区"
+          title="复盘与转录回看"
+        />
+        <InterviewRecapReview
+          sessions={agentSessions}
+          onOpenSession={openAgentSession}
+        />
+      </section>
 
       {stats.totalCount > 0 && (
         <>
@@ -413,13 +459,6 @@ export default function InterviewPage() {
           onToggleCollapse={() => {}}
         />
       )}
-
-      {/* ── Upcoming interviews ── */}
-      <AgentInterviewHistory
-        sessions={agentSessions}
-        onOpenSession={openAgentSession}
-        onDeleteSession={deleteAgentSession}
-      />
 
       {upcomingInterviews.length > 0 && (
         <PaperCard padding="md">
