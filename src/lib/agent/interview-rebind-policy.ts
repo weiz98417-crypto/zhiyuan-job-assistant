@@ -71,8 +71,8 @@ function materialKind(text: string): InterviewMaterialKind {
 
 function cleanQuery(text: string): string {
   return text
-    .replace(/^(请|麻烦|帮我|你先|现在|然后|接下来|把|用|切换|换成|改用|参考|结合|重新开始|重开)+/g, "")
-    .replace(/(这个|这份|那个|那份|材料|作为背景|做面试|模拟面试|面试|吧|一下|看看|来练)+/g, " ")
+    .replace(/^(请|麻烦|帮我|你先|现在|然后|接下来|继续|把|用|切换|换成|改用|参考|结合|重新开始|重开)+/g, "")
+    .replace(/(这个|这份|那个|那份|这场|本场|当前|继续|材料|作为背景|做面试|模拟面试|面试|吧|一下|看看|来练)+/g, " ")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 120);

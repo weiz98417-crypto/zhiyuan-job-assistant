@@ -129,6 +129,17 @@ describe("interview material reference classifier", () => {
     expect(resolution.clarificationQuestion).toContain("补充参考");
   });
 
+  it("does not silently switch ambiguous another-resume wording even when local resumes exist", () => {
+    const decision = classifyInterviewMaterialReference("用另一个简历继续这场面试吧");
+    const match = matchInterviewMaterialReference(decision, records);
+    const resolution = resolveInterviewRebindAction(decision, match);
+
+    expect(decision.intent).toBe("needs_clarification");
+    expect(decision.materialKind).toBe("resume");
+    expect(resolution.action).toBe("ask_clarification");
+    expect(resolution.action).not.toBe("auto_switch_material");
+  });
+
   it("keeps the current binding for weak unmatched references", () => {
     const decision = classifyInterviewMaterialReference("这个 JD 里好像也提到了数据分析");
     const resolution = resolveInterviewRebindAction(decision, null);

@@ -72,7 +72,7 @@
 - [x] Test: changing prep configuration does not mutate an active AgentChat session.
 - [x] Test: follow-up after Q3 is stored as child of Q3, not Q9.
 - [x] Test: after answering multiple questions, recap uses stored answers and never asks the user to repost them.
-- [ ] Test: ambiguous "use another resume" wording does not silently switch bindings.
+- [x] Test: ambiguous "use another resume" wording does not silently switch bindings.
 - [ ] Test: explicit "switch to X resume and restart" creates a new session or rebinds with recorded history.
 - [ ] Test: Interview Prep displays AgentChat interview history and recap entries.
 - [x] Run `npm run build`.
