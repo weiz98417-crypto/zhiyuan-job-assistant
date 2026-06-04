@@ -33,6 +33,19 @@ describe("Interview Prep UI surfaces", () => {
     expect(recap).toContain("state?.transcript?.length");
   });
 
+  it("displays AgentChat interview sessions in both history and recap review", () => {
+    const page = source("src/app/interview/page.tsx");
+    const history = source("src/app/interview/AgentInterviewHistory.tsx");
+    const recap = source("src/app/interview/InterviewRecapReview.tsx");
+
+    expect(page).toContain("const [agentSessions, setAgentSessions]");
+    expect(page).toContain("sessions={agentSessions}");
+    expect(history).toContain("isInterviewSession(session)");
+    expect(history).toContain("recapPreview");
+    expect(recap).toContain("isInterviewSession(session)");
+    expect(recap).toContain("StructuredRecap");
+  });
+
   it("renders recap review from structured recap fields", () => {
     const recap = source("src/app/interview/InterviewRecapReview.tsx");
 

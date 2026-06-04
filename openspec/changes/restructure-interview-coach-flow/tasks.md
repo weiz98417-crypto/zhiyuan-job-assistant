@@ -74,5 +74,5 @@
 - [x] Test: after answering multiple questions, recap uses stored answers and never asks the user to repost them.
 - [x] Test: ambiguous "use another resume" wording does not silently switch bindings.
 - [x] Test: explicit "switch to X resume and restart" creates a new session or rebinds with recorded history.
-- [ ] Test: Interview Prep displays AgentChat interview history and recap entries.
+- [x] Test: Interview Prep displays AgentChat interview history and recap entries.
 - [x] Run `npm run build`.
