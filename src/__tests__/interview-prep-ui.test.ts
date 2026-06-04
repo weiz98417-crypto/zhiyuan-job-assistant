@@ -25,6 +25,8 @@ describe("Interview Prep UI surfaces", () => {
     expect(history).toContain("statusLabel");
     expect(history).toContain("averageScore");
     expect(history).toContain("有复盘");
+    expect(history).toContain("recapPreview");
+    expect(history).toContain("复盘：");
     expect(history).toContain("plan?.jdSnapshot?.company");
     expect(history).toContain("plan?.resumeSnapshot?.title");
     expect(recap).toContain("recap.overallVerdict");

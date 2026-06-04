@@ -107,7 +107,8 @@ export default function AgentInterviewHistory({
               const state = session.interviewState;
               const plan = state?.planSnapshot;
               const score = averageScore(state);
-              const hasRecap = Boolean(state?.recap);
+              const recapPreview = state?.recap?.overallVerdict?.trim();
+              const hasRecap = Boolean(recapPreview);
               return (
                 <div
                   key={id}
@@ -162,6 +163,11 @@ export default function AgentInterviewHistory({
                       <p className="text-xs text-[var(--color-muted)] line-clamp-1 mt-0.5">
                         {preview}
                       </p>
+                      {recapPreview ? (
+                        <p className="text-xs text-[var(--color-primary)] line-clamp-2 mt-1">
+                          复盘：{recapPreview}
+                        </p>
+                      ) : null}
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
                       <button

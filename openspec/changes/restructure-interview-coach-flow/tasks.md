@@ -64,7 +64,7 @@
   - next practice plan.
 - [x] Render recap from structured data, not as a raw assistant blob.
 - [x] Link recap back to the exact session transcript and plan snapshot.
-- [ ] Make recap visible from Interview Prep history.
+- [x] Make recap visible from Interview Prep history.
 
 ## 7. Regression Tests
 
