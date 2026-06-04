@@ -45,6 +45,13 @@ function parseOfferText(text: string, params: Record<string, unknown>): OfferSna
   const bonusMatch = text.match(/年终(?:奖)?\s*(\d+(?:\.\d+)?)\s*(?:个月|月)/);
   const fundMatch = text.match(/公积金\s*(\d{1,2})\s*%/);
   const probationMatch = text.match(/试用期\s*(\d)\s*(?:个月|月)/);
+  const socialBaseType =
+    (params.socialInsuranceBaseType as OfferSnapshot["socialInsuranceBaseType"]) ||
+    (/full\s*-?\s*(salary|base)|actual\s+salary|全额|足额|按实际工资|按工资全额/i.test(text)
+      ? "full_salary"
+      : /minimum\s*-?\s*base|lowest\s*-?\s*base|low\s*-?\s*base|最低|下限|最低基数|低基数/i.test(text)
+        ? "minimum_base"
+        : "unknown");
 
   return {
     company,
@@ -54,6 +61,8 @@ function parseOfferText(text: string, params: Record<string, unknown>): OfferSna
     monthsPerYear: numberParam(params.monthsPerYear, salaryMatch?.[2] ? Number(salaryMatch[2]) : monthsMatch ? Number(monthsMatch[1]) : 12),
     annualBonus: numberParam(params.annualBonus, bonusMatch ? Number(bonusMatch[1]) : 0),
     hasSocialInsurance: params.hasSocialInsurance !== false && !/无社保|不缴社保|不交社保/.test(text),
+    socialInsuranceBaseType: socialBaseType,
+    socialInsuranceBaseK: numberParam(params.socialInsuranceBaseK, 0) || undefined,
     housingFundRate: numberParam(params.housingFundRate, fundMatch ? Number(fundMatch[1]) : 7),
     probationMonths: numberParam(params.probationMonths, probationMatch ? Number(probationMatch[1]) : 3),
     otherBenefits: String(params.otherBenefits || text).slice(0, 1000),
@@ -288,6 +297,8 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
       monthsPerYear: numberParam(enrichedParams.monthsPerYear, 12),
       annualBonus: numberParam(enrichedParams.annualBonus, 0),
       hasSocialInsurance: enrichedParams.hasSocialInsurance !== false,
+      socialInsuranceBaseType: (enrichedParams.socialInsuranceBaseType as OfferSnapshot["socialInsuranceBaseType"]) || "unknown",
+      socialInsuranceBaseK: numberParam(enrichedParams.socialInsuranceBaseK, 0) || undefined,
       housingFundRate: numberParam(enrichedParams.housingFundRate, 7),
       probationMonths: numberParam(enrichedParams.probationMonths, 3),
       otherBenefits: String(enrichedParams.otherBenefits || ""),
@@ -407,6 +418,8 @@ export const evaluateOffer: ToolDefinition = {
     annualBonus: { type: "number", required: false, description: "年终奖月数。" },
     hasSocialInsurance: { type: "boolean", required: false, description: "是否缴纳五险一金。" },
     housingFundRate: { type: "number", required: false, description: "公积金个人缴存比例百分数。" },
+    socialInsuranceBaseType: { type: "string", required: false, description: "full_salary/minimum_base/unknown，用于判断社保公积金缴纳基数风险。" },
+    socialInsuranceBaseK: { type: "number", required: false, description: "社保/公积金缴纳基数，单位 K。" },
     probationMonths: { type: "number", required: false, description: "试用期月数。" },
     employmentForm: { type: "string", required: false, description: "direct_hire/dispatch/outsourcing/intern/contractor/unknown。" },
     overtimePolicy: { type: "string", required: false, description: "none/occasional/common/intense/unknown。" },

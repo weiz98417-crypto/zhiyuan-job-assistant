@@ -83,6 +83,8 @@ function baseSnapshot(input: Offer | OfferSnapshot): OfferSnapshot {
     monthsPerYear: toNumber(maybeOffer.monthsPerYear, 12) || 12,
     annualBonus: toNumber(maybeOffer.annualBonus, 0),
     hasSocialInsurance: maybeOffer.hasSocialInsurance !== false,
+    socialInsuranceBaseType: maybeOffer.socialInsuranceBaseType || "unknown",
+    socialInsuranceBaseK: toNumber(maybeOffer.socialInsuranceBaseK, 0) || undefined,
     housingFundRate: toNumber(maybeOffer.housingFundRate, 7) || 7,
     probationMonths: toNumber(maybeOffer.probationMonths, 3) || 3,
     startDate: normalizeText(maybeOffer.startDate),
@@ -149,21 +151,50 @@ function cashModule(snapshot: OfferSnapshot): OfferEvaluationModule {
   };
 }
 
+function inferSocialInsuranceBaseType(snapshot: OfferSnapshot): NonNullable<OfferSnapshot["socialInsuranceBaseType"]> {
+  if (snapshot.socialInsuranceBaseType && snapshot.socialInsuranceBaseType !== "unknown") {
+    return snapshot.socialInsuranceBaseType;
+  }
+
+  if (snapshot.socialInsuranceBaseK && snapshot.monthlySalary) {
+    return snapshot.socialInsuranceBaseK >= snapshot.monthlySalary * 0.9 ? "full_salary" : "minimum_base";
+  }
+
+  const text = `${snapshot.otherBenefits || ""} ${snapshot.sourceLabel || ""}`.toLowerCase();
+  if (/full\s*-?\s*(salary|base)|actual\s+salary|全额|足额|按实际工资|按工资全额/.test(text)) {
+    return "full_salary";
+  }
+  if (/minimum\s*-?\s*base|lowest\s*-?\s*base|low\s*-?\s*base|最低|下限|最低基数|低基数/.test(text)) {
+    return "minimum_base";
+  }
+  return "unknown";
+}
+
 function taxModule(snapshot: OfferSnapshot): OfferEvaluationModule {
-  const fullBase = snapshot.hasSocialInsurance && snapshot.housingFundRate >= 10;
-  const score = fullBase ? 4.6 : snapshot.hasSocialInsurance ? 3.8 : 2.6;
+  const baseType = inferSocialInsuranceBaseType(snapshot);
+  const fullBase = snapshot.hasSocialInsurance && baseType === "full_salary" && snapshot.housingFundRate >= 10;
+  const minimumBase = snapshot.hasSocialInsurance && baseType === "minimum_base";
+  const lowFundRate = snapshot.hasSocialInsurance && snapshot.housingFundRate > 0 && snapshot.housingFundRate < 7;
+  const risks = [];
+  if (!snapshot.hasSocialInsurance) risks.push("社保缺失或按最低基数缴纳");
+  if (minimumBase) risks.push("社保/公积金按最低基数或低基数缴纳");
+  if (snapshot.hasSocialInsurance && baseType === "unknown") risks.push("社保/公积金缴纳基数未明确");
+  if (lowFundRate) risks.push("公积金比例偏低");
+  const missingInfo = !snapshot.hasSocialInsurance || baseType === "unknown" ? ["社保缴纳基数"] : [];
+  const score = fullBase ? 4.6 : minimumBase ? 3.1 : snapshot.hasSocialInsurance ? 3.6 : 2.6;
   return {
     id: "tax",
     label: "社保与税后",
     score: clampScore(score),
     weight: MODULE_WEIGHTS.tax,
-    confidence: 0.78,
+    confidence: fullBase ? 0.84 : baseType === "unknown" ? 0.62 : 0.74,
     evidence: [
       snapshot.hasSocialInsurance ? "缴纳五险一金" : "社保不完整",
+      `缴纳基数：${baseType === "full_salary" ? "按实际薪资" : baseType === "minimum_base" ? "最低/低基数" : "未明确"}`,
       `公积金 ${snapshot.housingFundRate}%`,
     ],
-    risks: snapshot.hasSocialInsurance ? [] : ["社保缺失或按最低基数缴纳"],
-    missingInfo: snapshot.hasSocialInsurance ? [] : ["社保缴纳基数"],
+    risks,
+    missingInfo,
     notes: fullBase ? "社保公积金相对健康" : "需重点确认缴费基数和城市口径",
   };
 }

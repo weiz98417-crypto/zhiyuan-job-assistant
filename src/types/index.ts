@@ -138,6 +138,8 @@ export interface Offer {
   monthsPerYear: number;
   annualBonus?: number;
   hasSocialInsurance: boolean;
+  socialInsuranceBaseType?: OfferSocialInsuranceBaseType;
+  socialInsuranceBaseK?: number;
   housingFundRate: number;
   options?: string;
   probationMonths: number;
@@ -176,6 +178,11 @@ export type OfferVerdict =
 
 export type OfferRiskLevel = "low" | "medium" | "high" | "critical";
 
+export type OfferSocialInsuranceBaseType =
+  | "full_salary"
+  | "minimum_base"
+  | "unknown";
+
 export interface OfferSnapshot {
   offerId?: number;
   company: string;
@@ -186,6 +193,8 @@ export interface OfferSnapshot {
   monthsPerYear: number;
   annualBonus?: number;
   hasSocialInsurance: boolean;
+  socialInsuranceBaseType?: OfferSocialInsuranceBaseType;
+  socialInsuranceBaseK?: number;
   housingFundRate: number;
   probationMonths: number;
   startDate?: string;
