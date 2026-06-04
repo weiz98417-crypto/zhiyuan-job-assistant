@@ -35,6 +35,22 @@ export interface InterviewMaterialMatch {
   matchedBy: string[];
 }
 
+export type InterviewRebindAction =
+  | "continue_current_session"
+  | "use_as_supporting_context"
+  | "auto_switch_material"
+  | "auto_restart_interview"
+  | "ask_clarification"
+  | "keep_current_binding";
+
+export interface InterviewRebindResolution {
+  action: InterviewRebindAction;
+  materialKind: InterviewMaterialKind;
+  match?: InterviewMaterialMatch;
+  clarificationQuestion?: string;
+  reason: string;
+}
+
 const JD_PATTERN = /\bJD\b|岗位|职位|招聘|job description|job post|position/i;
 const RESUME_PATTERN = /简历|履历|resume|cv/i;
 const MATERIAL_PATTERN = new RegExp(`${JD_PATTERN.source}|${RESUME_PATTERN.source}`, "i");
@@ -236,4 +252,72 @@ export function matchInterviewMaterialReference(
   const best = matches[0];
   if (!best || best.score < 20) return null;
   return best;
+}
+
+function materialLabel(kind: InterviewMaterialKind): string {
+  if (kind === "jd") return "JD";
+  if (kind === "resume") return "简历";
+  return "材料";
+}
+
+export function resolveInterviewRebindAction(
+  decision: InterviewMaterialReferenceDecision,
+  match: InterviewMaterialMatch | null,
+): InterviewRebindResolution {
+  if (decision.intent === "continue_current_session") {
+    return {
+      action: "continue_current_session",
+      materialKind: decision.materialKind,
+      reason: "No material reference needs arbitration.",
+    };
+  }
+
+  if (decision.intent === "use_as_supporting_context") {
+    return {
+      action: "use_as_supporting_context",
+      materialKind: decision.materialKind,
+      match: match || undefined,
+      reason: "The user framed the material as context rather than a binding switch.",
+    };
+  }
+
+  const highConfidenceExplicit =
+    decision.explicit &&
+    decision.confidence === "high" &&
+    match?.confidence === "high";
+
+  if (highConfidenceExplicit && decision.intent === "restart_as_new_interview") {
+    return {
+      action: "auto_restart_interview",
+      materialKind: decision.materialKind,
+      match,
+      reason: "Explicit restart request with a high-confidence local match.",
+    };
+  }
+
+  if (highConfidenceExplicit && decision.intent === "switch_active_material") {
+    return {
+      action: "auto_switch_material",
+      materialKind: decision.materialKind,
+      match,
+      reason: "Explicit switch request with a high-confidence local match.",
+    };
+  }
+
+  if (decision.confidence === "medium" || match?.confidence === "medium" || decision.intent === "needs_clarification") {
+    return {
+      action: "ask_clarification",
+      materialKind: decision.materialKind,
+      match: match || undefined,
+      clarificationQuestion: `你是想切换到这份${materialLabel(decision.materialKind)}重新面试，还是只把它作为补充参考？`,
+      reason: "The reference is plausible but not safe enough for a silent switch.",
+    };
+  }
+
+  return {
+    action: "keep_current_binding",
+    materialKind: decision.materialKind,
+    match: match || undefined,
+    reason: "The material reference is weak or unmatched, so the active binding should remain unchanged.",
+  };
 }

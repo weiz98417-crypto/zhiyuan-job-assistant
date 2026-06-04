@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   classifyInterviewMaterialReference,
   matchInterviewMaterialReference,
+  resolveInterviewRebindAction,
   type InterviewMaterialRecord,
 } from "@/lib/agent/interview-rebind-policy";
 
@@ -95,5 +96,42 @@ describe("interview material reference classifier", () => {
     const match = matchInterviewMaterialReference(decision, records);
 
     expect(match).toBeNull();
+  });
+
+  it("auto-switches only on explicit high-confidence local matches", () => {
+    const decision = classifyInterviewMaterialReference("切换到腾讯 AI 产品经理 JD，后面按它问");
+    const match = matchInterviewMaterialReference(decision, records);
+    const resolution = resolveInterviewRebindAction(decision, match);
+
+    expect(resolution.action).toBe("auto_switch_material");
+    expect(resolution.match?.record.id).toBe(7);
+  });
+
+  it("auto-restarts only on explicit high-confidence restart requests", () => {
+    const decision = classifyInterviewMaterialReference("换成《字节 AI 产品经理 JD》并重新开始一场模拟面试");
+    const match = matchInterviewMaterialReference(decision, [
+      ...records,
+      { id: 8, kind: "jd", title: "字节 AI 产品经理 JD", company: "字节", role: "AI 产品经理" },
+    ]);
+    const resolution = resolveInterviewRebindAction(decision, match);
+
+    expect(resolution.action).toBe("auto_restart_interview");
+    expect(resolution.match?.record.id).toBe(8);
+  });
+
+  it("asks one clarification for medium-confidence references", () => {
+    const decision = classifyInterviewMaterialReference("用另一份简历吧");
+    const resolution = resolveInterviewRebindAction(decision, null);
+
+    expect(resolution.action).toBe("ask_clarification");
+    expect(resolution.clarificationQuestion).toContain("切换");
+    expect(resolution.clarificationQuestion).toContain("补充参考");
+  });
+
+  it("keeps the current binding for weak unmatched references", () => {
+    const decision = classifyInterviewMaterialReference("这个 JD 里好像也提到了数据分析");
+    const resolution = resolveInterviewRebindAction(decision, null);
+
+    expect(resolution.action).toBe("use_as_supporting_context");
   });
 });
