@@ -39,7 +39,7 @@
   - use another JD/resume as supporting context;
   - switch active material;
   - restart as a new interview.
-- [ ] Match mentioned JD/resume references against local records by explicit id/name/company/role/title.
+- [x] Match mentioned JD/resume references against local records by explicit id/name/company/role/title.
 - [ ] Automatically rebind only when confidence is high and user wording is explicit.
 - [ ] For medium confidence, ask one short clarification before rebinding.
 - [ ] For weak references, keep the current binding and treat the mention as contextual information.

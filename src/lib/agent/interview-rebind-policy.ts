@@ -16,6 +16,25 @@ export interface InterviewMaterialReferenceDecision {
   reason: string;
 }
 
+export interface InterviewMaterialRecord {
+  id?: string | number;
+  kind: Exclude<InterviewMaterialKind, "unknown">;
+  title?: string;
+  name?: string;
+  label?: string;
+  company?: string;
+  role?: string;
+  body?: string;
+  keywords?: string[];
+}
+
+export interface InterviewMaterialMatch {
+  record: InterviewMaterialRecord;
+  score: number;
+  confidence: "high" | "medium" | "low";
+  matchedBy: string[];
+}
+
 const JD_PATTERN = /\bJD\b|岗位|职位|招聘|job description|job post|position/i;
 const RESUME_PATTERN = /简历|履历|resume|cv/i;
 const MATERIAL_PATTERN = new RegExp(`${JD_PATTERN.source}|${RESUME_PATTERN.source}`, "i");
@@ -125,4 +144,96 @@ export function classifyInterviewMaterialReference(text: string): InterviewMater
     query,
     reason: "The material mention is weak, so it should not silently change the active binding.",
   };
+}
+
+function normalizeForMatch(value: unknown): string {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[「」《》"'#，。；;:：、/\\|()[\]{}_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function queryTokens(query: string): string[] {
+  return normalizeForMatch(query)
+    .split(" ")
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 2);
+}
+
+function confidenceForScore(score: number): InterviewMaterialMatch["confidence"] {
+  if (score >= 80) return "high";
+  if (score >= 45) return "medium";
+  return "low";
+}
+
+export function matchInterviewMaterialReference(
+  decision: InterviewMaterialReferenceDecision,
+  records: InterviewMaterialRecord[],
+): InterviewMaterialMatch | null {
+  if (decision.intent === "continue_current_session") return null;
+  const kindFiltered = decision.materialKind === "unknown"
+    ? records
+    : records.filter((record) => record.kind === decision.materialKind);
+  const q = normalizeForMatch(decision.query);
+  const tokens = queryTokens(decision.query);
+  if (!q && tokens.length === 0) return null;
+
+  const matches = kindFiltered.map((record): InterviewMaterialMatch => {
+    const matchedBy: string[] = [];
+    let score = 0;
+    const id = record.id == null ? "" : String(record.id);
+    const idPatterns = [`#${id}`, `id ${id}`, `id=${id}`, id].filter(Boolean).map(normalizeForMatch);
+    if (id && idPatterns.some((pattern) => q === pattern || q.includes(pattern))) {
+      score += 90;
+      matchedBy.push("id");
+    }
+
+    const title = normalizeForMatch(record.title || record.name || record.label);
+    if (title && (q.includes(title) || title.includes(q))) {
+      score += 70;
+      matchedBy.push("title");
+    }
+
+    const company = normalizeForMatch(record.company);
+    const role = normalizeForMatch(record.role);
+    if (company && q.includes(company)) {
+      score += 35;
+      matchedBy.push("company");
+    }
+    if (role && q.includes(role)) {
+      score += 35;
+      matchedBy.push("role");
+    }
+    if (company && role && q.includes(company) && q.includes(role)) {
+      score += 20;
+      matchedBy.push("company_role_pair");
+    }
+
+    const keywordHits = (record.keywords || [])
+      .map(normalizeForMatch)
+      .filter((keyword) => keyword && tokens.some((token) => keyword.includes(token) || token.includes(keyword)));
+    if (keywordHits.length) {
+      score += Math.min(30, keywordHits.length * 10);
+      matchedBy.push("keywords");
+    }
+
+    const body = normalizeForMatch(record.body).slice(0, 1200);
+    const bodyHits = tokens.filter((token) => body.includes(token)).length;
+    if (bodyHits >= 2) {
+      score += Math.min(20, bodyHits * 4);
+      matchedBy.push("body");
+    }
+
+    return {
+      record,
+      score,
+      confidence: confidenceForScore(score),
+      matchedBy: Array.from(new Set(matchedBy)),
+    };
+  }).sort((a, b) => b.score - a.score);
+
+  const best = matches[0];
+  if (!best || best.score < 20) return null;
+  return best;
 }
