@@ -39,6 +39,40 @@ function interviewState() {
 }
 
 describe("Interview session state", () => {
+  it("freezes JD and resume content in the active session snapshot", () => {
+    const mutableJd: JDRecord = {
+      ...jd,
+      company: "Original Co",
+      role: "Original Role",
+      body: "Original JD requirements.",
+    };
+    const originalResume = "Original resume case study.";
+    const snapshot = buildInterviewPlanSnapshot({
+      jd: mutableJd,
+      resumeText: originalResume,
+      resumeTitle: "Resume v1",
+    });
+    const state = createInterviewState(snapshot);
+
+    mutableJd.company = "Edited Co";
+    mutableJd.role = "Edited Role";
+    mutableJd.body = "Edited JD requirements.";
+    const editedResume = "Edited resume case study.";
+
+    expect(state.planSnapshot.source.jdId).toBe(12);
+    expect(state.planSnapshot.source.resumeId).toBe("Resume v1");
+    expect(state.planSnapshot.jdSnapshot).toMatchObject({
+      company: "Original Co",
+      role: "Original Role",
+      body: "Original JD requirements.",
+    });
+    expect(state.planSnapshot.resumeSnapshot).toMatchObject({
+      title: "Resume v1",
+      body: originalResume,
+    });
+    expect(state.planSnapshot.resumeSnapshot?.body).not.toBe(editedResume);
+  });
+
   it("stores hidden bootstrap assistant questions as the active main question", () => {
     const state = interviewState();
     const next = updateInterviewStateWithAssistantMessage(
