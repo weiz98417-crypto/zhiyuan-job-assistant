@@ -6,7 +6,7 @@
 - [x] Add durable storage for interview sessions, either by extending chat session metadata or creating interview-specific tables/records.
 - [x] Persist `planSnapshot` inside the session at start time so later JD/resume edits do not mutate the active simulation.
 - [x] Persist question graph and transcript after every user/assistant turn.
-- [ ] Persist recap and scoring artifacts separately from raw assistant text.
+- [x] Persist recap and scoring artifacts separately from raw assistant text.
 
 ## 2. Interview Prep Page
 

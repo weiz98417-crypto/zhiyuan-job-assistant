@@ -938,12 +938,28 @@ export interface InterviewScore {
   feedback?: string;
 }
 
+export interface InterviewScoreArtifact {
+  id: string;
+  questionNodeId?: string;
+  answerTurnIds: string[];
+  score: InterviewScore;
+  sourceTool?: string;
+  createdAt: string;
+}
+
 export interface InterviewRecap {
   generatedAt: string;
   overallVerdict: string;
   strengths: string[];
   weaknesses: string[];
   nextPracticePlan: string[];
+  questionFeedback?: {
+    questionNodeId?: string;
+    question: string;
+    score?: number;
+    feedback?: string;
+  }[];
+  sourceTurnIds?: string[];
   rawText?: string;
 }
 
@@ -961,6 +977,7 @@ export interface InterviewSessionState {
   currentQuestionId?: string;
   questionGraph: InterviewQuestionNode[];
   transcript: InterviewTurn[];
+  scoreArtifacts?: InterviewScoreArtifact[];
   recap?: InterviewRecap;
   rebindHistory: InterviewRebindEvent[];
 }

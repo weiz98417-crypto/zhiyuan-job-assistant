@@ -32,7 +32,13 @@ import {
   ensureDefaultSession,
   generateMemoryDigest,
 } from "@/lib/agent/sessions";
-import { updateInterviewStateWithExchange } from "@/lib/agent/interview-session-state";
+import {
+  persistInterviewRecap,
+  shouldPersistInterviewRecap,
+  updateInterviewStateWithAssistantMessage,
+  updateInterviewStateWithExchange,
+  updateInterviewStateWithToolResult,
+} from "@/lib/agent/interview-session-state";
 import { markOfferStateStaleFromText } from "@/lib/agent/offer-session-state";
 import type { AgentMessage, AgentInteraction, ChatSession } from "@/types";
 
@@ -635,8 +641,9 @@ Rules:
                   agent_id: agent.id !== "general" ? agent.id : undefined,
                 });
               }
+              let persistedToolMessage: AgentMessage | undefined;
               if (toolResultInfo) {
-                fullMessages.push({
+                persistedToolMessage = {
                   role: "tool",
                   content: toolResultInfo.result,
                   toolName: toolResultInfo.name,
@@ -647,20 +654,27 @@ Rules:
                       : { success: toolResultInfo.success, result: toolResultInfo.result, data: toolResultInfo.data },
                   agent_id: agent.id !== "general" ? agent.id : undefined,
                   timestamp: new Date().toISOString(),
-                });
+                };
+                fullMessages.push(persistedToolMessage);
               }
               const taggedAssistant = agent.id !== "general"
                 ? { ...finalAssistant, agent_id: agent.id }
                 : finalAssistant;
               fullMessages.push(taggedAssistant);
 
-              const nextInterviewState = hideUserMessage
-                ? currentSession.interviewState
+              let nextInterviewState = hideUserMessage
+                ? updateInterviewStateWithAssistantMessage(currentSession.interviewState, taggedAssistant)
                 : updateInterviewStateWithExchange(
                     currentSession.interviewState,
                     taggedUserMsg,
                     taggedAssistant,
                   );
+              if (nextInterviewState && persistedToolMessage) {
+                nextInterviewState = updateInterviewStateWithToolResult(nextInterviewState, persistedToolMessage);
+              }
+              if (nextInterviewState && !hideUserMessage && shouldPersistInterviewRecap(taggedUserMsg.content)) {
+                nextInterviewState = persistInterviewRecap(nextInterviewState, taggedAssistant.content);
+              }
               const isFirstUserMsg = currentSession.messages.filter((m) => m.role === "user").length === 0;
               const userMsgCount = fullMessages.filter((m) => m.role === "user").length;
               const memoryDigest = userMsgCount >= 5 ? generateMemoryDigest(fullMessages) : undefined;
