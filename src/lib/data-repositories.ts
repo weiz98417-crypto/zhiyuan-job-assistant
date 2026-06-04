@@ -597,7 +597,7 @@ function createPostgresReportRepository(): DataRepositories["reports"] {
 function createSqliteJdRepository(): DataRepositories["jds"] {
   return {
     async list(userId) {
-      const sql = userId ? "SELECT * FROM jds WHERE user_id = ? ORDER BY id DESC" : "SELECT * FROM jds ORDER BY id DESC";
+      const sql = userId ? "SELECT * FROM jds WHERE user_id = ? OR user_id IS NULL ORDER BY id DESC" : "SELECT * FROM jds ORDER BY id DESC";
       return (userId ? getDb().prepare(sql).all(userId) : getDb().prepare(sql).all()) as JDRow[];
     },
     async get(id, userId) {
@@ -630,7 +630,7 @@ function createSqliteJdRepository(): DataRepositories["jds"] {
       const sets = keys.map((key) => `${key} = @${key}`);
       const params: Record<string, unknown> = { id, user_id: userId };
       for (const key of keys) params[key] = updates[key as keyof JDRow];
-      const sql = `UPDATE jds SET ${sets.join(", ")} WHERE id = @id ${userId ? "AND user_id = @user_id" : ""}`;
+      const sql = `UPDATE jds SET ${sets.join(", ")} WHERE id = @id ${userId ? "AND (user_id = @user_id OR user_id IS NULL)" : ""}`;
       getDb().prepare(sql).run(params);
       return this.get(id, userId);
     },
@@ -649,12 +649,12 @@ function createPostgresJdRepository(): DataRepositories["jds"] {
   return {
     async list(userId) {
       return withPostgresClient(async (client) => rows<JDRow>((userId
-        ? await client.query("SELECT * FROM jds WHERE user_id = $1 ORDER BY id DESC", [userId])
+        ? await client.query("SELECT * FROM jds WHERE user_id = $1 OR user_id IS NULL ORDER BY id DESC", [userId])
         : await client.query("SELECT * FROM jds ORDER BY id DESC")).rows));
     },
     async get(id, userId) {
       return withPostgresClient(async (client) => one<JDRow>(userId
-        ? await client.query("SELECT * FROM jds WHERE id=$1 AND user_id=$2", [id, userId])
+        ? await client.query("SELECT * FROM jds WHERE id=$1 AND (user_id=$2 OR user_id IS NULL)", [id, userId])
         : await client.query("SELECT * FROM jds WHERE id=$1", [id])));
     },
     async insert(jd, userId) {
@@ -667,7 +667,7 @@ function createPostgresJdRepository(): DataRepositories["jds"] {
     async findReusable(input, userId) {
       if (input.source_url) {
         const byUrl = await withPostgresClient(async (client) => one<JDRow>(userId
-          ? await client.query("SELECT * FROM jds WHERE source_url=$1 AND user_id=$2 ORDER BY id DESC LIMIT 1", [input.source_url, userId])
+          ? await client.query("SELECT * FROM jds WHERE source_url=$1 AND (user_id=$2 OR user_id IS NULL) ORDER BY id DESC LIMIT 1", [input.source_url, userId])
           : await client.query("SELECT * FROM jds WHERE source_url=$1 ORDER BY id DESC LIMIT 1", [input.source_url])));
         if (byUrl) return byUrl;
       }
@@ -689,7 +689,7 @@ function createPostgresJdRepository(): DataRepositories["jds"] {
         if (userId) params.push(userId);
         const result = await client.query(`
           UPDATE jds SET ${sets.join(", ")}
-          WHERE id = $${keys.length + 1}${userId ? ` AND user_id = $${keys.length + 2}` : ""}
+          WHERE id = $${keys.length + 1}${userId ? ` AND (user_id = $${keys.length + 2} OR user_id IS NULL)` : ""}
           RETURNING *
         `, params);
         return one<JDRow>(result);
@@ -698,7 +698,7 @@ function createPostgresJdRepository(): DataRepositories["jds"] {
     async delete(id, userId) {
       return withPostgresClient(async (client) => {
         await client.query("UPDATE scan_jobs SET jd_id = NULL, status = CASE WHEN status IN ('saved','evaluating') THEN 'viewed' ELSE status END WHERE jd_id = $1", [id]);
-        const result = userId ? await client.query("DELETE FROM jds WHERE id=$1 AND user_id=$2", [id, userId]) : await client.query("DELETE FROM jds WHERE id=$1", [id]);
+        const result = userId ? await client.query("DELETE FROM jds WHERE id=$1 AND (user_id=$2 OR user_id IS NULL)", [id, userId]) : await client.query("DELETE FROM jds WHERE id=$1", [id]);
         return Number(result.rowCount || 0);
       });
     },

@@ -149,7 +149,7 @@ export function getDb(): Database.Database {
     const userTables = [
       'profiles', 'profile_signals', 'sessions', 'stories', 'cv_data',
       'applications', 'agent_preferences', 'session_memory',
-      'optimization_preferences', 'reports',
+      'optimization_preferences', 'reports', 'jds',
     ];
     for (const table of userTables) {
       const tCols = _db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
@@ -274,7 +274,7 @@ export function upsertReport(r: ReportRow, userId?: string): void {
 /* ── JDs ── */
 
 export interface JDRow {
-  id?: number; company: string; role: string; source_type: string;
+  id?: number; user_id?: string | null; company: string; role: string; source_type: string;
   source_url?: string; body: string; keywords_json: string; report_id?: number; created_at?: string;
 }
 
@@ -286,12 +286,13 @@ export function getJD(id: number): JDRow | undefined {
   return getDb().prepare("SELECT * FROM jds WHERE id = ?").get(id) as JDRow | undefined;
 }
 
-export function insertJD(jd: JDRow): number {
+export function insertJD(jd: JDRow, userId?: string): number {
   const result = getDb().prepare(`
-    INSERT INTO jds (company, role, source_type, source_url, body, keywords_json, report_id)
-    VALUES (@company, @role, @source_type, @source_url, @body, @keywords_json, @report_id)
+    INSERT INTO jds (user_id, company, role, source_type, source_url, body, keywords_json, report_id)
+    VALUES (@user_id, @company, @role, @source_type, @source_url, @body, @keywords_json, @report_id)
   `).run({
     ...jd,
+    user_id: userId || jd.user_id || null,
     source_url: jd.source_url || "",
     report_id: jd.report_id ?? null,
   });
@@ -302,16 +303,20 @@ function normalizeBodyForMatch(body: string): string {
   return body.replace(/\s+/g, " ").trim().slice(0, 500).toLowerCase();
 }
 
-export function findReusableJD(input: { source_url?: string; body?: string }): JDRow | undefined {
+export function findReusableJD(input: { source_url?: string; body?: string }, userId?: string): JDRow | undefined {
   const db = getDb();
   if (input.source_url) {
-    const byUrl = db.prepare("SELECT * FROM jds WHERE source_url = ? ORDER BY id DESC LIMIT 1").get(input.source_url) as JDRow | undefined;
+    const byUrl = userId
+      ? db.prepare("SELECT * FROM jds WHERE source_url = ? AND (user_id = ? OR user_id IS NULL) ORDER BY id DESC LIMIT 1").get(input.source_url, userId) as JDRow | undefined
+      : db.prepare("SELECT * FROM jds WHERE source_url = ? ORDER BY id DESC LIMIT 1").get(input.source_url) as JDRow | undefined;
     if (byUrl) return byUrl;
   }
 
   const normalized = normalizeBodyForMatch(input.body || "");
   if (!normalized) return undefined;
-  const rows = db.prepare("SELECT * FROM jds WHERE body != '' ORDER BY id DESC LIMIT 200").all() as JDRow[];
+  const rows = (userId
+    ? db.prepare("SELECT * FROM jds WHERE body != '' AND (user_id = ? OR user_id IS NULL) ORDER BY id DESC LIMIT 200").all(userId)
+    : db.prepare("SELECT * FROM jds WHERE body != '' ORDER BY id DESC LIMIT 200").all()) as JDRow[];
   return rows.find((row) => normalizeBodyForMatch(row.body) === normalized);
 }
 

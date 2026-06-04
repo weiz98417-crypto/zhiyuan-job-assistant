@@ -52,6 +52,7 @@ CREATE INDEX IF NOT EXISTS idx_reports_source_hash ON reports(source_hash);
 
 CREATE TABLE IF NOT EXISTS jds (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id TEXT REFERENCES users(id),
   company TEXT NOT NULL DEFAULT '',
   role TEXT NOT NULL DEFAULT '',
   source_type TEXT NOT NULL DEFAULT 'paste',

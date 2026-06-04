@@ -69,7 +69,7 @@
 
 - [x] Add regression tests for JD dedup by source URL and body hash.
 - [x] Add API tests or route-level checks for save-from-discovery.
-- [ ] Manually verify:
+- [x] Manually verify:
   - scan job -> view JD -> save to JD library;
   - scan job -> let Agent evaluate -> Agent reads saved JD;
   - saved discovery JD appears in JD Management;

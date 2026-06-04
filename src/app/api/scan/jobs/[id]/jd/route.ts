@@ -173,8 +173,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       body: jdBody,
       keywords_json: JSON.stringify([]),
     };
-    const reusable = findReusableJD({ source_url: row.source_url, body: row.body });
-    const jdId = reusable?.id || insertJD(row);
+    const reusable = findReusableJD({ source_url: row.source_url, body: row.body }, String(user.userId));
+    const jdId = reusable?.id || insertJD(row, String(user.userId));
     db.prepare("UPDATE scan_jobs SET jd_id = ?, status = ?, last_error = '', last_interaction_at = datetime('now') WHERE id = ?")
       .run(jdId, body.evaluate ? "evaluating" : "saved", jobId);
     return NextResponse.json({ success: true, jdId, reused: Boolean(reusable), data: reusable ? toClientJD(reusable) : { ...toClientJD(row), id: jdId } });

@@ -5,6 +5,7 @@ import path from "node:path";
 
 type ServerDbModule = typeof import("@/lib/server-db");
 type DiscoveryJdRoute = typeof import("@/app/api/scan/jobs/[id]/jd/route");
+type DataJdsRoute = typeof import("@/app/api/data/jds/route");
 
 const TEST_USER_ID = "user-discovery-save";
 
@@ -29,12 +30,13 @@ async function loadRouteHarness() {
 
   serverDb = await import("@/lib/server-db");
   const route = await import("@/app/api/scan/jobs/[id]/jd/route");
+  const dataJdsRoute = await import("@/app/api/data/jds/route");
   const db = serverDb.getDb();
   db.prepare(
     "INSERT INTO users (id, username, password_hash, display_name, role, status, token_version) VALUES (?, ?, ?, ?, ?, ?, 0)",
   ).run(TEST_USER_ID, "discovery-save-user", "hash", "Discovery Save User", "member", "active");
   db.prepare("INSERT INTO scan_queue (id, user_id, status) VALUES (?, ?, ?)").run("scan-save-1", TEST_USER_ID, "done");
-  return { db, route };
+  return { db, route, dataJdsRoute };
 }
 
 afterEach(() => {
@@ -81,7 +83,7 @@ async function postSave(route: DiscoveryJdRoute, jobId: number, body: Record<str
 
 describe("Discovery save-from-JD API", () => {
   it("creates a discovery-sourced JD and marks the scan job saved", async () => {
-    const { db, route } = await loadRouteHarness();
+    const { db, route, dataJdsRoute } = await loadRouteHarness();
     const jobId = insertScanJob(db);
     const jdBody = "岗位职责：负责 AI 产品规划、需求拆解、Agent 场景落地和跨团队项目推进。任职要求：熟悉 LLM 应用、数据分析和产品交付。";
 
@@ -106,6 +108,11 @@ describe("Discovery save-from-JD API", () => {
     expect(job.jd_id).toBe(json.jdId);
     expect(job.status).toBe("saved");
     expect(job.last_error).toBe("");
+
+    const listResponse = await dataJdsRoute.GET(new Request("http://localhost/api/data/jds"));
+    const listJson = await listResponse.json();
+    expect(listResponse.status).toBe(200);
+    expect(listJson.data.some((item: { id: number; sourceType: string }) => item.id === json.jdId && item.sourceType === "discovery")).toBe(true);
   });
 
   it("reuses an existing discovery JD and marks the scan job evaluating", async () => {
