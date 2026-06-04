@@ -203,7 +203,7 @@ function formatResult(result: ToolResult): string {
 1. 结论：投/谨慎/不投 + 一句话原因
 2. 主要风险：最多 2 条
 3. 最该确认的问题：最多 2 条
-4. 下一步：提示可打开报告详情或下载 PDF。`;
+4. 下一步：提示可去报告库或 JD 管理打开报告详情，也可下载 PDF。`;
 }
 
 export const evaluateJDFull: ToolDefinition = {

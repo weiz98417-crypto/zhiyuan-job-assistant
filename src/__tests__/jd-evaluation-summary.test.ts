@@ -51,6 +51,8 @@ describe("formatJDEvaluationSummary", () => {
     });
 
     expect(summary).toContain("A 职位概览");
+    expect(summary).toContain("JD 管理");
+    expect(summary).toContain("报告库");
     expect(summary).toContain("B 简历匹配");
     expect(summary).toContain("C 职级与策略");
     expect(summary).toContain("D 薪资与市场");

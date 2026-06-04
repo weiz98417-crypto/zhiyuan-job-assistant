@@ -56,7 +56,7 @@
   - open AgentChat with JD context;
   - auto-send or prefill a clear evaluation prompt.
 - [x] Agent must read local JD context instead of asking the user to paste the JD again.
-- [ ] Evaluation output remains summary-first in AgentChat; full report stays in Report/JD Management.
+- [x] Evaluation output remains summary-first in AgentChat; full report stays in Report/JD Management.
 
 ## 5. JD Management Integration
 

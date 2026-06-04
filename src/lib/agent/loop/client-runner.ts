@@ -333,7 +333,7 @@ export function formatJDEvaluationSummary(data: Record<string, unknown>): string
     "行业黑话 / 风险扫描：",
     ...riskLines.map((line) => `- ${line}`),
     "",
-    `${reportNum}，完整 A-G 报告已保存，可在报告库查看或下载 PDF。`,
+    `${reportNum}，完整 A-G 报告已保存，可在报告库或 JD 管理查看，也可下载 PDF。`,
   ].join("\n");
 }
 
