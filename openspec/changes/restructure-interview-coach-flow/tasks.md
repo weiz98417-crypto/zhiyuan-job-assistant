@@ -69,7 +69,7 @@
 ## 7. Regression Tests
 
 - [x] Test: prep snapshot freezes JD/resume content for the active session.
-- [ ] Test: changing prep configuration does not mutate an active AgentChat session.
+- [x] Test: changing prep configuration does not mutate an active AgentChat session.
 - [ ] Test: follow-up after Q3 is stored as child of Q3, not Q9.
 - [ ] Test: after answering multiple questions, recap uses stored answers and never asks the user to repost them.
 - [ ] Test: ambiguous "use another resume" wording does not silently switch bindings.

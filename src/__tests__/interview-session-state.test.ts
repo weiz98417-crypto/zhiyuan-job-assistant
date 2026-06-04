@@ -73,6 +73,47 @@ describe("Interview session state", () => {
     expect(state.planSnapshot.resumeSnapshot?.body).not.toBe(editedResume);
   });
 
+  it("keeps the active AgentChat snapshot when prep configuration changes later", () => {
+    const activeSnapshot = buildInterviewPlanSnapshot({
+      jd: {
+        ...jd,
+        company: "Active Co",
+        role: "Active PM",
+        body: "Active JD snapshot.",
+      },
+      resumeText: "Active resume snapshot.",
+      resumeTitle: "Active resume",
+      focusAreas: ["AI 产品"],
+    });
+    const activeState = createInterviewState(activeSnapshot);
+    const laterPrepSnapshot = buildInterviewPlanSnapshot({
+      jd: {
+        ...jd,
+        id: 99,
+        company: "Later Co",
+        role: "Later PM",
+        body: "Later prep JD.",
+      },
+      resumeText: "Later prep resume.",
+      resumeTitle: "Later resume",
+      focusAreas: ["数据产品"],
+    });
+
+    const progressed = updateInterviewStateWithAssistantMessage(
+      activeState,
+      msg("assistant", "第一题：请介绍一个最贴近 Active JD 的项目？"),
+    );
+
+    expect(progressed?.planSnapshot.snapshotId).toBe(activeSnapshot.snapshotId);
+    expect(progressed?.planSnapshot.jdSnapshot?.company).toBe("Active Co");
+    expect(progressed?.planSnapshot.jdSnapshot?.body).toBe("Active JD snapshot.");
+    expect(progressed?.planSnapshot.resumeSnapshot?.body).toBe("Active resume snapshot.");
+    expect(progressed?.planSnapshot.focusAreas).toEqual(["AI 产品"]);
+    expect(progressed?.planSnapshot.snapshotId).not.toBe(laterPrepSnapshot.snapshotId);
+    expect(progressed?.planSnapshot.jdSnapshot?.body).not.toBe(laterPrepSnapshot.jdSnapshot?.body);
+    expect(progressed?.planSnapshot.resumeSnapshot?.body).not.toBe(laterPrepSnapshot.resumeSnapshot?.body);
+  });
+
   it("stores hidden bootstrap assistant questions as the active main question", () => {
     const state = interviewState();
     const next = updateInterviewStateWithAssistantMessage(
