@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { enforceToolPolicy } from "@/lib/agent/loop/tool-policy";
+import { detectOfferMaterialChange, markOfferStateStaleFromText } from "@/lib/agent/offer-session-state";
 import { classifyIntent } from "@/lib/agent/registry";
 import { offerAgent } from "@/lib/agent/registry/agents/offer-agent";
 import { compareOffersDeep } from "@/lib/agent/tools/action/compare-offers-deep";
@@ -79,6 +80,26 @@ describe("Offer Agent routing and tool contracts", () => {
       toolWhitelist: offerAgent.toolNames,
     });
     expect(explicit).toBeNull();
+  });
+
+  it("marks active offer reports stale when the user supplies material changes", () => {
+    expect(detectOfferMaterialChange("HR 刚确认 offer 月薪改成 32K，base 也从北京换到上海")).toContain("薪资");
+
+    const next = markOfferStateStaleFromText({
+      offer: {
+        activeOfferId: 3,
+        activeOfferReportId: 7,
+        missingInfo: [],
+        redFlags: [],
+        updatedAt: "2026-05-01T00:00:00.000Z",
+      },
+    }, "HR 刚确认 offer 月薪改成 32K，base 也从北京换到上海");
+
+    expect(next?.offer?.staleReportReason).toContain("薪资");
+    expect(next?.offer?.staleReportReason).toContain("城市");
+
+    const unchanged = markOfferStateStaleFromText(next, "好的，那我知道了");
+    expect(unchanged?.offer?.staleReportReason).toBe(next?.offer?.staleReportReason);
   });
 
   it("evaluate_offer returns layered output and keeps full report in rawData", async () => {

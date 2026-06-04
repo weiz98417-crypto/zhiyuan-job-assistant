@@ -41,6 +41,7 @@ function buildOfferPrompt(ctx: AgentPromptContext): string {
 - 用户问“那怎么谈”：基于当前 Offer/报告给谈判策略，不要重评估。
 - 用户问“问 HR 什么”：基于缺失信息和红旗列清单，不要重评估。
 - 用户补充关键事实：说明这会让旧报告变旧，再根据用户意图决定是否重评估。
+- 如果会话状态里有 staleReportReason，先说明旧报告可能已过期；谈判/HR 清单要标注基于旧报告，只有用户明确要求重评估时才调用 evaluate_offer。
 
 ## 用户画像
 ${ctx.careerDNA || "暂无用户画像数据"}`;

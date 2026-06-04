@@ -33,6 +33,7 @@ import {
   generateMemoryDigest,
 } from "@/lib/agent/sessions";
 import { updateInterviewStateWithExchange } from "@/lib/agent/interview-session-state";
+import { markOfferStateStaleFromText } from "@/lib/agent/offer-session-state";
 import type { AgentMessage, AgentInteraction, ChatSession } from "@/types";
 
 
@@ -328,7 +329,7 @@ function AgentPageInner() {
 
         const currentSessionForRun = currentSessionId ? await getSession(currentSessionId) : undefined;
         const memoryDigest = currentSessionForRun?.memoryDigest;
-        const agentState = currentSessionForRun?.agentState;
+        const agentState = markOfferStateStaleFromText(currentSessionForRun?.agentState, content) || currentSessionForRun?.agentState;
 
         const preferredDocumentType = imageDataUris.length
           ? inferPreferredDocumentTypeFromText(content)
@@ -446,7 +447,7 @@ Rules:
 
         let toolResultInfo: { name: string; result: string; success: boolean; data?: unknown; uiPayload?: Record<string, unknown> } | null = null;
         let assistantText = "";
-        let nextOfferState = currentSessionForRun?.agentState?.offer;
+        let nextOfferState = agentState?.offer;
 
         const msgList = updated.map((m, index) => ({
           role: m.role,
