@@ -12,24 +12,17 @@ export interface CreateJDDTO {
 }
 
 export async function createJD(data: CreateJDDTO): Promise<number> {
-  try {
-    const res = await fetch("/api/data/jds", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-    if (res.ok) {
-      const json = await res.json();
-      if (json.success && typeof json.id === "number") return json.id;
-    }
-  } catch { /* fallback to local cache */ }
-
-  const id = await db.jds.add({
-    ...data,
-    createdAt: new Date(),
+  const res = await fetch("/api/data/jds", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
   });
-  if (id == null) throw new Error("Failed to create JD record");
-  return id;
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || !json.success || typeof json.id !== "number") {
+    throw new Error(typeof json.error === "string" ? json.error : "Failed to create JD record");
+  }
+  await db.jds.put({ ...data, id: json.id, createdAt: new Date() }).catch(() => {});
+  return json.id;
 }
 
 export async function updateJD(id: number, data: Partial<CreateJDDTO>): Promise<void> {

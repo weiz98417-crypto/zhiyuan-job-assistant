@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
-import { insertSignals } from "@/lib/server-db";
+import { getCurrentUser } from "@/lib/auth";
+import { getDataRepositories } from "@/lib/data-repositories";
 
 export async function POST(request: Request) {
   try {
+    const user = await getCurrentUser();
     const body = await request.json() as {
       signals: {
         source?: string;
@@ -23,10 +25,13 @@ export async function POST(request: Request) {
       session_id: s.session_id,
     }));
 
-    insertSignals(signals);
+    await getDataRepositories().signals.insertMany(signals, user.userId);
 
     return NextResponse.json({ success: true, count: signals.length });
   } catch (err: unknown) {
+    if (err instanceof Error && err.message === "Not authenticated") {
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+    }
     return NextResponse.json(
       { success: false, error: `批量写入失败: ${err instanceof Error ? err.message : "unknown"}` },
       { status: 500 },

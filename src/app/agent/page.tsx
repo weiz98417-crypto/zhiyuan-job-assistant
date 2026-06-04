@@ -106,6 +106,7 @@ function AgentPageInner() {
   const [evalProgress, setEvalProgress] = useState<EvalBlockProgress[]>([]);
   const [completionInfo, setCompletionInfo] = useState<CompletionInfo | null>(null);
   const [resultQuality, setResultQuality] = useState<string | null>(null);
+  const [sessionLoadError, setSessionLoadError] = useState<string | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
   const streamContentRef = useRef("");
@@ -147,23 +148,27 @@ function AgentPageInner() {
 
   useEffect(() => {
     // Best-effort migration from legacy localStorage
-    migrateExploreToAgent().then(async () => {
-      const loaded = await listSessions();
-      setSessions(loaded);
+    migrateExploreToAgent()
+      .then(async () => {
+        const loaded = await listSessions();
+        setSessions(loaded);
 
-      if (loaded.length > 0) {
-        const latest = loaded[0];
-        setCurrentSessionId(latest.id!);
-        setMessages(latest.messages);
-      } else {
-        // Create default session with welcome message
-        const id = await createSession([WELCOME]);
-        setCurrentSessionId(id);
-        setMessages([WELCOME]);
-        setSessions(await listSessions());
-      }
-      setMounted(true);
-    });
+        if (loaded.length > 0) {
+          const latest = loaded[0];
+          setCurrentSessionId(latest.id!);
+          setMessages(latest.messages);
+        } else {
+          // Create default session with welcome message
+          const id = await createSession([WELCOME]);
+          setCurrentSessionId(id);
+          setMessages([WELCOME]);
+          setSessions(await listSessions());
+        }
+      })
+      .catch((error) => {
+        setSessionLoadError(error instanceof Error ? error.message : "Failed to load sessions");
+      })
+      .finally(() => setMounted(true));
      
   }, []);
 
@@ -893,6 +898,14 @@ Rules:
       <div className="space-y-6 animate-pulse">
         <div className="h-8 bg-[var(--color-divider)] rounded w-40" />
         <div className="h-96 bg-[var(--color-divider)] rounded-[var(--radius-lg)]" />
+      </div>
+    );
+  }
+
+  if (sessionLoadError) {
+    return (
+      <div className="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] p-6 text-sm text-[var(--color-text-soft)]">
+        会话数据加载失败：{sessionLoadError}
       </div>
     );
   }

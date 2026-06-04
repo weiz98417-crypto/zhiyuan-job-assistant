@@ -60,12 +60,15 @@ export default function ReportsPage() {
   const [sort, setSort] = useState<SortMode>("date-desc");
   const [selectedReport, setSelectedReport] = useState<EvaluationReport | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<EvaluationReport | null>(null);
+  const [loadError, setLoadError] = useState(false);
 
   const loadReports = useCallback(async () => {
     try {
-      const res = await fetch("/api/data/reports");
+      setLoadError(false);
+      const res = await fetch("/api/data/reports", { cache: "no-store" });
+      if (!res.ok) throw new Error("server load failed");
       const json = await res.json();
-      if (json.success && Array.isArray(json.data) && json.data.length > 0) {
+      if (json.success && Array.isArray(json.data)) {
         // Map SQLite snake_case to Dexie camelCase
         const mapped = json.data.map((r: Record<string, unknown>) => {
           const storedBlocks = parseJsonValue(r.blocks_json, {});
@@ -87,9 +90,11 @@ export default function ReportsPage() {
         setReports(mapped as EvaluationReport[]);
         return;
       }
-    } catch { /* fallback to DexieDB */ }
-    const data = await db.reports.orderBy("createdAt").reverse().toArray();
-    setReports(data);
+      throw new Error("server response failed");
+    } catch {
+      setLoadError(true);
+      setReports([]);
+    }
   }, []);
 
   useEffect(() => {
@@ -172,6 +177,14 @@ export default function ReportsPage() {
   };
 
   const hasFilters = scoreMin != null || scoreMax != null || timeDays > 0;
+
+  if (loadError) {
+    return (
+      <div className="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] p-6 text-sm text-[var(--color-text-soft)]">
+        服务器数据加载失败，请稍后重试。
+      </div>
+    );
+  }
 
   return (
     <div className="">

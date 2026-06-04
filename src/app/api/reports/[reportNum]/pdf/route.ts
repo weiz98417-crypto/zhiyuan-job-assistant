@@ -3,8 +3,10 @@ import { chromium } from "playwright";
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { getReport } from "@/lib/server-db";
+import { getCurrentUser } from "@/lib/auth";
+import { getDataRepositories } from "@/lib/data-repositories";
 import { markdownToSafeHtml } from "@/lib/server-markdown";
+import type { ReportRow } from "@/lib/server-db";
 
 const BLOCK_LABELS: Record<string, string> = {
   a: "A 职位概览",
@@ -63,7 +65,7 @@ function escapeHtml(value: string): string {
     .replace(/"/g, "&quot;");
 }
 
-function buildReportHtml(report: NonNullable<ReturnType<typeof getReport>>): string {
+function buildReportHtml(report: ReportRow): string {
   const rawBlocks = parseJson<Record<string, unknown>>(report.blocks_json, {});
   const keywords = parseJson<string[]>(report.keywords_json, []);
   const sections = Object.entries(BLOCK_LABELS)
@@ -143,7 +145,8 @@ function buildReportHtml(report: NonNullable<ReturnType<typeof getReport>>): str
 export async function GET(_request: Request, { params }: { params: Promise<{ reportNum: string }> }) {
   try {
     const { reportNum } = await params;
-    const report = getReport(Number(reportNum));
+    const user = await getCurrentUser();
+    const report = await getDataRepositories().reports.get(Number(reportNum), user.userId);
     if (!report) {
       return NextResponse.json({ success: false, error: "报告不存在" }, { status: 404 });
     }
@@ -185,6 +188,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ rep
       },
     });
   } catch (error) {
+    if (error instanceof Error && (error.message === "Not authenticated" || error.message === "Invalid or expired token")) {
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+    }
     const message = error instanceof Error ? error.message : "未知错误";
     return NextResponse.json({ success: false, error: `PDF 生成失败: ${message}` }, { status: 500 });
   }

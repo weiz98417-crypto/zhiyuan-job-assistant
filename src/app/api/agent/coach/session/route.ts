@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
-import { getDb } from "@/lib/server-db";
+import { getDataRepositories } from "@/lib/data-repositories";
 import { createSession, nextAction, advance, getPhasePrompt, shouldFollowUp } from "@/lib/agent/interview/engine";
 import type { InterviewSession } from "@/lib/agent/interview/engine";
 
@@ -130,8 +130,7 @@ async function generateSummary(session: InterviewSession): Promise<string> {
   return data.choices?.[0]?.message?.content?.trim() || `面试完成，平均分 ${avgScore}/10`;
 }
 
-function persistInterviewSession(userId: string, session: InterviewSession, summary: string): number {
-  const db = getDb();
+async function persistInterviewSession(userId: string, session: InterviewSession, summary: string): Promise<number> {
   const title = `${session.company} ${session.role} 面试模拟`;
   const messages = [
     {
@@ -150,10 +149,11 @@ function persistInterviewSession(userId: string, session: InterviewSession, summ
     },
   ];
 
-  const result = db.prepare(
-    "INSERT INTO sessions (title, messages_json, memory_digest, user_id) VALUES (?, ?, ?, ?)"
-  ).run(title, JSON.stringify(messages), summary.slice(0, 300), userId);
-  return Number(result.lastInsertRowid);
+  return getDataRepositories().sessions.create({
+    title,
+    messages,
+    memoryDigest: summary.slice(0, 300),
+  }, userId);
 }
 
 export async function POST(request: Request) {
@@ -218,7 +218,7 @@ export async function POST(request: Request) {
 
         if (session.phase === "done") {
           const summary = await generateSummary(session);
-          const storedSessionId = persistInterviewSession(user.userId, session, summary);
+          const storedSessionId = await persistInterviewSession(user.userId, session, summary);
           sessions.delete(session.id);
           return NextResponse.json({
             success: true,

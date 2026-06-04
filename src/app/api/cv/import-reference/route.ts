@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { insertReferenceResume, checkReferenceResumeName } from "@/lib/server-db";
+import { getCurrentUser } from "@/lib/auth";
+import { getDataRepositories } from "@/lib/data-repositories";
 import { isGarbledText } from "@/lib/agent/loop/text-quality";
 import { ZHIPU_API_URL, ZHIPU_VISION_MODEL } from "@/lib/zhipu";
 import mammoth from "mammoth";
@@ -164,6 +165,7 @@ function getFileExtension(filename: string): string {
 
 export async function POST(request: Request) {
   try {
+    const user = await getCurrentUser();
     const contentType = request.headers.get("content-type") || "";
 
     let rawText = "";
@@ -274,7 +276,8 @@ export async function POST(request: Request) {
     const defaultName = `参考简历-${firstRole.slice(0, 20).replace(/\n/g, " ")}`;
 
     // Check duplicate
-    const exists = checkReferenceResumeName(defaultName);
+    const repos = getDataRepositories();
+    const exists = await repos.referenceResumes.nameExists(defaultName, undefined, user.userId);
     const name = exists ? `${defaultName}-${Date.now().toString(36)}` : defaultName;
 
     // Build raw_text for FTS5 index
@@ -298,19 +301,22 @@ export async function POST(request: Request) {
       }
     }
 
-    const id = insertReferenceResume({
+    const id = await repos.referenceResumes.insert({
       name,
       source,
       sections_json: JSON.stringify(sections),
       raw_text: rawTextForIndex,
       tags: JSON.stringify(tags),
-    });
+    }, user.userId);
 
     return NextResponse.json({
       success: true,
       data: { id, name, source, sections, tags },
     });
   } catch (error: unknown) {
+    if (error instanceof Error && error.message === "Not authenticated") {
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+    }
     const message = error instanceof Error ? error.message : "未知错误";
     console.error("Import reference resume error:", message);
     return NextResponse.json(

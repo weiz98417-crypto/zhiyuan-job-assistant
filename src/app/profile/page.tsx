@@ -67,21 +67,24 @@ export default function ProfilePage() {
   const [resetConfirm, setResetConfirm] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [companySignals, setCompanySignals] = useState<CompanySignal[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const { isLocked } = useLockedFields(profile);
 
   const fetchProfile = useCallback(async () => {
     try {
-      const res = await fetch("/api/data/profile");
-      if (res.ok) {
-        const json = await res.json();
-        if (json.success && json.data) {
-          await syncProfileToCache(json.data);
-        }
-      }
-    } catch { /* fall through to cache */ }
-    const local = await loadProfile();
-    if (local) setProfile(local);
+      setLoadError(null);
+      const res = await fetch("/api/data/profile", { cache: "no-store" });
+      if (!res.ok) throw new Error("server load failed");
+      const json = await res.json();
+      if (!json.success || !json.data) throw new Error("server response failed");
+      await syncProfileToCache(json.data);
+      const local = await loadProfile();
+      if (local) setProfile(local);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "画像数据加载失败");
+      return;
+    }
     try {
       const repRes = await fetch("/api/data/reports");
       if (repRes.ok) {
@@ -108,6 +111,14 @@ export default function ProfilePage() {
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(null), 3000); return () => clearTimeout(t); } }, [toast]);
 
   const goalsLocked = isLocked("goals");
+
+  if (loadError) {
+    return (
+      <div className="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] p-6 text-sm text-[var(--color-text-soft)]">
+        画像数据加载失败：{loadError}
+      </div>
+    );
+  }
 
   const handleSync = async () => {
     setSyncing(true);

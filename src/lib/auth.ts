@@ -2,6 +2,7 @@ import { SignJWT, jwtVerify } from 'jose';
 import bcrypt from 'bcryptjs';
 import { cookies } from 'next/headers';
 import { getDb } from './server-db';
+import { getDataRepositories } from './data-repositories';
 
 // ── JWT Secret (lazy — defers validation to runtime, not build-time) ──
 let _jwtSecret: Uint8Array | null = null;
@@ -85,12 +86,9 @@ export async function getCurrentUser(): Promise<JWTPayload> {
 
 // ── Token Version Check ──
 /** Verify token_version against DB. Call before write operations. */
-export function verifyTokenVersion(payload: JWTPayload): void {
-  const db = getDb();
-  const user = db
-    .prepare('SELECT token_version FROM users WHERE id = ?')
-    .get(payload.userId) as { token_version: number } | undefined;
-  if (!user || user.token_version !== payload.tokenVersion) {
+export async function verifyTokenVersion(payload: JWTPayload): Promise<void> {
+  const valid = await getDataRepositories().users.verifyTokenVersion(payload.userId, payload.tokenVersion);
+  if (!valid) {
     throw new Error('Token has been revoked');
   }
 }

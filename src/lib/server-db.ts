@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import path from "path";
 import fs from "fs";
+import { getDatabaseDriver } from "@/lib/postgres";
 
 const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), "data");
 const DB_PATH = path.join(DATA_DIR, "zhiyuan.db");
@@ -9,6 +10,9 @@ const SCHEMA_PATH = path.join(process.cwd(), "src", "lib", "server-schema.sql");
 let _db: Database.Database | null = null;
 
 export function getDb(): Database.Database {
+  if (getDatabaseDriver() === "postgres" && process.env.ALLOW_SQLITE_LEGACY !== "1") {
+    throw new Error("SQLite getDb() used while DB_DRIVER=postgres. Use data repositories for authoritative server data.");
+  }
   if (!_db) {
     const dir = path.dirname(DB_PATH);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });

@@ -5,13 +5,13 @@ import Link from "next/link";
 import { FileText, BookOpen, ArrowRight, Bot, Sparkles } from "lucide-react";
 import { HandwritingTitle, WarmButton, PaperCard } from "@/components/design";
 import { StaggerList, StaggerItem } from "@/components/design/PageTransition";
-import db from "@/lib/db";
 
 export default function EvaluatePage() {
   const [jdCount, setJdCount] = useState(0);
   const [reportCount, setReportCount] = useState(0);
   const [avgScore, setAvgScore] = useState(0);
   const [mounted, setMounted] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -21,37 +21,24 @@ export default function EvaluatePage() {
           fetch("/api/data/reports", { cache: "no-store" }),
         ]);
 
-        if (jdsRes.ok && reportsRes.ok) {
-          const [jdsJson, reportsJson] = await Promise.all([jdsRes.json(), reportsRes.json()]);
-          const serverJds = Array.isArray(jdsJson.data) ? jdsJson.data : [];
-          const serverReports = Array.isArray(reportsJson.data) ? reportsJson.data : [];
-          setJdCount(serverJds.length);
-          setReportCount(serverReports.length);
-          const scored = serverReports
-            .map((r: Record<string, unknown>) => Number(r.overall_score) || 0)
-            .filter((score: number) => score > 0);
-          setAvgScore(
-            scored.length > 0
-              ? Math.round((scored.reduce((sum: number, score: number) => sum + score, 0) / scored.length) * 10) / 10
-              : 0
-          );
-          setMounted(true);
-          return;
-        }
-      } catch { /* fallback to local cache */ }
-
-      const [jds, reports] = await Promise.all([
-        db.jds.toArray(),
-        db.reports.toArray(),
-      ]);
-      setJdCount(jds.length);
-      setReportCount(reports.length);
-      const scored = reports.filter((r) => r.overallScore > 0);
-      setAvgScore(
-        scored.length > 0
-          ? Math.round((scored.reduce((s, r) => s + r.overallScore, 0) / scored.length) * 10) / 10
-          : 0
-      );
+        if (!jdsRes.ok || !reportsRes.ok) throw new Error("server load failed");
+        const [jdsJson, reportsJson] = await Promise.all([jdsRes.json(), reportsRes.json()]);
+        if (!jdsJson.success || !reportsJson.success) throw new Error("server response failed");
+        const serverJds = Array.isArray(jdsJson.data) ? jdsJson.data : [];
+        const serverReports = Array.isArray(reportsJson.data) ? reportsJson.data : [];
+        setJdCount(serverJds.length);
+        setReportCount(serverReports.length);
+        const scored = serverReports
+          .map((r: Record<string, unknown>) => Number(r.overall_score) || 0)
+          .filter((score: number) => score > 0);
+        setAvgScore(
+          scored.length > 0
+            ? Math.round((scored.reduce((sum: number, score: number) => sum + score, 0) / scored.length) * 10) / 10
+            : 0
+        );
+      } catch {
+        setLoadError(true);
+      }
       setMounted(true);
     }
     load();
@@ -62,6 +49,14 @@ export default function EvaluatePage() {
       <div className="space-y-6 animate-pulse">
         <div className="h-8 bg-[var(--color-divider)] rounded w-40" />
         <div className="h-24 bg-[var(--color-divider)] rounded-[var(--radius-lg)]" />
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] p-6 text-sm text-[var(--color-text-soft)]">
+        服务器数据加载失败，请稍后重试。
       </div>
     );
   }

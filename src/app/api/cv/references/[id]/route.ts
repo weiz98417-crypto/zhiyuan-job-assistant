@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getReferenceResume, deleteReferenceResume, updateReferenceResume } from "@/lib/server-db";
+import { getCurrentUser } from "@/lib/auth";
+import { getDataRepositories } from "@/lib/data-repositories";
 
 export async function GET(
   _request: Request,
@@ -7,12 +8,13 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
+    const user = await getCurrentUser();
     const numId = parseInt(id);
     if (isNaN(numId)) {
       return NextResponse.json({ success: false, error: "无效 ID" }, { status: 400 });
     }
 
-    const resume = getReferenceResume(numId);
+    const resume = await getDataRepositories().referenceResumes.get(numId, user.userId);
     if (!resume) {
       return NextResponse.json({ success: false, error: "参考简历不存在" }, { status: 404 });
     }
@@ -44,6 +46,7 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params;
+    const user = await getCurrentUser();
     const numId = parseInt(id);
     if (isNaN(numId)) {
       return NextResponse.json({ success: false, error: "无效 ID" }, { status: 400 });
@@ -74,7 +77,7 @@ export async function PATCH(
       return NextResponse.json({ success: false, error: "无更新内容" }, { status: 400 });
     }
 
-    const ok = updateReferenceResume(numId, updates as Parameters<typeof updateReferenceResume>[1]);
+    const ok = await getDataRepositories().referenceResumes.update(numId, updates, user.userId);
     if (!ok) {
       return NextResponse.json({ success: false, error: "参考简历不存在" }, { status: 404 });
     }
@@ -95,12 +98,13 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
+    const user = await getCurrentUser();
     const numId = parseInt(id);
     if (isNaN(numId)) {
       return NextResponse.json({ success: false, error: "无效 ID" }, { status: 400 });
     }
 
-    const deleted = deleteReferenceResume(numId);
+    const deleted = await getDataRepositories().referenceResumes.delete(numId, user.userId);
     if (!deleted) {
       return NextResponse.json({ success: false, error: "参考简历不存在" }, { status: 404 });
     }

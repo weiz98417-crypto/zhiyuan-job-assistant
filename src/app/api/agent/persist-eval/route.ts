@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import crypto from "crypto";
-import { listApps, upsertApp, listReports, upsertReport, insertJD, type AppRow, type ReportRow } from "@/lib/server-db";
+import { getCurrentUser } from "@/lib/auth";
+import { getDataRepositories } from "@/lib/data-repositories";
+import type { AppRow, ReportRow } from "@/lib/server-db";
 
 function hashSource(text?: string): string {
   const normalized = (text || "").replace(/\s+/g, " ").trim();
@@ -17,6 +19,8 @@ function isRecentDuplicate(createdAt?: unknown): boolean {
 
 export async function POST(request: Request) {
   try {
+    const user = await getCurrentUser();
+    const repos = getDataRepositories();
     const body = await request.json() as {
       company?: string;
       role?: string;
@@ -44,7 +48,7 @@ export async function POST(request: Request) {
     const sourceHash = hashSource(jdText);
 
     // 1. Compute application number (num = max existing + 1)
-    const allApps = listApps();
+    const allApps = await repos.applications.list({}, user.userId);
     const maxAppNum = allApps.reduce((max, a) => Math.max(max, a.num), 0);
     const appNum = maxAppNum + 1;
 
@@ -53,10 +57,10 @@ export async function POST(request: Request) {
       num: appNum, company, role, score, status: "Evaluated",
       date: today, pdf_generated: 0, report_path: "", notes: "",
     };
-    upsertApp(appRow);
+    await repos.applications.upsert(appRow, user.userId);
 
     // 3. Generate report number — use pre-allocated value from stream if available
-    const allReports = listReports();
+    const allReports = await repos.reports.list(user.userId);
     const duplicateReport = sourceHash
       ? allReports.find((r) => r.source_hash === sourceHash && isRecentDuplicate(r.created_at))
       : undefined;
@@ -80,12 +84,12 @@ export async function POST(request: Request) {
       keywords_json: keywords ? JSON.stringify(keywords) : "[]",
       source_hash: sourceHash,
     };
-    upsertReport(reportRow);
+    await repos.reports.upsert(reportRow, user.userId);
 
     // 4. Save JD to JD library
     if (jdText && jdText.trim().length >= 50) {
       try {
-        insertJD({
+        await repos.jds.insert({
           company,
           role,
           source_type: "agent",
@@ -93,7 +97,7 @@ export async function POST(request: Request) {
           body: jdText,
           keywords_json: keywords ? JSON.stringify(keywords) : "[]",
           report_id: reportNum,
-        });
+        }, user.userId);
       } catch (e) {
         console.warn("[persist-eval] JD save failed:", e);
       }
@@ -101,6 +105,9 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ success: true, reportNum });
   } catch (err) {
+    if (err instanceof Error && (err.message === "Not authenticated" || err.message === "Invalid or expired token")) {
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+    }
     console.error("[persist-eval] error:", err);
     return NextResponse.json(
       { success: false, error: `持久化失败: ${err instanceof Error ? err.message : "未知错误"}` },

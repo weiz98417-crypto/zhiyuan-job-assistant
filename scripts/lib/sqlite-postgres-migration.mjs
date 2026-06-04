@@ -30,7 +30,7 @@ export const MIGRATION_TABLES = [
   table("profiles", { userOwned: true, jsonColumns: ["data_json", "goals_json", "history_json"] }),
   table("cv_data", { userOwned: true, jsonColumns: ["data_json"] }),
   table("applications", { userOwned: true, uniqueChecks: [["user_id", "company", "role"]] }),
-  table("reports", { userOwned: true, jsonColumns: ["blocks_json", "keywords_json"], uniqueChecks: [["report_num"]] }),
+  table("reports", { userOwned: true, jsonColumns: ["blocks_json", "keywords_json"], uniqueChecks: [["user_id", "report_num"]] }),
   table("jds", { userOwned: true, jsonColumns: ["keywords_json"] }),
   table("offers", { userOwned: true, jsonColumns: ["benefits_json"], uniqueChecks: [["user_id", "company", "role"]] }),
   table("offer_reports", {

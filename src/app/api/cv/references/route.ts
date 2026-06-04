@@ -1,15 +1,18 @@
 import { NextResponse } from "next/server";
-import { listReferenceResumes, searchReferenceResumes } from "@/lib/server-db";
+import { getCurrentUser } from "@/lib/auth";
+import { getDataRepositories } from "@/lib/data-repositories";
 
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
+    const user = await getCurrentUser();
+    const repos = getDataRepositories();
     const search = searchParams.get("search") || "";
     const limit = parseInt(searchParams.get("limit") || "20");
 
     let resumes;
     if (search.trim()) {
-      resumes = searchReferenceResumes(search, limit);
+      resumes = await repos.referenceResumes.search(search, limit, user.userId);
       // Map to summary format (exclude sections_json and raw_text for list)
       const summaries = resumes.map((r) => ({
         id: r.id,
@@ -22,7 +25,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: true, data: summaries });
     }
 
-    const list = listReferenceResumes();
+    const list = await repos.referenceResumes.list(user.userId);
     const data = list.map((r) => ({
       ...r,
       tags: JSON.parse(r.tags || "[]"),

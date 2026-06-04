@@ -1,4 +1,4 @@
-import { getProfile, listApps, listReports, querySignals } from "@/lib/server-db";
+import { getDataRepositories } from "@/lib/data-repositories";
 import type { ProfileMarketFit, ProfilePreferences, ProfileSkill, ZhiyuanProfile } from "@/types";
 import fs from "fs";
 import path from "path";
@@ -58,8 +58,8 @@ function thirtyDaysAgo(): string {
   return d.toISOString();
 }
 
-function extractSignals(userId?: string): SignalSummary {
-  const signals = querySignals({ since: thirtyDaysAgo(), limit: 300 }, userId);
+async function extractSignals(userId: string): Promise<SignalSummary> {
+  const signals = await getDataRepositories().signals.query({ since: thirtyDaysAgo(), limit: 300 }, userId);
   const rolePreferences: SignalSummary["rolePreferences"] = [];
   const skillClaims: SignalSummary["skillClaims"] = [];
   const dealBreakers: string[] = [];
@@ -144,9 +144,10 @@ function readProfileYml(): Record<string, unknown> {
   }
 }
 
-function computeBehavioralStats(userId?: string): BehavioralStats {
-  const apps = listApps(undefined, userId);
-  const reports = listReports(userId);
+async function computeBehavioralStats(userId: string): Promise<BehavioralStats> {
+  const repos = getDataRepositories();
+  const apps = await repos.applications.list({}, userId);
+  const reports = await repos.reports.list(userId);
   const totalApplications = apps.length;
   const passed = apps.filter((app) => app.status === "interview" || app.status === "offer").length;
   const scored = reports.filter((report) => report.overall_score > 0);
@@ -364,9 +365,11 @@ function fuseSkills(input: {
 
 export async function runProfileEngine(options: EngineOptions = {}): Promise<ZhiyuanProfile> {
   const layer1 = readProfileYml();
-  const layer2 = extractSignals(options.userId);
-  const layer3 = computeBehavioralStats(options.userId);
-  const existingRow = getProfile(options.userId);
+  if (!options.userId) throw new Error("runProfileEngine requires userId");
+  const repos = getDataRepositories();
+  const layer2 = await extractSignals(options.userId);
+  const layer3 = await computeBehavioralStats(options.userId);
+  const existingRow = await repos.profiles.get(options.userId);
   const existingData = existingRow ? JSON.parse(existingRow.data_json || "{}") : {};
   const existingSkills: ProfileSkill[] = Array.isArray(existingData.skills) ? existingData.skills : [];
 

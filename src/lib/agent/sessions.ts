@@ -77,54 +77,34 @@ export async function createSession(
     updatedAt: now,
   };
 
-  try {
-    const res = await fetch("/api/sessions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        title: session.title,
-        messages: session.messages,
-        interviewState: session.interviewState,
-        agentState: session.agentState,
-      }),
-    });
-    if (res.ok) {
-      const json = await res.json();
-      if (json.success && json.data?.id) {
-        session.id = json.data.id;
-        await db.chatSessions.put(session);
-        return json.data.id;
-      }
-    }
-  } catch {
-    /* fallback to Dexie */
+  const res = await fetch("/api/sessions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      title: session.title,
+      messages: session.messages,
+      interviewState: session.interviewState,
+      agentState: session.agentState,
+    }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || !json.success || !json.data?.id) {
+    throw new Error(typeof json.error === "string" ? json.error : "Failed to create chat session");
   }
-
-  const id = await db.chatSessions.add(session);
-  return id as number;
+  session.id = json.data.id;
+  await db.chatSessions.put(session).catch(() => {});
+  return json.data.id;
 }
 
 export async function listSessions(): Promise<ChatSession[]> {
-  try {
-    const res = await fetch("/api/sessions", { cache: "no-store" });
-    if (res.ok) {
-      const json = await res.json();
-      if (json.success && Array.isArray(json.data)) {
-        const serverSessions = (json.data as ServerSessionRow[]).map(parseServerSession);
-        if (serverSessions.length > 0) {
-          await db.chatSessions.bulkPut(serverSessions);
-          return serverSessions.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
-        }
-      }
-    }
-  } catch {
-    /* fallback to Dexie */
+  const res = await fetch("/api/sessions", { cache: "no-store" });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || !json.success || !Array.isArray(json.data)) {
+    throw new Error(typeof json.error === "string" ? json.error : "Failed to load chat sessions");
   }
-
-  return db.chatSessions
-    .filter((s) => !s.deletedAt)
-    .reverse()
-    .sortBy("updatedAt");
+  const serverSessions = (json.data as ServerSessionRow[]).map(parseServerSession);
+  if (serverSessions.length > 0) await db.chatSessions.bulkPut(serverSessions).catch(() => {});
+  return serverSessions.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
 }
 
 export async function getSession(id: number): Promise<ChatSession | undefined> {

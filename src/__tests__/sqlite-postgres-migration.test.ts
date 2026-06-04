@@ -101,6 +101,8 @@ describe("SQLite to PostgreSQL migration inventory", () => {
     );
 
     const owner = resolveDefaultOwner(db, "admin");
+    expect(owner).not.toBeNull();
+    if (!owner) throw new Error("Expected default owner to resolve");
     const withOwner = analyzeOwnership(db, owner.id);
     expect(withOwner.missing).toHaveLength(0);
     expect(withOwner.assignments).toEqual(

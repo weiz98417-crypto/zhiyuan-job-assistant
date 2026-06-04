@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { recordPreference } from "@/lib/server-db";
 import { getCurrentUser } from "@/lib/auth";
+import { getDataRepositories } from "@/lib/data-repositories";
 
 export async function POST(request: Request) {
   try {
@@ -29,7 +29,7 @@ export async function POST(request: Request) {
       );
     }
 
-    recordPreference({
+    await getDataRepositories().preferences.record({
       section_id,
       variant_type: variant_type || "",
       action,

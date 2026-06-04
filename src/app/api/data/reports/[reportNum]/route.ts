@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
-import { getDb, getReport } from "@/lib/server-db";
+import { getCurrentUser } from "@/lib/auth";
+import { getDataRepositories } from "@/lib/data-repositories";
 
 export async function GET(_request: Request, { params }: { params: Promise<{ reportNum: string }> }) {
   try {
     const { reportNum } = await params;
-    const report = getReport(parseInt(reportNum));
+    const user = await getCurrentUser();
+    const report = await getDataRepositories().reports.get(parseInt(reportNum), user.userId);
     if (!report) return NextResponse.json({ success: false, error: "报告不存在" }, { status: 404 });
     return NextResponse.json({ success: true, data: report });
   } catch (err: unknown) {
@@ -15,11 +17,12 @@ export async function GET(_request: Request, { params }: { params: Promise<{ rep
 export async function PATCH(request: Request, { params }: { params: Promise<{ reportNum: string }> }) {
   try {
     const { reportNum } = await params;
+    const user = await getCurrentUser();
     const num = parseInt(reportNum);
     if (!Number.isFinite(num)) {
       return NextResponse.json({ success: false, error: "报告编号无效" }, { status: 400 });
     }
-    const report = getReport(num);
+    const report = await getDataRepositories().reports.get(num, user.userId);
     if (!report) return NextResponse.json({ success: false, error: "报告不存在" }, { status: 404 });
 
     const body = await request.json() as {
@@ -49,41 +52,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ re
       keywords_json: Array.isArray(body.keywords) ? JSON.stringify(body.keywords) : report.keywords_json,
     };
 
-    const db = getDb();
-    const tx = db.transaction(() => {
-      db.prepare(`
-        UPDATE reports
-        SET company = @company,
-            role = @role,
-            archetype = @archetype,
-            legitimacy = @legitimacy,
-            keywords_json = @keywords_json
-        WHERE report_num = @report_num
-      `).run({ ...next, report_num: num });
-
-      db.prepare(`
-        UPDATE applications
-        SET company = @company,
-            role = @role,
-            updated_at = datetime('now')
-        WHERE company = @oldCompany AND role = @oldRole
-      `).run({
-        company: next.company,
-        role: next.role,
-        oldCompany: report.company,
-        oldRole: report.role,
-      });
-
-      db.prepare(`
-        UPDATE jds
-        SET company = @company,
-            role = @role
-        WHERE report_id = @report_num
-      `).run({ company: next.company, role: next.role, report_num: num });
-    });
-    tx();
-
-    return NextResponse.json({ success: true, data: getReport(num) });
+    const updated = await getDataRepositories().reports.updateMetadata(num, next, user.userId);
+    return NextResponse.json({ success: true, data: updated });
   } catch (err: unknown) {
     return NextResponse.json({ success: false, error: `更新失败: ${err instanceof Error ? err.message : "unknown"}` }, { status: 500 });
   }
@@ -92,20 +62,16 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ re
 export async function DELETE(_request: Request, { params }: { params: Promise<{ reportNum: string }> }) {
   try {
     const { reportNum } = await params;
+    const user = await getCurrentUser();
     const num = parseInt(reportNum);
     if (!Number.isFinite(num)) {
       return NextResponse.json({ success: false, error: "报告编号无效" }, { status: 400 });
     }
 
-    const db = getDb();
-    const report = getReport(num);
+    const report = await getDataRepositories().reports.get(num, user.userId);
     if (!report) return NextResponse.json({ success: false, error: "报告不存在" }, { status: 404 });
 
-    const tx = db.transaction(() => {
-      db.prepare("UPDATE jds SET report_id = NULL WHERE report_id = ? OR report_id = ?").run(num, report.id || num);
-      db.prepare("DELETE FROM reports WHERE report_num = ?").run(num);
-    });
-    tx();
+    await getDataRepositories().reports.delete(num, user.userId);
 
     return NextResponse.json({ success: true });
   } catch (err: unknown) {

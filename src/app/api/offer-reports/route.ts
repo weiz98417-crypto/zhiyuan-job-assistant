@@ -1,51 +1,11 @@
 import { NextResponse } from "next/server";
-import { existsSync, readFileSync } from "fs";
-import { resolve } from "path";
-import { getDb } from "@/lib/server-db";
+import { getCurrentUser } from "@/lib/auth";
+import { getDataRepositories } from "@/lib/data-repositories";
 import { evaluateOfferSnapshot } from "@/lib/offer-evaluation";
-
-function ensureSchema() {
-  const db = getDb();
-  const schemaPath = resolve(process.cwd(), "src", "lib", "server-schema.sql");
-  if (existsSync(schemaPath)) {
-    try {
-      const schema = readFileSync(schemaPath, "utf-8");
-      db.exec(schema);
-    } catch { /* schema already initialized */ }
-  }
-  const cols = [
-    "ALTER TABLE offer_reports ADD COLUMN report_type TEXT NOT NULL DEFAULT 'comparison'",
-    "ALTER TABLE offer_reports ADD COLUMN model_version TEXT NOT NULL DEFAULT ''",
-    "ALTER TABLE offer_reports ADD COLUMN offer_id INTEGER REFERENCES offers(id)",
-    "ALTER TABLE offer_reports ADD COLUMN overall_score REAL NOT NULL DEFAULT 0",
-    "ALTER TABLE offer_reports ADD COLUMN verdict TEXT NOT NULL DEFAULT ''",
-    "ALTER TABLE offer_reports ADD COLUMN summary TEXT NOT NULL DEFAULT ''",
-    "ALTER TABLE offer_reports ADD COLUMN offer_snapshot_json TEXT NOT NULL DEFAULT '{}'",
-    "ALTER TABLE offer_reports ADD COLUMN modules_json TEXT NOT NULL DEFAULT '[]'",
-    "ALTER TABLE offer_reports ADD COLUMN red_flags_json TEXT NOT NULL DEFAULT '[]'",
-    "ALTER TABLE offer_reports ADD COLUMN missing_info_json TEXT NOT NULL DEFAULT '[]'",
-    "ALTER TABLE offer_reports ADD COLUMN negotiation_levers_json TEXT NOT NULL DEFAULT '[]'",
-    "ALTER TABLE offer_reports ADD COLUMN hr_questions_json TEXT NOT NULL DEFAULT '[]'",
-    "ALTER TABLE offer_reports ADD COLUMN assumptions_json TEXT NOT NULL DEFAULT '[]'",
-    "ALTER TABLE offer_reports ADD COLUMN take_home_json TEXT NOT NULL DEFAULT '{}'",
-    "ALTER TABLE offer_reports ADD COLUMN offers_json TEXT NOT NULL DEFAULT '[]'",
-    "ALTER TABLE offer_reports ADD COLUMN report_markdown TEXT NOT NULL DEFAULT ''",
-    "ALTER TABLE offer_reports ADD COLUMN num_offers INTEGER NOT NULL DEFAULT 0",
-  ];
-  for (const sql of cols) {
-    try { db.exec(sql); } catch { /* column already exists */ }
-  }
-}
-
-function jsonString(value: unknown, fallback: unknown): string {
-  if (value === undefined || value === null) return JSON.stringify(fallback);
-  if (typeof value === "string") return value;
-  return JSON.stringify(value);
-}
 
 export async function POST(request: Request) {
   try {
-    ensureSchema();
+    const user = await getCurrentUser();
     const body = await request.json();
     const {
       title,
@@ -77,63 +37,45 @@ export async function POST(request: Request) {
     const evaluated = snapshot?.company && snapshot?.role ? evaluateOfferSnapshot(snapshot) : null;
     const titleStr = title || (evaluated ? `${evaluated.company} Offer 评估报告` : "Offer report");
 
-    const db = getDb();
-    const result = db.prepare(`
-      INSERT INTO offer_reports (
-        title, report_type, model_version, offer_id, overall_score, verdict, summary,
-        offer_snapshot_json, modules_json, red_flags_json, missing_info_json,
-        negotiation_levers_json, hr_questions_json, assumptions_json, take_home_json,
-        offers_json, report_markdown, num_offers
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-    `).run(
-      titleStr,
-      report_type || (numOffers > 1 ? "comparison" : "single"),
-      model_version || evaluated?.modelVersion || "",
-      offer_id ?? evaluated?.offerId ?? null,
-      overall_score ?? evaluated?.overallScore ?? 0,
-      verdict ?? evaluated?.verdict ?? "",
-      summary ?? evaluated?.summary ?? "",
-      JSON.stringify(snapshot || evaluated?.offerSnapshot || {}),
-      jsonString(modules_json, evaluated?.modules || []),
-      jsonString(red_flags_json, evaluated?.redFlags || []),
-      jsonString(missing_info_json, evaluated?.missingInfo || []),
-      jsonString(negotiation_levers_json, evaluated?.negotiationLevers || []),
-      jsonString(hr_questions_json, evaluated?.hrQuestions || []),
-      jsonString(assumptions_json, evaluated?.assumptions || []),
-      jsonString(take_home_json, evaluated?.takeHomeEstimate || {}),
-      JSON.stringify(offersArr),
+    const id = await getDataRepositories().offerReports.insert({
+      title: titleStr,
+      report_type: report_type || (numOffers > 1 ? "comparison" : "single"),
+      model_version: model_version || evaluated?.modelVersion || "",
+      offer_id: offer_id ?? evaluated?.offerId ?? null,
+      overall_score: overall_score ?? evaluated?.overallScore ?? 0,
+      verdict: verdict ?? evaluated?.verdict ?? "",
+      summary: summary ?? evaluated?.summary ?? "",
+      offer_snapshot_json: snapshot || evaluated?.offerSnapshot || {},
+      modules_json: modules_json ?? evaluated?.modules ?? [],
+      red_flags_json: red_flags_json ?? evaluated?.redFlags ?? [],
+      missing_info_json: missing_info_json ?? evaluated?.missingInfo ?? [],
+      negotiation_levers_json: negotiation_levers_json ?? evaluated?.negotiationLevers ?? [],
+      hr_questions_json: hr_questions_json ?? evaluated?.hrQuestions ?? [],
+      assumptions_json: assumptions_json ?? evaluated?.assumptions ?? [],
+      take_home_json: take_home_json ?? evaluated?.takeHomeEstimate ?? {},
+      offers_json: offersArr,
       report_markdown,
-      numOffers,
-    );
-
-    const id = Number(result.lastInsertRowid);
-    const reportOfferId = offer_id ?? evaluated?.offerId;
-    if (reportOfferId) {
-      try {
-        db.prepare("UPDATE offers SET latest_report_id = ? WHERE id = ?").run(id, reportOfferId);
-      } catch { /* non-fatal */ }
-    }
+      num_offers: numOffers,
+    }, user.userId);
 
     return NextResponse.json({ success: true, data: { id } }, { status: 201 });
   } catch (err) {
+    if (err instanceof Error && err.message === "Not authenticated") {
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+    }
     return NextResponse.json({ success: false, error: String(err) }, { status: 500 });
   }
 }
 
 export async function GET() {
   try {
-    ensureSchema();
-    const rows = getDb().prepare(`
-      SELECT id, title, report_type, offer_id, overall_score, verdict, summary,
-             offer_snapshot_json, modules_json, red_flags_json, missing_info_json,
-             negotiation_levers_json, hr_questions_json, assumptions_json, take_home_json,
-             report_markdown, num_offers, created_at
-      FROM offer_reports
-      ORDER BY created_at DESC
-      LIMIT 20
-    `).all();
+    const user = await getCurrentUser();
+    const rows = await getDataRepositories().offerReports.list(user.userId);
     return NextResponse.json({ success: true, data: rows });
   } catch (err) {
+    if (err instanceof Error && err.message === "Not authenticated") {
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+    }
     return NextResponse.json({ success: false, error: String(err) }, { status: 500 });
   }
 }

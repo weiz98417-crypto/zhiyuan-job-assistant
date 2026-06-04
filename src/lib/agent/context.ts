@@ -7,6 +7,7 @@ import { injectKnowledge } from "./knowledge";
 import type { AgentScenario, KnowledgeContext } from "./knowledge";
 import type { Application, AgentInteraction, AgentDecision, AgentPreferenceModel, ZhiyuanProfile } from "@/types";
 import db from "@/lib/db";
+import { getDataRepositories } from "@/lib/data-repositories";
 
 /* ── Context types ── */
 
@@ -43,8 +44,9 @@ export interface AssembleOptions {
 /* ── Pipeline summary ── */
 
 async function buildPipelineSummary(userId?: string): Promise<PipelineSummary> {
-  let apps = await db.applications.toArray();
-  if (userId) apps = apps.filter((a) => (a as Application & { userId?: string }).userId === userId);
+  const apps = userId
+    ? (await getDataRepositories().applications.list({}, userId)).map(appRowToApplication)
+    : await db.applications.toArray();
   const byStatus: Record<string, number> = {};
   let recentActivity = 0;
   let staleCount = 0;
@@ -74,14 +76,17 @@ async function buildPipelineSummary(userId?: string): Promise<PipelineSummary> {
 /* ── Dynamic data assembler (parallel queries) ── */
 
 async function assembleDynamicData(maxApps = 5, userId?: string): Promise<AgentDynamicData> {
+  const repos = userId ? getDataRepositories() : null;
   const [profile, recentInteractions, pendingDecisions, preferences, pipelineSummary, rawApps] =
     await Promise.all([
-      loadProfile(),
+      userId && repos ? loadServerProfile(userId) : loadProfile(),
       getRecentInteractions(5),
       getPendingDecisions(),
       loadPreferences(),
       buildPipelineSummary(userId),
-      db.applications.orderBy("updatedAt").reverse().limit(maxApps).toArray(),
+      userId && repos
+        ? repos.applications.list({ limit: maxApps }, userId).then((rows) => rows.map(appRowToApplication))
+        : db.applications.orderBy("updatedAt").reverse().limit(maxApps).toArray(),
     ]);
 
   const applications = userId
@@ -95,6 +100,51 @@ async function assembleDynamicData(maxApps = 5, userId?: string): Promise<AgentD
     preferences,
     pipelineSummary,
     applications,
+  };
+}
+
+function appRowToApplication(row: unknown): Application {
+  const data = row as Record<string, unknown>;
+  const date = String(data.date || new Date().toISOString().slice(0, 10));
+  const created = new Date(String(data.created_at || date));
+  const updated = new Date(String(data.updated_at || data.created_at || date));
+  return {
+    id: Number(data.id || data.num || 0),
+    num: Number(data.num || 0),
+    date,
+    company: String(data.company || ""),
+    role: String(data.role || ""),
+    score: Number(data.score || 0),
+    status: String(data.status || "Evaluated") as Application["status"],
+    pdfGenerated: Boolean(data.pdf_generated),
+    reportPath: String(data.report_path || ""),
+    notes: String(data.notes || ""),
+    createdAt: Number.isNaN(created.getTime()) ? new Date(date) : created,
+    updatedAt: Number.isNaN(updated.getTime()) ? new Date(date) : updated,
+  };
+}
+
+async function loadServerProfile(userId: string): Promise<ZhiyuanProfile | null> {
+  const row = await getDataRepositories().profiles.get(userId);
+  if (!row) return null;
+  const data = JSON.parse(row.data_json || "{}");
+  return {
+    id: row.id,
+    skills: Array.isArray(data.skills) ? data.skills : [],
+    preferences: data.preferences || {
+      companySize: { startup: 0, sme: 0, large: 0 },
+      industry: {},
+      workStyle: {},
+      salaryTarget: { min: 0, max: 0 },
+    },
+    marketFit: data.marketFit || {
+      overallScore: 0,
+      topArchetypes: [],
+      skillGaps: [],
+    },
+    goals: JSON.parse(row.goals_json || "{}"),
+    history: JSON.parse(row.history_json || "[]"),
+    lastUpdated: row.last_updated,
   };
 }
 

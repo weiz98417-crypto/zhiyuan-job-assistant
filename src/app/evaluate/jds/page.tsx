@@ -21,12 +21,9 @@ import {
 } from "lucide-react";
 import { WarmButton, PaperCard } from "@/components/design";
 import { StaggerList, StaggerItem } from "@/components/design/PageTransition";
-import db from "@/lib/db";
 import {
-  getAllJDs,
   deleteJD,
   updateJD,
-  searchJDs,
 } from "@/lib/jd-storage";
 import type { JDRecord, JDSourceType } from "@/types";
 
@@ -60,19 +57,24 @@ export default function JDLibraryPage() {
   const [selectedJD, setSelectedJD] = useState<JDRecord | null>(null);
   const [editingJD, setEditingJD] = useState<JDRecord | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<JDRecord | null>(null);
+  const [loadError, setLoadError] = useState(false);
 
   const loadJDs = useCallback(async () => {
     try {
-      const res = await fetch("/api/data/jds");
+      setLoadError(false);
+      const res = await fetch("/api/data/jds", { cache: "no-store" });
+      if (!res.ok) throw new Error("server load failed");
       const json = await res.json();
       if (json.success && Array.isArray(json.data)) {
         setJDs(json.data);
         return;
       }
-    } catch { /* fallback to DexieDB */ }
-    const data = search.trim() ? await searchJDs(search.trim()) : await getAllJDs();
-    setJDs(data);
-  }, [search]);
+      throw new Error("server response failed");
+    } catch {
+      setLoadError(true);
+      setJDs([]);
+    }
+  }, []);
 
   useEffect(() => {
     loadJDs();
@@ -80,6 +82,15 @@ export default function JDLibraryPage() {
 
   const filtered = useMemo(() => {
     let result = jds;
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      result = result.filter((jd) =>
+        jd.company.toLowerCase().includes(q) ||
+        jd.role.toLowerCase().includes(q) ||
+        jd.body.toLowerCase().includes(q) ||
+        jd.keywords.some((kw) => kw.toLowerCase().includes(q))
+      );
+    }
     if (sourceFilter) {
       result = result.filter((jd) => jd.sourceType === sourceFilter);
     }
@@ -89,14 +100,18 @@ export default function JDLibraryPage() {
       result = result.filter((jd) => jd.reportId == null);
     }
     return result;
-  }, [jds, sourceFilter, reportFilter]);
+  }, [jds, search, sourceFilter, reportFilter]);
 
   const handleDelete = async () => {
     if (!deleteConfirm || deleteConfirm.id == null) return;
     try {
-      await fetch(`/api/data/jds?id=${deleteConfirm.id}`, { method: "DELETE" });
-    } catch { /* fallback to Dexie */ }
-    await deleteJD(deleteConfirm.id);
+      const res = await fetch(`/api/data/jds?id=${deleteConfirm.id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("server delete failed");
+      await deleteJD(deleteConfirm.id).catch(() => {});
+    } catch {
+      setLoadError(true);
+      return;
+    }
     setDeleteConfirm(null);
     setSelectedJD(null);
     loadJDs();
@@ -104,17 +119,39 @@ export default function JDLibraryPage() {
 
   const handleSaveEdit = async () => {
     if (!editingJD || editingJD.id == null) return;
+    const res = await fetch("/api/data/jds", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: editingJD.id,
+        company: editingJD.company,
+        role: editingJD.role,
+        body: editingJD.body,
+      }),
+    });
+    if (!res.ok) {
+      setLoadError(true);
+      return;
+    }
     await updateJD(editingJD.id, {
       company: editingJD.company,
       role: editingJD.role,
       body: editingJD.body,
-    });
+    }).catch(() => {});
     setEditingJD(null);
     setSelectedJD(null);
     loadJDs();
   };
 
   const hasFilters = sourceFilter || reportFilter;
+
+  if (loadError) {
+    return (
+      <div className="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] p-6 text-sm text-[var(--color-text-soft)]">
+        服务器数据加载失败，请稍后重试。
+      </div>
+    );
+  }
 
   return (
     <div className="">

@@ -1,15 +1,12 @@
 import { NextResponse } from 'next/server';
-import { getDb } from '@/lib/server-db';
 import { getCurrentUser } from '@/lib/auth';
+import { getDataRepositories } from '@/lib/data-repositories';
 
 export async function GET() {
   try {
     const payload = await getCurrentUser();
 
-    const db = getDb();
-    const user = db
-      .prepare('SELECT * FROM users WHERE id = ?')
-      .get(payload.userId) as Record<string, unknown> | undefined;
+    const user = await getDataRepositories().users.findById(payload.userId);
 
     if (!user) {
       return NextResponse.json(

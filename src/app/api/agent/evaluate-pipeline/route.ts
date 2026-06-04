@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
-import { upsertApp, upsertReport, listReports, type AppRow, type ReportRow } from "@/lib/server-db";
+import { getDataRepositories } from "@/lib/data-repositories";
+import type { AppRow, ReportRow } from "@/lib/server-db";
 
 export async function POST(request: Request) {
   try {
@@ -97,25 +98,33 @@ export async function POST(request: Request) {
             const keywords = evalJson.data.keywords || [];
             const legitimacy = evalJson.data.legitimacy || "";
             const date = evalJson.data.date || new Date().toISOString().slice(0, 10);
-
-            // Save application record
-            const appRow: Partial<AppRow> = {
-              company, role, score: overallScore, status: "Evaluated",
-              date, report_path: "",
-            };
-            upsertApp(appRow as AppRow, user.userId);
-
-            // Save report record with full blocks
-            const allReports = listReports(user.userId);
+            const repos = getDataRepositories();
+            const allReports = await repos.reports.list(user.userId);
             const maxNum = allReports.reduce((max, r) => Math.max(max, r.report_num), 0);
             reportNum = maxNum + 1;
+
+            // Save application record
+            const appRow: AppRow = {
+              num: reportNum,
+              company,
+              role,
+              score: overallScore,
+              status: "Evaluated",
+              date,
+              pdf_generated: 0,
+              report_path: "",
+              notes: "",
+            };
+            await repos.applications.upsert(appRow, user.userId);
+
+            // Save report record with full blocks
             const reportRow: ReportRow = {
               report_num: reportNum, date, company, role,
               archetype, overall_score: overallScore, legitimacy,
               blocks_json: JSON.stringify(blocks),
               keywords_json: JSON.stringify(keywords),
             };
-            upsertReport(reportRow, user.userId);
+            await repos.reports.upsert(reportRow, user.userId);
           } catch (e) { console.warn("[pipeline] persist failed:", e); }
 
           sse({

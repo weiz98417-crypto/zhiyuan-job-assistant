@@ -2,7 +2,8 @@
 
 import fs from "fs";
 import path from "path";
-import { listReports } from "@/lib/server-db";
+import { getCurrentUser } from "@/lib/auth";
+import { getDataRepositories } from "@/lib/data-repositories";
 import { ZHIPU_API_URL, ZHIPU_VISION_MODEL } from "@/lib/zhipu";
 import { buildOCRImageCandidates, normalizeImageDataUri } from "@/lib/server-image-variants";
 
@@ -372,6 +373,16 @@ function extractScore(text: string, blockKey: string): number {
    ══════════════════════════════════════════════════════════════ */
 
 export async function POST(request: Request) {
+  let user;
+  try {
+    user = await getCurrentUser();
+  } catch {
+    return new Response(JSON.stringify({ success: false, error: "Unauthorized" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
   const body = (await request.json()) as EvalInput;
   const { jdText: inputText, jdUrl, images, cvText, targetCompany, allowWebSearch = false, language = "zh" } = body;
 
@@ -655,7 +666,7 @@ export async function POST(request: Request) {
         /* ── Pre-allocate report number ── */
         let reportNum = 0;
         try {
-          const allReports = listReports();
+          const allReports = await getDataRepositories().reports.list(user.userId);
           const maxReportNum = allReports.reduce((max, r) => Math.max(max, r.report_num), 0);
           reportNum = maxReportNum + 1;
         } catch { /* non-blocking */ }

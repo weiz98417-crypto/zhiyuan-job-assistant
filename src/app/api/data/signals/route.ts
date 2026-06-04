@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { insertSignal, querySignals } from "@/lib/server-db";
 import { getCurrentUser } from "@/lib/auth";
+import { getDataRepositories } from "@/lib/data-repositories";
 
 export async function GET(request: Request) {
   try {
@@ -11,7 +11,7 @@ export async function GET(request: Request) {
     const since = searchParams.get("since") || undefined;
     const limit = searchParams.get("limit") ? parseInt(searchParams.get("limit")!) : 50;
 
-    const signals = querySignals({ signal_type: signalType, source, since, limit }, user.userId);
+    const signals = await getDataRepositories().signals.query({ signal_type: signalType, source, since, limit }, user.userId);
     const parsed = signals.map((s) => ({
       ...s,
       content_json: JSON.parse(s.content_json || "{}"),
@@ -43,7 +43,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: "缺少 signal_type 字段" }, { status: 400 });
     }
 
-    insertSignal({
+    await getDataRepositories().signals.insert({
       source: body.source || "dingwei",
       signal_type: body.signal_type,
       content_json: JSON.stringify(body.content_json || {}),
