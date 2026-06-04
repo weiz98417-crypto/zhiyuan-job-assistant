@@ -63,8 +63,11 @@ const USER_PRIVATE_TABLES = [
   "offers",
   "offer_reports",
   "reference_resumes",
-  "scan_queue",
+  "memory_evidence",
+  "memory_chunks",
+  "memory_items",
   "scan_jobs",
+  "scan_queue",
 ];
 
 export interface UserRecord extends AnyRow {

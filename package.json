@@ -23,6 +23,7 @@
     "check:postgres": "node scripts/check-postgres.mjs",
     "migrate:postgres": "node scripts/migrate-sqlite-to-postgres.mjs",
     "check:postgres-migration": "node scripts/check-postgres-migration.mjs",
+    "backfill:memory": "node scripts/backfill-memory.mjs",
     "scan": "node scan.mjs",
     "scan:worker": "node scripts/scan-worker.mjs",
     "scan:once": "node scripts/scan-worker.mjs --once",
