@@ -43,7 +43,7 @@
 - [x] Automatically rebind only when confidence is high and user wording is explicit.
 - [x] For medium confidence, ask one short clarification before rebinding.
 - [x] For weak references, keep the current binding and treat the mention as contextual information.
-- [ ] Record all confirmed rebinds in `rebindHistory`.
+- [x] Record all confirmed rebinds in `rebindHistory`.
 
 ## 5. Coach Prompt And Tool Policy
 

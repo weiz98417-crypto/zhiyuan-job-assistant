@@ -4,6 +4,7 @@ import {
   buildInterviewPlanSnapshot,
   createInterviewState,
   persistInterviewRecap,
+  recordInterviewRebind,
   shouldPersistInterviewRecap,
   updateInterviewStateWithAssistantMessage,
   updateInterviewStateWithExchange,
@@ -126,5 +127,19 @@ describe("Interview session state", () => {
     expect(recapped?.recap?.sourceTurnIds?.length).toBe(scored?.transcript.length);
     expect(recapped?.recap?.questionFeedback?.[0].score).toBe(4);
     expect(recapped?.recap?.overallVerdict).toContain("平均评分 4/5");
+  });
+
+  it("records confirmed rebinds in session history", () => {
+    const state = interviewState();
+    const rebound = recordInterviewRebind(state, {
+      to: { jdId: 99, resumeId: "v2" },
+      reason: "User explicitly switched to a matched JD and resume.",
+      createdAt: "2026-06-04T10:00:00.000Z",
+    });
+
+    expect(rebound?.rebindHistory).toHaveLength(1);
+    expect(rebound?.rebindHistory[0].from).toMatchObject({ jdId: 12, resumeId: "Main resume" });
+    expect(rebound?.rebindHistory[0].to).toMatchObject({ jdId: 99, resumeId: "v2" });
+    expect(rebound?.rebindHistory[0].reason).toContain("explicitly switched");
   });
 });

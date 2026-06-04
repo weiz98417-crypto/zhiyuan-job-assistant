@@ -5,6 +5,7 @@ import type {
   InterviewQuestionKind,
   InterviewQuestionNode,
   InterviewRecap,
+  InterviewRebindEvent,
   InterviewScore,
   InterviewScoreArtifact,
   InterviewSessionState,
@@ -273,5 +274,29 @@ export function persistInterviewRecap(
   return {
     ...state,
     recap: buildInterviewRecapFromState(state, rawText),
+  };
+}
+
+export function recordInterviewRebind(
+  state: InterviewSessionState | undefined,
+  input: {
+    to: { jdId?: number; resumeId?: string };
+    reason: string;
+    createdAt?: string;
+  },
+): InterviewSessionState | undefined {
+  if (!state?.planSnapshot) return state;
+  const event: InterviewRebindEvent = {
+    from: {
+      jdId: state.planSnapshot.source.jdId,
+      resumeId: state.planSnapshot.source.resumeId,
+    },
+    to: input.to,
+    reason: input.reason,
+    createdAt: input.createdAt || new Date().toISOString(),
+  };
+  return {
+    ...state,
+    rebindHistory: [...(state.rebindHistory || []), event],
   };
 }
