@@ -2,6 +2,7 @@ import type { OfferEvaluationReport, OfferSnapshot } from "@/types";
 import { evaluateOfferSnapshot, normalizeOfferSnapshot } from "@/lib/offer-evaluation";
 import type { ToolDefinition, ToolResult } from "../types";
 import type { ImageIntakeResult } from "@/lib/agent/image-intake";
+import { fetchAgentMemoryContext, indexAgentMemorySource, writeCandidateAgentMemory } from "../memory-helpers";
 
 function apiPath(path: string): string {
   return typeof window === "undefined" ? `http://localhost:3000${path}` : path;
@@ -314,6 +315,13 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
     };
   }
 
+  const memoryContext = await fetchAgentMemoryContext({
+    task: "offer",
+    query: `${snapshot.company || ""} ${snapshot.role || ""} ${snapshot.location || ""} salary compensation offer preference`,
+    budgetChars: 1000,
+    semanticTopK: 5,
+  });
+
   const savedOfferId = await saveOffer(snapshot);
   if (savedOfferId && !snapshot.offerId) {
     snapshot = { ...snapshot, offerId: savedOfferId };
@@ -322,6 +330,37 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
   const report = evaluateOfferSnapshot(snapshot);
   const reportId = await saveReport(report);
   const withId = reportId ? { ...report, id: reportId } : report;
+  const reportMarkdown = reportToMarkdown(report);
+
+  if (savedOfferId) {
+    await indexAgentMemorySource({
+      sourceType: "offer",
+      sourceId: savedOfferId,
+      title: `${report.company} ${report.role}`,
+      text: offerText || JSON.stringify(report.offerSnapshot),
+      metadata: { reportId, company: report.company, role: report.role },
+    });
+  }
+  if (reportId) {
+    await indexAgentMemorySource({
+      sourceType: "offer_report",
+      sourceId: reportId,
+      title: `${report.company} ${report.role} offer report`,
+      text: reportMarkdown,
+      metadata: { offerId: report.offerId, company: report.company, role: report.role },
+    });
+    await writeCandidateAgentMemory({
+      memoryType: "offer_evaluation_observation",
+      canonicalText: `${report.company} ${report.role} offer evaluated as ${report.verdict}; score ${report.overallScore}/5.`,
+      sourceType: "offer_report",
+      sourceId: reportId,
+      quote: report.summary,
+      confidence: 0.65,
+      importance: report.redFlags.length ? 0.75 : 0.55,
+      extractionMethod: "offer_evaluation_writeback",
+      metadata: { offerId: report.offerId, reportId, company: report.company, role: report.role },
+    });
+  }
 
   return {
     success: true,
@@ -338,8 +377,13 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
       verdict: report.verdict,
       redFlags: report.redFlags.slice(0, 5),
       missingInfo: report.missingInfo.slice(0, 5),
+      memoryContext: memoryContext ? {
+        structuredCount: Array.isArray(memoryContext.structuredFacts) ? memoryContext.structuredFacts.length : 0,
+        semanticCount: Array.isArray(memoryContext.semanticSnippets) ? memoryContext.semanticSnippets.length : 0,
+        warnings: Array.isArray(memoryContext.warnings) ? memoryContext.warnings : [],
+      } : null,
     },
-    rawData: withId,
+    rawData: { report: withId, memoryContext },
   };
 }
 

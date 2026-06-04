@@ -47,6 +47,21 @@ export interface RetrieveMemoryInput {
   provider?: EmbeddingProvider;
 }
 
+export interface MemoryItemRecord {
+  id: number;
+  user_id: string;
+  memory_type: string;
+  canonical_text: string;
+  status: MemoryItemStatus;
+  confidence: number;
+  importance: number;
+  source_count: number;
+  metadata_json?: string | Record<string, unknown>;
+  last_seen_at?: string | Date;
+  created_at?: string | Date;
+  updated_at?: string | Date;
+}
+
 export async function createMemoryItem(input: MemoryItemInput): Promise<number> {
   return withPostgresClient(async (client) => {
     const result = await client.query(`
@@ -98,6 +113,32 @@ export async function indexMemorySource(
 ): Promise<EmbeddedMemoryChunk[]> {
   const chunks = chunkMemorySource(source);
   const embedded = await embedChunksWithRetry(chunks, provider, options);
+  await upsertEmbeddedMemoryChunks(embedded);
+  return embedded;
+}
+
+export async function indexMemorySourceBestEffort(
+  source: MemorySourceInput,
+  provider?: EmbeddingProvider,
+  options: { maxRetries?: number; fallbackReason?: string } = {},
+): Promise<EmbeddedMemoryChunk[]> {
+  const chunks = chunkMemorySource(source);
+  let activeProvider = provider;
+  if (!activeProvider) {
+    try {
+      activeProvider = createEmbeddingProvider();
+    } catch (error) {
+      const reason = options.fallbackReason || (error instanceof Error ? error.message : String(error));
+      activeProvider = {
+        model: "embedding-unavailable",
+        dimension: 1536,
+        async embed() {
+          throw new Error(reason);
+        },
+      };
+    }
+  }
+  const embedded = await embedChunksWithRetry(chunks, activeProvider, options);
   await upsertEmbeddedMemoryChunks(embedded);
   return embedded;
 }
@@ -175,6 +216,35 @@ export async function retrieveMemorySnippets(input: RetrieveMemoryInput): Promis
   });
 
   return rerankMemoryRows(rows, input.userId, requestedLimit);
+}
+
+export async function listMemoryItems(input: {
+  userId: string;
+  statuses?: MemoryItemStatus[];
+  memoryTypes?: string[];
+  limit?: number;
+}): Promise<MemoryItemRecord[]> {
+  const statuses = input.statuses?.length ? input.statuses : ["active", "candidate"];
+  const params: unknown[] = [input.userId, statuses, Math.max(1, Math.min(input.limit ?? 12, 30))];
+  const clauses = ["user_id = $1", "status = ANY($2::text[])"];
+
+  if (input.memoryTypes?.length) {
+    params.splice(2, 0, input.memoryTypes);
+    clauses.push("memory_type = ANY($3::text[])");
+  }
+
+  const limitParam = params.length;
+  return withPostgresClient(async (client) => {
+    const result = await client.query(`
+      SELECT id, user_id, memory_type, canonical_text, status, confidence, importance,
+        source_count, metadata_json, last_seen_at, created_at, updated_at
+      FROM memory_items
+      WHERE ${clauses.join(" AND ")}
+      ORDER BY importance DESC, confidence DESC, last_seen_at DESC
+      LIMIT $${limitParam}
+    `, params);
+    return result.rows as MemoryItemRecord[];
+  });
 }
 
 async function embedQuery(query: string, provider?: EmbeddingProvider): Promise<number[]> {

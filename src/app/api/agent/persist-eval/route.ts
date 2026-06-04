@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import crypto from "crypto";
 import { getCurrentUser } from "@/lib/auth";
 import { getDataRepositories } from "@/lib/data-repositories";
+import { getDatabaseDriver, isPostgresConfigured } from "@/lib/postgres";
+import { createMemoryItem, addMemoryEvidence, indexMemorySourceBestEffort } from "@/lib/memory/postgres-memory";
 import type { AppRow, ReportRow } from "@/lib/server-db";
 
 function hashSource(text?: string): string {
@@ -87,9 +89,10 @@ export async function POST(request: Request) {
     await repos.reports.upsert(reportRow, user.userId);
 
     // 4. Save JD to JD library
+    let jdId: number | null = null;
     if (jdText && jdText.trim().length >= 50) {
       try {
-        await repos.jds.insert({
+        jdId = await repos.jds.insert({
           company,
           role,
           source_type: "agent",
@@ -100,6 +103,56 @@ export async function POST(request: Request) {
         }, user.userId);
       } catch (e) {
         console.warn("[persist-eval] JD save failed:", e);
+      }
+    }
+
+    if (getDatabaseDriver() === "postgres" && isPostgresConfigured()) {
+      try {
+        if (jdText && jdText.trim().length >= 50) {
+          await indexMemorySourceBestEffort({
+            userId: user.userId,
+            sourceType: "jd",
+            sourceId: jdId || reportNum,
+            title: `${company} ${role}`,
+            text: jdText,
+            metadata: { reportNum, company, role, source: "persist-eval" },
+          });
+        }
+        const reportText = [
+          `${company} ${role}`,
+          `overallScore=${score}`,
+          blocks ? JSON.stringify(blocks) : "",
+        ].filter(Boolean).join("\n");
+        await indexMemorySourceBestEffort({
+          userId: user.userId,
+          sourceType: "jd_report",
+          sourceId: reportNum,
+          title: `${company} ${role} report ${reportNum}`,
+          text: reportText,
+          metadata: { reportNum, company, role, source: "persist-eval" },
+        });
+        const itemId = await createMemoryItem({
+          userId: user.userId,
+          memoryType: "jd_evaluation_observation",
+          canonicalText: `${company} ${role} JD evaluation completed with score ${score}/5; report #${reportNum}.`,
+          status: "candidate",
+          confidence: 0.65,
+          importance: score < 2.5 ? 0.75 : 0.55,
+          sourceCount: 1,
+          metadata: { reportNum, company, role, score },
+        });
+        await addMemoryEvidence({
+          userId: user.userId,
+          memoryItemId: itemId,
+          sourceType: "jd_report",
+          sourceId: reportNum,
+          quote: reportText.slice(0, 800),
+          extractionMethod: "jd_evaluation_writeback",
+          confidence: 0.65,
+          metadata: { reportNum, company, role, score },
+        });
+      } catch (error) {
+        console.warn("[persist-eval] memory index/writeback failed:", error);
       }
     }
 

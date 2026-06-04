@@ -26,7 +26,7 @@ const OCR_SYSTEM_PROMPT = `你是一个专业的招聘 JD 图片识别助手。�
 
 /* ── Types ── */
 
-interface EvalInput { jdText?: string; jdUrl?: string; images?: string[]; cvText?: string; targetCompany?: string; allowWebSearch?: boolean; language?: "zh" | "en"; }
+interface EvalInput { jdText?: string; jdUrl?: string; images?: string[]; cvText?: string; targetCompany?: string; allowWebSearch?: boolean; language?: "zh" | "en"; memoryContext?: string; }
 interface BlockResult { content: string; score: number; }
 interface RiskSignal { signal: string; excerpt?: string; severity: string; source?: string; }
 interface EvalState {
@@ -384,7 +384,7 @@ export async function POST(request: Request) {
   }
 
   const body = (await request.json()) as EvalInput;
-  const { jdText: inputText, jdUrl, images, cvText, targetCompany, allowWebSearch = false, language = "zh" } = body;
+  const { jdText: inputText, jdUrl, images, cvText, targetCompany, allowWebSearch = false, language = "zh", memoryContext = "" } = body;
 
   // Priority: images > jdUrl > jdText
   const hasImages = Array.isArray(images) && images.length > 0;

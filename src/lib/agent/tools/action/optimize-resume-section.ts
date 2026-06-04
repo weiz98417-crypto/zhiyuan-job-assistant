@@ -1,4 +1,5 @@
 import type { ToolDefinition, ToolResult } from "../types";
+import { fetchAgentMemoryContext } from "../memory-helpers";
 
 interface OptimizeParams {
   section?: string;
@@ -77,6 +78,18 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
     return { success: false, data: null, error: `${sectionId} 板块内容不足 20 字，无法优化`, recoverable: false, retryHint: "请先在 CV 页面完善该板块内容后再尝试优化" };
   }
 
+  const memoryContext = await fetchAgentMemoryContext({
+    task: "resume",
+    query: `${instruction || ""}\n${String(params.jd_text || "").slice(0, 900)}\n${sectionContent.slice(0, 900)}`,
+    budgetChars: 900,
+    semanticTopK: 4,
+  });
+  const instructionWithMemory = [
+    instruction || "",
+    String(params.jd_text || "").trim() ? `Target JD:\n${String(params.jd_text).slice(0, 1200)}` : "",
+    memoryContext?.llmSummary ? `Long-term memory context:\n${memoryContext.llmSummary}` : "",
+  ].filter(Boolean).join("\n\n");
+
   // 3. Call optimize-section API
   const optimizeRes = await fetch("/api/cv/optimize-section", {
     method: "POST",
@@ -87,7 +100,7 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
       fullCV,
       operation: operation || "full",
       effort: effort || 3,
-      intent: instruction || "",
+      intent: instructionWithMemory,
       enablePlaceholders: true,
       referenceIds: referenceIds || undefined,
       fast: !(referenceIds && referenceIds.length > 0), // Use Pro when reference resumes are provided
@@ -110,6 +123,7 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
       original: sectionContent,
       variants: optimizeJson.data?.variants || [],
       fullCV,
+      memoryContext,
     },
   };
 }

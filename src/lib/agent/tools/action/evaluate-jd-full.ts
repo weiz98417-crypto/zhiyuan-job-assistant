@@ -1,5 +1,6 @@
 import type { ToolDefinition, ToolResult } from "../types";
 import type { ImageIntakeResult } from "@/lib/agent/image-intake";
+import { fetchAgentMemoryContext } from "../memory-helpers";
 
 interface EvalJDFullParams {
   jd_text?: string;
@@ -131,16 +132,28 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
 
   // Delegate to streaming evaluate API — handler returns the stream,
   // client-runner reads it and yields events through the generator
+  const memoryContext = await fetchAgentMemoryContext({
+    task: "jd",
+    query: `${targetCompany || ""}\n${jdText.slice(0, 1200)}`,
+    budgetChars: 1200,
+    semanticTopK: 5,
+  });
+  const cvTextWithMemory = [
+    cv_text || "",
+    memoryContext?.llmSummary ? `Long-term memory context:\n${memoryContext.llmSummary}` : "",
+  ].filter(Boolean).join("\n\n");
+
   const res = await fetch("/api/evaluate/stream", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       jdText,
       jdUrl: jd_url || "",
-      cvText: cv_text || "",
+      cvText: cvTextWithMemory,
       targetCompany,
       images: imagesForStream,
       allowWebSearch: allow_web_search === true,
+      memoryContext: memoryContext?.llmSummary || "",
     }),
   });
 
