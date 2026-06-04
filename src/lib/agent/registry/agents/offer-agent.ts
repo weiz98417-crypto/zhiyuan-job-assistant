@@ -12,6 +12,7 @@ const OFFER_TOOL_NAMES = [
   "generate_offer_negotiation_strategy",
   "generate_offer_hr_question_list",
   "compare_offers_deep",
+  "web_search",
   "export_file",
   "download_report_pdf",
 ];
@@ -58,7 +59,10 @@ const OFFER_INTENT_PATTERNS = [
   /(对比|比较|选哪个).*(offer|Offer|OFFER)/i,
   /offer.*(评估|分析|对比|比较|谈判|策略)/i,
   /(谈|聊).*(薪资|待遇|offer|Offer)/i,
+  /(offer|Offer|OFFER).*(谈|聊).*(HR|hr|人事|薪资|待遇)/i,
+  /(offer|Offer|OFFER).*(HR|hr|人事).*(谈|聊|怎么|如何)/i,
   /(问|询问).*(HR|hr|人事).*(offer|薪资|待遇|合同|社保|公积金)/i,
+  /(offer|Offer|OFFER).*(问|询问).*(HR|hr|人事|什么|哪些)/i,
   /(两个|2个|两个以上|多个).*(offer|Offer)/i,
 ];
 

@@ -73,6 +73,10 @@ function isInterviewAgent(toolWhitelist?: string[]): boolean {
   return !!toolWhitelist?.includes("generate_interview_questions") || !!toolWhitelist?.includes("prepare_interview_full");
 }
 
+function isOfferAgent(toolWhitelist?: string[]): boolean {
+  return !!toolWhitelist?.includes("evaluate_offer");
+}
+
 function explicitlyAskedForWeb(text: string): boolean {
   return /(联网|网上|网络|搜索|查一下.*(官网|公开信息|新闻|面经|薪资|公司背景|部门)|面经)/.test(text);
 }
@@ -80,7 +84,7 @@ function explicitlyAskedForWeb(text: string): boolean {
 export function enforceToolPolicy(input: ToolPolicyInput): ToolResult | null {
   const userText = latestUserText(input.messages);
 
-  if ((isEvaluateAgent(input.toolWhitelist) || isInterviewAgent(input.toolWhitelist)) && input.toolName === "web_search" && !explicitlyAskedForWeb(userText)) {
+  if ((isEvaluateAgent(input.toolWhitelist) || isInterviewAgent(input.toolWhitelist) || isOfferAgent(input.toolWhitelist)) && input.toolName === "web_search" && !explicitlyAskedForWeb(userText)) {
     return {
       success: false,
       data: null,

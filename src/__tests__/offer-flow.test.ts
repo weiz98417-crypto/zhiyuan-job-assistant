@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { enforceToolPolicy } from "@/lib/agent/loop/tool-policy";
 import { classifyIntent } from "@/lib/agent/registry";
 import { offerAgent } from "@/lib/agent/registry/agents/offer-agent";
 import { compareOffersDeep } from "@/lib/agent/tools/action/compare-offers-deep";
@@ -42,10 +45,40 @@ afterEach(() => {
 describe("Offer Agent routing and tool contracts", () => {
   it("routes single-offer evaluation language to the Offer Agent", () => {
     expect(classifyIntent("这个 offer 值不值得接？").id).toBe("offer");
+    expect(classifyIntent("帮我看看这个 offer 值不值").id).toBe("offer");
     expect(offerAgent.toolNames).toContain("evaluate_offer");
     expect(offerAgent.toolNames).toContain("read_offer_report");
     expect(offerAgent.toolNames).toContain("generate_offer_negotiation_strategy");
     expect(offerAgent.toolNames).toContain("generate_offer_hr_question_list");
+  });
+
+  it("routes negotiation and HR-question language to the Offer Agent tool set", () => {
+    expect(classifyIntent("那这个 offer 怎么跟 HR 谈？").id).toBe("offer");
+    expect(classifyIntent("这份 offer 需要问 HR 什么？").id).toBe("offer");
+    expect(offerAgent.toolNames).toEqual(expect.arrayContaining([
+      "read_offer_report",
+      "generate_offer_negotiation_strategy",
+      "generate_offer_hr_question_list",
+    ]));
+  });
+
+  it("allows explicit external research but blocks vague company questions in Offer mode", () => {
+    expect(offerAgent.toolNames).toContain("web_search");
+    const vague = enforceToolPolicy({
+      toolName: "web_search",
+      params: { query: "字节跳动 公司背景" },
+      messages: [{ role: "user", content: "这家公司怎么样？" }],
+      toolWhitelist: offerAgent.toolNames,
+    });
+    expect(vague?.success).toBe(false);
+
+    const explicit = enforceToolPolicy({
+      toolName: "web_search",
+      params: { query: "字节跳动 公司背景" },
+      messages: [{ role: "user", content: "查一下这家公司背景怎么样" }],
+      toolWhitelist: offerAgent.toolNames,
+    });
+    expect(explicit).toBeNull();
   });
 
   it("evaluate_offer returns layered output and keeps full report in rawData", async () => {
@@ -151,6 +184,28 @@ describe("Offer Agent routing and tool contracts", () => {
     expect(result.llmSummary).toContain("evaluate_offer");
   });
 
+  it("compare_offers_deep does not compare when saved offer ids cannot both resolve", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/api/offers/1")) {
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            data: { id: 1, company: "A 公司", role: "产品经理", monthly_salary: 20, months_per_year: 14 },
+          }),
+        };
+      }
+      return { ok: false, json: async () => ({ success: false }) };
+    }) as unknown as typeof fetch);
+
+    const result = await compareOffersDeep.handler({ offerIds: [1, 2] });
+
+    expect(result.success).toBe(false);
+    expect(result.errorCategory).toBe("need_user_input");
+    expect(result.error).toContain("至少需要 2 个");
+  });
+
   it("read_offer_report returns concise LLM summary plus structured UI payload", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => ({
       ok: true,
@@ -194,5 +249,18 @@ describe("Offer Agent routing and tool contracts", () => {
     expect(questions.sourceMissingInfo).toContain("社保缴纳基数");
     expect(questions.sourceRedFlags).toContain("年终兑现不确定");
     expect(questions.priorityQuestions.length).toBeGreaterThan(0);
+  });
+
+  it("Offer workspace source keeps report, stale badge, and Agent handoff boundaries", () => {
+    const source = readFileSync(path.join(process.cwd(), "src/app/compare/page.tsx"), "utf-8");
+
+    expect(source).toContain("/api/offers");
+    expect(source).toContain("/api/offer-reports");
+    expect(source).toContain("intent=evaluate");
+    expect(source).toContain("intent=negotiate");
+    expect(source).toContain("intent=ask_hr");
+    expect(source).toContain("stale");
+    expect(source).toContain("statusForOffer");
+    expect(source).toContain("reportForOffer");
   });
 });
