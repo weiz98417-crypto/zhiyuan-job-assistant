@@ -1,5 +1,5 @@
 import type { ToolResult } from "@/lib/agent/tools/types";
-import type { InterviewSessionState } from "@/types";
+import type { InterviewQuestionNode, InterviewSessionState, InterviewTurn } from "@/types";
 
 export interface ToolPolicyInput {
   toolName: string;
@@ -91,6 +91,72 @@ function hydrateSingleQuestionFromActiveSession(input: ToolPolicyInput): void {
   }
 }
 
+function findQuestionForScoring(state: InterviewSessionState): InterviewQuestionNode | undefined {
+  const current = state.currentQuestionId
+    ? state.questionGraph.find((node) => node.id === state.currentQuestionId)
+    : undefined;
+  if (current?.answerTurnIds.length) return current;
+  return [...state.questionGraph].reverse().find((node) => node.answerTurnIds.length > 0) || current || state.questionGraph.at(-1);
+}
+
+function findAnswerForScoring(
+  state: InterviewSessionState,
+  question?: InterviewQuestionNode,
+): InterviewTurn | undefined {
+  if (question?.answerTurnIds.length) {
+    const answerIds = new Set(question.answerTurnIds);
+    const linked = [...state.transcript].reverse().find((turn) => turn.role === "user" && answerIds.has(turn.id));
+    if (linked) return linked;
+  }
+
+  return [...state.transcript].reverse().find((turn) =>
+    turn.role === "user" && (!question?.id || turn.questionNodeId === question.id || !turn.questionNodeId)
+  );
+}
+
+function buildInterviewScoreContext(state: InterviewSessionState, question?: InterviewQuestionNode, answer?: InterviewTurn): string {
+  const plan = state.planSnapshot;
+  return [
+    "Active interview scoring context.",
+    `Company: ${plan.jdSnapshot?.company || ""}`,
+    `Role: ${plan.jdSnapshot?.role || ""}`,
+    `Question node: ${question?.id || ""}`,
+    `Answer turn: ${answer?.id || ""}`,
+    plan.jdSnapshot?.body ? `JD snapshot:\n${plan.jdSnapshot.body.slice(0, 1200)}` : "",
+    plan.resumeSnapshot?.body ? `Resume snapshot:\n${plan.resumeSnapshot.body.slice(0, 1200)}` : "",
+  ].filter(Boolean).join("\n\n");
+}
+
+function hydrateScoreFromActiveSession(input: ToolPolicyInput): ToolResult | null {
+  const state = input.interviewState;
+  if (!hasActiveInterviewSession(state) || input.toolName !== "score_interview_answer") return null;
+
+  const questionText = typeof input.params.question === "string" ? input.params.question.trim() : "";
+  const answerText = typeof input.params.answer === "string" ? input.params.answer.trim() : "";
+  const question = findQuestionForScoring(state);
+  const answer = findAnswerForScoring(state, question);
+
+  if (!questionText && question?.question) input.params.question = question.question;
+  if (!answerText && answer?.content) input.params.answer = answer.content;
+  if (typeof input.params.context !== "string" || !input.params.context.trim()) {
+    input.params.context = buildInterviewScoreContext(state, question, answer);
+  }
+
+  const hydratedQuestion = typeof input.params.question === "string" ? input.params.question.trim() : "";
+  const hydratedAnswer = typeof input.params.answer === "string" ? input.params.answer.trim() : "";
+  if (!hydratedQuestion || !hydratedAnswer) {
+    return {
+      success: false,
+      data: null,
+      error: "No stored interview question/answer is available for scoring yet.",
+      errorCategory: "need_user_input",
+      llmSummary: "Score only from InterviewSessionState. Do not ask the user to paste previous answers. If no stored answer exists, ask the user to answer the current interview question first.",
+    };
+  }
+
+  return null;
+}
+
 function hasUrl(text: string): boolean {
   return /https?:\/\/\S+/i.test(text);
 }
@@ -117,6 +183,11 @@ export function enforceToolPolicy(input: ToolPolicyInput): ToolResult | null {
 
   if (hasActiveInterview && input.toolName === "generate_interview_questions") {
     hydrateSingleQuestionFromActiveSession(input);
+  }
+
+  if (hasActiveInterview && input.toolName === "score_interview_answer") {
+    const scorePolicyResult = hydrateScoreFromActiveSession(input);
+    if (scorePolicyResult) return scorePolicyResult;
   }
 
   if (

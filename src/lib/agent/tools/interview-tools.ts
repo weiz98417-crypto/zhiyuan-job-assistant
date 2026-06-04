@@ -188,8 +188,8 @@ export const scoreInterviewAnswer: ToolDefinition = {
   name: "score_interview_answer",
   description: "对用户的面试回答进行四维度评分，并将观察结果作为候选长期记忆写回。",
   parameters: {
-    question: { type: "string", required: true, description: "原面试题目。" },
-    answer: { type: "string", required: true, description: "用户的回答文本。" },
+    question: { type: "string", required: false, description: "原面试题目。有 active interview session 时可留空，由已持久化的 questionGraph 补全。" },
+    answer: { type: "string", required: false, description: "用户的回答文本。有 active interview session 时可留空，由已持久化的 transcript 补全。" },
     mode: { type: "string", required: false, description: "面试模式，影响评分权重。" },
     context: { type: "string", required: false, description: "JD/CV 上下文，可帮助评分更精准。" },
   },

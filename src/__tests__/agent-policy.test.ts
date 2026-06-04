@@ -51,6 +51,15 @@ function activeInterviewState(): InterviewSessionState {
   };
 }
 
+function unansweredInterviewState(): InterviewSessionState {
+  const state = activeInterviewState();
+  return {
+    ...state,
+    questionGraph: state.questionGraph.map((node) => ({ ...node, answerTurnIds: [] })),
+    transcript: [],
+  };
+}
+
 describe("agent tool policy", () => {
   it("blocks evaluate agent web search unless explicitly requested", () => {
     const result = enforceToolPolicy({
@@ -134,6 +143,37 @@ describe("agent tool policy", () => {
     expect(params.role).toBe("AI Product Manager");
     expect(params.jdText).toContain("JD snapshot body");
     expect(params.cvText).toContain("Resume snapshot body");
+  });
+
+  it("hydrates interview scoring from stored question and answer turns", () => {
+    const params: Record<string, unknown> = {};
+    const result = enforceToolPolicy({
+      toolName: "score_interview_answer",
+      params,
+      messages: [{ role: "user", content: "score my last answer" }],
+      toolWhitelist: interviewAgent.toolNames,
+      interviewState: activeInterviewState(),
+    });
+
+    expect(result).toBeNull();
+    expect(params.question).toBe("Tell me about one relevant project.");
+    expect(params.answer).toBe("I led an AI product prototype.");
+    expect(params.context).toContain("JD snapshot body");
+    expect(params.context).toContain("Resume snapshot body");
+  });
+
+  it("blocks interview scoring without asking for pasted answers when no stored answer exists", () => {
+    const result = enforceToolPolicy({
+      toolName: "score_interview_answer",
+      params: {},
+      messages: [{ role: "user", content: "score my answer" }],
+      toolWhitelist: interviewAgent.toolNames,
+      interviewState: unansweredInterviewState(),
+    });
+
+    expect(result?.success).toBe(false);
+    expect(result?.errorCategory).toBe("need_user_input");
+    expect(result?.llmSummary).toContain("Do not ask the user to paste previous answers");
   });
 });
 
