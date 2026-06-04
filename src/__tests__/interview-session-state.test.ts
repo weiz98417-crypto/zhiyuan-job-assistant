@@ -241,6 +241,42 @@ describe("Interview session state", () => {
     expect(recapped?.recap?.overallVerdict).not.toContain("整体不错");
   });
 
+  it("builds recap from multiple stored answers without asking the user to repost them", () => {
+    const q1 = updateInterviewStateWithAssistantMessage(
+      interviewState(),
+      msg("assistant", "第一题：请介绍一个 AI 产品项目？"),
+    );
+    const q2Asked = updateInterviewStateWithExchange(
+      q1,
+      msg("user", "第一题回答：我负责模型评估指标和上线验收。"),
+      msg("assistant", "第二题：请讲一次你和研发对齐需求优先级的经历？"),
+    );
+    const q2Answered = updateInterviewStateWithExchange(
+      q2Asked,
+      msg("user", "第二题回答：我组织评审会拆优先级，并用数据说明取舍。"),
+      msg("assistant", "好的，我记录完这两道题。"),
+    );
+
+    const recapped = persistInterviewRecap(q2Answered, "请用户重新粘贴前面所有答案。");
+    const feedback = recapped?.recap?.questionFeedback || [];
+    const structuredRecapText = [
+      recapped?.recap?.overallVerdict,
+      ...(recapped?.recap?.strengths || []),
+      ...(recapped?.recap?.weakSpots || []),
+      ...(recapped?.recap?.evidenceFromAnswers || []),
+      ...(recapped?.recap?.nextPracticePlan || []),
+      ...feedback.map((item) => `${item.question}\n${item.answerExcerpt || ""}\n${item.feedback || ""}`),
+    ].join("\n");
+
+    expect(feedback).toHaveLength(2);
+    expect(feedback[0].answerExcerpt).toContain("模型评估指标");
+    expect(feedback[1].answerExcerpt).toContain("评审会拆优先级");
+    expect(feedback[0].sourceTurnIds).toHaveLength(1);
+    expect(feedback[1].sourceTurnIds).toHaveLength(1);
+    expect(recapped?.recap?.overallVerdict).toContain("2 道已回答问题");
+    expect(structuredRecapText).not.toContain("重新粘贴");
+  });
+
   it("records confirmed rebinds in session history", () => {
     const state = interviewState();
     const rebound = recordInterviewRebind(state, {
