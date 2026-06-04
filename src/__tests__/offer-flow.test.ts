@@ -262,5 +262,8 @@ describe("Offer Agent routing and tool contracts", () => {
     expect(source).toContain("stale");
     expect(source).toContain("statusForOffer");
     expect(source).toContain("reportForOffer");
+    expect(source).toContain("offerForComparison");
+    expect(source).toContain("编辑 Offer");
+    expect(source).toContain("method: editingOfferId ? \"PUT\" : \"POST\"");
   });
 });

@@ -168,6 +168,7 @@ export interface DataRepositories {
     list(userId: string): Promise<AnyRow[]>;
     get(id: number, userId: string): Promise<AnyRow | undefined>;
     upsert(input: AnyRow, userId: string): Promise<{ id: number; created?: boolean; updated?: boolean }>;
+    update(id: number, input: AnyRow, userId: string): Promise<AnyRow | undefined>;
     delete(id: number, userId: string): Promise<{ offerId: number; deletedReports: number } | null>;
   };
   offerReports: {
@@ -1059,6 +1060,20 @@ function createSqliteOfferRepository(): DataRepositories["offers"] {
       `).run(userId, input.company, input.role, ...values);
       return { id: Number(result.lastInsertRowid), created: true };
     },
+    async update(id, input, userId) {
+      const existing = await this.get(id, userId);
+      if (!existing) return undefined;
+      const next = { ...existing, ...input };
+      const monthlySalaryK = normalizeMonthlySalaryK(next.monthly_salary);
+      const values = offerValues(next, monthlySalaryK);
+      getDb().prepare(`
+        UPDATE offers SET company=?, role=?, monthly_salary=?, months_per_year=?, annual_bonus=?, has_social_insurance=?, housing_fund_rate=?,
+          options=?, probation_months=?, start_date=?, other_benefits=?, location=?, level=?, employment_form=?, employer_name=?,
+          contract_months=?, overtime_policy=?, bonus_guarantee=?, equity_type=?, equity_vesting=?, commute_minutes=?,
+          city_cost_level=?, job_nature=?, benefits_json=?, application_id=?, updated_at=datetime('now') WHERE id=? AND user_id=?
+      `).run(next.company, next.role, ...values, id, userId);
+      return this.get(id, userId);
+    },
     async delete(id, userId) {
       const db = getDb();
       const offer = db.prepare("SELECT id FROM offers WHERE id = ? AND user_id = ?").get(id, userId);
@@ -1106,6 +1121,24 @@ function createPostgresOfferRepository(): DataRepositories["offers"] {
           RETURNING id
         `, [userId, input.company, input.role, ...values]);
         return { id: Number(result.rows[0].id), created: true };
+      });
+    },
+    async update(id, input, userId) {
+      return withPostgresClient(async (client) => {
+        const existing = one<AnyRow>(await client.query("SELECT * FROM offers WHERE id=$1 AND user_id=$2", [id, userId]));
+        if (!existing) return undefined;
+        const next = { ...existing, ...input };
+        const monthlySalaryK = normalizeMonthlySalaryK(next.monthly_salary);
+        const values = offerValues(next, monthlySalaryK);
+        const result = await client.query(`
+          UPDATE offers SET company=$1, role=$2, monthly_salary=$3, months_per_year=$4, annual_bonus=$5, has_social_insurance=$6, housing_fund_rate=$7,
+            options=$8, probation_months=$9, start_date=$10, other_benefits=$11, location=$12, level=$13, employment_form=$14,
+            employer_name=$15, contract_months=$16, overtime_policy=$17, bonus_guarantee=$18, equity_type=$19, equity_vesting=$20,
+            commute_minutes=$21, city_cost_level=$22, job_nature=$23, benefits_json=$24::jsonb, application_id=$25, updated_at=now()
+          WHERE id=$26 AND user_id=$27
+          RETURNING *
+        `, [next.company, next.role, ...values, id, userId]);
+        return one<AnyRow>(result);
       });
     },
     async delete(id, userId) {

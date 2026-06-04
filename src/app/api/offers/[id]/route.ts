@@ -26,6 +26,31 @@ export async function GET(_request: Request, context: RouteContext) {
   }
 }
 
+export async function PUT(request: Request, context: RouteContext) {
+  try {
+    const user = await getCurrentUser();
+    const { id } = await context.params;
+    const offerId = Number(id);
+    if (!Number.isFinite(offerId)) {
+      return NextResponse.json({ success: false, error: "invalid offer id" }, { status: 400 });
+    }
+
+    const body = await request.json();
+    if (!body.company || !body.role) {
+      return NextResponse.json({ success: false, error: "company and role are required" }, { status: 400 });
+    }
+
+    const row = await getDataRepositories().offers.update(offerId, body, user.userId);
+    if (!row) return NextResponse.json({ success: false, error: "offer not found" }, { status: 404 });
+    return NextResponse.json({ success: true, data: row });
+  } catch (err) {
+    if (err instanceof Error && err.message === "Not authenticated") {
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+    }
+    return NextResponse.json({ success: false, error: String(err) }, { status: 500 });
+  }
+}
+
 export async function DELETE(_request: Request, context: RouteContext) {
   try {
     const user = await getCurrentUser();

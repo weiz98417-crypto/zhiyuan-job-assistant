@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, Bot, CheckSquare, FileText, HelpCircle, Plus, Scale, X } from "lucide-react";
+import { Bot, CheckSquare, FileText, HelpCircle, Pencil, Plus, Scale, X } from "lucide-react";
 import { HandwritingTitle, PaperCard, ScoreBadge, WarmButton } from "@/components/design";
 import type { Offer, OfferEvaluationModule, OfferVerdict } from "@/types";
 
@@ -183,6 +183,24 @@ function mergeOffersWithReports(offers: Offer[], reports: OfferReportRow[]): Off
   });
 }
 
+function offerForComparison(offer: Offer, reports: OfferReportRow[]): Offer {
+  const report = reportForOffer(offer, reports);
+  if (!report) return offer;
+  const snapshot = reportSnapshot(report);
+  return {
+    ...offer,
+    company: cleanText(snapshot.company, offer.company),
+    role: cleanText(snapshot.role, offer.role),
+    location: cleanText(snapshot.location, offer.location || "") || offer.location,
+    monthlySalary: normalizeMonthlySalaryK(snapshot.monthlySalary) || offer.monthlySalary,
+    monthsPerYear: Number(snapshot.monthsPerYear || offer.monthsPerYear || 12),
+    annualBonus: Number(snapshot.annualBonus || offer.annualBonus || 0),
+    hasSocialInsurance: snapshot.hasSocialInsurance !== undefined ? snapshot.hasSocialInsurance !== false : offer.hasSocialInsurance,
+    housingFundRate: Number(snapshot.housingFundRate || offer.housingFundRate || 7),
+    probationMonths: Number(snapshot.probationMonths || offer.probationMonths || 3),
+  };
+}
+
 function statusForOffer(offer: Offer, reports: OfferReportRow[]): "unevaluated" | "evaluated" | "stale" {
   const report = reportForOffer(offer, reports);
   if (!report) return "unevaluated";
@@ -208,6 +226,7 @@ export default function ComparePage() {
   const [compareIds, setCompareIds] = useState<Set<number>>(new Set());
   const [compareMode, setCompareMode] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const [editingOfferId, setEditingOfferId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({
@@ -219,6 +238,11 @@ export default function ComparePage() {
     location: "",
     otherBenefits: "",
   });
+
+  const resetForm = () => {
+    setEditingOfferId(null);
+    setForm({ company: "", role: "", monthlySalary: "", monthsPerYear: "12", annualBonus: "0", location: "", otherBenefits: "" });
+  };
 
   async function loadData() {
     setLoading(true);
@@ -292,6 +316,26 @@ export default function ComparePage() {
     window.location.href = `/agent?offerReportId=${reportId}&intent=ask_hr`;
   }
 
+  function startAddOffer() {
+    resetForm();
+    setShowForm(true);
+  }
+
+  function startEditOffer(offer: Offer) {
+    if (!offer.id || offer.id < 0) return;
+    setEditingOfferId(offer.id);
+    setForm({
+      company: offer.company || "",
+      role: offer.role || "",
+      monthlySalary: offer.monthlySalary ? String(offer.monthlySalary) : "",
+      monthsPerYear: String(offer.monthsPerYear || 12),
+      annualBonus: String(offer.annualBonus || 0),
+      location: offer.location || "",
+      otherBenefits: offer.otherBenefits || "",
+    });
+    setShowForm(true);
+  }
+
   async function deleteOffer(offerId: number) {
     const offer = offers.find((item) => item.id === offerId);
     if (!offer) return;
@@ -327,10 +371,11 @@ export default function ComparePage() {
     await loadData();
   }
 
-  async function addOffer() {
+  async function saveOffer() {
     if (!form.company.trim() || !form.role.trim()) return;
-    const res = await fetch("/api/offers", {
-      method: "POST",
+    const endpoint = editingOfferId ? `/api/offers/${editingOfferId}` : "/api/offers";
+    const res = await fetch(endpoint, {
+      method: editingOfferId ? "PUT" : "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         company: form.company.trim(),
@@ -349,7 +394,7 @@ export default function ComparePage() {
       return;
     }
     setShowForm(false);
-    setForm({ company: "", role: "", monthlySalary: "", monthsPerYear: "12", annualBonus: "0", location: "", otherBenefits: "" });
+    resetForm();
     await loadData();
   }
 
@@ -376,7 +421,7 @@ export default function ComparePage() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <WarmButton variant="soft" size="sm" onClick={() => setShowForm(true)}>
+            <WarmButton variant="soft" size="sm" onClick={startAddOffer}>
               <Plus size={16} className="mr-1.5" />
               录入 Offer
             </WarmButton>
@@ -441,7 +486,7 @@ export default function ComparePage() {
                   <tr key={label as string}>
                     <td className="py-3 px-3 text-[var(--color-muted)]">{label as string}</td>
                     {selectedForCompare.map((offer) => (
-                      <td key={offer.id} className="py-3 px-3 text-[var(--color-text)]">{(render as (offer: Offer) => string)(offer)}</td>
+                      <td key={offer.id} className="py-3 px-3 text-[var(--color-text)]">{(render as (offer: Offer) => string)(offerForComparison(offer, reports))}</td>
                     ))}
                   </tr>
                 ))}
@@ -547,6 +592,12 @@ export default function ComparePage() {
                           删除报告
                         </button>
                       </>
+                    )}
+                    {selectedOffer.id && selectedOffer.id > 0 && (
+                      <WarmButton variant="soft" size="sm" onClick={() => startEditOffer(selectedOffer)}>
+                        <Pencil size={14} className="mr-1" />
+                        编辑 Offer
+                      </WarmButton>
                     )}
                     <button
                       className="rounded-[var(--radius-sm)] px-3 py-1.5 text-xs text-red-600 hover:bg-red-50"
@@ -670,8 +721,8 @@ export default function ComparePage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4">
           <div className="w-full max-w-lg rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-6 shadow-[var(--shadow-lg)]">
             <div className="mb-4 flex items-center justify-between">
-              <HandwritingTitle as="h2">录入 Offer</HandwritingTitle>
-              <button onClick={() => setShowForm(false)}><X size={20} className="text-[var(--color-muted)]" /></button>
+              <HandwritingTitle as="h2">{editingOfferId ? "编辑 Offer" : "录入 Offer"}</HandwritingTitle>
+              <button onClick={() => { setShowForm(false); resetForm(); }}><X size={20} className="text-[var(--color-muted)]" /></button>
             </div>
             <div className="space-y-4">
               <div className="grid gap-3 sm:grid-cols-2">
@@ -707,8 +758,8 @@ export default function ComparePage() {
                 <textarea value={form.otherBenefits} onChange={(e) => setForm({ ...form, otherBenefits: e.target.value })} rows={3} className="w-full resize-none rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2" />
               </label>
               <div className="flex justify-end gap-2">
-                <WarmButton variant="ghost" size="sm" onClick={() => setShowForm(false)}>取消</WarmButton>
-                <WarmButton variant="primary" size="sm" onClick={addOffer}>保存</WarmButton>
+                <WarmButton variant="ghost" size="sm" onClick={() => { setShowForm(false); resetForm(); }}>取消</WarmButton>
+                <WarmButton variant="primary" size="sm" onClick={saveOffer}>保存</WarmButton>
               </div>
             </div>
           </div>
