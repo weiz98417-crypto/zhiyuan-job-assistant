@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { BookOpenText, Clock, ExternalLink, FileText, MessageSquare, Star } from "lucide-react";
 import { PaperCard } from "@/components/design";
-import type { ChatSession, InterviewRecap, InterviewSessionState } from "@/types";
+import type { ChatSession, InterviewPlanSnapshot, InterviewRecap, InterviewSessionState, InterviewTurn } from "@/types";
 import { isInterviewSession } from "@/lib/agent/interview-session-state";
 
 interface InterviewRecapReviewProps {
@@ -35,6 +35,33 @@ function lastTranscriptText(session: ChatSession): string {
   return (message?.content || "暂无转录内容").replace(/\s+/g, " ").trim();
 }
 
+function compactText(value: string | undefined, maxLength = 120): string {
+  const text = (value || "").replace(/\s+/g, " ").trim();
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength)}...`;
+}
+
+function formatTraceDate(value?: string): string {
+  if (!value) return "未知时间";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "未知时间";
+  return date.toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function recapSourceTurnIds(recap: InterviewRecap): Set<string> {
+  const ids = new Set<string>();
+  (recap.sourceTurnIds || []).forEach((id) => ids.add(id));
+  (recap.questionFeedback || []).forEach((item) => {
+    (item.sourceTurnIds || []).forEach((id) => ids.add(id));
+  });
+  return ids;
+}
+
 function StructuredRecapSection({
   title,
   items,
@@ -60,10 +87,79 @@ function StructuredRecapSection({
   );
 }
 
-function StructuredRecap({ recap }: { recap: InterviewRecap }) {
+function PlanSnapshotTrace({ plan }: { plan?: InterviewPlanSnapshot }) {
+  if (!plan) return null;
+  const sourceItems = [
+    plan.source.jdId != null ? `JD #${plan.source.jdId}` : "JD 未记录 ID",
+    plan.source.resumeId ? `简历 ${plan.source.resumeId}` : "简历未记录 ID",
+    `快照 ${plan.snapshotId.slice(0, 8)}`,
+    formatTraceDate(plan.createdAt),
+  ];
+  return (
+    <section className="rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 space-y-1">
+      <p className="text-xs font-medium text-[var(--color-primary)]">绑定材料快照</p>
+      <p className="text-xs text-[var(--color-text-soft)] leading-relaxed">
+        {plan.jdSnapshot?.company || "未知公司"} · {plan.jdSnapshot?.role || "目标岗位"} · {plan.resumeSnapshot?.title || "未绑定简历"}
+      </p>
+      <p className="text-xs text-[var(--color-muted)] leading-relaxed">
+        {sourceItems.join(" · ")}
+      </p>
+      {plan.focusAreas.length ? (
+        <p className="text-xs text-[var(--color-muted)] leading-relaxed">
+          关注点：{plan.focusAreas.slice(0, 3).join("、")}
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+function SourceTranscriptTrace({
+  recap,
+  state,
+}: {
+  recap: InterviewRecap;
+  state?: InterviewSessionState;
+}) {
+  const transcript = state?.transcript || [];
+  const sourceIds = recapSourceTurnIds(recap);
+  const exactTurns = transcript.filter((turn) => sourceIds.has(turn.id));
+  const visibleTurns: InterviewTurn[] = exactTurns.slice(-3);
+  return (
+    <section className="rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-medium text-[var(--color-primary)]">复盘依据转录</p>
+        <span className="text-xs text-[var(--color-muted)]">
+          {exactTurns.length}/{transcript.length} 条
+        </span>
+      </div>
+      {visibleTurns.length ? (
+        <div className="space-y-2">
+          {visibleTurns.map((turn) => (
+            <div key={turn.id} className="text-xs leading-relaxed">
+              <p className="text-[var(--color-muted)]">
+                {turn.role === "user" ? "我" : "Agent"} · {formatTraceDate(turn.createdAt)} · #{turn.id.slice(0, 8)}
+              </p>
+              <p className="text-[var(--color-text-soft)] line-clamp-2">
+                {compactText(turn.content, 160)}
+              </p>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="text-xs text-[var(--color-muted)] leading-relaxed">
+          这份旧复盘未记录可追溯转录 ID，打开会话可查看完整上下文。
+        </p>
+      )}
+    </section>
+  );
+}
+
+function StructuredRecap({ recap, state }: { recap: InterviewRecap; state?: InterviewSessionState }) {
   const questionFeedback = (recap.questionFeedback || []).slice(0, 2);
   return (
     <div className="space-y-3 text-sm text-[var(--color-text)]">
+      <PlanSnapshotTrace plan={state?.planSnapshot} />
+
       <section>
         <p className="text-xs font-medium text-[var(--color-primary)] mb-1">复盘摘要</p>
         <p className="leading-relaxed">{recap.overallVerdict}</p>
@@ -96,6 +192,7 @@ function StructuredRecap({ recap }: { recap: InterviewRecap }) {
       ) : null}
 
       <StructuredRecapSection title="下一步" items={recap.nextPracticePlan} limit={3} />
+      <SourceTranscriptTrace recap={recap} state={state} />
     </div>
   );
 }
@@ -187,7 +284,7 @@ export default function InterviewRecapReview({
                   </div>
 
                   {recap ? (
-                    <StructuredRecap recap={recap} />
+                    <StructuredRecap recap={recap} state={state} />
                   ) : (
                     <div className="text-sm text-[var(--color-text)]">
                       <p className="text-xs font-medium text-[var(--color-primary)] mb-1">

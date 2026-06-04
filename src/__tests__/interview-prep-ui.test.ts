@@ -41,4 +41,14 @@ describe("Interview Prep UI surfaces", () => {
     expect(recap).toContain("recap.nextPracticePlan");
     expect(recap).not.toContain("rawText");
   });
+
+  it("links recap review to the frozen plan snapshot and source transcript turns", () => {
+    const recap = source("src/app/interview/InterviewRecapReview.tsx");
+
+    expect(recap).toContain("PlanSnapshotTrace");
+    expect(recap).toContain("SourceTranscriptTrace");
+    expect(recap).toContain("state?.planSnapshot");
+    expect(recap).toContain("recap.sourceTurnIds");
+    expect(recap).toContain("transcript.filter((turn) => sourceIds.has(turn.id))");
+  });
 });
