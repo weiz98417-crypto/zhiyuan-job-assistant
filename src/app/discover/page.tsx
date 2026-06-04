@@ -67,6 +67,9 @@ interface ScanHistoryEntry {
 
 const DISCOVERY_VISIBLE_STATUSES: JobItem["status"][] = ["new", "viewed", "saved", "evaluating", "evaluated"];
 
+const DEFAULT_DISCOVERY_TITLE_KEYWORDS = "AI产品经理,大模型产品经理,Agent产品经理,数据产品经理,AI运营";
+const DEFAULT_DISCOVERY_EXCLUDE_KEYWORDS = "实习,销售,客服,外包,劳务,兼职,电话销售,地推";
+
 const DISCOVERY_JOB_STATUS_BADGES: Record<JobItem["status"], { label: string; className: string }> = {
   new: {
     label: "新发现",
@@ -131,10 +134,10 @@ export default function DiscoverPage() {
   const [savingJD, setSavingJD] = useState(false);
   const [dismissedIds, setDismissedIds] = useState<Set<number>>(new Set());
   const [showScanIntro, setShowScanIntro] = useState(false);
-  const [titleKeyword, setTitleKeyword] = useState("");
-  const [excludeKeyword, setExcludeKeyword] = useState("实习,销售,客服");
-  const [locationFilter, setLocationFilter] = useState("杭州");
-  const [maxResults, setMaxResults] = useState(50);
+  const [titleKeyword, setTitleKeyword] = useState(DEFAULT_DISCOVERY_TITLE_KEYWORDS);
+  const [excludeKeyword, setExcludeKeyword] = useState(DEFAULT_DISCOVERY_EXCLUDE_KEYWORDS);
+  const [locationFilter, setLocationFilter] = useState("");
+  const [maxResults, setMaxResults] = useState(100);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const { showToast } = useToast();
 
@@ -439,7 +442,7 @@ export default function DiscoverPage() {
             <input
               value={titleKeyword}
               onChange={(e) => setTitleKeyword(e.target.value)}
-              placeholder="例如：AI产品经理、数据运营、Agent"
+              placeholder="例如：AI产品经理、大模型产品经理、数据产品经理"
               disabled={scanning}
               className="w-full rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
             />
@@ -449,7 +452,7 @@ export default function DiscoverPage() {
             <input
               value={excludeKeyword}
               onChange={(e) => setExcludeKeyword(e.target.value)}
-              placeholder="例如：实习,销售,客服"
+              placeholder="例如：实习,销售,客服,外包"
               disabled={scanning}
               className="w-full rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
             />
@@ -459,7 +462,7 @@ export default function DiscoverPage() {
             <input
               value={locationFilter}
               onChange={(e) => setLocationFilter(e.target.value)}
-              placeholder="例如：杭州、上海、北京"
+              placeholder="留空为全国，例如：北京、上海、杭州、深圳"
               disabled={scanning}
               className="w-full rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
             />
@@ -472,9 +475,9 @@ export default function DiscoverPage() {
               disabled={scanning}
               className="w-full rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
             >
-              <option value={20}>20</option>
-              <option value={50}>50</option>
               <option value={100}>100</option>
+              <option value={50}>50</option>
+              <option value={20}>20</option>
             </select>
           </label>
           <WarmButton variant="primary" size="sm" onClick={startScan} disabled={scanning || !titleKeyword.trim()}>
@@ -678,7 +681,7 @@ export default function DiscoverPage() {
                 <Search size={24} className="text-[var(--color-primary)]" />
               </div>
               <HandwritingTitle as="h2">尚未扫描职位</HandwritingTitle>
-              <p className="text-[var(--color-muted)] text-sm">点击「开始扫描」自动抓取 32 家目标公司的招聘官网</p>
+              <p className="text-[var(--color-muted)] text-sm">点击「开始扫描」自动抓取国内目标公司的招聘官网</p>
               <WarmButton variant="primary" size="sm" onClick={startScan}>开始扫描</WarmButton>
             </div>
           ) : (
@@ -729,12 +732,12 @@ export default function DiscoverPage() {
       {/* ── Tab: Sources ────────────────────────────────────────── */}
       {activeTab === "sources" && (
         <div className="space-y-3">
-          <p className="text-sm text-[var(--color-muted)]">32 家公司 · 3 种 ATS 类型</p>
+          <p className="text-sm text-[var(--color-muted)]">国内目标公司 · 官网优先 · 平台补扫</p>
           <div className="grid gap-2 sm:grid-cols-2">
             {[
-              { name: "Moka 系 (12家)", desc: "字节/美团/快手/滴滴/小米/B站/小红书/网易/知乎/理想/蔚来/得物", color: "bg-blue-50 text-blue-700" },
-              { name: "北森系 (5家)", desc: "京东/比亚迪/贝壳/携程/唯品会", color: "bg-purple-50 text-purple-700" },
-              { name: "自定义 (15家)", desc: "腾讯/阿里/蚂蚁/百度/拼多多/米哈游/大疆/DeepSeek等 — LLM提取", color: "bg-amber-50 text-amber-700" },
+              { name: "大厂产品与数据", desc: "字节/腾讯/阿里/百度/美团/快手/京东/小米/拼多多", color: "bg-blue-50 text-blue-700" },
+              { name: "内容与社区", desc: "小红书/B站/网易/滴滴等，重点看产品、运营、数据岗位", color: "bg-purple-50 text-purple-700" },
+              { name: "AI 与硬件", desc: "华为/大疆/米哈游/理想等，优先发现 AI、Agent、数据产品机会", color: "bg-amber-50 text-amber-700" },
             ].map(g => (
               <PaperCard key={g.name} padding="sm">
                 <p className={`text-xs px-2 py-0.5 rounded-full inline-block mb-2 ${g.color}`}>{g.name}</p>

@@ -45,7 +45,7 @@
   - `已评估`
   - `已跳过`
 - [x] Do not add report browsing actions to Discovery.
-- [ ] Adjust default scan config toward Chinese target roles and domestic companies.
+- [x] Adjust default scan config toward Chinese target roles and domestic companies.
 
 ## 4. Agent Handoff
 
