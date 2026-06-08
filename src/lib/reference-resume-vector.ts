@@ -46,7 +46,7 @@ export interface ReferenceResumeRetrievalQuery {
 }
 
 const ROLE_ALIASES: Array<[RegExp, string]> = [
-  [/(ai|人工智能|大模型|智能).{0,8}(产品|pm)|ai产品|aipm/i, "ai_product_manager"],
+  [/(ai|artificial intelligence|人工智能|大模型|智能).{0,24}(product|产品|pm)|ai[\s_-]*product|ai产品|aipm/i, "ai_product_manager"],
   [/(ai|人工智能|大模型|智能).{0,8}运营|ai运营|增长运营|用户运营/i, "ai_operations"],
   [/(ai|人工智能|大模型|智能).{0,8}(售前|解决方案)|ai售前|pre.?sales/i, "ai_presales"],
   [/数据产品|bi|business intelligence|数仓|数据经营|主数据/i, "data_product_manager"],

@@ -32,7 +32,7 @@ const SAVE_EXCELLENT_RESUME_RE =
   /(保存|存|沉淀|加入|放到).{0,16}(优秀|参考|标杆|样例|范例).{0,16}(简历|履历|resume|cv)|(优秀|参考|标杆|样例|范例).{0,16}(简历|履历|resume|cv).{0,16}(保存|存|沉淀|加入|放到)/i;
 const RESUME_HINT_RE = /(简历|履历|resume|curriculum vitae|\bcv\b|教育经历|项目经历|工作经历|实习经历|专业技能|个人优势|求职意向|个人概述)/i;
 const ROLE_ALIASES: Array<[RegExp, string]> = [
-  [/(ai|人工智能|大模型|智能).{0,8}(产品|pm)|ai产品|aipm/i, "ai_product_manager"],
+  [/(ai|artificial intelligence|人工智能|大模型|智能).{0,24}(product|产品|pm)|ai[\s_-]*product|ai产品|aipm/i, "ai_product_manager"],
   [/(ai|人工智能|大模型|智能).{0,8}运营|ai运营|增长运营|用户运营/i, "ai_operations"],
   [/(ai|人工智能|大模型|智能).{0,8}(售前|解决方案)|ai售前|pre.?sales/i, "ai_presales"],
   [/数据产品|bi|business intelligence|数仓|数据经营|主数据/i, "data_product_manager"],

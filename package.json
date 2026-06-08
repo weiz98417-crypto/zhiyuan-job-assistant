@@ -24,6 +24,7 @@
     "migrate:postgres": "node scripts/migrate-sqlite-to-postgres.mjs",
     "check:postgres-migration": "node scripts/check-postgres-migration.mjs",
     "backfill:memory": "node scripts/backfill-memory.mjs",
+    "eval:memory": "vitest run src/__tests__/memory-eval-harness.test.ts",
     "smoke:embedding": "node scripts/smoke-embedding.mjs",
     "cleanup:profile-signals": "node scripts/cleanup-profile-signals.mjs",
     "scan": "node scan.mjs",
