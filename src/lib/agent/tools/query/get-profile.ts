@@ -78,7 +78,8 @@ async function handler(params: Record<string, unknown> = {}): Promise<ToolResult
     }
 
     const memoryContext = await fetchAgentMemoryContext({
-      task: "profile",
+      task: "profile_growth",
+      agentId: "profile",
       query: sectionFilter ? `profile ${sectionFilter}` : "profile resume goals preferences interview observations",
       budgetChars: 700,
       semanticTopK: 4,

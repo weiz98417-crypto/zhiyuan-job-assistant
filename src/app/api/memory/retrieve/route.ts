@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { retrieveMemorySnippets } from "@/lib/memory/postgres-memory";
-import type { MemorySourceFilter } from "@/lib/memory/vector-memory";
+import { normalizeMemorySourceFilters, type MemorySourceFilter } from "@/lib/memory/vector-memory";
+import { enforceAgentMemoryPolicy } from "@/lib/agent/memory-context";
+import { resolveAgentMemoryPolicy } from "@/lib/agent/memory-policy";
 
 const ALLOWED_FILTERS = new Set([
   "resume",
@@ -26,6 +28,8 @@ export async function POST(request: Request) {
       query?: string;
       sourceTypes?: string[];
       limit?: number;
+      task?: string;
+      agentId?: string;
     };
 
     const query = (body.query || "").trim();
@@ -33,15 +37,46 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: "query is required" }, { status: 400 });
     }
 
-    const sourceTypes = normalizeSourceTypes(body.sourceTypes);
+    const policy = resolveAgentMemoryPolicy(body.task);
+    const requestedSourceTypes = normalizeMemorySourceFilters(normalizeSourceTypes(body.sourceTypes));
+    const sourceTypes = requestedSourceTypes.length
+      ? policy.allowedSourceTypes.filter((sourceType) => requestedSourceTypes.includes(sourceType))
+      : policy.allowedSourceTypes;
+    if (policy.semanticTopK <= 0 || sourceTypes.length === 0) {
+      return NextResponse.json({
+        success: true,
+        data: {
+          snippets: [],
+          policyId: policy.id,
+          task: policy.task,
+          deniedSources: [],
+          warnings: ["semantic_memory_denied_by_policy"],
+        },
+      });
+    }
+
     const snippets = await retrieveMemorySnippets({
       userId: user.userId,
       query,
       sourceTypes,
-      limit: body.limit,
+      limit: Math.min(body.limit || policy.semanticTopK, policy.maxSemanticSnippets),
+    });
+    const enforced = enforceAgentMemoryPolicy({
+      policy,
+      agentId: body.agentId,
+      structuredFacts: [],
+      semanticSnippets: snippets,
     });
 
-    return NextResponse.json({ success: true, data: { snippets } });
+    return NextResponse.json({
+      success: true,
+      data: {
+        snippets: enforced.semanticSnippets,
+        deniedSources: enforced.deniedSources,
+        policyId: policy.id,
+        task: policy.task,
+      },
+    });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     if (message === "Not authenticated") {

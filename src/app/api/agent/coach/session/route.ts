@@ -218,7 +218,8 @@ export async function POST(request: Request) {
 
       const memory = await assembleAgentMemoryContext({
         userId: user.userId,
-        task: "interview",
+        task: "interview_coaching",
+        agentId: "interview",
         query: `${company} ${role}\n${jdText || ""}\n${cvText || ""}`,
         budgetChars: 1400,
         semanticTopK: 5,

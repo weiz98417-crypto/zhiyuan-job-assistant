@@ -14,7 +14,8 @@ async function generateHandler(params: Record<string, unknown>): Promise<ToolRes
 
   try {
     const memoryContext = await fetchAgentMemoryContext({
-      task: "interview",
+      task: "interview_coaching",
+      agentId: "interview",
       query: `${company} ${role}\n${jdText.slice(0, 900)}\n${cvText.slice(0, 900)}`,
       budgetChars: 1100,
       semanticTopK: 5,
@@ -99,7 +100,8 @@ async function scoreHandler(params: Record<string, unknown>): Promise<ToolResult
 
   try {
     const memoryContext = await fetchAgentMemoryContext({
-      task: "interview",
+      task: "interview_coaching",
+      agentId: "interview",
       query: `${question}\n${answer}\n${context}`,
       budgetChars: 800,
       semanticTopK: 4,

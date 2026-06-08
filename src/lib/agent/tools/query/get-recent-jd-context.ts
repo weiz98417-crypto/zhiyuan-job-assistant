@@ -46,7 +46,8 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
     const body = jd.body.trim();
     const short = body.length > 2500 ? `${body.slice(0, 2500)}\n\n[JD 已截断，仅供上下文使用]` : body;
     const memoryContext = await fetchAgentMemoryContext({
-      task: "jd",
+      task: "jd_evaluation",
+      agentId: "evaluate",
       query: `${jd.company || ""} ${jd.role || ""}\n${body.slice(0, 900)}`,
       budgetChars: 900,
       semanticTopK: 4,

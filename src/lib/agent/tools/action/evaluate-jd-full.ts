@@ -133,7 +133,8 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
   // Delegate to streaming evaluate API — handler returns the stream,
   // client-runner reads it and yields events through the generator
   const memoryContext = await fetchAgentMemoryContext({
-    task: "jd",
+    task: "jd_evaluation",
+    agentId: "evaluate",
     query: `${targetCompany || ""}\n${jdText.slice(0, 1200)}`,
     budgetChars: 1200,
     semanticTopK: 5,

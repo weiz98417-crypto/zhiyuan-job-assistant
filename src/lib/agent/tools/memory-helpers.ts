@@ -1,4 +1,5 @@
-import type { AgentMemoryContext, AgentMemoryTask } from "@/lib/agent/memory-context";
+import type { AgentMemoryContext } from "@/lib/agent/memory-context";
+import type { AgentMemoryTask } from "@/lib/agent/memory-policy";
 import type { MemorySourceType } from "@/lib/memory/vector-memory";
 
 function apiPath(path: string): string {
@@ -6,10 +7,13 @@ function apiPath(path: string): string {
 }
 
 export async function fetchAgentMemoryContext(input: {
-  task: AgentMemoryTask;
+  task: AgentMemoryTask | string;
+  agentId?: string;
   query?: string;
   budgetChars?: number;
   semanticTopK?: number;
+  userTextTask?: string;
+  contentTask?: string;
 }): Promise<AgentMemoryContext | null> {
   try {
     const res = await fetch(apiPath("/api/agent/memory-context"), {

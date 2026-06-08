@@ -1,26 +1,29 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
-import { assembleAgentMemoryContext, type AgentMemoryTask } from "@/lib/agent/memory-context";
-
-const TASKS = new Set(["jd", "offer", "resume", "interview", "profile", "general_chat"]);
+import { assembleAgentMemoryContext } from "@/lib/agent/memory-context";
 
 export async function POST(request: Request) {
   try {
     const user = await getCurrentUser();
     const body = await request.json().catch(() => ({})) as {
       task?: string;
+      agentId?: string;
       query?: string;
       budgetChars?: number;
       semanticTopK?: number;
+      userTextTask?: string;
+      contentTask?: string;
     };
 
-    const task = TASKS.has(body.task || "") ? body.task as AgentMemoryTask : "general_chat";
     const context = await assembleAgentMemoryContext({
       userId: user.userId,
-      task,
+      task: body.task,
+      agentId: body.agentId,
       query: body.query || "",
       budgetChars: body.budgetChars,
       semanticTopK: body.semanticTopK,
+      userTextTask: body.userTextTask,
+      contentTask: body.contentTask,
     });
 
     return NextResponse.json({ success: true, data: context });

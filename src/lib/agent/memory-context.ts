@@ -6,158 +6,156 @@ import {
   type MemoryItemRecord,
 } from "@/lib/memory/postgres-memory";
 import {
+  buildMemoryPolicyDenial,
+  detectMemoryTaskConflict,
+  evaluateMemoryPolicySource,
+  resolveAgentMemoryPolicy,
+  type AgentMemoryPolicy,
+  type AgentMemoryResolvedTask,
+  type AgentStructuredMemoryScope,
+  type MemoryPolicyDenial,
+} from "@/lib/agent/memory-policy";
+import {
   extractTextFromUnknown,
   type MemorySnippet,
-  type MemorySourceFilter,
+  type MemorySourceType,
 } from "@/lib/memory/vector-memory";
 
-export type AgentMemoryTask = "jd" | "offer" | "resume" | "interview" | "profile" | "general_chat";
-
-export interface AgentMemoryPolicy {
-  task: AgentMemoryTask;
-  sourceTypes: MemorySourceFilter[];
-  structuredScopes: Array<"profile" | "cv" | "jds" | "reports" | "offers" | "offer_reports" | "memory_items" | "sessions">;
-  semanticTopK: number;
-  budgetChars: number;
-}
+export { resolveAgentMemoryPolicy } from "@/lib/agent/memory-policy";
 
 export interface StructuredMemoryFact {
   label: string;
-  sourceType: string;
+  sourceType: MemorySourceType;
   sourceId?: string | number;
   text: string;
   status?: string;
+  visibility?: string;
+  memoryType?: string;
   confidence?: number;
   importance?: number;
 }
 
 export interface AgentMemoryContext {
-  task: AgentMemoryTask;
-  sourceTypes: MemorySourceFilter[];
+  task: AgentMemoryResolvedTask;
+  policyId: string;
+  agentId: string;
+  sourceTypes: MemorySourceType[];
   structuredFacts: StructuredMemoryFact[];
   semanticSnippets: MemorySnippet[];
   llmSummary: string;
   warnings: string[];
+  deniedSources: MemoryPolicyDenial[];
 }
 
 export interface AssembleAgentMemoryContextInput {
   userId: string;
-  task: AgentMemoryTask;
+  task?: string;
+  agentId?: string;
   query?: string;
   budgetChars?: number;
   semanticTopK?: number;
   semanticSnippets?: MemorySnippet[];
-}
-
-export const AGENT_MEMORY_POLICIES: Record<AgentMemoryTask, AgentMemoryPolicy> = {
-  jd: {
-    task: "jd",
-    sourceTypes: ["resume", "profile", "jd", "report"],
-    structuredScopes: ["profile", "cv", "reports", "memory_items"],
-    semanticTopK: 6,
-    budgetChars: 2400,
-  },
-  offer: {
-    task: "offer",
-    sourceTypes: ["offer", "profile", "report"],
-    structuredScopes: ["profile", "offers", "offer_reports", "memory_items"],
-    semanticTopK: 6,
-    budgetChars: 2200,
-  },
-  resume: {
-    task: "resume",
-    sourceTypes: ["resume", "jd", "profile", "report"],
-    structuredScopes: ["profile", "cv", "jds", "reports", "memory_items"],
-    semanticTopK: 6,
-    budgetChars: 2400,
-  },
-  interview: {
-    task: "interview",
-    sourceTypes: ["resume", "jd", "report", "interview", "profile"],
-    structuredScopes: ["profile", "cv", "jds", "reports", "sessions", "memory_items"],
-    semanticTopK: 8,
-    budgetChars: 2800,
-  },
-  profile: {
-    task: "profile",
-    sourceTypes: ["profile", "resume", "interview"],
-    structuredScopes: ["profile", "cv", "sessions", "memory_items"],
-    semanticTopK: 5,
-    budgetChars: 1800,
-  },
-  general_chat: {
-    task: "general_chat",
-    sourceTypes: ["profile", "resume", "jd", "offer", "report", "interview"],
-    structuredScopes: ["profile", "memory_items"],
-    semanticTopK: 5,
-    budgetChars: 1600,
-  },
-};
-
-export function resolveAgentMemoryPolicy(task: AgentMemoryTask): AgentMemoryPolicy {
-  return AGENT_MEMORY_POLICIES[task] || AGENT_MEMORY_POLICIES.general_chat;
+  userTextTask?: string;
+  contentTask?: string;
 }
 
 export async function assembleAgentMemoryContext(input: AssembleAgentMemoryContextInput): Promise<AgentMemoryContext> {
   const policy = resolveAgentMemoryPolicy(input.task);
+  const agentId = input.agentId || inferAgentId(policy.task);
   const warnings: string[] = [];
-  const structuredFacts = await readStructuredFacts(input.userId, policy).catch((error) => {
+  let deniedSources: MemoryPolicyDenial[] = [];
+  const conflict = detectMemoryTaskConflict({
+    userTextTask: input.userTextTask || input.task,
+    contentTask: input.contentTask,
+  });
+
+  if (conflict.requiresClarification) {
+    warnings.push(`clarification_required:${conflict.reason}`);
+    return buildEmptyContext({ policy, agentId, warnings, deniedSources });
+  }
+
+  const rawStructuredFacts = await readStructuredFacts(input.userId, policy).catch((error) => {
     warnings.push(`structured:${error instanceof Error ? error.message : String(error)}`);
     return [] as StructuredMemoryFact[];
   });
 
   let semanticSnippets = input.semanticSnippets || [];
-  if (!input.semanticSnippets && input.query?.trim() && getDatabaseDriver() === "postgres" && isPostgresConfigured()) {
+  if (
+    !input.semanticSnippets
+    && input.query?.trim()
+    && policy.semanticTopK > 0
+    && getDatabaseDriver() === "postgres"
+    && isPostgresConfigured()
+  ) {
     try {
       semanticSnippets = await retrieveMemorySnippets({
         userId: input.userId,
         query: input.query,
-        sourceTypes: policy.sourceTypes,
-        limit: input.semanticTopK || policy.semanticTopK,
+        sourceTypes: policy.allowedSourceTypes,
+        limit: Math.min(input.semanticTopK || policy.semanticTopK, policy.maxSemanticSnippets),
       });
     } catch (error) {
       warnings.push(`semantic:${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
+  const enforced = enforceAgentMemoryPolicy({
+    policy,
+    agentId,
+    structuredFacts: rawStructuredFacts,
+    semanticSnippets,
+  });
+  deniedSources = enforced.deniedSources;
+  logMemoryPolicyDenials(deniedSources);
+
   const llmSummary = formatAgentMemoryContext({
     task: policy.task,
-    sourceTypes: policy.sourceTypes,
-    structuredFacts,
-    semanticSnippets,
+    policyId: policy.id,
+    sourceTypes: policy.allowedSourceTypes,
+    structuredFacts: enforced.structuredFacts,
+    semanticSnippets: enforced.semanticSnippets,
     budgetChars: input.budgetChars || policy.budgetChars,
   });
 
   return {
     task: policy.task,
-    sourceTypes: policy.sourceTypes,
-    structuredFacts,
-    semanticSnippets,
+    policyId: policy.id,
+    agentId,
+    sourceTypes: policy.allowedSourceTypes,
+    structuredFacts: enforced.structuredFacts,
+    semanticSnippets: enforced.semanticSnippets,
     llmSummary,
     warnings,
+    deniedSources,
   };
 }
 
 export function formatAgentMemoryContext(input: {
-  task: AgentMemoryTask;
-  sourceTypes: MemorySourceFilter[];
+  task: AgentMemoryResolvedTask;
+  policyId?: string;
+  sourceTypes: MemorySourceType[];
   structuredFacts: StructuredMemoryFact[];
   semanticSnippets: MemorySnippet[];
   budgetChars: number;
 }): string {
   const lines: string[] = [
-    `Agent memory context task=${input.task} filters=${input.sourceTypes.join(",")}`,
+    `Agent memory task=${input.task}`,
+    `[policy:${input.policyId || "unknown"} sources=${input.sourceTypes.length}]`,
   ];
 
   for (const fact of input.structuredFacts) {
     const sourceId = fact.sourceId === undefined ? "" : `#${fact.sourceId}`;
     const status = fact.status ? ` status=${fact.status}` : "";
+    const memoryType = fact.memoryType ? ` memoryType=${fact.memoryType}` : "";
     const confidence = fact.confidence !== undefined ? ` confidence=${fact.confidence}` : "";
-    lines.push(`[structured:${fact.sourceType}${sourceId}${status}${confidence}] ${compactLine(fact.label)}: ${compactLine(fact.text, 360)}`);
+    lines.push(`[structured:${fact.sourceType}${sourceId}${status}${memoryType}${confidence}] ${compactLine(fact.label)}: ${compactLine(fact.text, 360)}`);
   }
 
   for (const snippet of input.semanticSnippets) {
-    lines.push(`[semantic:${snippet.sourceType}#${snippet.sourceId} score=${snippet.score.toFixed(2)}] ${compactLine(snippet.snippet, 360)}`);
+    const metadata = readSnippetMetadata(snippet);
+    const status = metadata.status ? ` status=${metadata.status}` : "";
+    const memoryType = metadata.memoryType ? ` memoryType=${metadata.memoryType}` : "";
+    lines.push(`[semantic:${snippet.sourceType}#${snippet.sourceId}${status}${memoryType} score=${snippet.score.toFixed(2)}] ${compactLine(snippet.snippet, 360)}`);
   }
 
   return applyBudget(lines.join("\n"), input.budgetChars);
@@ -166,7 +164,7 @@ export function formatAgentMemoryContext(input: {
 async function readStructuredFacts(userId: string, policy: AgentMemoryPolicy): Promise<StructuredMemoryFact[]> {
   const repos = getDataRepositories();
   const facts: StructuredMemoryFact[] = [];
-  const wants = (scope: AgentMemoryPolicy["structuredScopes"][number]) => policy.structuredScopes.includes(scope);
+  const wants = (scope: AgentStructuredMemoryScope) => policy.structuredScopes.includes(scope);
 
   if (wants("profile")) {
     const profile = await repos.profiles.get(userId).catch(() => undefined);
@@ -260,7 +258,19 @@ async function readStructuredFacts(userId: string, policy: AgentMemoryPolicy): P
   }
 
   if (wants("memory_items") && getDatabaseDriver() === "postgres" && isPostgresConfigured()) {
-    const items = await listMemoryItems({ userId, limit: 12 }).catch(() => []);
+    const statuses = policy.allowedMemoryStatuses
+      .filter((status) => status !== "candidate" || policy.allowCandidateMemory);
+    const memoryTypes = policy.allowedMemoryTypes && policy.allowedMemoryTypes.length > 0
+      ? policy.allowedMemoryTypes
+      : undefined;
+    const items = memoryTypes
+      ? await listMemoryItems({
+        userId,
+        statuses: statuses.length ? statuses : ["active"],
+        memoryTypes,
+        limit: policy.maxStructuredFacts,
+      }).catch(() => [])
+      : [];
     facts.push(...items.map(memoryItemToFact));
   }
 
@@ -268,15 +278,157 @@ async function readStructuredFacts(userId: string, policy: AgentMemoryPolicy): P
 }
 
 function memoryItemToFact(item: MemoryItemRecord): StructuredMemoryFact {
+  const metadata = parseJson(item.metadata_json) as Record<string, unknown>;
   return {
     label: item.memory_type,
-    sourceType: "memory_item",
+    sourceType: memoryItemSourceType(item.memory_type),
     sourceId: item.id,
     text: item.canonical_text,
     status: item.status,
+    visibility: typeof metadata.visibility === "string" ? metadata.visibility : "private",
+    memoryType: item.memory_type,
     confidence: Number(item.confidence || 0),
     importance: Number(item.importance || 0),
   };
+}
+
+export function enforceAgentMemoryPolicy(input: {
+  policy: AgentMemoryPolicy;
+  agentId?: string;
+  structuredFacts: StructuredMemoryFact[];
+  semanticSnippets: MemorySnippet[];
+}): {
+  structuredFacts: StructuredMemoryFact[];
+  semanticSnippets: MemorySnippet[];
+  deniedSources: MemoryPolicyDenial[];
+} {
+  const deniedSources: MemoryPolicyDenial[] = [];
+  const agentId = input.agentId || "unknown";
+
+  const structuredFacts = input.structuredFacts.filter((fact) => {
+    const decision = evaluateMemoryPolicySource(input.policy, {
+      sourceKind: fact.memoryType ? "memory_item" : "structured",
+      sourceType: fact.sourceType,
+      sourceId: fact.sourceId,
+      memoryType: fact.memoryType,
+      status: fact.status,
+      visibility: fact.visibility,
+    });
+    if (decision.allowed) return true;
+    deniedSources.push(buildMemoryPolicyDenial({
+      policy: input.policy,
+      agentId,
+      candidate: {
+        sourceKind: fact.memoryType ? "memory_item" : "structured",
+        sourceType: fact.sourceType,
+        sourceId: fact.sourceId,
+        memoryType: fact.memoryType,
+        status: fact.status,
+        visibility: fact.visibility,
+      },
+      reason: decision.reason,
+    }));
+    return false;
+  }).slice(0, input.policy.maxStructuredFacts);
+
+  const semanticSnippets = input.semanticSnippets.filter((snippet) => {
+    const metadata = readSnippetMetadata(snippet);
+    const decision = evaluateMemoryPolicySource(input.policy, {
+      sourceKind: "semantic",
+      sourceType: snippet.sourceType,
+      sourceId: snippet.sourceId,
+      memoryType: metadata.memoryType,
+      status: metadata.status,
+      visibility: metadata.visibility,
+    });
+    if (decision.allowed) return true;
+    deniedSources.push(buildMemoryPolicyDenial({
+      policy: input.policy,
+      agentId,
+      candidate: {
+        sourceKind: "semantic",
+        sourceType: snippet.sourceType,
+        sourceId: snippet.sourceId,
+        memoryType: metadata.memoryType,
+        status: metadata.status,
+        visibility: metadata.visibility,
+      },
+      reason: decision.reason,
+    }));
+    return false;
+  }).slice(0, input.policy.maxSemanticSnippets);
+
+  return { structuredFacts, semanticSnippets, deniedSources };
+}
+
+function buildEmptyContext(input: {
+  policy: AgentMemoryPolicy;
+  agentId: string;
+  warnings: string[];
+  deniedSources: MemoryPolicyDenial[];
+}): AgentMemoryContext {
+  return {
+    task: input.policy.task,
+    policyId: input.policy.id,
+    agentId: input.agentId,
+    sourceTypes: input.policy.allowedSourceTypes,
+    structuredFacts: [],
+    semanticSnippets: [],
+    llmSummary: formatAgentMemoryContext({
+      task: input.policy.task,
+      policyId: input.policy.id,
+      sourceTypes: input.policy.allowedSourceTypes,
+      structuredFacts: [],
+      semanticSnippets: [],
+      budgetChars: input.policy.budgetChars,
+    }),
+    warnings: input.warnings,
+    deniedSources: input.deniedSources,
+  };
+}
+
+function readSnippetMetadata(snippet: MemorySnippet): {
+  memoryType?: string;
+  status?: string;
+  visibility?: string;
+} {
+  const metadata = snippet.metadata || {};
+  return {
+    memoryType: readStringMetadata(metadata, ["memoryType", "memory_type", "type"]),
+    status: readStringMetadata(metadata, ["status", "memoryStatus", "referenceStatus"]),
+    visibility: readStringMetadata(metadata, ["visibility", "scope"]),
+  };
+}
+
+function readStringMetadata(metadata: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = metadata[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+function memoryItemSourceType(memoryType: string): MemorySourceType {
+  if (memoryType.startsWith("jd_")) return "jd_report";
+  if (memoryType.startsWith("offer_") || memoryType.includes("compensation") || memoryType.includes("work_style")) return "offer_report";
+  if (memoryType.startsWith("interview_")) return "interview";
+  if (memoryType === "excellent_resume_pattern" || memoryType.startsWith("resume_")) return "reference_resume";
+  return "profile_signal";
+}
+
+function inferAgentId(task: AgentMemoryResolvedTask): string {
+  if (task === "jd_evaluation") return "evaluate";
+  if (task === "offer_evaluation") return "offer";
+  if (task === "resume_optimization" || task === "reference_resume_save") return "resume";
+  if (task === "interview_coaching") return "interview";
+  if (task === "profile_growth") return "profile";
+  if (task === "general_chat") return "general";
+  return "unknown";
+}
+
+function logMemoryPolicyDenials(denials: MemoryPolicyDenial[]): void {
+  if (!denials.length || process.env.NODE_ENV === "production") return;
+  console.warn("[agent-memory-policy] denied sources", denials);
 }
 
 function summarizeJson(value: unknown, maxChars: number): string {

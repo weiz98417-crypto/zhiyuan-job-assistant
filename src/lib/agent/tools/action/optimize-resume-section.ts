@@ -79,7 +79,8 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
   }
 
   const memoryContext = await fetchAgentMemoryContext({
-    task: "resume",
+    task: "resume_optimization",
+    agentId: "resume",
     query: `${instruction || ""}\n${String(params.jd_text || "").slice(0, 900)}\n${sectionContent.slice(0, 900)}`,
     budgetChars: 900,
     semanticTopK: 4,

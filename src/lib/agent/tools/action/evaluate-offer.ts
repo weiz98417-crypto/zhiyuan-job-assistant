@@ -327,7 +327,8 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
   }
 
   const memoryContext = await fetchAgentMemoryContext({
-    task: "offer",
+    task: "offer_evaluation",
+    agentId: "offer",
     query: `${snapshot.company || ""} ${snapshot.role || ""} ${snapshot.location || ""} salary compensation offer preference`,
     budgetChars: 1000,
     semanticTopK: 5,
