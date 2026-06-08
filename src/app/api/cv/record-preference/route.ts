@@ -1,19 +1,37 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { getDataRepositories } from "@/lib/data-repositories";
-import { recordReferenceResumeUsage } from "@/lib/reference-resume-vector";
+import { recordOptimizationMemoryFeedback } from "@/lib/memory/feedback-promotion";
 
 export async function POST(request: Request) {
   try {
     const user = await getCurrentUser();
     const body = await request.json();
-    const { section_id, variant_type, action, original_text, optimized_text, operation, referenceMemory } = body as {
+    const {
+      section_id,
+      variant_type,
+      action,
+      original_text,
+      optimized_text,
+      edited_text,
+      operation,
+      referenceMemory,
+      roleCategory,
+      targetJdId,
+      taskType,
+      feedbackText,
+    } = body as {
       section_id: string;
       variant_type: string;
       action: string;
       original_text?: string;
       optimized_text?: string;
+      edited_text?: string;
       operation?: string;
+      roleCategory?: string;
+      targetJdId?: number;
+      taskType?: string;
+      feedbackText?: string;
       referenceMemory?: {
         snippetIds?: number[];
         referenceResumeIds?: number[];
@@ -28,9 +46,9 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!["accept", "reject"].includes(action)) {
+    if (!["accept", "accepted", "save", "saved", "reject", "rejected", "dismiss", "dismissed", "heavily_edit", "heavily_edited", "modified"].includes(action)) {
       return NextResponse.json(
-        { success: false, error: "action 必须为 accept 或 reject" },
+        { success: false, error: "action 必须是 accept/save/reject/dismiss/heavily_edit" },
         { status: 400 },
       );
     }
@@ -44,24 +62,21 @@ export async function POST(request: Request) {
       optimized_text,
     }, user.userId);
 
-    const referenceResumeIds = Array.isArray(referenceMemory?.referenceResumeIds)
-      ? [...new Set(referenceMemory.referenceResumeIds.map(Number).filter((id) => Number.isInteger(id) && id > 0))]
-      : [];
-    if (referenceResumeIds.length > 0) {
-      await Promise.all(referenceResumeIds.map((referenceResumeId) => recordReferenceResumeUsage({
-        referenceResumeId,
-        userId: user.userId,
-        taskType: "cv_optimize",
-        accepted: action === "accept",
-        feedback: `${action}:${variant_type || ""}`,
-        metadata: {
-          sectionId: section_id,
-          operation: operation || "",
-          snippetIds: referenceMemory?.snippetIds || [],
-          patternMemoryIds: referenceMemory?.patternMemoryIds || [],
-        },
-      }).catch(() => undefined)));
-    }
+    await recordOptimizationMemoryFeedback({
+      userId: user.userId,
+      action,
+      referenceMemory,
+      taskType: taskType || "cv_optimize",
+      roleCategory,
+      sectionId: section_id,
+      operation,
+      variantType: variant_type,
+      targetJdId,
+      originalText: original_text,
+      optimizedText: optimized_text,
+      editedText: edited_text,
+      feedbackText,
+    }).catch(() => undefined);
 
     return NextResponse.json({ success: true });
   } catch (error: unknown) {

@@ -28,6 +28,14 @@ export interface ReferenceResumeSnippet {
   score: number;
   visibility: ReferenceResumeVisibility;
   metadata: Record<string, unknown>;
+  ranking: {
+    similarity: number;
+    quality: number;
+    roleScore: number;
+    feedbackTrustScore: number;
+    acceptedCount: number;
+    rejectedCount: number;
+  };
 }
 
 export interface ReferenceResumeIndexResult {
@@ -342,13 +350,32 @@ export function buildReferenceResumeRetrievalQuery(input: {
       , COALESCE(usage.rejected_count, 0) AS rejected_count
     FROM reference_resume_chunks c
     JOIN reference_resumes r ON r.id = c.reference_resume_id
-    LEFT JOIN (
-      SELECT reference_resume_id,
+    LEFT JOIN LATERAL (
+      SELECT
         COUNT(*) FILTER (WHERE accepted IS TRUE) AS accepted_count,
         COUNT(*) FILTER (WHERE accepted IS FALSE) AS rejected_count
       FROM reference_resume_usage
-      GROUP BY reference_resume_id
-    ) usage ON usage.reference_resume_id = c.reference_resume_id
+      WHERE reference_resume_id = c.reference_resume_id
+        AND (
+          COALESCE(metadata_json->'snippetIds', '[]'::jsonb) = '[]'::jsonb
+          OR COALESCE(metadata_json->'snippetIds', '[]'::jsonb) @> to_jsonb(c.id)
+        )
+        AND (
+          task_type = 'cv_optimize'
+          OR COALESCE(metadata_json->>'taskType', '') = 'cv_optimize'
+          OR COALESCE(task_type, '') = ''
+        )
+        AND (
+          COALESCE(metadata_json->>'roleCategory', '') = ''
+          OR COALESCE(metadata_json->>'roleCategory', '') = c.role_category
+          OR c.role_category = ''
+        )
+        AND (
+          COALESCE(metadata_json->>'sectionId', '') = ''
+          OR COALESCE(metadata_json->>'sectionId', '') = c.section_type
+          OR c.section_type = ''
+        )
+    ) usage ON TRUE
     WHERE ${clauses.join(" AND ")}
     ORDER BY c.embedding <=> $1::vector ASC, c.updated_at DESC
     LIMIT $${params.length}
@@ -466,13 +493,17 @@ function toReferenceSnippet(row: Record<string, unknown>, roleCategory: string):
   const quality = normalizeScore(Number(row.quality_score ?? 0));
   const rowRole = String(row.role_category || "");
   const roleScore = rowRole === roleCategory ? 1 : rowRole === "general" || !rowRole ? 0.65 : 0.35;
+  const acceptedCount = Number(row.accepted_count || 0);
+  const rejectedCount = Number(row.rejected_count || 0);
+  const feedbackTrustScore = computeFeedbackTrustScore(acceptedCount, rejectedCount);
   const score = computeReferenceSnippetScore({
     similarity,
     quality,
     roleScore,
-    acceptedCount: Number(row.accepted_count || 0),
-    rejectedCount: Number(row.rejected_count || 0),
+    acceptedCount,
+    rejectedCount,
   });
+  const metadata = parseMetadata(row.metadata_json);
   return {
     id: Number(row.id),
     referenceResumeId: Number(row.reference_resume_id),
@@ -483,7 +514,25 @@ function toReferenceSnippet(row: Record<string, unknown>, roleCategory: string):
     similarity,
     score,
     visibility: normalizeReferenceVisibility(String(row.visibility || "private")),
-    metadata: parseMetadata(row.metadata_json),
+    metadata: {
+      ...metadata,
+      ranking: {
+        similarity,
+        quality,
+        roleScore,
+        feedbackTrustScore,
+        acceptedCount,
+        rejectedCount,
+      },
+    },
+    ranking: {
+      similarity,
+      quality,
+      roleScore,
+      feedbackTrustScore,
+      acceptedCount,
+      rejectedCount,
+    },
   };
 }
 
@@ -496,13 +545,17 @@ export function computeReferenceSnippetScore(input: {
 }): number {
   const accepted = Math.max(0, Number(input.acceptedCount || 0));
   const rejected = Math.max(0, Number(input.rejectedCount || 0));
-  const total = accepted + rejected;
-  const feedbackScore = total > 0 ? (accepted + 1) / (total + 2) : 0.5;
+  const feedbackScore = computeFeedbackTrustScore(accepted, rejected);
   const score = (normalizeScore(input.similarity) * 0.68)
     + (normalizeScore(input.quality) * 0.18)
     + (normalizeScore(input.roleScore) * 0.1)
     + (feedbackScore * 0.04);
   return Number(score.toFixed(4));
+}
+
+function computeFeedbackTrustScore(accepted: number, rejected: number): number {
+  const total = accepted + rejected;
+  return total > 0 ? (accepted + 1) / (total + 2) : 0.5;
 }
 
 function normalizeWhitespace(text: string): string {

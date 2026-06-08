@@ -68,6 +68,7 @@ const USER_PRIVATE_TABLES = [
   "reference_resumes",
   "reference_resume_usage",
   "memory_evidence",
+  "memory_status_transitions",
   "memory_chunks",
   "memory_items",
   "scan_jobs",

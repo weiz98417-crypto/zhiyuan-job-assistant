@@ -16,6 +16,12 @@ interface ReferenceMemoryUsage {
   snippetIds?: number[];
   referenceResumeIds?: number[];
   patternMemoryIds?: number[];
+  ranking?: Array<{
+    snippetId: number;
+    referenceResumeId: number;
+    score: number;
+    ranking?: Record<string, unknown>;
+  }>;
 }
 
 interface OptimizePanelProps {
@@ -87,6 +93,10 @@ export default function OptimizePanel({
           variant_type: variantType || "",
           action,
           operation,
+          taskType: "cv_optimize",
+          roleCategory: roleDirection && roleDirection !== "auto"
+            ? roleDirection
+            : targetJD?.role || "",
           original_text: original,
           optimized_text: optimized,
           referenceMemory,

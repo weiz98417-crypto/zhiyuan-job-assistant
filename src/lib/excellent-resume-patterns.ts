@@ -32,6 +32,8 @@ export interface ExcellentResumePatternMemory {
   confidence: number;
   importance: number;
   metadata: Record<string, unknown>;
+  status?: string;
+  feedbackTrustScore?: number;
 }
 
 const PATTERN_RULES: Array<{
@@ -212,7 +214,7 @@ export async function retrieveExcellentResumePatternMemory(input: {
   const limit = Math.max(1, Math.min(input.limit ?? 6, 12));
   const roleCategory = normalizeText(input.roleCategory || "");
   const result = await withPostgresClient(async (client) => client.query(`
-    SELECT id, canonical_text, confidence, importance, metadata_json
+    SELECT id, canonical_text, status, confidence, importance, metadata_json
     FROM memory_items
     WHERE memory_type = $1
       AND status = ANY($2::text[])
@@ -225,15 +227,34 @@ export async function retrieveExcellentResumePatternMemory(input: {
       )
     ORDER BY importance DESC, confidence DESC, last_seen_at DESC
     LIMIT $5
-  `, [EXCELLENT_RESUME_PATTERN_MEMORY_TYPE, ["candidate", "active"], input.userId, roleCategory, limit]));
+  `, [EXCELLENT_RESUME_PATTERN_MEMORY_TYPE, ["active"], input.userId, roleCategory, Math.min(limit * 3, 30)]));
 
-  return (result.rows as MemoryItemRecord[]).map((row) => ({
-    id: Number(row.id),
-    canonicalText: String(row.canonical_text || ""),
-    confidence: Number(row.confidence || 0),
-    importance: Number(row.importance || 0),
-    metadata: parseMetadata(row.metadata_json),
-  }));
+  return (result.rows as MemoryItemRecord[])
+    .map((row) => {
+      const metadata = parseMetadata(row.metadata_json);
+      const feedbackTrustScore = readFeedbackTrustScore(metadata);
+      return {
+        id: Number(row.id),
+        canonicalText: String(row.canonical_text || ""),
+        status: String(row.status || "candidate"),
+        confidence: Number(row.confidence || 0),
+        importance: Number(row.importance || 0),
+        feedbackTrustScore,
+        metadata: {
+          ...metadata,
+          ranking: {
+            confidence: Number(row.confidence || 0),
+            importance: Number(row.importance || 0),
+            feedbackTrustScore,
+          },
+        },
+      };
+    })
+    .filter((row) => row.status === "active")
+    .filter((row) => row.confidence >= 0.65)
+    .filter((row) => row.importance >= 0.55)
+    .sort((a, b) => patternRank(b) - patternRank(a))
+    .slice(0, limit);
 }
 
 function passesPatternQualityGate(pattern: string, quote: string): boolean {
@@ -272,4 +293,22 @@ function parseMetadata(value: unknown): Record<string, unknown> {
     }
   }
   return {};
+}
+
+function readFeedbackTrustScore(metadata: Record<string, unknown>): number {
+  const raw = Number(metadata.feedbackTrustScore);
+  if (Number.isFinite(raw)) return Math.max(0, Math.min(1, raw));
+  const stats = metadata.feedbackStats && typeof metadata.feedbackStats === "object"
+    ? metadata.feedbackStats as Record<string, unknown>
+    : {};
+  const positive = Math.max(0, Number(stats.positive || 0));
+  const negative = Math.max(0, Number(stats.negative || 0));
+  const total = positive + negative;
+  return total > 0 ? Number(((positive + 1) / (total + 2)).toFixed(4)) : 0.5;
+}
+
+function patternRank(pattern: Pick<ExcellentResumePatternMemory, "confidence" | "importance" | "feedbackTrustScore">): number {
+  return (pattern.importance * 0.48)
+    + (pattern.confidence * 0.38)
+    + ((pattern.feedbackTrustScore ?? 0.5) * 0.14);
 }

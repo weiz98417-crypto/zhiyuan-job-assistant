@@ -181,6 +181,12 @@ export async function POST(request: Request) {
           snippetIds: semanticReferenceSnippets.map((snippet) => snippet.id),
           referenceResumeIds: [...new Set(semanticReferenceSnippets.map((snippet) => snippet.referenceResumeId))],
           patternMemoryIds: patternMemory.map((pattern) => pattern.id),
+          ranking: semanticReferenceSnippets.map((snippet) => ({
+            snippetId: snippet.id,
+            referenceResumeId: snippet.referenceResumeId,
+            score: snippet.score,
+            ranking: snippet.ranking,
+          })),
         },
       },
     });

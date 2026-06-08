@@ -76,7 +76,7 @@ describe("excellent resume pattern memory", () => {
     expect(importRoute).toContain("persistExcellentResumePatternsBestEffort");
     expect(optimizeRoute).toContain("retrieveExcellentResumePatternMemory");
     expect(optimizeRoute).toContain("patternMemoryIds");
-    expect(preferenceRoute).toContain("recordReferenceResumeUsage");
+    expect(preferenceRoute).toContain("recordOptimizationMemoryFeedback");
     expect(preferenceRoute).toContain("referenceMemory");
   });
 });
