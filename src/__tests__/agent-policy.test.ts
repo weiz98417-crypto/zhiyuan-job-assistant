@@ -168,6 +168,20 @@ describe("agent tool policy", () => {
     expect(params.cvText).toContain("Resume snapshot body");
   });
 
+  it("blocks resume reloads when the user only asks to continue an active interview", () => {
+    const result = enforceToolPolicy({
+      toolName: "read_file",
+      params: { path: "我的简历" },
+      messages: [{ role: "user", content: "下一题呗" }],
+      toolWhitelist: interviewAgent.toolNames,
+      interviewState: activeInterviewState(),
+    });
+
+    expect(result?.success).toBe(false);
+    expect(result?.llmSummary).toContain("Active Interview Session");
+    expect(result?.llmSummary).toContain("generate_interview_questions");
+  });
+
   it("hydrates interview scoring from stored question and answer turns", () => {
     const params: Record<string, unknown> = {};
     const result = enforceToolPolicy({

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Pencil, Check, BookOpen, Tag, Calendar, FileText } from "lucide-react";
+import { X, Pencil, Check, BookOpen, Tag, Calendar, FileText, Gauge } from "lucide-react";
 import { WarmButton, PaperCard } from "@/components/design";
 
 interface CVSection {
@@ -19,6 +19,12 @@ interface ReferenceDetail {
   tags: string[];
   notes: string;
   created_at: string;
+  roleCategory?: string;
+  visibility?: string;
+  status?: string;
+  qualityScore?: number;
+  anonymized?: boolean;
+  updated_at?: string;
 }
 
 interface ReferenceSummary {
@@ -28,6 +34,12 @@ interface ReferenceSummary {
   tags: string[];
   notes: string;
   created_at: string;
+  roleCategory?: string;
+  visibility?: string;
+  status?: string;
+  qualityScore?: number;
+  anonymized?: boolean;
+  updated_at?: string;
 }
 
 interface ReferenceViewerProps {
@@ -60,6 +72,21 @@ export default function ReferenceViewer({
     setEditNotes(resume.notes);
     setEditSectionId(null);
   }, [resume]);
+
+  const visibilityLabel = resume.visibility === "team"
+    ? "团队共享"
+    : resume.visibility === "team_pending"
+      ? "待审核共享"
+      : resume.visibility === "disabled"
+        ? "已停用"
+        : "私有";
+  const statusLabel = resume.status === "pending"
+    ? "待审核"
+    : resume.status === "disabled"
+      ? "已停用"
+      : resume.status === "index_failed"
+        ? "索引失败"
+        : "可用";
 
   // Cross-reference: same-tag resumes
   const relatedResumes = allResumes
@@ -151,12 +178,29 @@ export default function ReferenceViewer({
           </div>
 
           {/* Meta bar */}
-          <div className="flex items-center gap-3 px-6 py-2 text-xs text-[var(--color-muted)] border-b border-[var(--color-divider)] shrink-0">
+          <div className="flex flex-wrap items-center gap-2 px-6 py-2 text-xs text-[var(--color-muted)] border-b border-[var(--color-divider)] shrink-0">
             <span className="flex items-center gap-1">
               <Calendar size={12} />
               {new Date(resume.created_at).toLocaleDateString("zh-CN")}
             </span>
             <span>{resume.source === "upload" ? "📄 上传" : "📋 粘贴"}</span>
+            {resume.roleCategory && (
+              <span className="px-1.5 py-0.5 rounded-full bg-[var(--color-primary-muted)] text-[var(--color-text-soft)]">
+                {resume.roleCategory}
+              </span>
+            )}
+            <span className="px-1.5 py-0.5 rounded-full bg-[var(--color-primary-muted)] text-[var(--color-text-soft)]">
+              {visibilityLabel}
+            </span>
+            <span className="px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">
+              {statusLabel}
+            </span>
+            {typeof resume.qualityScore === "number" && (
+              <span className="flex items-center gap-1">
+                <Gauge size={12} />
+                质量 {Math.round(resume.qualityScore * 100)}
+              </span>
+            )}
             {resume.tags.length > 0 && (
               <div className="flex items-center gap-1">
                 <Tag size={12} />

@@ -1,10 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as cheerio from "cheerio";
 import { getCurrentUser } from "@/lib/auth";
-import { findReusableJD, getDb, insertJD, type JDRow } from "@/lib/server-db";
+import { getDataRepositories } from "@/lib/data-repositories";
+import {
+  attachJdToScanJobForUser,
+  getScanJobForUser,
+  markScanJobViewedForUser,
+  updateScanJobErrorForUser,
+} from "@/lib/scan-data";
+import type { JDRow } from "@/lib/server-db";
 
 const FETCH_TIMEOUT_MS = 10_000;
 const MAX_RESPONSE_SIZE = 500_000;
+
+type ScanJob = {
+  id: number | string;
+  jd_id?: number | string | null;
+  company: string;
+  title: string;
+  url: string;
+  jd_snippet?: string;
+  last_error?: string;
+};
 
 function toClientJD(jd: JDRow) {
   return {
@@ -83,31 +100,24 @@ async function fetchJDText(url: string): Promise<{ title: string; text: string }
   }
 }
 
-function getJob(db: ReturnType<typeof getDb>, id: number, userId: string) {
-  return db.prepare("SELECT * FROM scan_jobs WHERE id = ? AND user_id = ?").get(id, userId) as
-    | { id: number; jd_id?: number; company: string; title: string; url: string; jd_snippet?: string; last_error?: string }
-    | undefined;
-}
-
 export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const user = await getCurrentUser();
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const { id } = await params;
     const jobId = Number(id);
-    const db = getDb();
-    const job = getJob(db, jobId, String(user.userId));
+    const userId = String(user.userId);
+    const job = await getScanJobForUser(jobId, userId) as ScanJob | undefined;
     if (!job) return NextResponse.json({ success: false, error: "Job not found" }, { status: 404 });
 
     if (job.jd_id) {
-      const jd = db.prepare("SELECT * FROM jds WHERE id = ?").get(job.jd_id) as JDRow | undefined;
+      const jd = await getDataRepositories().jds.get(Number(job.jd_id), userId);
       if (jd) return NextResponse.json({ success: true, data: { job, jd: toClientJD(jd), reused: true } });
     }
 
     try {
       const fetched = await fetchJDText(job.url);
-      db.prepare("UPDATE scan_jobs SET status = 'viewed', jd_snippet = ?, last_error = '', last_interaction_at = datetime('now') WHERE id = ?")
-        .run(fetched.text.slice(0, 1000), jobId);
+      await markScanJobViewedForUser(jobId, userId, { snippet: fetched.text.slice(0, 1000) });
       return NextResponse.json({
         success: true,
         data: {
@@ -123,8 +133,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : "JD 抓取失败";
-      db.prepare("UPDATE scan_jobs SET status = 'viewed', last_error = ?, last_interaction_at = datetime('now') WHERE id = ?")
-        .run(message, jobId);
+      await markScanJobViewedForUser(jobId, userId, { error: message });
       return NextResponse.json({
         success: true,
         data: {
@@ -146,8 +155,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const { id } = await params;
     const jobId = Number(id);
-    const db = getDb();
-    const job = getJob(db, jobId, String(user.userId));
+    const userId = String(user.userId);
+    const job = await getScanJobForUser(jobId, userId) as ScanJob | undefined;
     if (!job) return NextResponse.json({ success: false, error: "Job not found" }, { status: 404 });
 
     const body = await request.json().catch(() => ({})) as { jdBody?: string; company?: string; role?: string; evaluate?: boolean };
@@ -161,7 +170,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       }
     }
     if (jdBody.length < 50) {
-      db.prepare("UPDATE scan_jobs SET last_error = ?, last_interaction_at = datetime('now') WHERE id = ?").run(fetchError || "JD 正文不足", jobId);
+      await updateScanJobErrorForUser(jobId, userId, fetchError || "JD 正文不足");
       return NextResponse.json({ success: false, error: fetchError || "JD 正文不足，请手动粘贴后再保存" }, { status: 422 });
     }
 
@@ -173,10 +182,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       body: jdBody,
       keywords_json: JSON.stringify([]),
     };
-    const reusable = findReusableJD({ source_url: row.source_url, body: row.body }, String(user.userId));
-    const jdId = reusable?.id || insertJD(row, String(user.userId));
-    db.prepare("UPDATE scan_jobs SET jd_id = ?, status = ?, last_error = '', last_interaction_at = datetime('now') WHERE id = ?")
-      .run(jdId, body.evaluate ? "evaluating" : "saved", jobId);
+    const repos = getDataRepositories();
+    const reusable = await repos.jds.findReusable({ source_url: row.source_url, body: row.body }, userId);
+    const jdId = reusable?.id || await repos.jds.insert(row, userId);
+    await attachJdToScanJobForUser(jobId, userId, Number(jdId), body.evaluate ? "evaluating" : "saved");
     return NextResponse.json({ success: true, jdId, reused: Boolean(reusable), data: reusable ? toClientJD(reusable) : { ...toClientJD(row), id: jdId } });
   } catch (err) {
     const message = err instanceof Error ? err.message : "unknown";

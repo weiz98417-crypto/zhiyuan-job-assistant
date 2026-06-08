@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
-import { getDb } from "@/lib/server-db";
-import { getScanHistory } from "../../../../../lib/scan/orchestrator.mjs";
+import { getScanHistoryForUser } from "@/lib/scan-data";
 
 export async function GET(request: NextRequest) {
   try {
@@ -12,8 +11,7 @@ export async function GET(request: NextRequest) {
     const page = parseInt(url.searchParams.get("page") || "1");
     const limit = parseInt(url.searchParams.get("limit") || "10");
 
-    const db = getDb();
-    const result = getScanHistory(db, String(user.userId), { page, limit });
+    const result = await getScanHistoryForUser(String(user.userId), { page, limit });
 
     return NextResponse.json({ success: true, data: result });
   } catch (error: unknown) {

@@ -144,7 +144,7 @@ export function resolveMemoryEmbeddingConfig(
   return {
     provider,
     apiUrl: env.MEMORY_EMBEDDING_API_URL || "",
-    apiKey: env.MEMORY_EMBEDDING_API_KEY || "",
+    apiKey: env.MEMORY_EMBEDDING_API_KEY || env.DASHSCOPE_API_KEY || "",
     model: env.MEMORY_EMBEDDING_MODEL || (provider === "mock" ? "mock-embedding-1536" : ""),
     dimension,
     maxRetries: clampInteger(Number(env.MEMORY_EMBEDDING_MAX_RETRIES || 2), 0, 5),
@@ -183,7 +183,11 @@ export function createEmbeddingProvider(
           "Content-Type": "application/json",
           Authorization: `Bearer ${config.apiKey}`,
         },
-        body: JSON.stringify({ model: config.model, input: texts }),
+        body: JSON.stringify({
+          model: config.model,
+          input: texts,
+          dimensions: config.dimension,
+        }),
       });
       if (!response.ok) {
         const errorText = await response.text().catch(() => "");

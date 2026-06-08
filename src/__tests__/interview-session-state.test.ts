@@ -206,6 +206,58 @@ describe("Interview session state", () => {
     expect(scored?.scoreArtifacts?.[0].score.feedback).toContain("业务结果");
   });
 
+  it("creates an active interview state from generated question tool results in AgentChat", () => {
+    const state = updateInterviewStateWithToolResult(
+      undefined,
+      msg("tool", "generated question", {
+        toolName: "generate_interview_questions",
+        toolResult: {
+          data: {
+            questions: [{
+              category: "technical",
+              question: "How would you design the BioLid Agent data pipeline for this role?",
+              context: "JD asks for Agent data workflows.",
+              storyHint: "Connect the JD workflow requirement to the BioLid four-layer project.",
+              source: "jd",
+            }],
+            company: "Acme",
+            role: "AI Product Manager",
+            mode: "project-review",
+            planSnapshotSeed: {
+              jdText: "JD asks for Agent data workflows and model evaluation.",
+              cvText: "Resume includes BioLid four-layer Agent intervention framework.",
+              company: "Acme",
+              role: "AI Product Manager",
+              mode: "project-review",
+            },
+          },
+        },
+      }),
+    );
+
+    expect(state?.planSnapshot.jdSnapshot?.company).toBe("Acme");
+    expect(state?.planSnapshot.jdSnapshot?.body).toContain("Agent data workflows");
+    expect(state?.planSnapshot.resumeSnapshot?.body).toContain("BioLid");
+    expect(state?.questionGraph).toHaveLength(1);
+    expect(state?.currentQuestionId).toBe(state?.questionGraph[0].id);
+    expect(state?.questionGraph[0].question).toContain("BioLid Agent");
+  });
+
+  it("does not count help-or-next control turns as real interview answers", () => {
+    const started = updateInterviewStateWithAssistantMessage(
+      interviewState(),
+      msg("assistant", "Question: How did you design the BioLid Agent framework?"),
+    );
+    const helped = updateInterviewStateWithExchange(
+      started,
+      msg("user", "那你给"),
+      msg("assistant", "Here is a strong sample answer using structure, metrics, and JD linkage."),
+    );
+
+    expect(helped?.transcript.some((turn) => turn.role === "user" && turn.content === "那你给")).toBe(true);
+    expect(helped?.questionGraph[0].answerTurnIds).toHaveLength(0);
+  });
+
   it("persists recap from stored turns and scores", () => {
     const started = updateInterviewStateWithAssistantMessage(
       interviewState(),

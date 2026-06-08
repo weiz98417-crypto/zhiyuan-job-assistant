@@ -8,7 +8,7 @@ import type { AgentDefinition, AgentPromptContext } from "@/lib/agent/registry/t
 import { injectRoleWritingGuide } from "@/lib/agent/knowledge/role-writing-guides";
 
 // ── Resume-specific tools ──
-const RESUME_TOOL_NAMES = ["read_file", "import_resume", "generate_cv", "evaluate_jd", "export_file", "get_reference_detail", "optimize_resume_section", "save_resume_section", "check_ats_compatibility"];
+const RESUME_TOOL_NAMES = ["read_file", "import_resume", "generate_cv", "evaluate_jd", "export_file", "get_reference_detail", "optimize_resume_section", "save_resume_section", "save_reference_resume", "check_ats_compatibility"];
 
 // ── Extract targetRoles from careerDNA text ──
 
@@ -86,6 +86,8 @@ const RESUME_INTENT_PATTERNS = [
   /(我的|这是我的).*(简历|CV|履历)/,
   /(优化|改写|润色|修改|改一下).*(工作经历|项目经验|技能|概述|教育|经历|简历|CV)/,
   /(帮我|请).*(优化|改写|润色|修改)/,
+  /(保存|沉淀|加入).*(优秀|参考|标杆|样例|范例).*(简历|CV|履历)/,
+  /(优秀|参考|标杆|样例|范例).*(简历|CV|履历).*(保存|沉淀|加入)/,
   /ATS.*(检查|优化|兼容)/,
 ];
 

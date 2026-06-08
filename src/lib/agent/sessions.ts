@@ -128,7 +128,7 @@ export async function getSession(id: number): Promise<ChatSession | undefined> {
 
 export async function updateSession(id: number, updates: Partial<ChatSession>): Promise<void> {
   await db.chatSessions.update(id, { ...updates, updatedAt: new Date().toISOString() });
-  fetch(`/api/sessions/${id}`, {
+  const res = await fetch(`/api/sessions/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -139,7 +139,13 @@ export async function updateSession(id: number, updates: Partial<ChatSession>): 
       interviewState: updates.interviewState,
       agentState: updates.agentState,
     }),
-  }).catch(() => {});
+  }).catch((error) => {
+    console.warn("[sessions] server update failed", error);
+    return undefined;
+  });
+  if (res && !res.ok) {
+    console.warn("[sessions] server update rejected", res.status);
+  }
 }
 
 export async function softDeleteSession(id: number): Promise<void> {

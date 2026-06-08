@@ -20,6 +20,9 @@ import {
   ClipboardPaste,
   GitCompare,
   CheckCircle,
+  Users,
+  Lock,
+  Gauge,
 } from "lucide-react";
 import {
   HandwritingTitle,
@@ -108,6 +111,26 @@ function PreviewBlock({ title, content, sidebar, tags }: {
   );
 }
 
+function referenceVisibilityLabel(value?: string): string {
+  if (value === "team") return "团队共享";
+  if (value === "team_pending") return "待审核";
+  if (value === "disabled") return "已停用";
+  return "私有";
+}
+
+function referenceStatusLabel(value?: string): string {
+  if (value === "pending") return "待审核";
+  if (value === "disabled") return "已停用";
+  if (value === "index_failed") return "索引失败";
+  return "可用";
+}
+
+function referenceStatusClass(value?: string): string {
+  if (value === "pending") return "bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300";
+  if (value === "disabled" || value === "index_failed") return "bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-300";
+  return "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300";
+}
+
 export default function CVPage() {
   const [sections, setSections] = useState<CVSection[]>([]);
   const [savedHash, setSavedHash] = useState("");
@@ -150,14 +173,21 @@ export default function CVPage() {
   // Reference resume library
   interface ReferenceResumeSummary {
     id: number; name: string; source: string; tags: string[]; notes: string; created_at: string;
+    roleCategory?: string; visibility?: string; status?: string; qualityScore?: number; anonymized?: boolean; updated_at?: string;
   }
   const [referenceResumes, setReferenceResumes] = useState<ReferenceResumeSummary[]>([]);
+  const [referenceAdminData, setReferenceAdminData] = useState<{
+    pending: ReferenceResumeSummary[];
+    health: { total: number; team: number; pending: number; disabled: number; indexFailed: number; averageQuality: number };
+  } | null>(null);
   const [showImportPanel, setShowImportPanel] = useState(false);
   const [importText, setImportText] = useState("");
   const [importLoading, setImportLoading] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [importMode, setImportMode] = useState<"paste" | "upload">("paste");
   const [importFile, setImportFile] = useState<File | null>(null);
+  const [importRoleCategory, setImportRoleCategory] = useState("");
+  const [importVisibility, setImportVisibility] = useState<"private" | "team">("private");
   const [importDragOver, setImportDragOver] = useState(false);
   const [importedRefId, setImportedRefId] = useState<number | null>(null);
   const [renameImportedValue, setRenameImportedValue] = useState("");
@@ -202,6 +232,7 @@ export default function CVPage() {
   interface ReferenceDetail {
     id: number; name: string; source: string;
     sections: CVSection[]; tags: string[]; notes: string; created_at: string;
+    roleCategory?: string; visibility?: string; status?: string; qualityScore?: number; anonymized?: boolean; updated_at?: string;
   }
 
   const fetchReferences = useCallback(async () => {
@@ -214,9 +245,26 @@ export default function CVPage() {
     } catch { /* ignore */ }
   }, []);
 
+  const fetchReferenceAdminData = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/reference-resumes");
+      if (res.status === 403 || res.status === 401) {
+        setReferenceAdminData(null);
+        return;
+      }
+      if (res.ok) {
+        const data = await res.json();
+        setReferenceAdminData(data.success ? data.data : null);
+      }
+    } catch {
+      setReferenceAdminData(null);
+    }
+  }, []);
+
   useEffect(() => {
     fetchReferences();
-  }, [fetchReferences]);
+    fetchReferenceAdminData();
+  }, [fetchReferences, fetchReferenceAdminData]);
 
   const handleImportReference = async () => {
     setImportLoading(true);
@@ -226,6 +274,9 @@ export default function CVPage() {
       if (importMode === "upload" && importFile) {
         const formData = new FormData();
         formData.append("file", importFile);
+        formData.append("roleCategory", importRoleCategory);
+        formData.append("visibility", importVisibility);
+        formData.append("saveAsExcellent", "true");
         res = await fetch("/api/cv/import-reference", {
           method: "POST",
           body: formData,
@@ -234,7 +285,12 @@ export default function CVPage() {
         res = await fetch("/api/cv/import-reference", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: importText }),
+          body: JSON.stringify({
+            text: importText,
+            roleCategory: importRoleCategory,
+            visibility: importVisibility,
+            saveAsExcellent: true,
+          }),
         });
       } else {
         setImportError("请粘贴简历文本或上传文件");
@@ -245,11 +301,14 @@ export default function CVPage() {
       if (!data.success) throw new Error(data.error || "导入失败");
       setImportText("");
       setImportFile(null);
+      setImportRoleCategory("");
+      setImportVisibility("private");
       // Show rename prompt instead of immediately closing
       setImportedRefId(data.data.id);
       setRenameImportedValue(data.data.name);
       setShowRenamePrompt(true);
       fetchReferences();
+      fetchReferenceAdminData();
     } catch (err: unknown) {
       setImportError(err instanceof Error ? err.message : "导入失败");
     } finally {
@@ -289,6 +348,19 @@ export default function CVPage() {
     try {
       await fetch(`/api/cv/references/${id}`, { method: "DELETE" });
       fetchReferences();
+      fetchReferenceAdminData();
+    } catch { /* ignore */ }
+  };
+
+  const handleReviewReference = async (id: number, action: "approve" | "reject" | "disable") => {
+    try {
+      await fetch("/api/admin/reference-resumes", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, action }),
+      });
+      fetchReferences();
+      fetchReferenceAdminData();
     } catch { /* ignore */ }
   };
 
@@ -333,6 +405,7 @@ export default function CVPage() {
       setViewingRefDetail({ ...viewingRefDetail, ...updates } as typeof viewingRefDetail);
     }
     fetchReferences();
+    fetchReferenceAdminData();
   };
 
   const versionMenuRef = useRef<HTMLDivElement>(null);
@@ -1237,6 +1310,47 @@ export default function CVPage() {
                       </button>
                     </div>
 
+                    <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                      <label className="block">
+                        <span className="text-[10px] text-[var(--color-muted)]">岗位方向</span>
+                        <input
+                          value={importRoleCategory}
+                          onChange={(e) => setImportRoleCategory(e.target.value)}
+                          placeholder="AI产品经理 / AI运营 / AI售前"
+                          className="mt-1 w-full bg-[var(--color-surface)] border border-[var(--color-border)] rounded-[var(--radius-sm)] px-2 py-1.5 text-xs text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
+                        />
+                      </label>
+                      <div>
+                        <span className="text-[10px] text-[var(--color-muted)]">可见性</span>
+                        <div className="mt-1 flex rounded-[var(--radius-sm)] border border-[var(--color-border)] overflow-hidden">
+                          <button
+                            type="button"
+                            onClick={() => setImportVisibility("private")}
+                            className={`flex items-center gap-1 px-2 py-1.5 text-xs ${
+                              importVisibility === "private"
+                                ? "bg-[var(--color-primary)] text-white"
+                                : "bg-[var(--color-surface)] text-[var(--color-muted)] hover:text-[var(--color-text)]"
+                            }`}
+                          >
+                            <Lock size={11} />
+                            私有
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setImportVisibility("team")}
+                            className={`flex items-center gap-1 px-2 py-1.5 text-xs border-l border-[var(--color-border)] ${
+                              importVisibility === "team"
+                                ? "bg-[var(--color-primary)] text-white"
+                                : "bg-[var(--color-surface)] text-[var(--color-muted)] hover:text-[var(--color-text)]"
+                            }`}
+                          >
+                            <Users size={11} />
+                            团队
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
                     {/* Paste mode */}
                     {importMode === "paste" && (
                       <>
@@ -1372,7 +1486,30 @@ export default function CVPage() {
                     className="flex items-center gap-2 text-left px-2 py-1.5 rounded-[var(--radius-sm)] text-sm hover:bg-[var(--color-divider)] transition-colors group"
                   >
                     <BookOpen size={12} className="text-[var(--color-muted)] shrink-0" />
-                    <span className="flex-1 truncate text-[var(--color-text)]">{ref.name}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1 min-w-0">
+                        <span className="truncate text-[var(--color-text)]">{ref.name}</span>
+                        {ref.visibility && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--color-primary-muted)] text-[var(--color-text-soft)] shrink-0">
+                            {referenceVisibilityLabel(ref.visibility)}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1 mt-0.5 text-[10px] text-[var(--color-muted)]">
+                        {ref.roleCategory && <span className="truncate">{ref.roleCategory}</span>}
+                        {ref.status && (
+                          <span className={`px-1.5 py-0.5 rounded-full ${referenceStatusClass(ref.status)}`}>
+                            {referenceStatusLabel(ref.status)}
+                          </span>
+                        )}
+                        {typeof ref.qualityScore === "number" && (
+                          <span className="inline-flex items-center gap-0.5">
+                            <Gauge size={10} />
+                            {Math.round(ref.qualityScore * 100)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
                     <span className="text-xs text-[var(--color-muted)] shrink-0">
                       {ref.source === "upload" ? "📄" : "📋"}
                     </span>
@@ -1400,6 +1537,62 @@ export default function CVPage() {
               <p className="text-xs text-[var(--color-muted)]">
                 暂无参考简历。导入行业优秀简历，AI 优化时自动参考其表达风格。
               </p>
+            )}
+
+            {referenceAdminData && (
+              <div className="mt-3 pt-3 border-t border-[var(--color-divider)] space-y-2">
+                <div className="grid grid-cols-3 gap-1 text-[10px]">
+                  <div className="rounded-[var(--radius-sm)] bg-[var(--color-bg)] px-2 py-1">
+                    <span className="text-[var(--color-muted)]">团队</span>
+                    <span className="ml-1 font-medium text-[var(--color-text)]">{referenceAdminData.health.team}</span>
+                  </div>
+                  <div className="rounded-[var(--radius-sm)] bg-[var(--color-bg)] px-2 py-1">
+                    <span className="text-[var(--color-muted)]">待审</span>
+                    <span className="ml-1 font-medium text-[var(--color-text)]">{referenceAdminData.health.pending}</span>
+                  </div>
+                  <div className="rounded-[var(--radius-sm)] bg-[var(--color-bg)] px-2 py-1">
+                    <span className="text-[var(--color-muted)]">均分</span>
+                    <span className="ml-1 font-medium text-[var(--color-text)]">{Math.round(referenceAdminData.health.averageQuality * 100)}</span>
+                  </div>
+                </div>
+
+                {referenceAdminData.pending.length > 0 && (
+                  <div className="space-y-1.5">
+                    <p className="text-[10px] text-[var(--color-muted)]">团队共享待审核</p>
+                    {referenceAdminData.pending.slice(0, 4).map((ref) => (
+                      <div key={ref.id} className="rounded-[var(--radius-sm)] bg-[var(--color-bg)] px-2 py-1.5">
+                        <div className="flex items-center gap-2">
+                          <span className="flex-1 min-w-0 truncate text-xs text-[var(--color-text)]">{ref.name}</span>
+                          <span className="text-[10px] text-[var(--color-muted)]">{Math.round((ref.qualityScore || 0) * 100)}</span>
+                        </div>
+                        <div className="mt-1 flex gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleReviewReference(ref.id, "approve")}
+                            className="text-[10px] px-2 py-0.5 rounded-[var(--radius-sm)] bg-emerald-500 text-white"
+                          >
+                            批准
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleReviewReference(ref.id, "reject")}
+                            className="text-[10px] px-2 py-0.5 rounded-[var(--radius-sm)] bg-[var(--color-surface)] text-[var(--color-muted)] border border-[var(--color-border)]"
+                          >
+                            退回私有
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleReviewReference(ref.id, "disable")}
+                            className="text-[10px] px-2 py-0.5 rounded-[var(--radius-sm)] bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-300"
+                          >
+                            停用
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             )}
           </PaperCard>
 

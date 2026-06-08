@@ -74,6 +74,10 @@ function explicitlyAskedToRestartInterview(text: string): boolean {
   return /(重新开始|重开|重启|重新模拟|重新出题|重新生成|从头来|新开一场|另开一场|切换.*(重新|重开|重启)|restart|start over|new interview|regenerate)/i.test(text);
 }
 
+function asksToContinueInterview(text: string): boolean {
+  return /(下一题|下一个|继续|继续问|下一轮|跳过|换一题|next question|continue|skip)/i.test(text);
+}
+
 function mentionsMaterialRebindIntent(text: string): boolean {
   const mentionsMaterial = /\bJD\b|岗位|职位|招聘|简历|履历|resume|cv/i.test(text);
   const asksSwitch = /切换|换成|改用|用这份|使用这份|绑定|重新开始|重开|重启|新开|另开|restart|start over|new interview/i.test(text);
@@ -197,6 +201,20 @@ export function enforceToolPolicy(input: ToolPolicyInput): ToolResult | null {
   if (hasActiveInterview && input.toolName === "score_interview_answer") {
     const scorePolicyResult = hydrateScoreFromActiveSession(input);
     if (scorePolicyResult) return scorePolicyResult;
+  }
+
+  if (
+    hasActiveInterview &&
+    asksToContinueInterview(userText) &&
+    input.toolName === "read_file"
+  ) {
+    return {
+      success: false,
+      data: null,
+      error: "Active interview continuation must use the stored interview session, not reload resume files.",
+      errorCategory: "need_user_input",
+      llmSummary: "The user asked to continue the active mock interview. Do not read files or ask for company/role again. Use the Active Interview Session planSnapshot and call generate_interview_questions with count=1.",
+    };
   }
 
   if (

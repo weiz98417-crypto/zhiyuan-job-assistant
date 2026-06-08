@@ -1,18 +1,24 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { getDataRepositories } from "@/lib/data-repositories";
+import { recordReferenceResumeUsage } from "@/lib/reference-resume-vector";
 
 export async function POST(request: Request) {
   try {
     const user = await getCurrentUser();
     const body = await request.json();
-    const { section_id, variant_type, action, original_text, optimized_text, operation } = body as {
+    const { section_id, variant_type, action, original_text, optimized_text, operation, referenceMemory } = body as {
       section_id: string;
       variant_type: string;
       action: string;
       original_text?: string;
       optimized_text?: string;
       operation?: string;
+      referenceMemory?: {
+        snippetIds?: number[];
+        referenceResumeIds?: number[];
+        patternMemoryIds?: number[];
+      };
     };
 
     if (!section_id || !action) {
@@ -37,6 +43,25 @@ export async function POST(request: Request) {
       original_text,
       optimized_text,
     }, user.userId);
+
+    const referenceResumeIds = Array.isArray(referenceMemory?.referenceResumeIds)
+      ? [...new Set(referenceMemory.referenceResumeIds.map(Number).filter((id) => Number.isInteger(id) && id > 0))]
+      : [];
+    if (referenceResumeIds.length > 0) {
+      await Promise.all(referenceResumeIds.map((referenceResumeId) => recordReferenceResumeUsage({
+        referenceResumeId,
+        userId: user.userId,
+        taskType: "cv_optimize",
+        accepted: action === "accept",
+        feedback: `${action}:${variant_type || ""}`,
+        metadata: {
+          sectionId: section_id,
+          operation: operation || "",
+          snippetIds: referenceMemory?.snippetIds || [],
+          patternMemoryIds: referenceMemory?.patternMemoryIds || [],
+        },
+      }).catch(() => undefined)));
+    }
 
     return NextResponse.json({ success: true });
   } catch (error: unknown) {

@@ -2,6 +2,7 @@ import type {
   AgentMessage,
   ChatSession,
   InterviewPlanSnapshot,
+  InterviewQuestion,
   InterviewQuestionKind,
   InterviewQuestionNode,
   InterviewRecap,
@@ -61,6 +62,139 @@ export function createInterviewState(planSnapshot: InterviewPlanSnapshot): Inter
     transcript: [],
     scoreArtifacts: [],
     rebindHistory: [],
+  };
+}
+
+interface GeneratedInterviewSeed {
+  jdText?: string;
+  cvText?: string;
+  company?: string;
+  role?: string;
+  mode?: string;
+}
+
+interface GeneratedInterviewQuestionPayload {
+  questions?: Partial<InterviewQuestion>[];
+  company?: string;
+  role?: string;
+  mode?: string;
+  planSnapshotSeed?: GeneratedInterviewSeed;
+}
+
+function objectRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" ? value as Record<string, unknown> : undefined;
+}
+
+function generatedInterviewPayload(toolMsg: AgentMessage): GeneratedInterviewQuestionPayload | undefined {
+  if (toolMsg.toolName !== "generate_interview_questions") return undefined;
+  const result = objectRecord(toolMsg.toolResult);
+  const data = objectRecord(result?.data) || objectRecord(toolMsg.toolResult);
+  const uiPayload = objectRecord(result?.uiPayload);
+  const questions = Array.isArray(data?.questions)
+    ? data.questions
+    : Array.isArray(uiPayload?.questions)
+      ? uiPayload.questions
+      : undefined;
+  if (!questions?.length) return undefined;
+  return {
+    ...(data || {}),
+    questions: questions as Partial<InterviewQuestion>[],
+    company: String(data?.company || uiPayload?.company || ""),
+    role: String(data?.role || uiPayload?.role || ""),
+    mode: String(data?.mode || uiPayload?.mode || ""),
+    planSnapshotSeed: objectRecord(data?.planSnapshotSeed) as GeneratedInterviewSeed | undefined,
+  };
+}
+
+function buildPlanSnapshotFromGeneratedPayload(payload: GeneratedInterviewQuestionPayload): InterviewPlanSnapshot | undefined {
+  const seed = payload.planSnapshotSeed || {};
+  const company = (seed.company || payload.company || "").trim();
+  const role = (seed.role || payload.role || "").trim();
+  const jdText = (seed.jdText || "").trim();
+  const cvText = (seed.cvText || "").trim();
+  if (!company && !role && !jdText && !cvText) return undefined;
+
+  return {
+    snapshotId: makeId("plan"),
+    source: {
+      resumeId: cvText ? "agent-chat-resume" : undefined,
+    },
+    jdSnapshot: company || role || jdText
+      ? {
+          company,
+          role,
+          body: jdText,
+        }
+      : undefined,
+    resumeSnapshot: cvText
+      ? {
+          title: "agent-chat-resume",
+          body: cvText,
+        }
+      : undefined,
+    mode: seed.mode || payload.mode || "realistic",
+    difficulty: "normal",
+    focusAreas: [],
+    allowFollowUps: true,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function normalizeQuestionText(text: string): string {
+  return text.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function isDuplicateQuestion(state: InterviewSessionState, question: string): InterviewQuestionNode | undefined {
+  const normalized = normalizeQuestionText(question);
+  if (!normalized) return undefined;
+  return [...state.questionGraph].reverse().find((node) => normalizeQuestionText(node.question) === normalized);
+}
+
+function appendGeneratedQuestionFromTool(
+  state: InterviewSessionState | undefined,
+  toolMsg: AgentMessage,
+): InterviewSessionState | undefined {
+  const payload = generatedInterviewPayload(toolMsg);
+  const first = payload?.questions?.[0];
+  const question = String(first?.question || "").trim();
+  if (!payload || !question) return state;
+
+  const generatedPlan = state?.planSnapshot ? undefined : buildPlanSnapshotFromGeneratedPayload(payload);
+  const baseState = state?.planSnapshot ? state : generatedPlan ? createInterviewState(generatedPlan) : undefined;
+  if (!baseState?.planSnapshot) return state;
+
+  const duplicate = isDuplicateQuestion(baseState, question);
+  if (duplicate) {
+    return {
+      ...baseState,
+      currentQuestionId: duplicate.id,
+    };
+  }
+
+  const node: InterviewQuestionNode = {
+    id: makeId("q"),
+    kind: "main",
+    reason: String(first?.context || "Generated from the active interview plan."),
+    question,
+    answerTurnIds: [],
+    createdAt: toolMsg.timestamp || new Date().toISOString(),
+  };
+
+  return {
+    ...baseState,
+    currentQuestionId: node.id,
+    questionGraph: [...baseState.questionGraph, node],
+    transcript: [
+      ...baseState.transcript,
+      {
+        id: makeId("turn_assistant"),
+        role: "assistant",
+        content: question,
+        questionNodeId: node.id,
+        createdAt: toolMsg.timestamp || new Date().toISOString(),
+      },
+    ],
+    scoreArtifacts: [...(baseState.scoreArtifacts || [])],
   };
 }
 
@@ -144,6 +278,12 @@ function appendAssistantTurn(
   return next;
 }
 
+function isInterviewControlTurn(content: string): boolean {
+  const text = content.replace(/\s+/g, "").trim().toLowerCase();
+  if (!text) return false;
+  return /^(下一题|下一个|继续|跳过|过|换一题|那你给|你给|给我|给个示范|示范|不会|不知道|我不知道|没思路|不会答|next|skip|continue)/i.test(text);
+}
+
 export function updateInterviewStateWithExchange(
   state: InterviewSessionState | undefined,
   userMsg: AgentMessage,
@@ -167,7 +307,7 @@ export function updateInterviewStateWithExchange(
   };
   next.transcript.push(userTurn);
 
-  if (next.currentQuestionId) {
+  if (next.currentQuestionId && !isInterviewControlTurn(userMsg.content)) {
     next.questionGraph = next.questionGraph.map((node) =>
       node.id === next.currentQuestionId
         ? { ...node, answerTurnIds: [...node.answerTurnIds, userTurn.id] }
@@ -204,6 +344,10 @@ export function updateInterviewStateWithToolResult(
   state: InterviewSessionState | undefined,
   toolMsg: AgentMessage,
 ): InterviewSessionState | undefined {
+  if (toolMsg.toolName === "generate_interview_questions") {
+    return appendGeneratedQuestionFromTool(state, toolMsg);
+  }
+
   if (!state?.planSnapshot || toolMsg.toolName !== "score_interview_answer") return state;
 
   const toolResult = toolMsg.toolResult as { data?: unknown } | undefined;

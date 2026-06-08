@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getCachedNews, cacheNews, cleanExpiredNews, isNewsCacheFresh, type NewsCacheRow } from "@/lib/server-db";
+import { getDataRepositories } from "@/lib/data-repositories";
+import type { NewsCacheRow } from "@/lib/server-db";
 
 const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
 const MODEL = "deepseek-v4-flash";
@@ -194,15 +195,16 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const force = searchParams.get("force") === "1";
+    const newsRepo = getDataRepositories().news;
 
     // 1. Check cache (skip if force refresh)
-    if (!force && isNewsCacheFresh("industry", 6)) {
-      const cached = getCachedNews("industry", 10);
+    if (!force && await newsRepo.isFresh("industry", 6)) {
+      const cached = await newsRepo.list("industry", 10);
       return NextResponse.json({ success: true, data: cached.map(formatNewsItem), cached: true });
     }
 
     // 2. Clean expired cache
-    cleanExpiredNews(24);
+    await newsRepo.cleanExpired(24);
 
     // 3. Fetch all RSS sources
     const results = await Promise.all(
@@ -220,7 +222,7 @@ export async function GET(request: Request) {
       console.log("[news] industry: all RSS fetches failed, generating with DeepSeek");
       const generated = await generateNewsWithDeepSeek();
       if (generated.length > 0) {
-        cacheNews(generated.map((item) => ({
+        await newsRepo.cache(generated.map((item) => ({
           source: "industry" as const,
           source_name: item.source_name,
           title: item.title,
@@ -228,12 +230,12 @@ export async function GET(request: Request) {
           url: undefined,
           published_at: new Date().toISOString(),
         })));
-        const cached = getCachedNews("industry", 10);
+        const cached = await newsRepo.list("industry", 10);
         return NextResponse.json({ success: true, data: cached.map(formatNewsItem), cached: false });
       }
 
       // Return stale cache as last resort
-      const stale = getCachedNews("industry", 10);
+      const stale = await newsRepo.list("industry", 10);
       if (stale.length > 0) {
         return NextResponse.json({ success: true, data: stale.map(formatNewsItem), cached: true, stale: true });
       }
@@ -252,6 +254,14 @@ export async function GET(request: Request) {
           summary: item.summary,
         }))
       );
+      if (summarized.length === 0) {
+        console.warn("[news] industry: summarization returned no items, using raw titles");
+        summarized = toSummarize.map((item) => ({
+          title: item.title,
+          summary: item.summary || item.title,
+          url: item.url,
+        }));
+      }
     } catch (err) {
       console.error("[news] industry: summarization failed, using raw titles:", err);
       summarized = toSummarize.map((item) => ({
@@ -261,9 +271,9 @@ export async function GET(request: Request) {
       }));
     }
 
-    // 6. Cache to SQLite
+    // 6. Cache to the selected database
     if (summarized.length > 0) {
-      cacheNews(
+      await newsRepo.cache(
         summarized.map((item, i) => ({
           source: "industry" as const,
           source_name: toSummarize[i]?.source_name || "",
@@ -276,7 +286,7 @@ export async function GET(request: Request) {
     }
 
     // 7. Return
-    const cached = getCachedNews("industry", 12);
+    const cached = await newsRepo.list("industry", 12);
     return NextResponse.json({ success: true, data: cached.map(formatNewsItem), cached: false });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "未知错误";

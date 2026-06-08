@@ -51,7 +51,15 @@ async function generateHandler(params: Record<string, unknown>): Promise<ToolRes
     const questions = generatedQuestions.slice(0, 1);
     return {
       success: true,
-      data: { questions, company, role, mode, count: questions.length, memoryContext },
+      data: {
+        questions,
+        company,
+        role,
+        mode,
+        count: questions.length,
+        memoryContext,
+        planSnapshotSeed: { jdText, cvText, company, role, mode },
+      },
       llmSummary: `已生成 ${questions.length} 道面试题，面向 ${company || "目标公司"} ${role || "目标岗位"}。真实模拟模式每轮只展示 1 道题，并等待用户回答。`,
       uiPayload: { type: "interview_questions", questions, company, role, mode, memoryContext },
     };

@@ -26,13 +26,16 @@ export interface ImageIntakeResult {
 }
 
 export interface ImageToolCallPlan {
-  name: "evaluate_jd_full" | "evaluate_offer";
+  name: "evaluate_jd_full" | "evaluate_offer" | "save_reference_resume";
   params: Record<string, unknown>;
 }
 
 const JD_HINT_RE = /(JD|岗位|职位|职位描述|招聘|job description)/i;
 const OFFER_HINT_RE = /(offer|录取|薪资包|薪资|待遇|谈判)/i;
 const RESUME_HINT_RE = /(简历|履历|CV|resume)/i;
+const SAVE_REFERENCE_RESUME_RE = /(保存|存|沉淀|加入|放到).{0,16}(优秀|参考|标杆|样例|范例).{0,16}(简历|履历|resume|cv)|(优秀|参考|标杆|样例|范例).{0,16}(简历|履历|resume|cv).{0,16}(保存|存|沉淀|加入|放到)/i;
+const TEAM_SHARE_RE = /(团队|共享|局域网|大家|公共|共用|team|shared|lan)/i;
+const ROLE_CATEGORY_RE = /(AI产品经理|AI运营|AI售前|数据产品经理|产品经理|大模型产品经理|Agent产品经理)/i;
 
 function cleanExtractedText(text: unknown): string {
   if (typeof text !== "string") return "";
@@ -81,6 +84,18 @@ export function inferPreferredDocumentTypeFromText(text: string): ImageDocumentT
   return undefined;
 }
 
+function isSaveReferenceResumeIntent(text: string): boolean {
+  return SAVE_REFERENCE_RESUME_RE.test(text || "");
+}
+
+function inferRoleCategoryFromText(text: string, structured?: Record<string, unknown>): string {
+  for (const key of ["roleCategory", "role_category", "targetRole", "role"]) {
+    const value = structured?.[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return text.match(ROLE_CATEGORY_RE)?.[1] || "";
+}
+
 export function buildImageIntakeContext(intake: ImageIntakeResult): string {
   const extractedText = cleanExtractedText(intake.extractedText);
   const textPreview = extractedText
@@ -119,7 +134,8 @@ export function buildImageIntakeToolCall(
   let effectiveType: ImageDocumentType | undefined;
   if (intake) {
     const decision = routeImageIntake(userText, intake);
-    if (decision.route !== "evaluate_jd" && decision.route !== "evaluate_offer") {
+    const saveReferenceResume = decision.route === "resume_preview" && isSaveReferenceResumeIntent(userText);
+    if (decision.route !== "evaluate_jd" && decision.route !== "evaluate_offer" && !saveReferenceResume) {
       return null;
     }
     effectiveType = decision.documentType;
@@ -128,6 +144,22 @@ export function buildImageIntakeToolCall(
   }
   if (!effectiveType || effectiveType === "unknown") return null;
   if (!extractedText && imageList.length === 0) return null;
+
+  if (
+    effectiveType === "resume" &&
+    isSaveReferenceResumeIntent(userText) &&
+    isAllowed("save_reference_resume", toolWhitelist)
+  ) {
+    const params: Record<string, unknown> = {
+      resume_text: extractedText,
+      role_category: inferRoleCategoryFromText(userText, structured),
+      visibility: TEAM_SHARE_RE.test(userText) ? "team" : "private",
+    };
+    copyIfPresent(params, structured, "name");
+    if (extractedText.length >= 80) {
+      return { name: "save_reference_resume", params };
+    }
+  }
 
   if (effectiveType === "jd" && isAllowed("evaluate_jd_full", toolWhitelist)) {
     const params: Record<string, unknown> = {};

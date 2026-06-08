@@ -64,6 +64,18 @@ describe("vector memory chunking and embeddings", () => {
     })).toThrow(/dimension mismatch/);
   });
 
+  it("can reuse DASHSCOPE_API_KEY when MEMORY_EMBEDDING_API_KEY is not set", () => {
+    const config = resolveMemoryEmbeddingConfig({
+      MEMORY_EMBEDDING_PROVIDER: "openai-compatible",
+      MEMORY_EMBEDDING_API_URL: "https://example.invalid/v1/embeddings",
+      MEMORY_EMBEDDING_MODEL: "text-embedding-v4",
+      MEMORY_EMBEDDING_DIMENSION: "1536",
+      DASHSCOPE_API_KEY: "dashscope-secret",
+    });
+
+    expect(config.apiKey).toBe("dashscope-secret");
+  });
+
   it("produces deterministic mock embeddings", async () => {
     const provider = createEmbeddingProvider(resolveMemoryEmbeddingConfig({
       NODE_ENV: "test",
@@ -76,6 +88,37 @@ describe("vector memory chunking and embeddings", () => {
     expect(first).toEqual(second);
     expect(first).toHaveLength(1536);
     expect(Math.hypot(...first)).toBeCloseTo(1, 5);
+  });
+
+  it("sends the configured dimension to OpenAI-compatible providers without exposing secrets", async () => {
+    let requestBody: Record<string, unknown> | null = null;
+    let authorization = "";
+    const fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
+      requestBody = JSON.parse(String(init?.body || "{}")) as Record<string, unknown>;
+      authorization = String((init?.headers as Record<string, string>)?.Authorization || "");
+      return new Response(JSON.stringify({
+        data: [{ embedding: createDeterministicEmbedding("优秀AI产品经理简历") }],
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }) as typeof fetch;
+
+    const provider = createEmbeddingProvider(resolveMemoryEmbeddingConfig({
+      MEMORY_EMBEDDING_PROVIDER: "openai-compatible",
+      MEMORY_EMBEDDING_API_URL: "https://example.invalid/v1/embeddings",
+      MEMORY_EMBEDDING_MODEL: "text-embedding-v4",
+      MEMORY_EMBEDDING_DIMENSION: "1536",
+      MEMORY_EMBEDDING_API_KEY: "test-secret",
+    }), fetchImpl);
+
+    const [embedding] = await provider.embed(["优秀AI产品经理简历"]);
+
+    expect(embedding).toHaveLength(1536);
+    expect(requestBody).toMatchObject({
+      model: "text-embedding-v4",
+      input: ["优秀AI产品经理简历"],
+      dimensions: 1536,
+    });
+    expect(authorization).toBe("Bearer test-secret");
+    expect(JSON.stringify(requestBody)).not.toContain("test-secret");
   });
 });
 

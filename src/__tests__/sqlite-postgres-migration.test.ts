@@ -6,6 +6,7 @@ import path from "path";
 
 // @ts-ignore - migration helper is a Node CLI ESM module.
 import {
+  MIGRATION_TABLES,
   analyzeOwnership,
   buildMigrationInventory,
   resolveDefaultOwner,
@@ -87,6 +88,12 @@ describe("SQLite to PostgreSQL migration inventory", () => {
     expect(inventory.tables.find((table) => table.name === "jds")?.columns).not.toContain("user_id");
 
     db.close();
+  });
+
+  it("marks news cache as volatile so verification ignores runtime cache churn", () => {
+    expect(MIGRATION_TABLES.find((table) => table.name === "news_cache")).toMatchObject({
+      volatile: true,
+    });
   });
 
   it("requires an explicit default owner for null or missing user_id rows", () => {

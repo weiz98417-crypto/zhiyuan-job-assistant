@@ -22,6 +22,7 @@ const table = (name, options = {}) => ({
   jsonColumns: [],
   booleanColumns: [],
   uniqueChecks: [],
+  volatile: false,
   ...options,
 });
 
@@ -60,7 +61,7 @@ export const MIGRATION_TABLES = [
   table("session_memory", { userOwned: true }),
   table("scan_queue", { userOwned: true, jsonColumns: ["title_positive_json", "title_negative_json", "error_log"] }),
   table("scan_jobs", { userOwned: true, uniqueChecks: [["dedup_key"]] }),
-  table("news_cache", { conflictColumns: ["id"] }),
+  table("news_cache", { conflictColumns: ["id"], volatile: true }),
 ];
 
 export function openSqlite(sqlitePath = DEFAULT_SQLITE_PATH, options = {}) {
@@ -286,6 +287,19 @@ export async function verifyMigration({ sqliteDb, pgClient, defaultOwner = null,
 
     const sourceRows = sqliteDb.prepare(`SELECT * FROM ${quoteSqliteIdent(tableConfig.name)}`).all();
     const targetColumns = await getPostgresColumns(pgClient, tableConfig.name);
+    const targetTotal = Number((await pgClient.query(`SELECT COUNT(*) AS count FROM ${quotePgIdent(tableConfig.name)}`)).rows[0].count);
+    if (tableConfig.volatile) {
+      tableChecks.push({
+        table: tableConfig.name,
+        sourceCount: sourceRows.length,
+        migratedCount: Math.min(sourceRows.length, targetTotal),
+        targetTotal,
+        ok: true,
+        skipped: "volatile cache table",
+      });
+      continue;
+    }
+
     const keyColumn = tableConfig.conflictColumns[0];
     let migratedCount = 0;
     if (sourceRows.length > 0 && targetColumns.includes(keyColumn)) {
@@ -295,7 +309,6 @@ export async function verifyMigration({ sqliteDb, pgClient, defaultOwner = null,
         if (result.rowCount === 1) migratedCount++;
       }
     }
-    const targetTotal = Number((await pgClient.query(`SELECT COUNT(*) AS count FROM ${quotePgIdent(tableConfig.name)}`)).rows[0].count);
     const ok = migratedCount === sourceRows.length;
     if (!ok) errors.push(`${tableConfig.name}: expected ${sourceRows.length} source rows to be present, found ${migratedCount}`);
     tableChecks.push({ table: tableConfig.name, sourceCount: sourceRows.length, migratedCount, targetTotal, ok });
@@ -367,7 +380,8 @@ export function formatVerificationReport(report) {
   lines.push("");
   lines.push("## Row checks");
   for (const check of report.tableChecks) {
-    lines.push(`- ${check.table}: source=${check.sourceCount}, migrated=${check.migratedCount}, target_total=${check.targetTotal}, ${check.ok ? "ok" : "mismatch"}`);
+    const status = check.skipped ? `ok (${check.skipped})` : (check.ok ? "ok" : "mismatch");
+    lines.push(`- ${check.table}: source=${check.sourceCount}, migrated=${check.migratedCount}, target_total=${check.targetTotal}, ${status}`);
   }
   lines.push("");
   lines.push("## JSON samples");

@@ -10,6 +10,7 @@ import {
 import type {
   AppRow,
   JDRow,
+  NewsCacheRow,
   PreferenceRow,
   ProfileRow,
   ReferenceResumeRow,
@@ -30,6 +31,8 @@ const JSON_COLUMNS = new Set([
   "content_json",
   "sections_json",
   "tags",
+  "industry_tags",
+  "metadata_json",
   "messages_json",
   "interview_state_json",
   "agent_state_json",
@@ -63,6 +66,7 @@ const USER_PRIVATE_TABLES = [
   "offers",
   "offer_reports",
   "reference_resumes",
+  "reference_resume_usage",
   "memory_evidence",
   "memory_chunks",
   "memory_items",
@@ -150,6 +154,18 @@ export interface DataRepositories {
       raw_text: string;
       tags?: string;
       notes?: string;
+      role_category?: string;
+      industry_tags?: string;
+      seniority?: string;
+      visibility?: string;
+      status?: string;
+      quality_score?: number;
+      anonymized?: number | boolean;
+      shared_text_redacted?: string;
+      source_hash?: string;
+      metadata_json?: string;
+      approved_by?: string | null;
+      approved_at?: string | null;
     }, userId?: string): Promise<number>;
     list(userId?: string): Promise<ReferenceResumeSummary[]>;
     search(query: string, limit: number, userId?: string): Promise<ReferenceResumeRow[]>;
@@ -157,6 +173,7 @@ export interface DataRepositories {
     update(id: number, updates: Partial<ReferenceResumeRow>, userId?: string): Promise<boolean>;
     delete(id: number, userId?: string): Promise<boolean>;
     nameExists(name: string, excludeId?: number, userId?: string): Promise<boolean>;
+    findBySourceHash(sourceHash: string, userId?: string): Promise<ReferenceResumeRow | undefined>;
   };
   sessions: {
     list(userId: string): Promise<AnyRow[]>;
@@ -176,6 +193,12 @@ export interface DataRepositories {
     get(id: number, userId: string): Promise<AnyRow | undefined>;
     insert(input: AnyRow, userId: string): Promise<number>;
     delete(id: number, userId: string): Promise<{ reportId: number; offerId: number | null } | null>;
+  };
+  news: {
+    cache(news: Omit<NewsCacheRow, "id" | "cached_at">[]): Promise<void>;
+    list(source: string, limit?: number): Promise<NewsCacheRow[]>;
+    cleanExpired(maxAgeHours?: number): Promise<number>;
+    isFresh(source: string, maxAgeHours?: number): Promise<boolean>;
   };
   preferences: {
     record(preference: PreferenceRow, userId: string): Promise<void>;
@@ -351,6 +374,7 @@ function createSqliteRepositories(): DataRepositories {
     sessions: createSqliteSessionRepository(),
     offers: createSqliteOfferRepository(),
     offerReports: createSqliteOfferReportRepository(),
+    news: createSqliteNewsRepository(),
     preferences: {
       async record(preference, userId) {
         getDb().prepare(`
@@ -389,6 +413,7 @@ function createPostgresRepositories(): DataRepositories {
     sessions: createPostgresSessionRepository(),
     offers: createPostgresOfferRepository(),
     offerReports: createPostgresOfferReportRepository(),
+    news: createPostgresNewsRepository(),
     preferences: {
       async record(preference: PreferenceRow, userId: string) {
         await withPostgresClient((client) => client.query(`
@@ -840,19 +865,47 @@ function createPostgresSignalRepository(): DataRepositories["signals"] {
 function createSqliteReferenceResumeRepository(): DataRepositories["referenceResumes"] {
   return {
     async insert(row, userId) {
-      const result = getDb().prepare("INSERT INTO reference_resumes (user_id, name, source, sections_json, raw_text, tags, notes) VALUES (?, @name, @source, @sections_json, @raw_text, @tags, @notes)")
-        .run(userId || null, { ...row, tags: row.tags || "[]", notes: row.notes || "" });
+      const result = getDb().prepare(`
+        INSERT INTO reference_resumes (
+          user_id, name, source, sections_json, raw_text, tags, notes, role_category,
+          industry_tags, seniority, visibility, status, quality_score, anonymized,
+          shared_text_redacted, source_hash, metadata_json, approved_by, approved_at
+        )
+        VALUES (
+          @user_id, @name, @source, @sections_json, @raw_text, @tags, @notes, @role_category,
+          @industry_tags, @seniority, @visibility, @status, @quality_score, @anonymized,
+          @shared_text_redacted, @source_hash, @metadata_json, @approved_by, @approved_at
+        )
+      `).run({
+        ...row,
+        user_id: userId || null,
+        tags: row.tags || "[]",
+        notes: row.notes || "",
+        role_category: row.role_category || "",
+        industry_tags: row.industry_tags || "[]",
+        seniority: row.seniority || "",
+        visibility: row.visibility || "private",
+        status: row.status || "active",
+        quality_score: row.quality_score || 0,
+        anonymized: row.anonymized ? 1 : 0,
+        shared_text_redacted: row.shared_text_redacted || "",
+        source_hash: row.source_hash || "",
+        metadata_json: row.metadata_json || "{}",
+        approved_by: row.approved_by || null,
+        approved_at: row.approved_at || null,
+      });
       return Number(result.lastInsertRowid);
     },
     async list(userId) {
-      const sql = userId ? "SELECT id, name, source, tags, notes, created_at FROM reference_resumes WHERE user_id = ? ORDER BY created_at DESC" : "SELECT id, name, source, tags, notes, created_at FROM reference_resumes ORDER BY created_at DESC";
+      const columns = "id, name, source, tags, notes, role_category, visibility, status, quality_score, anonymized, created_at, updated_at";
+      const sql = userId ? `SELECT ${columns} FROM reference_resumes WHERE user_id = ? OR visibility = 'team' ORDER BY created_at DESC` : `SELECT ${columns} FROM reference_resumes ORDER BY created_at DESC`;
       return (userId ? getDb().prepare(sql).all(userId) : getDb().prepare(sql).all()) as ReferenceResumeSummary[];
     },
     async search(query, limit, userId) {
       try {
         const terms = query.replace(/['"]/g, "").split(/\s+/).filter(Boolean).map((term) => `"${term}"`).join(" OR ");
         if (!terms) return [];
-        const userClause = userId ? "AND rr.user_id = @user_id" : "";
+        const userClause = userId ? "AND (rr.user_id = @user_id OR rr.visibility = 'team')" : "";
         return getDb().prepare(`
           SELECT rr.* FROM reference_resumes rr
           INNER JOIN reference_resumes_fts fts ON rr.id = fts.rowid
@@ -860,21 +913,27 @@ function createSqliteReferenceResumeRepository(): DataRepositories["referenceRes
           ORDER BY rank LIMIT @limit
         `).all({ query: terms, limit, user_id: userId }) as ReferenceResumeRow[];
       } catch {
-        const userClause = userId ? "AND user_id = @user_id" : "";
+        const userClause = userId ? "AND (user_id = @user_id OR visibility = 'team')" : "";
         return getDb().prepare(`SELECT * FROM reference_resumes WHERE raw_text LIKE @like ${userClause} ORDER BY id DESC LIMIT @limit`).all({ like: `%${query.slice(0, 50)}%`, limit, user_id: userId }) as ReferenceResumeRow[];
       }
     },
     async get(id, userId) {
-      const sql = userId ? "SELECT * FROM reference_resumes WHERE id = ? AND user_id = ?" : "SELECT * FROM reference_resumes WHERE id = ?";
+      const sql = userId ? "SELECT * FROM reference_resumes WHERE id = ? AND (user_id = ? OR visibility = 'team')" : "SELECT * FROM reference_resumes WHERE id = ?";
       return (userId ? getDb().prepare(sql).get(id, userId) : getDb().prepare(sql).get(id)) as ReferenceResumeRow | undefined;
     },
     async update(id, updates, userId) {
       const sets: string[] = [];
       const params: Record<string, unknown> = { id, user_id: userId };
-      for (const key of ["name", "sections_json", "raw_text", "tags", "notes"] as const) {
+      for (const key of [
+        "name", "sections_json", "raw_text", "tags", "notes", "role_category",
+        "industry_tags", "seniority", "visibility", "status", "quality_score",
+        "anonymized", "shared_text_redacted", "source_hash", "metadata_json",
+        "approved_by", "approved_at",
+      ] as const) {
         if (updates[key] !== undefined) { sets.push(`${key} = @${key}`); params[key] = updates[key]; }
       }
       if (!sets.length) return false;
+      sets.push("updated_at = datetime('now')");
       const sql = `UPDATE reference_resumes SET ${sets.join(", ")} WHERE id = @id ${userId ? "AND user_id = @user_id" : ""}`;
       return getDb().prepare(sql).run(params).changes > 0;
     },
@@ -889,6 +948,13 @@ function createSqliteReferenceResumeRepository(): DataRepositories["referenceRes
       if (userId) { sql += " AND user_id = ?"; params.push(userId); }
       return Boolean(getDb().prepare(sql).get(...params));
     },
+    async findBySourceHash(sourceHash, userId) {
+      if (!sourceHash) return undefined;
+      const sql = userId
+        ? "SELECT * FROM reference_resumes WHERE source_hash = ? AND user_id = ? ORDER BY id DESC LIMIT 1"
+        : "SELECT * FROM reference_resumes WHERE source_hash = ? ORDER BY id DESC LIMIT 1";
+      return (userId ? getDb().prepare(sql).get(sourceHash, userId) : getDb().prepare(sql).get(sourceHash)) as ReferenceResumeRow | undefined;
+    },
   };
 }
 
@@ -896,27 +962,58 @@ function createPostgresReferenceResumeRepository(): DataRepositories["referenceR
   return {
     async insert(row, userId) {
       return withPostgresClient(async (client) => Number((await client.query(`
-        INSERT INTO reference_resumes (user_id, name, source, sections_json, raw_text, tags, notes)
-        VALUES ($1,$2,$3,$4::jsonb,$5,$6::jsonb,$7) RETURNING id
-      `, [userId || null, row.name, row.source, row.sections_json, row.raw_text, row.tags || "[]", row.notes || ""])).rows[0].id));
+        INSERT INTO reference_resumes (
+          user_id, name, source, sections_json, raw_text, tags, notes, role_category,
+          industry_tags, seniority, visibility, status, quality_score, anonymized,
+          shared_text_redacted, source_hash, metadata_json, approved_by, approved_at
+        )
+        VALUES ($1,$2,$3,$4::jsonb,$5,$6::jsonb,$7,$8,$9::jsonb,$10,$11,$12,$13,$14,$15,$16,$17::jsonb,$18,$19)
+        RETURNING id
+      `, [
+        userId || null,
+        row.name,
+        row.source,
+        row.sections_json,
+        row.raw_text,
+        row.tags || "[]",
+        row.notes || "",
+        row.role_category || "",
+        row.industry_tags || "[]",
+        row.seniority || "",
+        row.visibility || "private",
+        row.status || "active",
+        row.quality_score || 0,
+        Boolean(row.anonymized),
+        row.shared_text_redacted || "",
+        row.source_hash || "",
+        row.metadata_json || "{}",
+        row.approved_by || null,
+        row.approved_at || null,
+      ])).rows[0].id));
     },
     async list(userId) {
+      const columns = "id, name, source, tags, notes, role_category, visibility, status, quality_score, anonymized, created_at, updated_at";
       return withPostgresClient(async (client) => rows<ReferenceResumeSummary>((userId
-        ? await client.query("SELECT id, name, source, tags, notes, created_at FROM reference_resumes WHERE user_id=$1 ORDER BY created_at DESC", [userId])
-        : await client.query("SELECT id, name, source, tags, notes, created_at FROM reference_resumes ORDER BY created_at DESC")).rows));
+        ? await client.query(`SELECT ${columns} FROM reference_resumes WHERE user_id=$1 OR visibility='team' ORDER BY created_at DESC`, [userId])
+        : await client.query(`SELECT ${columns} FROM reference_resumes ORDER BY created_at DESC`)).rows));
     },
     async search(query, limit, userId) {
       return withPostgresClient(async (client) => rows<ReferenceResumeRow>((userId
-        ? await client.query("SELECT * FROM reference_resumes WHERE user_id=$1 AND raw_text ILIKE $2 ORDER BY id DESC LIMIT $3", [userId, `%${query.slice(0, 80)}%`, limit])
+        ? await client.query("SELECT * FROM reference_resumes WHERE (user_id=$1 OR visibility='team') AND raw_text ILIKE $2 ORDER BY id DESC LIMIT $3", [userId, `%${query.slice(0, 80)}%`, limit])
         : await client.query("SELECT * FROM reference_resumes WHERE raw_text ILIKE $1 ORDER BY id DESC LIMIT $2", [`%${query.slice(0, 80)}%`, limit])).rows));
     },
     async get(id, userId) {
       return withPostgresClient(async (client) => one<ReferenceResumeRow>(userId
-        ? await client.query("SELECT * FROM reference_resumes WHERE id=$1 AND user_id=$2", [id, userId])
+        ? await client.query("SELECT * FROM reference_resumes WHERE id=$1 AND (user_id=$2 OR visibility='team')", [id, userId])
         : await client.query("SELECT * FROM reference_resumes WHERE id=$1", [id])));
     },
     async update(id, updates, userId) {
-      const keys = ["name", "sections_json", "raw_text", "tags", "notes"].filter((key) => updates[key as keyof ReferenceResumeRow] !== undefined);
+      const keys = [
+        "name", "sections_json", "raw_text", "tags", "notes", "role_category",
+        "industry_tags", "seniority", "visibility", "status", "quality_score",
+        "anonymized", "shared_text_redacted", "source_hash", "metadata_json",
+        "approved_by", "approved_at",
+      ].filter((key) => updates[key as keyof ReferenceResumeRow] !== undefined);
       if (!keys.length) return false;
       return withPostgresClient(async (client) => {
         const sets = keys.map((key, index) => {
@@ -926,6 +1023,7 @@ function createPostgresReferenceResumeRepository(): DataRepositories["referenceR
         const params = keys.map((key) => updates[key as keyof ReferenceResumeRow]);
         params.push(id);
         if (userId) params.push(userId);
+        sets.push("updated_at = now()");
         const sql = `UPDATE reference_resumes SET ${sets.join(", ")} WHERE id = $${keys.length + 1}${userId ? ` AND user_id = $${keys.length + 2}` : ""}`;
         return Boolean((await client.query(sql, params)).rowCount);
       });
@@ -943,6 +1041,12 @@ function createPostgresReferenceResumeRepository(): DataRepositories["referenceR
         if (userId) { params.push(userId); clauses.push(`user_id = $${params.length}`); }
         return Boolean((await client.query(`SELECT id FROM reference_resumes WHERE ${clauses.join(" AND ")} LIMIT 1`, params)).rowCount);
       });
+    },
+    async findBySourceHash(sourceHash, userId) {
+      if (!sourceHash) return undefined;
+      return withPostgresClient(async (client) => one<ReferenceResumeRow>(userId
+        ? await client.query("SELECT * FROM reference_resumes WHERE source_hash=$1 AND user_id=$2 ORDER BY id DESC LIMIT 1", [sourceHash, userId])
+        : await client.query("SELECT * FROM reference_resumes WHERE source_hash=$1 ORDER BY id DESC LIMIT 1", [sourceHash])));
     },
   };
 }
@@ -1025,6 +1129,103 @@ function createPostgresAgentPreferenceRepository(): DataRepositories["agentPrefe
         ON CONFLICT (user_id, entity_type, entity_key) DO UPDATE SET
           weight = EXCLUDED.weight, last_updated = now()
       `, [userId, input.entity_type, input.entity_key, input.weight ?? 1.0, input.decay_rate ?? 0.05]));
+    },
+  };
+}
+
+function createSqliteNewsRepository(): DataRepositories["news"] {
+  return {
+    async cache(news) {
+      if (!news.length) return;
+      const db = getDb();
+      const del = db.prepare("DELETE FROM news_cache WHERE source = ? AND source_name = ?");
+      const ins = db.prepare(`
+        INSERT INTO news_cache (source, source_name, title, summary, url, published_at)
+        VALUES (@source, @source_name, @title, @summary, @url, @published_at)
+      `);
+      const tx = db.transaction(() => {
+        for (const item of news) {
+          del.run(item.source, item.source_name || null);
+          ins.run({
+            source: item.source,
+            source_name: item.source_name || null,
+            title: item.title,
+            summary: item.summary || null,
+            url: item.url || null,
+            published_at: item.published_at || null,
+          });
+        }
+      });
+      tx();
+    },
+    async list(source, limit = 5) {
+      return getDb().prepare(
+        "SELECT * FROM news_cache WHERE source = ? ORDER BY cached_at DESC LIMIT ?",
+      ).all(source, limit) as NewsCacheRow[];
+    },
+    async cleanExpired(maxAgeHours = 24) {
+      return getDb().prepare(
+        `DELETE FROM news_cache WHERE cached_at < datetime('now', '-' || ? || ' hours')`,
+      ).run(maxAgeHours).changes;
+    },
+    async isFresh(source, maxAgeHours = 6) {
+      const row = getDb().prepare(
+        `SELECT cached_at FROM news_cache WHERE source = ? AND cached_at > datetime('now', '-' || ? || ' hours') LIMIT 1`,
+      ).get(source, maxAgeHours) as { cached_at: string } | undefined;
+      return Boolean(row);
+    },
+  };
+}
+
+function createPostgresNewsRepository(): DataRepositories["news"] {
+  return {
+    async cache(news) {
+      if (!news.length) return;
+      await withPostgresClient(async (client) => {
+        await client.query("BEGIN");
+        try {
+          for (const item of news) {
+            const sourceName = item.source_name || null;
+            await client.query(
+              "DELETE FROM news_cache WHERE source = $1 AND source_name IS NOT DISTINCT FROM $2",
+              [item.source, sourceName],
+            );
+            await client.query(`
+              INSERT INTO news_cache (source, source_name, title, summary, url, published_at)
+              VALUES ($1, $2, $3, $4, $5, $6)
+            `, [
+              item.source,
+              sourceName,
+              item.title,
+              item.summary || null,
+              item.url || null,
+              normalizeTimestampInput(item.published_at),
+            ]);
+          }
+          await client.query("COMMIT");
+        } catch (error) {
+          await client.query("ROLLBACK");
+          throw error;
+        }
+      });
+    },
+    async list(source, limit = 5) {
+      return withPostgresClient(async (client) => rows<NewsCacheRow>((await client.query(
+        "SELECT * FROM news_cache WHERE source = $1 ORDER BY cached_at DESC LIMIT $2",
+        [source, limit],
+      )).rows));
+    },
+    async cleanExpired(maxAgeHours = 24) {
+      return withPostgresClient(async (client) => Number((await client.query(
+        "DELETE FROM news_cache WHERE cached_at < now() - make_interval(hours => $1::int)",
+        [maxAgeHours],
+      )).rowCount || 0));
+    },
+    async isFresh(source, maxAgeHours = 6) {
+      return withPostgresClient(async (client) => Boolean((await client.query(
+        "SELECT cached_at FROM news_cache WHERE source = $1 AND cached_at > now() - make_interval(hours => $2::int) LIMIT 1",
+        [source, maxAgeHours],
+      )).rowCount));
     },
   };
 }
@@ -1304,6 +1505,12 @@ function normalizeMonthlySalaryK(value: unknown): number {
 
 function normalizeBodyForMatch(body: string): string {
   return body.replace(/\s+/g, " ").trim().slice(0, 500).toLowerCase();
+}
+
+function normalizeTimestampInput(value?: string | null): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
 function rows<T>(input: AnyRow[]): T[] {

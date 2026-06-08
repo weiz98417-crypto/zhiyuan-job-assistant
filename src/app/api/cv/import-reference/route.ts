@@ -2,13 +2,23 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { getDataRepositories } from "@/lib/data-repositories";
 import { isGarbledText } from "@/lib/agent/loop/text-quality";
+import {
+  buildReferenceResumeRawText,
+  indexReferenceResumeBestEffort,
+  looksLikeResumeText,
+  normalizeReferenceVisibility,
+  normalizeRoleCategory,
+  redactReferenceResumeText,
+  scoreReferenceResumeQuality,
+} from "@/lib/reference-resume-vector";
+import { stableHash } from "@/lib/memory/vector-memory";
+import { persistExcellentResumePatternsBestEffort } from "@/lib/excellent-resume-patterns";
 import { ZHIPU_API_URL, ZHIPU_VISION_MODEL } from "@/lib/zhipu";
 import mammoth from "mammoth";
 
 const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
 const MODEL = "deepseek-v4-flash";
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
-const VALID_MIME_TYPES = ["image/png", "image/jpeg", "image/webp"];
 
 interface CVSection {
   id: string;
@@ -57,22 +67,36 @@ title 字段使用中文：个人概述、工作经历、项目经历、技能�
   const content = data.choices?.[0]?.message?.content;
   if (!content) throw new Error("AI 返回为空");
 
-  let parsed: { sections?: CVSection[] };
-  // Try multiple extraction strategies
+  let parsed: { sections?: CVSection[] } | undefined;
   const strategies = [
     () => JSON.parse(content),
-    () => { const m = content.match(/```(?:json)?\s*([\s\S]*?)```/); return m ? JSON.parse(m[1]) : null; },
-    () => { const m = content.match(/\{[\s\S]*"sections"[\s\S]*\}/); return m ? JSON.parse(m[0]) : null; },
-    () => { const m = content.match(/\{[\s\S]*\}/); return m ? JSON.parse(m[0]) : null; },
+    () => {
+      const match = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+      return match ? JSON.parse(match[1]) : null;
+    },
+    () => {
+      const match = content.match(/\{[\s\S]*"sections"[\s\S]*\}/);
+      return match ? JSON.parse(match[0]) : null;
+    },
+    () => {
+      const match = content.match(/\{[\s\S]*\}/);
+      return match ? JSON.parse(match[0]) : null;
+    },
   ];
-  for (const strat of strategies) {
-    try {
-      const result = strat();
-      if (result && result.sections) { parsed = result; break; }
-    } catch { /* next strategy */ }
-  }
-  if (!parsed!) throw new Error(`AI 返回格式解析失败。原始返回: ${content.slice(0, 300)}`);
 
+  for (const strategy of strategies) {
+    try {
+      const result = strategy();
+      if (result && result.sections) {
+        parsed = result;
+        break;
+      }
+    } catch {
+      // Try the next extraction strategy.
+    }
+  }
+
+  if (!parsed) throw new Error(`AI 返回格式解析失败。原始返回: ${content.slice(0, 300)}`);
   if (!parsed.sections || !Array.isArray(parsed.sections)) {
     throw new Error("AI 解析结果缺少 sections 数组");
   }
@@ -129,18 +153,18 @@ async function extractViaQwenLong(buffer: Buffer, filename: string): Promise<str
   const apiKey = process.env.DASHSCOPE_API_KEY;
   if (!apiKey) throw new Error("未配置 DASHSCOPE_API_KEY，文件解析需要阿里云百炼 API");
 
-  // Upload
   const form = new FormData();
   form.append("file", new Blob([new Uint8Array(buffer)]), filename);
   form.append("purpose", "file-extract");
   const upRes = await fetch(`${DASHSCOPE_BASE}/files`, {
-    method: "POST", headers: { Authorization: `Bearer ${apiKey}` }, body: form,
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}` },
+    body: form,
     signal: AbortSignal.timeout(30000),
   });
   if (!upRes.ok) throw new Error(`文件上传失败: ${upRes.status}`);
   const { id: fileId } = await upRes.json() as { id: string };
 
-  // Parse via Qwen-Long
   const chatRes = await fetch(`${DASHSCOPE_BASE}/chat/completions`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
@@ -170,6 +194,12 @@ export async function POST(request: Request) {
 
     let rawText = "";
     let source: "paste" | "upload" = "paste";
+    let requestedName = "";
+    let requestedRoleCategory = "";
+    let requestedVisibility = "private";
+    let requestedNotes = "";
+    let requestedTags: string[] = [];
+    let saveAsExcellent = false;
 
     if (contentType.includes("multipart/form-data")) {
       const formData = await request.formData();
@@ -182,12 +212,10 @@ export async function POST(request: Request) {
       const ext = getFileExtension(fileName);
       const fileBuffer = Buffer.from(await file.arrayBuffer());
 
-      // Check file size
       if (fileBuffer.length > MAX_FILE_SIZE) {
         return NextResponse.json({ success: false, error: "文件大小不能超过 10MB" }, { status: 400 });
       }
 
-      // Parse different file formats
       if (ext === "txt" || ext === "md") {
         rawText = new TextDecoder().decode(fileBuffer);
       } else if (ext === "docx") {
@@ -197,9 +225,6 @@ export async function POST(request: Request) {
           if (!rawText.trim()) {
             return NextResponse.json({ success: false, error: "Word 文档中未提取到文本内容" }, { status: 400 });
           }
-          // Mammoth hardcodes TextDecoder("utf-8") for the ZIP'd XML — when the docx
-          // was authored by tools that encode XML as GBK (older WPS etc.), we get mojibake.
-          // Fall back to Qwen-Long which handles encoding more robustly.
           if (isGarbledText(rawText)) {
             console.log("[import-reference] mammoth output appears garbled, falling back to Qwen-Long");
             try {
@@ -210,7 +235,6 @@ export async function POST(request: Request) {
             } catch (fallbackErr) {
               console.error("[import-reference] Qwen-Long fallback also failed:", fallbackErr);
             }
-            // If Qwen-Long fallback also produced garbage or failed, tell the user
             if (isGarbledText(rawText) || !rawText.trim()) {
               return NextResponse.json({
                 success: false,
@@ -252,17 +276,34 @@ export async function POST(request: Request) {
       }
 
       source = "upload";
+      requestedName = String(formData.get("name") || "");
+      requestedRoleCategory = String(formData.get("roleCategory") || formData.get("role_category") || "");
+      requestedVisibility = String(formData.get("visibility") || "private");
+      requestedNotes = String(formData.get("notes") || "");
+      requestedTags = parseTags(formData.get("tags"));
+      saveAsExcellent = String(formData.get("saveAsExcellent") || "").toLowerCase() === "true";
     } else {
-      // JSON body: text paste
       const body = await request.json().catch(() => ({}));
       rawText = (body.text as string) || "";
       if (!rawText.trim()) {
         return NextResponse.json({ success: false, error: "请提供简历文本" }, { status: 400 });
       }
+      requestedName = String(body.name || "");
+      requestedRoleCategory = String(body.roleCategory || body.role_category || "");
+      requestedVisibility = String(body.visibility || "private");
+      requestedNotes = String(body.notes || "");
+      requestedTags = parseTags(body.tags);
+      saveAsExcellent = Boolean(body.saveAsExcellent || body.save_as_excellent);
       source = "paste";
     }
 
-    // Parse with AI (DeepSeek)
+    if (saveAsExcellent && !looksLikeResumeText(rawText)) {
+      return NextResponse.json({
+        success: false,
+        error: "上传内容不像一份完整简历，请确认文件或文本后再保存为优秀参考简历。",
+      }, { status: 400 });
+    }
+
     let sections: CVSection[];
     try {
       sections = await parseCVWithAI(rawText);
@@ -271,34 +312,73 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: `AI 解析失败: ${msg}` }, { status: 500 });
     }
 
-    // Generate default name from content
-    const firstRole = sections.find(s => s.id === "summary")?.content?.slice(0, 30) || "未命名";
+    const firstRole = sections.find((section) => section.id === "summary")?.content?.slice(0, 30) || "未命名";
     const defaultName = `参考简历-${firstRole.slice(0, 20).replace(/\n/g, " ")}`;
 
-    // Check duplicate
     const repos = getDataRepositories();
-    const exists = await repos.referenceResumes.nameExists(defaultName, undefined, user.userId);
-    const name = exists ? `${defaultName}-${Date.now().toString(36)}` : defaultName;
+    const baseName = requestedName.trim() || defaultName;
+    const exists = await repos.referenceResumes.nameExists(baseName, undefined, user.userId);
+    const name = exists ? `${baseName}-${Date.now().toString(36)}` : baseName;
 
-    // Build raw_text for FTS5 index
-    const rawTextForIndex = sections
-      .filter(s => s.content?.trim())
-      .map(s => `【${s.title}】\n${s.content}`)
-      .join("\n\n");
+    const rawTextForIndex = buildReferenceResumeRawText(sections, rawText);
+    const sourceHash = stableHash(rawTextForIndex);
+    const roleCategory = normalizeRoleCategory(requestedRoleCategory, rawTextForIndex);
+    const qualityScore = scoreReferenceResumeQuality({ rawText: rawTextForIndex, sections });
+    const requestedVisibilityNormalized = normalizeReferenceVisibility(requestedVisibility);
+    const redactedText = redactReferenceResumeText(rawTextForIndex);
+    const isTeamRequested = requestedVisibilityNormalized === "team";
+    const actualVisibility = isTeamRequested && user.role === "admin" && qualityScore >= 0.45
+      ? "team"
+      : isTeamRequested
+        ? "team_pending"
+        : requestedVisibilityNormalized;
+    const status = actualVisibility === "team_pending" ? "pending" : actualVisibility === "disabled" ? "disabled" : "active";
+    const approvedBy = actualVisibility === "team" ? user.userId : null;
+    const approvedAt = actualVisibility === "team" ? new Date().toISOString() : null;
 
-    // Auto-extract tags from content
+    const duplicate = await repos.referenceResumes.findBySourceHash(sourceHash, user.userId);
+    if (duplicate) {
+      return NextResponse.json({
+        success: true,
+        data: {
+          id: duplicate.id,
+          name: duplicate.name,
+          source: duplicate.source,
+          sections: parseJsonArray<CVSection>(duplicate.sections_json),
+          tags: parseJsonArray<string>(duplicate.tags),
+          roleCategory: duplicate.role_category || roleCategory,
+          visibility: duplicate.visibility || "private",
+          status: duplicate.status || "active",
+          qualityScore: Number(duplicate.quality_score || 0),
+          anonymized: Boolean(duplicate.anonymized),
+          duplicate: true,
+          indexing: { status: "skipped", chunks: 0, embedded: 0, failed: 0, reason: "Duplicate source hash" },
+        },
+      });
+    }
+
     const tags: string[] = [];
     const tagPatterns: [RegExp, string][] = [
-      [/产品经理/g, "产品经理"], [/后端|Java|Go|Python|Node\.js/g, "后端开发"],
-      [/前端|React|Vue|TypeScript/g, "前端开发"], [/算法|机器学习|深度学习/g, "AI/算法"],
-      [/数据|SQL|数据分析/g, "数据"], [/设计|Figma|UI|UX/g, "设计"],
-      [/运营/g, "运营"], [/架构/g, "架构"],
+      [/产品经理/g, "产品经理"],
+      [/后端|Java|Go|Python|Node\.js/g, "后端开发"],
+      [/前端|React|Vue|TypeScript/g, "前端开发"],
+      [/算法|机器学习|深度学习/g, "AI/算法"],
+      [/数据|SQL|数据分析/g, "数据"],
+      [/设计|Figma|UI|UX/g, "设计"],
+      [/运营/g, "运营"],
+      [/架构/g, "架构"],
     ];
-    const contentLower = sections.map(s => s.content).join(" ");
+    const contentText = sections.map((section) => section.content).join(" ");
     for (const [regex, tag] of tagPatterns) {
-      if (regex.test(contentLower) && !tags.includes(tag)) {
+      if (regex.test(contentText) && !tags.includes(tag)) {
         tags.push(tag);
       }
+    }
+    for (const tag of requestedTags) {
+      if (tag && !tags.includes(tag)) tags.push(tag);
+    }
+    if (roleCategory && roleCategory !== "general" && !tags.includes(roleCategory)) {
+      tags.push(roleCategory);
     }
 
     const id = await repos.referenceResumes.insert({
@@ -307,11 +387,60 @@ export async function POST(request: Request) {
       sections_json: JSON.stringify(sections),
       raw_text: rawTextForIndex,
       tags: JSON.stringify(tags),
+      notes: requestedNotes,
+      role_category: roleCategory,
+      visibility: actualVisibility,
+      status,
+      quality_score: qualityScore,
+      anonymized: actualVisibility !== "private",
+      shared_text_redacted: actualVisibility !== "private" ? redactedText : "",
+      source_hash: sourceHash,
+      metadata_json: JSON.stringify({
+        saveAsExcellent,
+        requestedVisibility: requestedVisibilityNormalized,
+        roleCategory,
+        qualityScore,
+      }),
+      approved_by: approvedBy,
+      approved_at: approvedAt,
     }, user.userId);
+
+    const indexing = await indexReferenceResumeBestEffort({
+      referenceResumeId: id,
+      ownerUserId: user.userId,
+      name,
+      sections,
+      rawText: actualVisibility === "private" ? rawTextForIndex : redactedText,
+      roleCategory,
+      visibility: actualVisibility,
+      status,
+      qualityScore,
+    });
+    const patternMemory = await persistExcellentResumePatternsBestEffort({
+      userId: user.userId,
+      referenceResumeId: id,
+      sections,
+      rawText: actualVisibility === "private" ? rawTextForIndex : redactedText,
+      roleCategory,
+      visibility: actualVisibility,
+    });
 
     return NextResponse.json({
       success: true,
-      data: { id, name, source, sections, tags },
+      data: {
+        id,
+        name,
+        source,
+        sections,
+        tags,
+        roleCategory,
+        visibility: actualVisibility,
+        status,
+        qualityScore,
+        anonymized: actualVisibility !== "private",
+        indexing,
+        patternMemory,
+      },
     });
   } catch (error: unknown) {
     if (error instanceof Error && error.message === "Not authenticated") {
@@ -323,5 +452,29 @@ export async function POST(request: Request) {
       { success: false, error: `导入失败: ${message}` },
       { status: 500 },
     );
+  }
+}
+
+function parseTags(value: FormDataEntryValue | unknown): string[] {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.map(String).map((tag) => tag.trim()).filter(Boolean);
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed.map(String).map((tag) => tag.trim()).filter(Boolean);
+    } catch {
+      return value.split(/[,，、\s]+/).map((tag) => tag.trim()).filter(Boolean);
+    }
+  }
+  return [];
+}
+
+function parseJsonArray<T>(value: string | undefined): T[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed as T[] : [];
+  } catch {
+    return [];
   }
 }

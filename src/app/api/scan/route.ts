@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
-import { getDb } from "@/lib/server-db";
-import { loadPortals, createScanEntry } from "../../../../lib/scan/orchestrator.mjs";
+import { createScanEntryForUser } from "@/lib/scan-data";
+import { getDatabaseDriver } from "@/lib/postgres";
+import { loadPortals } from "../../../../lib/scan/orchestrator.mjs";
 import { spawn } from "child_process";
 import path from "path";
 
@@ -30,6 +31,15 @@ export async function POST(request: NextRequest) {
   try {
     const user = await getCurrentUser();
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (getDatabaseDriver() === "postgres") {
+      return NextResponse.json(
+        {
+          error: "scan_worker_postgres_not_ready",
+          message: "职位扫描后台 worker 仍在迁移到 Postgres，暂不启动新扫描，避免任务卡在 pending 状态。",
+        },
+        { status: 503 },
+      );
+    }
 
     let companyFilter: string[] | undefined;
     let titlePositive: string[] = [];
@@ -72,8 +82,7 @@ export async function POST(request: NextRequest) {
     }
 
     const companies = await loadPortals();
-    const db = getDb();
-    const { scanId, conflict, companiesTotal } = createScanEntry(db, String(user.userId), companies, companyFilter, {
+    const { scanId, conflict, companiesTotal } = await createScanEntryForUser(String(user.userId), companies, companyFilter, {
       positive: titlePositive,
       negative: titleNegative,
     }, {

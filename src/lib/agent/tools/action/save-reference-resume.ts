@@ -1,0 +1,111 @@
+import type { ToolDefinition, ToolResult } from "../types";
+
+interface SaveReferenceResumeParams {
+  resume_text?: string;
+  name?: string;
+  role_category?: string;
+  visibility?: "private" | "team";
+  tags?: string[];
+  notes?: string;
+}
+
+async function handler(params: Record<string, unknown>): Promise<ToolResult> {
+  const input = params as SaveReferenceResumeParams;
+  const resumeText = String(input.resume_text || "").trim();
+  const roleCategory = String(input.role_category || "").trim();
+
+  if (!resumeText) {
+    return {
+      success: false,
+      data: null,
+      error: "需要先提供或提取简历文本，才能保存为优秀简历。",
+      errorCategory: "need_user_input",
+      recoverable: false,
+      retryHint: "请让用户上传/粘贴简历，或先调用文件/图片识别工具提取简历内容。",
+    };
+  }
+
+  if (!roleCategory) {
+    return {
+      success: false,
+      data: null,
+      error: "保存优秀简历前需要确认岗位方向，例如 AI产品经理、AI运营、AI售前、数据产品经理。",
+      errorCategory: "need_user_input",
+      recoverable: false,
+      retryHint: "请先询问用户：这份优秀简历要保存到哪个岗位方向？",
+    };
+  }
+
+  const response = await fetch("/api/cv/import-reference", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      text: resumeText,
+      name: input.name,
+      roleCategory,
+      visibility: input.visibility || "private",
+      tags: input.tags || [],
+      notes: input.notes || "",
+      saveAsExcellent: true,
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+
+  if (!response.ok || !payload.success) {
+    return {
+      success: false,
+      data: payload,
+      error: payload.error || `保存优秀简历失败: HTTP ${response.status}`,
+      errorCategory: response.status >= 500 ? "transient" : "permanent",
+      recoverable: response.status >= 500,
+      retryHint: "请检查简历文本是否完整，或改为私有保存后再重试。",
+    };
+  }
+
+  const data = payload.data || {};
+  return {
+    success: true,
+    data,
+    llmSummary: [
+      `优秀简历已保存：${data.name || input.name || "未命名"}`,
+      `岗位方向：${data.roleCategory || roleCategory}`,
+      `可见性：${data.visibility || input.visibility || "private"}`,
+      `质量分：${typeof data.qualityScore === "number" ? data.qualityScore.toFixed(2) : "unknown"}`,
+      data.indexing ? `索引：${data.indexing.status} (${data.indexing.embedded || 0}/${data.indexing.chunks || 0})` : "",
+      data.patternMemory ? `模式记忆：${data.patternMemory.status} (${data.patternMemory.persisted || 0}/${data.patternMemory.extracted || 0})` : "",
+    ].filter(Boolean).join("\n"),
+    uiPayload: data,
+    rawData: data,
+    errorCategory: "ok",
+  };
+}
+
+function formatResult(result: ToolResult): string {
+  if (!result.success) return `保存优秀简历失败：${result.error}`;
+  return result.llmSummary || "优秀简历已保存。";
+}
+
+export const saveReferenceResume: ToolDefinition = {
+  name: "save_reference_resume",
+  description: "将用户上传、粘贴或识别出的优秀简历保存到参考简历库。保存前必须确认岗位方向；可选择 private 私有或 team 局域网共享。",
+  matchHints: [
+    "保存优秀简历",
+    "保存成参考简历",
+    "沉淀简历样本",
+    "优秀简历库",
+    "AI产品经理优秀简历",
+    "AI运营优秀简历",
+    "AI售前优秀简历",
+  ],
+  parameters: {
+    resume_text: { type: "string", required: true, description: "完整简历文本，来自用户粘贴、文件解析或图片识别结果。" },
+    role_category: { type: "string", required: true, description: "岗位方向，例如 AI产品经理/AI运营/AI售前/数据产品经理。" },
+    visibility: { type: "string", required: false, description: "private 或 team；team 会进入局域网共享库，非管理员默认待审核。" },
+    name: { type: "string", required: false, description: "参考简历名称。" },
+    tags: { type: "array", required: false, description: "补充标签。" },
+    notes: { type: "string", required: false, description: "保存备注。" },
+  },
+  category: "action",
+  handler,
+  formatResult,
+};

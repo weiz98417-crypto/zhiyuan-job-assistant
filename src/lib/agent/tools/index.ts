@@ -35,6 +35,7 @@ import { generateOfferHRQuestionList } from "./action/generate-offer-hr-question
 import { startInterviewSession } from "./action/start-interview-session";
 import { optimizeResumeSection } from "./action/optimize-resume-section";
 import { saveResumeSection } from "./action/save-resume-section";
+import { saveReferenceResume } from "./action/save-reference-resume";
 import { getReferenceDetail } from "./query/get-reference-detail";
 import { readFile } from "./query/read-file";
 import { downloadReportPDF } from "./action/download-report-pdf";
@@ -91,6 +92,7 @@ registry.register(generateOfferHRQuestionList);
 registry.register(startInterviewSession);
 registry.register(optimizeResumeSection);
 registry.register(saveResumeSection);
+registry.register(saveReferenceResume);
 registry.register(downloadReportPDF);
 registry.register(updateReportMetadata);
 

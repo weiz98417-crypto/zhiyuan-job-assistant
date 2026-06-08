@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
-import { getDb } from '@/lib/server-db';
 import { getCurrentUser } from '@/lib/auth';
-import { getTeamInsights } from '@/lib/team-insights';
+import { getTeamInsightsForSelectedDatabase } from '@/lib/team-insights';
 
 export async function GET() {
   try {
@@ -10,8 +9,7 @@ export async function GET() {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    const db = getDb();
-    const insights = getTeamInsights(db);
+    const insights = await getTeamInsightsForSelectedDatabase();
 
     return NextResponse.json(insights);
   } catch (err) {

@@ -20,7 +20,13 @@ export async function GET(request: Request) {
         source: r.source,
         tags: JSON.parse(r.tags || "[]"),
         notes: r.notes,
+        roleCategory: r.role_category || "",
+        visibility: r.visibility || "private",
+        status: r.status || "active",
+        qualityScore: Number(r.quality_score || 0),
+        anonymized: Boolean(r.anonymized),
         created_at: r.created_at,
+        updated_at: r.updated_at,
       }));
       return NextResponse.json({ success: true, data: summaries });
     }
@@ -29,6 +35,11 @@ export async function GET(request: Request) {
     const data = list.map((r) => ({
       ...r,
       tags: JSON.parse(r.tags || "[]"),
+      roleCategory: r.role_category || "",
+      visibility: r.visibility || "private",
+      status: r.status || "active",
+      qualityScore: Number(r.quality_score || 0),
+      anonymized: Boolean(r.anonymized),
     }));
     return NextResponse.json({ success: true, data });
   } catch (error: unknown) {

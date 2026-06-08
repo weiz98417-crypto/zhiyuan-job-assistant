@@ -149,7 +149,7 @@ export function getDb(): Database.Database {
     const userTables = [
       'profiles', 'profile_signals', 'sessions', 'stories', 'cv_data',
       'applications', 'agent_preferences', 'session_memory',
-      'optimization_preferences', 'reports', 'jds',
+      'optimization_preferences', 'reports', 'jds', 'reference_resumes',
     ];
     for (const table of userTables) {
       const tCols = _db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
@@ -165,6 +165,29 @@ export function getDb(): Database.Database {
     if (!sessionCols.some((c) => c.name === "agent_state_json")) {
       _db.exec("ALTER TABLE sessions ADD COLUMN agent_state_json TEXT NOT NULL DEFAULT '{}'");
     }
+
+    const referenceResumeCols = _db.prepare("PRAGMA table_info(reference_resumes)").all() as { name: string }[];
+    const referenceResumeMigrations = [
+      ["role_category", "ALTER TABLE reference_resumes ADD COLUMN role_category TEXT NOT NULL DEFAULT ''"],
+      ["industry_tags", "ALTER TABLE reference_resumes ADD COLUMN industry_tags TEXT NOT NULL DEFAULT '[]'"],
+      ["seniority", "ALTER TABLE reference_resumes ADD COLUMN seniority TEXT NOT NULL DEFAULT ''"],
+      ["visibility", "ALTER TABLE reference_resumes ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private'"],
+      ["status", "ALTER TABLE reference_resumes ADD COLUMN status TEXT NOT NULL DEFAULT 'active'"],
+      ["quality_score", "ALTER TABLE reference_resumes ADD COLUMN quality_score REAL NOT NULL DEFAULT 0"],
+      ["anonymized", "ALTER TABLE reference_resumes ADD COLUMN anonymized INTEGER NOT NULL DEFAULT 0"],
+      ["shared_text_redacted", "ALTER TABLE reference_resumes ADD COLUMN shared_text_redacted TEXT NOT NULL DEFAULT ''"],
+      ["source_hash", "ALTER TABLE reference_resumes ADD COLUMN source_hash TEXT NOT NULL DEFAULT ''"],
+      ["metadata_json", "ALTER TABLE reference_resumes ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'"],
+      ["approved_by", "ALTER TABLE reference_resumes ADD COLUMN approved_by TEXT"],
+      ["approved_at", "ALTER TABLE reference_resumes ADD COLUMN approved_at TEXT"],
+      ["updated_at", "ALTER TABLE reference_resumes ADD COLUMN updated_at TEXT NOT NULL DEFAULT (datetime('now'))"],
+    ];
+    for (const [name, sql] of referenceResumeMigrations) {
+      if (!referenceResumeCols.some((c) => c.name === name)) _db.exec(sql);
+    }
+    _db.exec("CREATE INDEX IF NOT EXISTS idx_reference_resumes_user ON reference_resumes(user_id, created_at)");
+    _db.exec("CREATE INDEX IF NOT EXISTS idx_reference_resumes_visibility ON reference_resumes(visibility, status, role_category)");
+    _db.exec("CREATE INDEX IF NOT EXISTS idx_reference_resumes_hash ON reference_resumes(source_hash)");
 
     const offerCols = _db.prepare("PRAGMA table_info(offers)").all() as { name: string }[];
     const offerMigrations = [
@@ -477,12 +500,26 @@ export function clearProfileSignals(): number {
 
 export interface ReferenceResumeRow {
   id: number;
+  user_id?: string | null;
   name: string;
   source: string;
   sections_json: string;
   raw_text: string;
   tags: string;
   notes: string;
+  role_category?: string;
+  industry_tags?: string;
+  seniority?: string;
+  visibility?: string;
+  status?: string;
+  quality_score?: number;
+  anonymized?: number | boolean;
+  shared_text_redacted?: string;
+  source_hash?: string;
+  metadata_json?: string;
+  approved_by?: string | null;
+  approved_at?: string | null;
+  updated_at?: string;
   created_at: string;
 }
 
@@ -492,21 +529,50 @@ export interface ReferenceResumeSummary {
   source: string;
   tags: string;
   notes: string;
+  role_category?: string;
+  visibility?: string;
+  status?: string;
+  quality_score?: number;
+  anonymized?: number | boolean;
   created_at: string;
+  updated_at?: string;
 }
 
-export function insertReferenceResume(r: {
+export interface ReferenceResumeInsertInput {
   name: string;
   source: string;
   sections_json: string;
   raw_text: string;
   tags?: string;
   notes?: string;
-}): number {
+  role_category?: string;
+  industry_tags?: string;
+  seniority?: string;
+  visibility?: string;
+  status?: string;
+  quality_score?: number;
+  anonymized?: number | boolean;
+  shared_text_redacted?: string;
+  source_hash?: string;
+  metadata_json?: string;
+  approved_by?: string | null;
+  approved_at?: string | null;
+  created_at: string;
+}
+
+export function insertReferenceResume(r: Omit<ReferenceResumeInsertInput, "created_at">): number {
   const db = getDb();
   const result = db.prepare(`
-    INSERT INTO reference_resumes (name, source, sections_json, raw_text, tags, notes)
-    VALUES (@name, @source, @sections_json, @raw_text, @tags, @notes)
+    INSERT INTO reference_resumes (
+      name, source, sections_json, raw_text, tags, notes, role_category,
+      industry_tags, seniority, visibility, status, quality_score, anonymized,
+      shared_text_redacted, source_hash, metadata_json, approved_by, approved_at
+    )
+    VALUES (
+      @name, @source, @sections_json, @raw_text, @tags, @notes, @role_category,
+      @industry_tags, @seniority, @visibility, @status, @quality_score, @anonymized,
+      @shared_text_redacted, @source_hash, @metadata_json, @approved_by, @approved_at
+    )
   `).run({
     name: r.name,
     source: r.source,
@@ -514,6 +580,18 @@ export function insertReferenceResume(r: {
     raw_text: r.raw_text,
     tags: r.tags || "[]",
     notes: r.notes || "",
+    role_category: r.role_category || "",
+    industry_tags: r.industry_tags || "[]",
+    seniority: r.seniority || "",
+    visibility: r.visibility || "private",
+    status: r.status || "active",
+    quality_score: r.quality_score || 0,
+    anonymized: r.anonymized ? 1 : 0,
+    shared_text_redacted: r.shared_text_redacted || "",
+    source_hash: r.source_hash || "",
+    metadata_json: r.metadata_json || "{}",
+    approved_by: r.approved_by || null,
+    approved_at: r.approved_at || null,
   });
   return result.lastInsertRowid as number;
 }

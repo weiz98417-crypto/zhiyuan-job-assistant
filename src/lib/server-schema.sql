@@ -86,14 +86,32 @@ CREATE INDEX IF NOT EXISTS idx_profile_signals_created ON profile_signals(create
 -- Reference Resumes (user-uploaded exemplary resumes for AI-assisted optimization)
 CREATE TABLE IF NOT EXISTS reference_resumes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id TEXT REFERENCES users(id),
   name TEXT NOT NULL,
   source TEXT NOT NULL DEFAULT 'paste',
   sections_json TEXT NOT NULL DEFAULT '[]',
   raw_text TEXT NOT NULL DEFAULT '',
   tags TEXT NOT NULL DEFAULT '[]',
   notes TEXT NOT NULL DEFAULT '',
+  role_category TEXT NOT NULL DEFAULT '',
+  industry_tags TEXT NOT NULL DEFAULT '[]',
+  seniority TEXT NOT NULL DEFAULT '',
+  visibility TEXT NOT NULL DEFAULT 'private',
+  status TEXT NOT NULL DEFAULT 'active',
+  quality_score REAL NOT NULL DEFAULT 0,
+  anonymized INTEGER NOT NULL DEFAULT 0,
+  shared_text_redacted TEXT NOT NULL DEFAULT '',
+  source_hash TEXT NOT NULL DEFAULT '',
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  approved_by TEXT,
+  approved_at TEXT,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE INDEX IF NOT EXISTS idx_reference_resumes_user ON reference_resumes(user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_reference_resumes_visibility ON reference_resumes(visibility, status, role_category);
+CREATE INDEX IF NOT EXISTS idx_reference_resumes_hash ON reference_resumes(source_hash);
 
 -- FTS5 full-text index for reference resumes
 CREATE VIRTUAL TABLE IF NOT EXISTS reference_resumes_fts USING fts5(

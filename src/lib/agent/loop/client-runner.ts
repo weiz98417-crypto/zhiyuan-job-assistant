@@ -10,6 +10,10 @@ import db from "@/lib/db";
 import { createJD } from "@/lib/jd-storage";
 import { buildImageIntakeToolCall, inferPreferredDocumentTypeFromText, type ImageDocumentType, type ImageIntakeResult } from "@/lib/agent/image-intake";
 import { buildImageRouteAssistantReply, routeImageIntake } from "@/lib/agent/image-intake-router";
+import {
+  completePendingReferenceResumeSave,
+  type PendingReferenceResumeSaveAction,
+} from "@/lib/agent/reference-resume-save-flow";
 
 export type { SSEEvent };
 
@@ -20,6 +24,7 @@ interface AgentLoopRuntimeContext {
   preferredDocumentType?: ImageDocumentType;
   interviewState?: InterviewSessionState;
   interviewRebindAction?: InterviewRebindAction;
+  pendingReferenceResumeSave?: PendingReferenceResumeSaveAction;
 }
 
 /* ── Result quality check ── */
@@ -528,7 +533,26 @@ export async function* agentLoopClient(
 
     const searchProgress = buildSearchProgress(recentCalls, firstIteration);
 
-    if (firstIteration && !forcedImageToolConsumed) {
+    if (firstIteration && runtimeContext?.pendingReferenceResumeSave) {
+      const text = latestUserText(ctx);
+      const completion = completePendingReferenceResumeSave(runtimeContext.pendingReferenceResumeSave, text);
+      if (completion && "cancelled" in completion) {
+        state.phase = "responding";
+        yield { type: "phase", phase: "responding" };
+        yield { type: "text", content: "好的，这次不保存为优秀简历。后续你想沉淀样本时再告诉我。" };
+        yield { type: "done" };
+        return;
+      }
+      if (completion && isToolAllowedInMode("save_reference_resume", toolWhitelist)) {
+        forcedToolCall = {
+          id: `forced-pending-save-reference-resume-${Date.now()}`,
+          name: "save_reference_resume",
+          arguments: JSON.stringify(completion),
+        };
+      }
+    }
+
+    if (firstIteration && !forcedImageToolConsumed && !forcedToolCall) {
       const images = latestUserImages(ctx);
       const text = latestUserText(ctx);
       const preferredDocumentType =
@@ -992,6 +1016,13 @@ ${followupInstruction}`,
       }
 
       yield { type: "tool_result", name: tc.name, result: formatted, success: toolResult.success, data: toolResult.data, uiPayload: toolResult.uiPayload };
+
+      if (tc.name === "save_reference_resume" && toolResult.success) {
+        yield { type: "phase", phase: "responding" };
+        yield { type: "text", content: toolResult.llmSummary || formatted || "优秀简历已保存。" };
+        yield { type: "done" };
+        return;
+      }
 
       // ── Self-healing ──
       if (!toolResult.success) {

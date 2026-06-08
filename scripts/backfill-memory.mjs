@@ -2,6 +2,10 @@
 
 import { createHash } from "node:crypto";
 import { Pool } from "pg";
+import dotenv from "dotenv";
+
+dotenv.config({ path: ".env.local" });
+dotenv.config();
 
 const DIMENSION = 1536;
 const SOURCE_RULES = {
@@ -321,7 +325,11 @@ async function createEmbedding(text, config) {
       "Content-Type": "application/json",
       Authorization: `Bearer ${config.apiKey}`,
     },
-    body: JSON.stringify({ model: config.model, input: [text] }),
+    body: JSON.stringify({
+      model: config.model,
+      input: [text],
+      dimensions: DIMENSION,
+    }),
   });
   if (!response.ok) {
     const errorText = await response.text().catch(() => "");
@@ -386,7 +394,7 @@ function resolveEmbeddingConfig(env) {
   return {
     provider,
     apiUrl: env.MEMORY_EMBEDDING_API_URL || "",
-    apiKey: env.MEMORY_EMBEDDING_API_KEY || "",
+    apiKey: env.MEMORY_EMBEDDING_API_KEY || env.DASHSCOPE_API_KEY || "",
     model: env.MEMORY_EMBEDDING_MODEL || (provider === "mock" ? "mock-embedding-1536" : ""),
     maxRetries: clampInteger(Number(env.MEMORY_EMBEDDING_MAX_RETRIES || 2), 0, 5),
   };

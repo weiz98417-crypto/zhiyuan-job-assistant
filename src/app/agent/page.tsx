@@ -48,6 +48,14 @@ import {
   type InterviewRebindResolution,
 } from "@/lib/agent/interview-rebind-policy";
 import { markOfferStateStaleFromText } from "@/lib/agent/offer-session-state";
+import {
+  buildPendingReferenceResumeSave,
+  buildPendingReferenceResumeSaveFromImage,
+  buildReferenceResumeRoleQuestion,
+  isPendingReferenceResumeSaveCancelled,
+  type PendingReferenceResumeSaveAction,
+  type ReferenceResumeSaveSessionState,
+} from "@/lib/agent/reference-resume-save-flow";
 import type { AgentMessage, AgentInteraction, ChatSession } from "@/types";
 
 
@@ -463,6 +471,82 @@ function AgentPageInner() {
           setExecutingTool(undefined);
         }
 
+        const currentReferenceResumeSaveState =
+          (agentState?.referenceResumeSave && typeof agentState.referenceResumeSave === "object"
+            ? agentState.referenceResumeSave
+            : undefined) as ReferenceResumeSaveSessionState | undefined;
+        let pendingReferenceResumeSaveForRun: PendingReferenceResumeSaveAction | undefined =
+          currentReferenceResumeSaveState?.pending;
+        const detectedReferenceResumeSave = imageDataUris.length > 0
+          ? buildPendingReferenceResumeSaveFromImage(content, imageDataUris.length, imageIntake)
+          : buildPendingReferenceResumeSave({
+              userText: content,
+              resumeText: content,
+              source: "paste",
+            });
+
+        if (detectedReferenceResumeSave) {
+          if (!detectedReferenceResumeSave.roleCategory) {
+            const askedPending: PendingReferenceResumeSaveAction = {
+              ...detectedReferenceResumeSave,
+              askedRoleCategoryAt: new Date().toISOString(),
+            };
+            const roleQuestion = buildReferenceResumeRoleQuestion(askedPending);
+            const finalAssistant: AgentMessage = {
+              ...assistantMsg,
+              content: roleQuestion,
+              agent_id: "resume",
+            };
+            streamContentRef.current = roleQuestion;
+            setStreamText(roleQuestion);
+            setPhase(null);
+            setExecutingTool(undefined);
+            setMessages((prev) => {
+              const copy = [...prev];
+              const last = copy[copy.length - 1];
+              if (last && last.role === "assistant" && last.content === "") copy[copy.length - 1] = finalAssistant;
+              else copy.push(finalAssistant);
+              return copy;
+            });
+
+            if (currentSessionId && currentSessionForRun) {
+              const fullMessages = [...currentSessionForRun.messages];
+              const taggedUserMsg = { ...userMsg, agent_id: "resume" };
+              if (!hideUserMessage) fullMessages.push(taggedUserMsg);
+              const persistedImageIntakeToolMessage = imageIntakeToolMessage as AgentMessage | null;
+              if (!hideUserMessage && persistedImageIntakeToolMessage) {
+                fullMessages.push({ ...persistedImageIntakeToolMessage, agent_id: "resume" });
+              }
+              fullMessages.push(finalAssistant);
+
+              const isFirstUserMsg = currentSessionForRun.messages.filter((m) => m.role === "user").length === 0;
+              const needsTitle =
+                !currentSessionForRun.interviewState?.planSnapshot &&
+                (isFirstUserMsg ||
+                  !currentSessionForRun.title ||
+                  currentSessionForRun.title === "新对话" ||
+                  currentSessionForRun.title === "新的对话");
+              const userMsgCount = fullMessages.filter((m) => m.role === "user").length;
+              await updateSession(currentSessionId, {
+                messages: fullMessages,
+                title: needsTitle ? makeSessionTitle(content) : undefined,
+                memoryDigest: userMsgCount >= 5 ? generateMemoryDigest(fullMessages) || undefined : memoryDigest,
+                interviewState: currentSessionForRun.interviewState,
+                agentState: {
+                  ...(agentState || {}),
+                  referenceResumeSave: { pending: askedPending },
+                },
+              });
+              setSessions(await listSessions());
+            }
+
+            triggerProfileUpdate({ force: true }).catch(() => {});
+            return;
+          }
+
+          pendingReferenceResumeSaveForRun = detectedReferenceResumeSave;
+        }
+
         const routedContent = content;
 
         const { agent, systemPrompt, toolWhitelist, tools } = await orchestrate(routedContent, {
@@ -472,7 +556,9 @@ function AgentPageInner() {
           agentState,
           imageIntake,
           preferredDocumentType,
-          forcedAgentId: currentSessionForRun?.interviewState?.planSnapshot
+          forcedAgentId: pendingReferenceResumeSaveForRun
+            ? "resume"
+            : currentSessionForRun?.interviewState?.planSnapshot
             ? "interview"
             : undefined,
         });
@@ -524,7 +610,13 @@ Rules:
         for await (const event of agentLoopClient(
           activeSystemPrompt, msgList, undefined, controller.signal, undefined,
           toolWhitelist.length > 0 ? toolWhitelist : undefined, tools,
-          { imageIntake, preferredDocumentType, interviewState, interviewRebindAction: rebindResolution?.action },
+          {
+            imageIntake,
+            preferredDocumentType,
+            interviewState,
+            interviewRebindAction: rebindResolution?.action,
+            pendingReferenceResumeSave: pendingReferenceResumeSaveForRun,
+          },
         )) {
           if (firstEvent) { setStartTime(Date.now()); firstEvent = false; }
           switch (event.type) {
@@ -659,7 +751,6 @@ Rules:
         // ── Finalize ──
         streamContentRef.current = assistantText;
         setStreamText(assistantText);
-        setStreaming(false);
         setPhase(null);
         setExecutingTool(undefined);
         setEvalProgress([]);
@@ -707,7 +798,7 @@ Rules:
                   content: toolResultInfo.result,
                   toolName: toolResultInfo.name,
                   toolResult: toolResultInfo.uiPayload
-                    ? { uiPayload: toolResultInfo.uiPayload, success: toolResultInfo.success }
+                    ? { uiPayload: toolResultInfo.uiPayload, data: toolResultInfo.data, success: toolResultInfo.success }
                     : toolResultInfo.name === "get_profile" && toolResultInfo.data
                       ? { data: toolResultInfo.data, success: toolResultInfo.success }
                       : { success: toolResultInfo.success, result: toolResultInfo.result, data: toolResultInfo.data },
@@ -730,6 +821,8 @@ Rules:
                   );
               if (nextInterviewState && persistedToolMessage) {
                 nextInterviewState = updateInterviewStateWithToolResult(nextInterviewState, persistedToolMessage);
+              } else if (persistedToolMessage) {
+                nextInterviewState = updateInterviewStateWithToolResult(currentSession.interviewState, persistedToolMessage);
               }
               if (nextInterviewState && !hideUserMessage && shouldPersistInterviewRecap(taggedUserMsg.content)) {
                 nextInterviewState = persistInterviewRecap(nextInterviewState, taggedAssistant.content);
@@ -751,6 +844,12 @@ Rules:
                 const titleText = firstUserMsg ? firstUserMsg.content.trim() : content.trim();
                 sessionTitle = makeSessionTitle(titleText);
               }
+              const shouldClearReferenceResumeSave =
+                (toolResultInfo?.name === "save_reference_resume" && toolResultInfo.success) ||
+                Boolean(pendingReferenceResumeSaveForRun && isPendingReferenceResumeSaveCancelled(content));
+              const nextReferenceResumeSave = shouldClearReferenceResumeSave
+                ? undefined
+                : currentAgentState.referenceResumeSave as ReferenceResumeSaveSessionState | undefined;
               await updateSession(currentSessionId, {
                 messages: fullMessages,
                 title: sessionTitle,
@@ -759,6 +858,7 @@ Rules:
                 agentState: {
                   ...currentAgentState,
                   offer: nextOfferState,
+                  referenceResumeSave: nextReferenceResumeSave,
                 },
               });
               // Refresh sessions list

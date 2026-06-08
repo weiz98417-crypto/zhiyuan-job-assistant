@@ -2,6 +2,7 @@
 
 import fs from "fs";
 import path from "path";
+import dotenv from "dotenv";
 import {
   DEFAULT_SQLITE_PATH,
   createPostgresPool,
@@ -12,6 +13,9 @@ import {
   openSqlite,
   verifyMigration,
 } from "./lib/sqlite-postgres-migration.mjs";
+
+dotenv.config({ path: ".env.local" });
+dotenv.config();
 
 function parseArgs(argv) {
   const args = {

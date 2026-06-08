@@ -135,6 +135,27 @@ describe("generic image intake routing", () => {
     expect(decision.route).toBe("resume_preview");
   });
 
+  it("resume screenshot plus excellent-resume save intent calls the reference save tool", () => {
+    const intake: ImageIntakeResult = {
+      documentType: "resume",
+      confidence: 0.9,
+      quality: "clear",
+      extractedText: "张三\n个人概述：AI产品经理，熟悉大模型应用与数据产品。\n教育经历：硕士。\n工作经历：负责AI助手产品从0到1落地。\n项目经历：RAG知识库项目，答案准确率提升28%。\n专业技能：SQL、Prompt Engineering、用户研究、产品规划。",
+    };
+
+    const call = buildImageIntakeToolCall(
+      "把这份简历保存成AI产品经理优秀简历，并团队共享",
+      images,
+      intake,
+      ["save_reference_resume"],
+    );
+
+    expect(call?.name).toBe("save_reference_resume");
+    expect(call?.params.resume_text).toContain("RAG知识库项目");
+    expect(call?.params.role_category).toBe("AI产品经理");
+    expect(call?.params.visibility).toBe("team");
+  });
+
   it("unrelated screenshots stay outside JD/Offer/resume flows", () => {
     const intake: ImageIntakeResult = {
       documentType: "chat_screenshot",
