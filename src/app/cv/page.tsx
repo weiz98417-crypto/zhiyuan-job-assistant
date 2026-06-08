@@ -173,13 +173,9 @@ export default function CVPage() {
   // Reference resume library
   interface ReferenceResumeSummary {
     id: number; name: string; source: string; tags: string[]; notes: string; created_at: string;
-    roleCategory?: string; visibility?: string; status?: string; qualityScore?: number; anonymized?: boolean; updated_at?: string;
+    roleCategory?: string; visibility?: string; status?: string; qualityScore?: number; anonymized?: boolean; ownedByUser?: boolean; updated_at?: string;
   }
   const [referenceResumes, setReferenceResumes] = useState<ReferenceResumeSummary[]>([]);
-  const [referenceAdminData, setReferenceAdminData] = useState<{
-    pending: ReferenceResumeSummary[];
-    health: { total: number; team: number; pending: number; disabled: number; indexFailed: number; averageQuality: number };
-  } | null>(null);
   const [showImportPanel, setShowImportPanel] = useState(false);
   const [importText, setImportText] = useState("");
   const [importLoading, setImportLoading] = useState(false);
@@ -232,7 +228,7 @@ export default function CVPage() {
   interface ReferenceDetail {
     id: number; name: string; source: string;
     sections: CVSection[]; tags: string[]; notes: string; created_at: string;
-    roleCategory?: string; visibility?: string; status?: string; qualityScore?: number; anonymized?: boolean; updated_at?: string;
+    roleCategory?: string; visibility?: string; status?: string; qualityScore?: number; anonymized?: boolean; ownedByUser?: boolean; updated_at?: string;
   }
 
   const fetchReferences = useCallback(async () => {
@@ -245,26 +241,9 @@ export default function CVPage() {
     } catch { /* ignore */ }
   }, []);
 
-  const fetchReferenceAdminData = useCallback(async () => {
-    try {
-      const res = await fetch("/api/admin/reference-resumes");
-      if (res.status === 403 || res.status === 401) {
-        setReferenceAdminData(null);
-        return;
-      }
-      if (res.ok) {
-        const data = await res.json();
-        setReferenceAdminData(data.success ? data.data : null);
-      }
-    } catch {
-      setReferenceAdminData(null);
-    }
-  }, []);
-
   useEffect(() => {
     fetchReferences();
-    fetchReferenceAdminData();
-  }, [fetchReferences, fetchReferenceAdminData]);
+  }, [fetchReferences]);
 
   const handleImportReference = async () => {
     setImportLoading(true);
@@ -308,7 +287,6 @@ export default function CVPage() {
       setRenameImportedValue(data.data.name);
       setShowRenamePrompt(true);
       fetchReferences();
-      fetchReferenceAdminData();
     } catch (err: unknown) {
       setImportError(err instanceof Error ? err.message : "导入失败");
     } finally {
@@ -348,19 +326,6 @@ export default function CVPage() {
     try {
       await fetch(`/api/cv/references/${id}`, { method: "DELETE" });
       fetchReferences();
-      fetchReferenceAdminData();
-    } catch { /* ignore */ }
-  };
-
-  const handleReviewReference = async (id: number, action: "approve" | "reject" | "disable") => {
-    try {
-      await fetch("/api/admin/reference-resumes", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, action }),
-      });
-      fetchReferences();
-      fetchReferenceAdminData();
     } catch { /* ignore */ }
   };
 
@@ -395,17 +360,20 @@ export default function CVPage() {
   };
 
   const handleUpdateReference = async (id: number, updates: Record<string, unknown>) => {
-    await fetch(`/api/cv/references/${id}`, {
+    const res = await fetch(`/api/cv/references/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(updates),
     });
-    // Update the currently viewed detail so the UI reflects changes immediately
-    if (viewingRefDetail && viewingRefDetail.id === id) {
-      setViewingRefDetail({ ...viewingRefDetail, ...updates } as typeof viewingRefDetail);
+    if (!res.ok) return;
+    if (viewingRefDetail?.id === id) {
+      const detailRes = await fetch(`/api/cv/references/${id}`);
+      if (detailRes.ok) {
+        const data = await detailRes.json();
+        if (data.success) setViewingRefDetail(data.data);
+      }
     }
     fetchReferences();
-    fetchReferenceAdminData();
   };
 
   const versionMenuRef = useRef<HTMLDivElement>(null);
@@ -1524,12 +1492,14 @@ export default function CVPage() {
                       <Eye size={10} />
                       查看
                     </button>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); handleDeleteReference(ref.id, ref.name); }}
-                      className="p-0.5 text-[var(--color-muted)] hover:text-red-500 shrink-0 opacity-0 group-hover:opacity-100 transition-all"
-                    >
-                      <Trash2 size={10} />
-                    </button>
+                    {ref.ownedByUser !== false && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleDeleteReference(ref.id, ref.name); }}
+                        className="p-0.5 text-[var(--color-muted)] hover:text-red-500 shrink-0 opacity-0 group-hover:opacity-100 transition-all"
+                      >
+                        <Trash2 size={10} />
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -1539,61 +1509,6 @@ export default function CVPage() {
               </p>
             )}
 
-            {referenceAdminData && (
-              <div className="mt-3 pt-3 border-t border-[var(--color-divider)] space-y-2">
-                <div className="grid grid-cols-3 gap-1 text-[10px]">
-                  <div className="rounded-[var(--radius-sm)] bg-[var(--color-bg)] px-2 py-1">
-                    <span className="text-[var(--color-muted)]">团队</span>
-                    <span className="ml-1 font-medium text-[var(--color-text)]">{referenceAdminData.health.team}</span>
-                  </div>
-                  <div className="rounded-[var(--radius-sm)] bg-[var(--color-bg)] px-2 py-1">
-                    <span className="text-[var(--color-muted)]">待审</span>
-                    <span className="ml-1 font-medium text-[var(--color-text)]">{referenceAdminData.health.pending}</span>
-                  </div>
-                  <div className="rounded-[var(--radius-sm)] bg-[var(--color-bg)] px-2 py-1">
-                    <span className="text-[var(--color-muted)]">均分</span>
-                    <span className="ml-1 font-medium text-[var(--color-text)]">{Math.round(referenceAdminData.health.averageQuality * 100)}</span>
-                  </div>
-                </div>
-
-                {referenceAdminData.pending.length > 0 && (
-                  <div className="space-y-1.5">
-                    <p className="text-[10px] text-[var(--color-muted)]">团队共享待审核</p>
-                    {referenceAdminData.pending.slice(0, 4).map((ref) => (
-                      <div key={ref.id} className="rounded-[var(--radius-sm)] bg-[var(--color-bg)] px-2 py-1.5">
-                        <div className="flex items-center gap-2">
-                          <span className="flex-1 min-w-0 truncate text-xs text-[var(--color-text)]">{ref.name}</span>
-                          <span className="text-[10px] text-[var(--color-muted)]">{Math.round((ref.qualityScore || 0) * 100)}</span>
-                        </div>
-                        <div className="mt-1 flex gap-1">
-                          <button
-                            type="button"
-                            onClick={() => handleReviewReference(ref.id, "approve")}
-                            className="text-[10px] px-2 py-0.5 rounded-[var(--radius-sm)] bg-emerald-500 text-white"
-                          >
-                            批准
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleReviewReference(ref.id, "reject")}
-                            className="text-[10px] px-2 py-0.5 rounded-[var(--radius-sm)] bg-[var(--color-surface)] text-[var(--color-muted)] border border-[var(--color-border)]"
-                          >
-                            退回私有
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleReviewReference(ref.id, "disable")}
-                            className="text-[10px] px-2 py-0.5 rounded-[var(--radius-sm)] bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-300"
-                          >
-                            停用
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
           </PaperCard>
 
           {/* Match percentage */}

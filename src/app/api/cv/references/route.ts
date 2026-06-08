@@ -13,7 +13,7 @@ export async function GET(request: Request) {
     let resumes;
     if (search.trim()) {
       resumes = await repos.referenceResumes.search(search, limit, user.userId);
-      // Map to summary format (exclude sections_json and raw_text for list)
+      // Map to summary format without private document internals.
       const summaries = resumes.map((r) => ({
         id: r.id,
         name: r.name,
@@ -25,6 +25,7 @@ export async function GET(request: Request) {
         status: r.status || "active",
         qualityScore: Number(r.quality_score || 0),
         anonymized: Boolean(r.anonymized),
+        ownedByUser: !r.user_id || r.user_id === user.userId,
         created_at: r.created_at,
         updated_at: r.updated_at,
       }));
@@ -33,13 +34,19 @@ export async function GET(request: Request) {
 
     const list = await repos.referenceResumes.list(user.userId);
     const data = list.map((r) => ({
-      ...r,
+      id: r.id,
+      name: r.name,
+      source: r.source,
       tags: JSON.parse(r.tags || "[]"),
+      notes: r.notes,
       roleCategory: r.role_category || "",
       visibility: r.visibility || "private",
       status: r.status || "active",
       qualityScore: Number(r.quality_score || 0),
       anonymized: Boolean(r.anonymized),
+      ownedByUser: !r.user_id || r.user_id === user.userId,
+      created_at: r.created_at,
+      updated_at: r.updated_at,
     }));
     return NextResponse.json({ success: true, data });
   } catch (error: unknown) {

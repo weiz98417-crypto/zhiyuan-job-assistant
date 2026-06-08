@@ -897,7 +897,7 @@ function createSqliteReferenceResumeRepository(): DataRepositories["referenceRes
       return Number(result.lastInsertRowid);
     },
     async list(userId) {
-      const columns = "id, name, source, tags, notes, role_category, visibility, status, quality_score, anonymized, created_at, updated_at";
+      const columns = "id, user_id, name, source, tags, notes, role_category, visibility, status, quality_score, anonymized, created_at, updated_at";
       const sql = userId ? `SELECT ${columns} FROM reference_resumes WHERE user_id = ? OR visibility = 'team' ORDER BY created_at DESC` : `SELECT ${columns} FROM reference_resumes ORDER BY created_at DESC`;
       return (userId ? getDb().prepare(sql).all(userId) : getDb().prepare(sql).all()) as ReferenceResumeSummary[];
     },
@@ -992,7 +992,7 @@ function createPostgresReferenceResumeRepository(): DataRepositories["referenceR
       ])).rows[0].id));
     },
     async list(userId) {
-      const columns = "id, name, source, tags, notes, role_category, visibility, status, quality_score, anonymized, created_at, updated_at";
+      const columns = "id, user_id, name, source, tags, notes, role_category, visibility, status, quality_score, anonymized, created_at, updated_at";
       return withPostgresClient(async (client) => rows<ReferenceResumeSummary>((userId
         ? await client.query(`SELECT ${columns} FROM reference_resumes WHERE user_id=$1 OR visibility='team' ORDER BY created_at DESC`, [userId])
         : await client.query(`SELECT ${columns} FROM reference_resumes ORDER BY created_at DESC`)).rows));

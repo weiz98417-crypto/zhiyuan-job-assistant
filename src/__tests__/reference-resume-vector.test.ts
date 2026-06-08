@@ -133,14 +133,19 @@ describe("reference resume schema boundaries", () => {
 
   it("provides admin review controls for pending team references", () => {
     const adminRoute = fs.readFileSync(path.join(process.cwd(), "src/app/api/admin/reference-resumes/route.ts"), "utf8");
-    const cvPage = fs.readFileSync(path.join(process.cwd(), "src/app/cv/page.tsx"), "utf8");
+    const memoryRoute = fs.readFileSync(path.join(process.cwd(), "src/app/api/admin/memory/route.ts"), "utf8");
+    const memoryPage = fs.readFileSync(path.join(process.cwd(), "src/app/admin/memory/page.tsx"), "utf8");
     expect(adminRoute).toContain('payload.role !== "admin"');
     expect(adminRoute).toContain('"approve"');
     expect(adminRoute).toContain('"reject"');
     expect(adminRoute).toContain('"disable"');
-    expect(cvPage).toContain("/api/admin/reference-resumes");
-    expect(cvPage).toContain("团队共享待审核");
-    expect(cvPage).toContain("退回私有");
+    expect(memoryRoute).toContain('payload.role !== "admin"');
+    expect(memoryRoute).toContain("approve_reference");
+    expect(memoryRoute).toContain("reject_reference");
+    expect(memoryRoute).toContain("disable_reference");
+    expect(memoryPage).toContain("/api/admin/memory");
+    expect(memoryPage).toContain("团队共享待审核");
+    expect(memoryPage).toContain("低质量或高拒绝材料");
   });
 
   it("provides an owner-scoped reindex endpoint for failed chunks", () => {

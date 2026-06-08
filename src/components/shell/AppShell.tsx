@@ -19,6 +19,7 @@ import {
   LogOut,
   Shield,
   TrendingUp,
+  Database,
 } from "lucide-react";
 import NavItem from "./NavItem";
 import { useTheme } from "@/components/providers/ThemeProvider";
@@ -157,6 +158,10 @@ export default function AppShell({ children }: { children: ReactNode }) {
                   <a href="/admin/insights" className="flex items-center gap-2 px-2 py-1.5 rounded-[var(--radius-sm)] text-xs font-medium text-[var(--color-primary)] hover:bg-[var(--color-primary-muted)] transition-colors duration-[var(--duration-fast)] no-underline">
                     <TrendingUp size={14} />
                     团队洞察
+                  </a>
+                  <a href="/admin/memory" className="flex items-center gap-2 px-2 py-1.5 rounded-[var(--radius-sm)] text-xs font-medium text-[var(--color-primary)] hover:bg-[var(--color-primary-muted)] transition-colors duration-[var(--duration-fast)] no-underline">
+                    <Database size={14} />
+                    记忆治理
                   </a>
                 </div>
               )}

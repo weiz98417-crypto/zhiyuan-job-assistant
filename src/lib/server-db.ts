@@ -525,6 +525,7 @@ export interface ReferenceResumeRow {
 
 export interface ReferenceResumeSummary {
   id: number;
+  user_id?: string | null;
   name: string;
   source: string;
   tags: string;
