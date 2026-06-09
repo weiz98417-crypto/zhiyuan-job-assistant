@@ -49,6 +49,7 @@ describe("excellent resume memory evolution evals", () => {
 
     expect(pending?.resumeText).toContain("RAG知识库项目");
     expect(pending?.roleCategory).toBeUndefined();
+    expect(pending?.suggestedRoleCategory).toBe("ai_product_manager");
     expect(completePendingReferenceResumeSave(pending!, "AI运营")).toMatchObject({
       role_category: "ai_operations",
     });

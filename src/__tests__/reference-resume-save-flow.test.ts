@@ -37,12 +37,15 @@ describe("reference resume save pending flow", () => {
 
     expect(pending?.resumeText).toContain("RAG知识库项目");
     expect(pending?.roleCategory).toBeUndefined();
+    expect(pending?.suggestedRoleCategory).toBe("ai_product_manager");
     expect(pending?.visibility).toBe("private");
 
     const question = buildReferenceResumeRoleQuestion(pending!);
-    expect(question.match(/？/g)).toHaveLength(1);
+    expect(question).toContain("更像「AI产品经理」方向");
+    expect(question).toContain("直接回复「确认」");
     expect(question).toContain("AI产品经理");
     expect(question).toContain("私有优秀简历");
+    expect(question).toContain("团队共享");
   });
 
   it("completes the pending save from the next role-category answer", () => {
@@ -59,6 +62,36 @@ describe("reference resume save pending flow", () => {
       resume_text: expect.stringContaining("RAG知识库项目"),
       role_category: "ai_product_manager",
       visibility: "private",
+    });
+  });
+
+  it("uses suggested role only after user confirmation", () => {
+    const pending = buildPendingReferenceResumeSave({
+      userText: "保存成优秀简历",
+      resumeText,
+      source: "paste",
+      createdAt: "2026-06-08T00:00:00.000Z",
+    });
+
+    expect(pending?.roleCategory).toBeUndefined();
+    expect(pending?.suggestedRoleCategory).toBe("ai_product_manager");
+    expect(completePendingReferenceResumeSave(pending!, "确认")).toMatchObject({
+      role_category: "ai_product_manager",
+      visibility: "private",
+    });
+  });
+
+  it("can confirm the suggested role and request team sharing in the same answer", () => {
+    const pending = buildPendingReferenceResumeSave({
+      userText: "保存成优秀简历",
+      resumeText,
+      source: "paste",
+      createdAt: "2026-06-08T00:00:00.000Z",
+    });
+
+    expect(completePendingReferenceResumeSave(pending!, "确认，团队共享")).toMatchObject({
+      role_category: "ai_product_manager",
+      visibility: "team",
     });
   });
 

@@ -145,6 +145,7 @@ describe("memory baseline evals", () => {
 
     expect(pending?.resumeText).toContain("RAG");
     expect(pending?.roleCategory).toBeUndefined();
+    expect(pending?.suggestedRoleCategory).toBe("ai_product_manager");
     expect(completePendingReferenceResumeSave(pending!, "AI Product Manager")).toMatchObject({
       role_category: "ai_product_manager",
     });

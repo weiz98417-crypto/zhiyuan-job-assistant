@@ -9,6 +9,12 @@ interface SaveReferenceResumeParams {
   notes?: string;
 }
 
+function hasSpecificRoleCategory(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return false;
+  return !/^(general|通用|未确定|unknown|其他|other)$/.test(normalized);
+}
+
 async function handler(params: Record<string, unknown>): Promise<ToolResult> {
   const input = params as SaveReferenceResumeParams;
   const resumeText = String(input.resume_text || "").trim();
@@ -25,7 +31,7 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
     };
   }
 
-  if (!roleCategory) {
+  if (!hasSpecificRoleCategory(roleCategory)) {
     return {
       success: false,
       data: null,

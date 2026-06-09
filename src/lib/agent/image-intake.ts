@@ -89,10 +89,7 @@ function isSaveReferenceResumeIntent(text: string): boolean {
 }
 
 function inferRoleCategoryFromText(text: string, structured?: Record<string, unknown>): string {
-  for (const key of ["roleCategory", "role_category", "targetRole", "role"]) {
-    const value = structured?.[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
-  }
+  void structured;
   return text.match(ROLE_CATEGORY_RE)?.[1] || "";
 }
 
@@ -150,9 +147,11 @@ export function buildImageIntakeToolCall(
     isSaveReferenceResumeIntent(userText) &&
     isAllowed("save_reference_resume", toolWhitelist)
   ) {
+    const roleCategory = inferRoleCategoryFromText(userText, structured);
+    if (!roleCategory) return null;
     const params: Record<string, unknown> = {
       resume_text: extractedText,
-      role_category: inferRoleCategoryFromText(userText, structured),
+      role_category: roleCategory,
       visibility: TEAM_SHARE_RE.test(userText) ? "team" : "private",
     };
     copyIfPresent(params, structured, "name");

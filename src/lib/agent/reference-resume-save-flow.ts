@@ -10,7 +10,9 @@ export interface PendingReferenceResumeSaveAction {
   sourceFileName?: string;
   inferredName?: string;
   roleCategory?: string;
+  suggestedRoleCategory?: string;
   visibility: "private" | "team";
+  visibilityExplicit?: boolean;
   askedRoleCategoryAt?: string;
   createdAt: string;
 }
@@ -27,6 +29,8 @@ export interface CompletedReferenceResumeSaveAction {
 }
 
 const TEAM_SHARE_RE = /(团队|共享|局域网|大家|公共|共用|同事|team|shared|lan)/i;
+const PRIVATE_VISIBILITY_RE = /(私有|仅自己|只给我|不要共享|不共享|private|only\s*me)/i;
+const CONFIRM_RE = /(确认|可以|好的|好|就这个|就按这个|按这个|是的|yes|ok|okay|confirm|确认保存|保存)/i;
 const CANCEL_RE = /(取消|别存|不要存|算了|停止|cancel|stop)/i;
 const SAVE_EXCELLENT_RESUME_RE =
   /(保存|存|沉淀|加入|放到).{0,16}(优秀|参考|标杆|样例|范例).{0,16}(简历|履历|resume|cv)|(优秀|参考|标杆|样例|范例).{0,16}(简历|履历|resume|cv).{0,16}(保存|存|沉淀|加入|放到)/i;
@@ -49,6 +53,14 @@ const CANONICAL_ROLE_CATEGORIES = new Set([
 ]);
 const ROLE_PROMPT =
   "这份优秀简历要保存到哪个岗位方向？请直接回复一个方向，例如：AI产品经理、AI运营、AI售前、数据产品经理、产品经理。";
+const ROLE_LABELS: Record<string, string> = {
+  ai_product_manager: "AI产品经理",
+  ai_operations: "AI运营",
+  ai_presales: "AI售前",
+  data_product_manager: "数据产品经理",
+  product_manager: "产品经理",
+};
+const ROLE_OPTIONS_TEXT = "AI产品经理 / AI运营 / AI售前 / 数据产品经理 / 产品经理";
 
 function cleanText(value: unknown): string {
   return typeof value === "string" ? value.replace(/\u0000/g, "").trim() : "";
@@ -58,6 +70,14 @@ function normalizeSpecificRole(input: string, fallbackText = ""): string {
   const normalized = normalizeReferenceResumeRoleCategory(input, fallbackText);
   if (!CANONICAL_ROLE_CATEGORIES.has(normalized)) return "";
   return normalized && normalized !== "general" ? normalized : "";
+}
+
+function roleLabel(roleCategory?: string): string {
+  return roleCategory ? ROLE_LABELS[roleCategory] || roleCategory : "";
+}
+
+function isConfirmation(text: string): boolean {
+  return CONFIRM_RE.test(cleanText(text));
 }
 
 function detectSaveExcellentResumeIntent(text: string): boolean {
@@ -112,6 +132,12 @@ export function inferReferenceResumeVisibility(text: string): "private" | "team"
   return TEAM_SHARE_RE.test(text || "") ? "team" : "private";
 }
 
+export function inferReferenceResumeVisibilityIntent(text: string): { visibility: "private" | "team"; explicit: boolean } {
+  if (TEAM_SHARE_RE.test(text || "")) return { visibility: "team", explicit: true };
+  if (PRIVATE_VISIBILITY_RE.test(text || "")) return { visibility: "private", explicit: true };
+  return { visibility: "private", explicit: false };
+}
+
 export function inferReferenceResumeRoleCategory(text: string, fallbackText = "", structured?: Record<string, unknown>): string {
   return inferRoleFromStructured(structured) || normalizeSpecificRole(text, fallbackText);
 }
@@ -127,6 +153,11 @@ export function buildPendingReferenceResumeSave(input: {
   const resumeText = cleanText(input.resumeText);
   if (!detectSaveExcellentResumeIntent(input.userText)) return null;
   if (!looksLikeResumeText(resumeText)) return null;
+  const explicitRoleCategory = normalizeSpecificRole(input.userText);
+  const suggestedRoleCategory = explicitRoleCategory
+    ? ""
+    : inferRoleFromStructured(input.structured) || normalizeSpecificRole(resumeText);
+  const visibilityIntent = inferReferenceResumeVisibilityIntent(input.userText);
 
   return {
     type: "save_reference_resume",
@@ -134,8 +165,10 @@ export function buildPendingReferenceResumeSave(input: {
     source: input.source,
     sourceImageCount: input.imageCount,
     inferredName: inferName(resumeText, input.structured),
-    roleCategory: inferReferenceResumeRoleCategory(input.userText, "", input.structured) || undefined,
-    visibility: inferReferenceResumeVisibility(input.userText),
+    roleCategory: explicitRoleCategory || undefined,
+    suggestedRoleCategory: suggestedRoleCategory || undefined,
+    visibility: visibilityIntent.visibility,
+    visibilityExplicit: visibilityIntent.explicit,
     createdAt: input.createdAt || new Date().toISOString(),
   };
 }
@@ -161,10 +194,13 @@ export function buildReferenceResumeRoleQuestion(pending: PendingReferenceResume
   const sourceText = pending.source === "image"
     ? `我已经从你上传的 ${pending.sourceImageCount || 1} 张简历截图里提取到了简历内容。`
     : "我已经拿到了这份简历内容。";
+  const roleText = pending.suggestedRoleCategory
+    ? `我看这份简历更像「${roleLabel(pending.suggestedRoleCategory)}」方向。要按这个方向保存吗？\n\n直接回复「确认」即可；也可以改成其他方向：${ROLE_OPTIONS_TEXT}。`
+    : `${ROLE_PROMPT}\n\n可选方向：${ROLE_OPTIONS_TEXT}。`;
   const visibilityText = pending.visibility === "team"
-    ? "你刚才提到了团队/局域网共享，保存后会按团队共享流程处理。"
-    : "如果你没有特别说明，我会先按私有优秀简历保存。";
-  return `${sourceText}\n\n${ROLE_PROMPT}\n\n${visibilityText}`;
+    ? "你刚才提到了团队/局域网共享，保存后会按团队共享流程处理，管理员审核后才会进入公共记忆。"
+    : "默认先保存为你的私有优秀简历；如果要给局域网团队共享，请在回复里带上「团队共享」。";
+  return `${sourceText}\n\n${roleText}\n\n${visibilityText}`;
 }
 
 export function completePendingReferenceResumeSave(
@@ -172,13 +208,17 @@ export function completePendingReferenceResumeSave(
   userText: string,
 ): CompletedReferenceResumeSaveAction | { cancelled: true } | null {
   if (isPendingReferenceResumeSaveCancelled(userText)) return { cancelled: true };
-  const roleCategory = inferReferenceResumeRoleCategory(userText, "") || pending.roleCategory || "general";
+  const answeredRoleCategory = inferReferenceResumeRoleCategory(userText, "");
+  const roleCategory = answeredRoleCategory
+    || pending.roleCategory
+    || (pending.suggestedRoleCategory && isConfirmation(userText) ? pending.suggestedRoleCategory : "");
   if (!roleCategory) return null;
+  const visibilityIntent = inferReferenceResumeVisibilityIntent(userText);
   return {
     resume_text: pending.resumeText,
     name: pending.inferredName,
     role_category: roleCategory,
-    visibility: inferReferenceResumeVisibility(userText) === "team" ? "team" : pending.visibility,
+    visibility: visibilityIntent.explicit ? visibilityIntent.visibility : pending.visibility,
   };
 }
 
