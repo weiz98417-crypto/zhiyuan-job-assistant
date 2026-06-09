@@ -1,11 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import AuthHero from '@/components/auth/AuthHero';
 
 export default function LoginPage() {
-  const router = useRouter();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -19,19 +17,25 @@ export default function LoginPage() {
     if (!password.trim()) { setError('请输入密码'); return; }
 
     setLoading(true);
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 10_000);
     try {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: username.trim(), password }),
+        signal: controller.signal,
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) { setError(data.error || '登录失败'); setLoading(false); return; }
-      router.push('/');
-      router.refresh();
-    } catch {
-      setError('网络错误，请稍后重试');
+      window.location.assign('/');
+    } catch (err) {
+      setError(err instanceof DOMException && err.name === 'AbortError'
+        ? '登录请求超时，请刷新页面后重试'
+        : '网络错误，请稍后重试');
       setLoading(false);
+    } finally {
+      window.clearTimeout(timeout);
     }
   }
 

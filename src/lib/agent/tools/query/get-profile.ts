@@ -1,4 +1,5 @@
 import type { ToolDefinition, ToolResult } from "../types";
+import { fetchAgentMemoryContext } from "../memory-helpers";
 
 async function handler(params: Record<string, unknown> = {}): Promise<ToolResult> {
   const sectionFilter = typeof params.section === "string" ? params.section.trim() : "";
@@ -76,6 +77,15 @@ async function handler(params: Record<string, unknown> = {}): Promise<ToolResult
       if (dealBreakers?.length) summaryParts.push(`底线: ${dealBreakers.join(", ")}`);
     }
 
+    const memoryContext = await fetchAgentMemoryContext({
+      task: "profile_growth",
+      agentId: "profile",
+      query: sectionFilter ? `profile ${sectionFilter}` : "profile resume goals preferences interview observations",
+      budgetChars: 700,
+      semanticTopK: 4,
+    });
+    if (memoryContext?.llmSummary) summaryParts.push(`Long-term memory: ${memoryContext.llmSummary}`);
+
     return {
       success: true,
       errorCategory: "ok",
@@ -86,9 +96,15 @@ async function handler(params: Record<string, unknown> = {}): Promise<ToolResult
         goals: goals || null,
         refResumes: refResumes.map(r => ({ id: r.id, name: r.name, tags: r.tags })),
         dnaSummary,
+        memoryContext: memoryContext ? {
+          task: memoryContext.task,
+          structuredCount: memoryContext.structuredFacts.length,
+          semanticCount: memoryContext.semanticSnippets.length,
+          warnings: memoryContext.warnings,
+        } : null,
       },
-      rawData: { dnaSummary, profileData, cvData, refResumes },
-      data: { dnaSummary, profileData, cvData, refResumes }, // backward compat
+      rawData: { dnaSummary, profileData, cvData, refResumes, memoryContext },
+      data: { dnaSummary, profileData, cvData, refResumes, memoryContext }, // backward compat
     };
   } catch (err) {
     return {

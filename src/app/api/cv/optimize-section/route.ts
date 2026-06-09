@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { buildJudgePrompt, getTemperatureByEffort } from "@/lib/judge-engine";
 import type { Operation } from "@/types";
 import { getCurrentUser } from "@/lib/auth";
+import { retrieveReferenceResumeSnippets } from "@/lib/reference-resume-vector";
+import { retrieveExcellentResumePatternMemory } from "@/lib/excellent-resume-patterns";
 
 const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
 const MODEL = "deepseek-v4-pro";
@@ -43,8 +45,6 @@ export async function POST(request: Request) {
       fast?: boolean;
     };
 
-    const model = fast ? FAST_MODEL : MODEL;
-
     if (!sectionContent || sectionContent.trim().length < 20) {
       return NextResponse.json(
         { success: false, error: "段落内容太少（至少20字），无法进行有意义的优化" },
@@ -60,6 +60,32 @@ export async function POST(request: Request) {
       );
     }
 
+    const effectiveRoleCategory = roleDirection && roleDirection !== "auto" && roleDirection !== "generic"
+      ? roleDirection
+      : targetJD?.role || userProfile?.targetRoles?.[0]?.name || "";
+
+    const semanticReferenceSnippets = await retrieveReferenceResumeSnippets({
+      userId: user.userId,
+      query: [
+        intent || "",
+        roleDirection || "",
+        targetJD?.role || "",
+        targetJD?.company || "",
+        targetJD?.keywords?.join(" ") || "",
+        sectionContent,
+      ].filter(Boolean).join("\n"),
+      roleCategory: effectiveRoleCategory,
+      sectionType: sectionId,
+      limit: 4,
+    }).catch(() => []);
+    const patternMemory = await retrieveExcellentResumePatternMemory({
+      userId: user.userId,
+      roleCategory: effectiveRoleCategory,
+      limit: 6,
+    }).catch(() => []);
+
+    const model = fast && !semanticReferenceSnippets.length && !patternMemory.length ? FAST_MODEL : MODEL;
+
     // Build prompt using judge-engine
     const systemPrompt = buildJudgePrompt({
       sectionId,
@@ -74,6 +100,8 @@ export async function POST(request: Request) {
       userProfile,
       roleDirection,
       questionAnswers,
+      referenceSnippets: semanticReferenceSnippets,
+      patternMemory,
     });
 
     const temperature = getTemperatureByEffort(effort);
@@ -147,7 +175,20 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: true,
-      data: { variants },
+      data: {
+        variants,
+        referenceMemory: {
+          snippetIds: semanticReferenceSnippets.map((snippet) => snippet.id),
+          referenceResumeIds: [...new Set(semanticReferenceSnippets.map((snippet) => snippet.referenceResumeId))],
+          patternMemoryIds: patternMemory.map((pattern) => pattern.id),
+          ranking: semanticReferenceSnippets.map((snippet) => ({
+            snippetId: snippet.id,
+            referenceResumeId: snippet.referenceResumeId,
+            score: snippet.score,
+            ranking: snippet.ranking,
+          })),
+        },
+      },
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "未知错误";

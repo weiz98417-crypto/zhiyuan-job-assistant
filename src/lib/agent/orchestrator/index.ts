@@ -21,6 +21,7 @@ import type { AgentDefinition, AgentPromptContext } from "@/lib/agent/registry/t
 import type { SSEEvent } from "@/lib/agent/loop/types";
 import registry from "@/lib/agent/tools";
 import { buildContext } from "@/lib/agent/memory/coordinator";
+import { resolveImageIntakeAgentId, type ImageDocumentType, type ImageIntakeResult } from "@/lib/agent/image-intake";
 
 // ── Types ──
 
@@ -29,6 +30,10 @@ export interface OrchestratorContext {
   messages: { role: string; content: string }[];
   memoryDigest?: string;
   signal?: AbortSignal;
+  forcedAgentId?: string;
+  agentState?: Record<string, unknown>;
+  imageIntake?: ImageIntakeResult | null;
+  preferredDocumentType?: ImageDocumentType;
 }
 
 export interface OrchestratorResult {
@@ -37,6 +42,14 @@ export interface OrchestratorResult {
   toolWhitelist: string[];
   tools: Array<{ type: string; function: object }>;
   annotatedMessages: { role: string; content: string }[];
+}
+
+function resolveAgentFromImageIntake(
+  userText: string,
+  intake?: ImageIntakeResult | null,
+  preferredDocumentType?: ImageDocumentType,
+): string | undefined {
+  return resolveImageIntakeAgentId(userText, intake, preferredDocumentType);
 }
 
 // ── Shared context building ──
@@ -57,6 +70,7 @@ async function buildAgentContext(
   return {
     careerDNA,
     memoryDigest,
+    agentStateInjection: ctx.agentState ? JSON.stringify(ctx.agentState, null, 2) : undefined,
     currentMessages: memCtx.truncatedMessages,
     agentKnowledge,
     claudeAgentActivity: claudeAgentActivity || undefined,
@@ -66,7 +80,7 @@ async function buildAgentContext(
 function buildSystemPrompt(
   soulBody: string,
   promptCtx: AgentPromptContext,
-  memCtx: { semanticInjection?: string },
+  memCtx: { semanticInjection?: string; agentStateInjection?: string },
 ): string {
   let prompt = soulBody;
 
@@ -80,11 +94,17 @@ function buildSystemPrompt(
   if (promptCtx.memoryDigest) {
     prompt += `\n\n## 会话记忆\n${promptCtx.memoryDigest}`;
   }
+  if (promptCtx.agentStateInjection) {
+    prompt += `\n\n## 会话状态\n${promptCtx.agentStateInjection}`;
+  }
   if (promptCtx.claudeAgentActivity) {
     prompt += `\n\n${promptCtx.claudeAgentActivity}`;
   }
   if (memCtx.semanticInjection) {
     prompt += `\n${memCtx.semanticInjection}`;
+  }
+  if (memCtx.agentStateInjection) {
+    prompt += `\n\n${memCtx.agentStateInjection}`;
   }
 
   return prompt;
@@ -189,20 +209,23 @@ export async function orchestrate(
   ctx: OrchestratorContext,
 ): Promise<OrchestratorResult> {
   // 1. Classify intent via server API (LLM with full message history)
-  let agentId = "general";
-  try {
-    const classifyRes = await fetch("/api/agent/classify", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: ctx.messages }),
-    });
-    if (classifyRes.ok) {
-      const json = await classifyRes.json();
-      if (json.success) agentId = json.data.agentId;
+  const imageAgentId = resolveAgentFromImageIntake(content, ctx.imageIntake, ctx.preferredDocumentType);
+  let agentId = ctx.forcedAgentId || imageAgentId || "general";
+  if (!ctx.forcedAgentId && !imageAgentId) {
+    try {
+      const classifyRes = await fetch("/api/agent/classify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: ctx.messages }),
+      });
+      if (classifyRes.ok) {
+        const json = await classifyRes.json();
+        if (json.success) agentId = json.data.agentId;
+      }
+    } catch {
+      // Fall back to regex on network error
+      agentId = classifyIntent(content).id;
     }
-  } catch {
-    // Fall back to regex on network error
-    agentId = classifyIntent(content).id;
   }
 
   // 2. Load agent definition

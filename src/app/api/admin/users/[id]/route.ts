@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/server-db';
 import { getCurrentUser, verifyTokenVersion, hashPassword } from '@/lib/auth';
+import { getDataRepositories } from '@/lib/data-repositories';
 
 async function ensureAdmin() {
   const payload = await getCurrentUser();
@@ -8,7 +8,7 @@ async function ensureAdmin() {
     throw new Error('Forbidden');
   }
   // Verify token_version before write operations
-  verifyTokenVersion(payload);
+  await verifyTokenVersion(payload);
   return payload;
 }
 
@@ -17,33 +17,25 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await ensureAdmin();
+    const payload = await ensureAdmin();
     const { id } = await params;
     const body = await request.json();
-    const db = getDb();
-
-    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+    const repos = getDataRepositories();
+    const user = await repos.users.findById(id);
     if (!user) {
       return NextResponse.json({ error: '用户不存在' }, { status: 404 });
     }
 
     if (body.status) {
       // Approve or reject
-      db.prepare(`
-        UPDATE users SET status = ?, token_version = token_version + 1,
-        approved_at = datetime('now'), approved_by = ?
-        WHERE id = ?
-      `).run(body.status, (await getCurrentUser()).userId, id);
+      await repos.users.updateStatus(id, body.status, payload.userId);
     }
 
     if (body.role) {
-      db.prepare(`
-        UPDATE users SET role = ?, token_version = token_version + 1
-        WHERE id = ?
-      `).run(body.role, id);
+      await repos.users.updateRole(id, body.role);
     }
 
-    const updated = db.prepare('SELECT * FROM users WHERE id = ?').get(id) as Record<string, unknown>;
+    const updated = await repos.users.findById(id) as Record<string, unknown>;
     return NextResponse.json({
       user: {
         id: updated.id,
@@ -59,7 +51,11 @@ export async function PUT(
     if ((err as Error).message === 'Forbidden') {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
-    if ((err as Error).message === 'Not authenticated' || (err as Error).message === 'Token has been revoked') {
+    if (
+      (err as Error).message === 'Not authenticated' ||
+      (err as Error).message === 'Invalid or expired token' ||
+      (err as Error).message === 'Token has been revoked'
+    ) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
     console.error('[admin/users/[id]]', err);
@@ -80,20 +76,20 @@ export async function POST(
       return NextResponse.json({ error: '新密码不能为空' }, { status: 400 });
     }
 
-    const db = getDb();
     const passwordHash = await hashPassword(newPassword);
 
-    db.prepare(`
-      UPDATE users SET password_hash = ?, token_version = token_version + 1
-      WHERE id = ?
-    `).run(passwordHash, id);
+    await getDataRepositories().users.resetPassword(id, passwordHash);
 
     return NextResponse.json({ message: '密码已重置' });
   } catch (err) {
     if ((err as Error).message === 'Forbidden') {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
-    if ((err as Error).message === 'Not authenticated' || (err as Error).message === 'Token has been revoked') {
+    if (
+      (err as Error).message === 'Not authenticated' ||
+      (err as Error).message === 'Invalid or expired token' ||
+      (err as Error).message === 'Token has been revoked'
+    ) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
     console.error('[admin/users/[id] POST]', err);
@@ -114,32 +110,24 @@ export async function DELETE(
       return NextResponse.json({ error: '不能删除自己的账户' }, { status: 400 });
     }
 
-    const db = getDb();
-    const user = db.prepare('SELECT id, username FROM users WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+    const repos = getDataRepositories();
+    const user = await repos.users.findById(id);
     if (!user) {
       return NextResponse.json({ error: '用户不存在' }, { status: 404 });
     }
 
-    // Delete all associated data from private tables, then the user
-    const privateTables = [
-      'profiles', 'profile_signals', 'sessions', 'stories', 'cv_data',
-      'applications', 'agent_preferences', 'session_memory',
-      'optimization_preferences', 'reports',
-    ];
-    const del = db.transaction(() => {
-      for (const table of privateTables) {
-        db.prepare(`DELETE FROM ${table} WHERE user_id = ?`).run(id);
-      }
-      db.prepare('DELETE FROM users WHERE id = ?').run(id);
-    });
-    del();
+    await repos.users.deleteCascade(id);
 
     return NextResponse.json({ message: `用户 ${user.username} 已删除` });
   } catch (err) {
     if ((err as Error).message === 'Forbidden') {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
-    if ((err as Error).message === 'Not authenticated' || (err as Error).message === 'Token has been revoked') {
+    if (
+      (err as Error).message === 'Not authenticated' ||
+      (err as Error).message === 'Invalid or expired token' ||
+      (err as Error).message === 'Token has been revoked'
+    ) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
     console.error('[admin/users/[id] DELETE]', err);

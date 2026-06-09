@@ -8,11 +8,13 @@ export interface ToolDisplay {
 }
 
 export const TOOL_DISPLAY: Record<string, ToolDisplay> = {
+  recognize_document_image: { label: "识别图片", emoji: "🖼️" },
   // Query tools
   search_applications:  { label: "搜索投递记录", emoji: "📋" },
   get_report_detail:    { label: "查看评估报告", emoji: "📊" },
   get_profile:          { label: "读取求职画像", emoji: "👤" },
   get_recent_activity:  { label: "近期活动",     emoji: "🕐" },
+  get_recent_jd_context:{ label: "读取最近 JD",  emoji: "📌" },
   get_recommendations:  { label: "岗位推荐",     emoji: "💼" },
   get_pipeline_status:  { label: "Pipeline 状态", emoji: "📡" },
   import_resume:             { label: "导入简历",     emoji: "📥" },
@@ -40,9 +42,11 @@ export const TOOL_DISPLAY: Record<string, ToolDisplay> = {
   get_profile_insights: { label: "画像洞察",     emoji: "📊" },
   detect_skill_gaps:    { label: "技能缺口分析", emoji: "🔍" },
   save_resume_section:      { label: "保存到简历", emoji: "💾" },
+  save_reference_resume:    { label: "保存优秀简历", emoji: "💾" },
   check_ats_compatibility:  { label: "ATS 兼容检查", emoji: "🤖" },
   start_interview_session:  { label: "启动模拟面试", emoji: "🎙️" },
   download_report_pdf:  { label: "导出报告 PDF", emoji: "🖨️" },
+  update_report_metadata: { label: "更新报告信息", emoji: "✏️" },
 
   // MCP tools
   web_search:           { label: "网络搜索",     emoji: "🌐" },

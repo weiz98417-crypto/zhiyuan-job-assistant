@@ -1,7 +1,8 @@
 /* ── Report Save API (HITL confirmation) ── */
 
 import { NextResponse } from "next/server";
-import { upsertApp, upsertReport } from "@/lib/server-db";
+import { getCurrentUser } from "@/lib/auth";
+import { getDataRepositories } from "@/lib/data-repositories";
 
 interface SaveRequest {
   company: string;
@@ -25,6 +26,8 @@ function slugify(s: string): string {
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as SaveRequest;
+    const user = await getCurrentUser();
+    const repos = getDataRepositories();
     const { company, role, overallScore, archetype, legitimacy, blocks, jdText, keywords = [], actions } = body;
 
     if (!company || !role) {
@@ -34,8 +37,7 @@ export async function POST(request: Request) {
     const date = new Date().toISOString().split("T")[0];
     const reportNum = Date.now() % 100000; // Simple sequential-ish number
 
-    // Save report to SQLite
-    upsertReport({
+    await repos.reports.upsert({
       report_num: reportNum,
       date,
       company, role,
@@ -44,11 +46,11 @@ export async function POST(request: Request) {
       legitimacy: legitimacy || "",
       blocks_json: JSON.stringify(blocks),
       keywords_json: JSON.stringify(keywords),
-    });
+    }, user.userId);
 
     // Add to tracker if requested
     if (actions.addToTracker) {
-      upsertApp({
+      await repos.applications.upsert({
         num: reportNum,
         date,
         company, role,
@@ -57,7 +59,19 @@ export async function POST(request: Request) {
         pdf_generated: 0,
         report_path: `reports/${String(reportNum).padStart(3, "0")}-${slugify(company)}-${date}.md`,
         notes: `Archetype: ${archetype}`,
-      });
+      }, user.userId);
+    }
+
+    if (actions.saveJD && jdText && jdText.trim().length >= 50) {
+      await repos.jds.insert({
+        company,
+        role,
+        source_type: "agent",
+        source_url: "",
+        body: jdText,
+        keywords_json: JSON.stringify(keywords),
+        report_id: reportNum,
+      }, user.userId);
     }
 
     return NextResponse.json({

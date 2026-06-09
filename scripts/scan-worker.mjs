@@ -15,7 +15,7 @@
  */
 
 import Database from 'better-sqlite3';
-import { createHash } from 'crypto';
+import { randomUUID } from 'crypto';
 import { readFileSync, mkdirSync, writeFileSync, existsSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -31,7 +31,8 @@ const DB_PATH = path.join(DATA_DIR, 'zhiyuan.db');
 // ── Load adapters ──────────────────────────────────────────────────
 
 import { getAdapter } from '../lib/scan/adapters/router.mjs';
-import { loadPortals, loadTitleFilter, applyTitleFilter, makeDedupKey } from '../lib/scan/orchestrator.mjs';
+import { loadPortals, loadTitleFilter, applyTitleFilter, applyLocationFilter, makeDedupKey } from '../lib/scan/orchestrator.mjs';
+import { scanJobBoards } from '../lib/scan/job-board-fallback.mjs';
 
 // ── DB ─────────────────────────────────────────────────────────────
 
@@ -48,6 +49,7 @@ const COMPANY_FILTER = (() => {
   const idx = args.indexOf('--company');
   return idx >= 0 ? args[idx + 1] : null;
 })();
+const COMPANY_TIMEOUT_MS = Number(process.env.SCAN_COMPANY_TIMEOUT_MS || 20_000);
 
 // ── Helpers ────────────────────────────────────────────────────────
 
@@ -80,6 +82,14 @@ function recoverStaleScans() {
   if (result.changes > 0) {
     log(`recovered ${result.changes} stale scan(s)`);
   }
+}
+
+function getScanRow(scanId) {
+  return db.prepare("SELECT status FROM scan_queue WHERE id = ?").get(scanId);
+}
+
+function isCanceled(scanId) {
+  return getScanRow(scanId)?.status === 'canceled';
 }
 
 // ── Company scan ───────────────────────────────────────────────────
@@ -135,13 +145,24 @@ async function executeScan(scanId) {
     return;
   }
 
+  const scanConfig = db.prepare("SELECT title_positive_json, title_negative_json, location_filter, max_results FROM scan_queue WHERE id = ?").get(scanId) || {};
   const companies = await loadPortals(PROJECT_ROOT);
-  const titleFilter = await loadTitleFilter(PROJECT_ROOT);
+  const fallbackTitleFilter = await loadTitleFilter(PROJECT_ROOT);
+  const titleFilter = {
+    positive: JSON.parse(scanConfig.title_positive_json || '[]'),
+    negative: JSON.parse(scanConfig.title_negative_json || '[]'),
+  };
+  if (titleFilter.positive.length === 0) titleFilter.positive = fallbackTitleFilter.positive;
+  if (titleFilter.negative.length === 0) titleFilter.negative = fallbackTitleFilter.negative;
+  const scanScope = {
+    location: scanConfig.location_filter || '',
+    maxResults: Math.min(Math.max(Number(scanConfig.max_results || 50), 1), 200),
+  };
   const filtered = COMPANY_FILTER
     ? companies.filter(c => c.name === COMPANY_FILTER)
     : companies;
 
-  log(`total: ${filtered.length} companies (filter: +${titleFilter.positive.join(',') || 'none'} / -${titleFilter.negative.join(',') || 'none'})`);
+  log(`total: ${filtered.length} companies (filter: +${titleFilter.positive.join(',') || 'none'} / -${titleFilter.negative.join(',') || 'none'}; location: ${scanScope.location || 'any'}; max: ${scanScope.maxResults})`);
 
   let browser = null;
   let companiesDone = 0;
@@ -169,49 +190,90 @@ async function executeScan(scanId) {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'new', ?)
     `);
 
+    const insertJobs = (jobsToInsert) => {
+      for (const job of jobsToInsert) {
+        if (jobsNew >= scanScope.maxResults) break;
+        const dedupKey = makeDedupKey(job.url);
+        const result = insertStmt.run(
+          scanId, userId, job.company || '招聘平台', job.title, job.url,
+          job.location || '', job.department || '', job.jd_snippet || '', dedupKey
+        );
+        if (result.changes > 0) {
+          jobsFound++;
+          jobsNew++;
+        }
+      }
+    };
+
     for (const company of filtered) {
+      if (isCanceled(scanId)) {
+        log(`scan ${scanId} canceled before ${company.name}`);
+        return;
+      }
       const page = await context.newPage();
       try {
-        // Per-company timeout: 60s max
+        // Per-company timeout: short enough that the UI can recover.
         const { jobs, error } = await Promise.race([
           scanCompany(company, page),
-          new Promise((_, reject) => setTimeout(() => reject(new Error(`timeout after 60s`)), 60000))
+          new Promise((resolve) => setTimeout(() => resolve({ jobs: [], error: `timeout after ${Math.round(COMPANY_TIMEOUT_MS / 1000)}s` }), COMPANY_TIMEOUT_MS))
         ]);
 
         if (error) {
           errorLog.push({ company: company.name, error, level: 'ERROR' });
+          companiesDone++;
+          db.prepare(`
+            UPDATE scan_queue SET companies_done = ?, jobs_found = ?, jobs_new = ?, error_log = ?, updated_at = datetime('now')
+            WHERE id = ? AND status != 'canceled'
+          `).run(companiesDone, jobsFound, jobsNew, JSON.stringify(errorLog), scanId);
           continue;
         }
 
         // Apply title filter
         const filteredJobs = applyTitleFilter(jobs, titleFilter);
+        const locationFilteredJobs = applyLocationFilter(filteredJobs, scanScope.location);
         if (jobs.length > 0 && filteredJobs.length === 0) {
           log(`[${company.name}] all ${jobs.length} jobs filtered out by title_filter`);
-          errorLog.push({ company: company.name, error: `all ${jobs.length} jobs filtered out`, level: 'WARN' });
+          errorLog.push({ company: company.name, error: `all ${jobs.length} jobs filtered out`, level: 'INFO' });
         } else if (filteredJobs.length === 0) {
-          errorLog.push({ company: company.name, error: 'zero results', level: 'WARN' });
+          errorLog.push({ company: company.name, error: 'zero results', level: 'INFO' });
         }
 
-        for (const job of filteredJobs) {
-          const dedupKey = makeDedupKey(job.url);
-          const result = insertStmt.run(
-            scanId, userId, company.name, job.title, job.url,
-            job.location || '', job.department || '', job.jd_snippet || '', dedupKey
-          );
-          jobsFound++;
-          if (result.changes > 0) jobsNew++;
+        insertJobs(locationFilteredJobs);
+        if (jobsNew >= scanScope.maxResults) {
+          companiesDone++;
+          db.prepare(`
+            UPDATE scan_queue SET companies_done = ?, jobs_found = ?, jobs_new = ?, error_log = ?, updated_at = datetime('now')
+            WHERE id = ? AND status != 'canceled'
+          `).run(companiesDone, jobsFound, jobsNew, JSON.stringify(errorLog), scanId);
+          log(`scan ${scanId} reached max result limit (${scanScope.maxResults})`);
+          break;
         }
 
         companiesDone++;
         // Update progress live
         db.prepare(`
           UPDATE scan_queue SET companies_done = ?, jobs_found = ?, jobs_new = ?, error_log = ?, updated_at = datetime('now')
-          WHERE id = ?
+          WHERE id = ? AND status != 'canceled'
         `).run(companiesDone, jobsFound, jobsNew, JSON.stringify(errorLog), scanId);
 
       } finally {
         await page.close().catch(() => {});
       }
+    }
+
+    if (!isCanceled(scanId) && jobsNew === 0) {
+      log(`company portals produced no new jobs; falling back to Liepin/51job/Zhaopin`);
+      const { jobs: boardJobs, errors } = await scanJobBoards(context, titleFilter, scanScope);
+      errorLog.push(...errors);
+      const filteredBoardJobs = applyLocationFilter(applyTitleFilter(boardJobs, titleFilter), scanScope.location);
+      if (filteredBoardJobs.length === 0) {
+        errorLog.push({ company: '招聘平台', error: 'fallback job boards returned zero matching results', level: 'INFO' });
+      }
+      insertJobs(filteredBoardJobs);
+      db.prepare(`
+        UPDATE scan_queue SET jobs_found = ?, jobs_new = ?, error_log = ?, updated_at = datetime('now')
+        WHERE id = ? AND status != 'canceled'
+      `).run(jobsFound, jobsNew, JSON.stringify(errorLog), scanId);
     }
   } finally {
     if (browser) await browser.close().catch(() => {});
@@ -220,7 +282,7 @@ async function executeScan(scanId) {
   // Mark done
   db.prepare(`
     UPDATE scan_queue SET status = 'done', companies_done = ?, jobs_found = ?, jobs_new = ?, error_log = ?, updated_at = datetime('now')
-    WHERE id = ?
+    WHERE id = ? AND status != 'canceled'
   `).run(companiesDone, jobsFound, jobsNew, JSON.stringify(errorLog), scanId);
 
   log(`=== Scan ${scanId} complete: ${jobsFound} jobs (${jobsNew} new), ${errorLog.length} errors ===`);
@@ -263,12 +325,12 @@ async function main() {
         "SELECT id FROM scan_queue WHERE status = 'pending' ORDER BY created_at ASC LIMIT 1"
       ).get();
 
-      const scanId = existingPending?.id || crypto.randomUUID();
+      const scanId = existingPending?.id || randomUUID();
 
       if (!existingPending) {
         db.prepare(`
-          INSERT INTO scan_queue (id, user_id, status, companies_total)
-          VALUES (?, ?, 'pending', ?)
+          INSERT INTO scan_queue (id, user_id, status, title_positive_json, title_negative_json, location_filter, max_results, companies_total)
+          VALUES (?, ?, 'pending', '[]', '[]', '', 50, ?)
         `).run(scanId, user.id, filtered.length);
       }
 
@@ -309,5 +371,14 @@ async function main() {
 
 main().catch(err => {
   console.error('Worker fatal:', err);
+  try {
+    db.prepare(`
+      UPDATE scan_queue
+      SET status = 'failed',
+          error_log = json_insert(COALESCE(NULLIF(error_log, ''), '[]'), '$[#]', json_object('company','worker','error',?,'level','ERROR')),
+          updated_at = datetime('now')
+      WHERE status = 'running'
+    `).run(err instanceof Error ? err.message : String(err));
+  } catch { /* best effort */ }
   process.exit(1);
 });

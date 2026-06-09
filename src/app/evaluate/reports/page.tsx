@@ -11,12 +11,14 @@ import {
   X,
   Filter,
   ArrowUpDown,
+  Download,
 } from "lucide-react";
 import { WarmButton, PaperCard, ScoreBadge } from "@/components/design";
 import { StaggerList, StaggerItem } from "@/components/design/PageTransition";
 import ReportBlocks from "@/components/ReportBlocks";
 import db from "@/lib/db";
 import { clearJDReportId } from "@/lib/jd-storage";
+import { normalizeReportBlocks, normalizeReportScores, parseJsonValue } from "@/lib/report-normalize";
 import type { EvaluationReport } from "@/types";
 
 type SortMode = "date-desc" | "date-asc" | "score-desc" | "score-asc";
@@ -58,38 +60,53 @@ export default function ReportsPage() {
   const [sort, setSort] = useState<SortMode>("date-desc");
   const [selectedReport, setSelectedReport] = useState<EvaluationReport | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<EvaluationReport | null>(null);
+  const [loadError, setLoadError] = useState(false);
 
   const loadReports = useCallback(async () => {
     try {
-      const res = await fetch("/api/data/reports");
+      setLoadError(false);
+      const res = await fetch("/api/data/reports", { cache: "no-store" });
+      if (!res.ok) throw new Error("server load failed");
       const json = await res.json();
-      if (json.success && Array.isArray(json.data) && json.data.length > 0) {
+      if (json.success && Array.isArray(json.data)) {
         // Map SQLite snake_case to Dexie camelCase
-        const mapped = json.data.map((r: Record<string, unknown>) => ({
-          id: r.id,
-          reportNum: r.report_num,
-          date: r.date,
-          company: r.company,
-          role: r.role,
-          archetype: r.archetype,
-          overallScore: r.overall_score,
-          legitimacy: r.legitimacy,
-          blocks: typeof r.blocks_json === "string" ? JSON.parse(r.blocks_json) : (r.blocks_json || {}),
-          keywords: typeof r.keywords_json === "string" ? JSON.parse(r.keywords_json) : (r.keywords_json || []),
-          scores: {},
-          createdAt: r.created_at ? new Date(r.created_at as string) : new Date(),
-        }));
+        const mapped = json.data.map((r: Record<string, unknown>) => {
+          const storedBlocks = parseJsonValue(r.blocks_json, {});
+          return {
+            id: r.id,
+            reportNum: r.report_num,
+            date: r.date,
+            company: r.company,
+            role: r.role,
+            archetype: r.archetype,
+            overallScore: r.overall_score,
+            legitimacy: r.legitimacy,
+            blocks: normalizeReportBlocks(storedBlocks),
+            keywords: parseJsonValue(r.keywords_json, []),
+            scores: normalizeReportScores(storedBlocks),
+            createdAt: r.created_at ? new Date(r.created_at as string) : new Date(),
+          };
+        });
         setReports(mapped as EvaluationReport[]);
         return;
       }
-    } catch { /* fallback to DexieDB */ }
-    const data = await db.reports.orderBy("createdAt").reverse().toArray();
-    setReports(data);
+      throw new Error("server response failed");
+    } catch {
+      setLoadError(true);
+      setReports([]);
+    }
   }, []);
 
   useEffect(() => {
     loadReports();
   }, [loadReports]);
+
+  useEffect(() => {
+    const reportParam = Number(new URLSearchParams(window.location.search).get("report"));
+    if (!Number.isFinite(reportParam) || reportParam <= 0 || reports.length === 0) return;
+    const matched = reports.find((report) => report.reportNum === reportParam);
+    if (matched) setSelectedReport(matched);
+  }, [reports]);
 
   const filtered = useMemo(() => {
     let result = reports;
@@ -131,22 +148,43 @@ export default function ReportsPage() {
   }, [reports, search, scoreMin, scoreMax, timeDays, sort]);
 
   const handleDelete = async () => {
-    if (!deleteConfirm || deleteConfirm.id == null) return;
+    if (!deleteConfirm || !deleteConfirm.reportNum) return;
+    const reportNum = deleteConfirm.reportNum;
     const reportId = deleteConfirm.id;
-    await db.reports.delete(reportId);
+    const res = await fetch(`/api/data/reports/${reportNum}`, { method: "DELETE" });
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      console.error("[reports] delete failed:", json.error || res.statusText);
+      return;
+    }
+    if (reportId != null) {
+      await db.reports.delete(reportId);
+    } else {
+      const local = await db.reports.where("reportNum").equals(reportNum).first();
+      if (local?.id != null) await db.reports.delete(local.id);
+    }
 
     // Cascade: unset reportId on associated JDs
-    const linkedJds = await db.jds.where("reportId").equals(deleteConfirm.reportNum).toArray();
+    const linkedJds = await db.jds.where("reportId").equals(reportNum).toArray();
     for (const jd of linkedJds) {
       if (jd.id != null) await clearJDReportId(jd.id);
     }
 
     setDeleteConfirm(null);
     setSelectedReport(null);
+    setReports((prev) => prev.filter((report) => report.reportNum !== reportNum));
     loadReports();
   };
 
   const hasFilters = scoreMin != null || scoreMax != null || timeDays > 0;
+
+  if (loadError) {
+    return (
+      <div className="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] p-6 text-sm text-[var(--color-text-soft)]">
+        服务器数据加载失败，请稍后重试。
+      </div>
+    );
+  }
 
   return (
     <div className="">
@@ -291,6 +329,16 @@ export default function ReportsPage() {
                     </p>
                   </div>
                   <ScoreBadge score={report.overallScore} size="sm" />
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDeleteConfirm(report);
+                    }}
+                    className="ml-1 p-1 rounded-[var(--radius-sm)] text-[var(--color-muted)] hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/20"
+                    title="删除报告"
+                  >
+                    <Trash2 size={13} />
+                  </button>
                 </div>
                 <div className="flex items-center gap-2 mb-1.5">
                   <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--color-primary-muted)] text-[var(--color-text-soft)]">
@@ -352,12 +400,21 @@ export default function ReportsPage() {
                       </span>
                     </div>
                   </div>
-                  <button
-                    onClick={() => setSelectedReport(null)}
-                    className="p-1.5 rounded-[var(--radius-sm)] hover:bg-[var(--color-primary-muted)] text-[var(--color-muted)]"
-                  >
-                    <X size={18} />
-                  </button>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => setDeleteConfirm(selectedReport)}
+                      className="p-1.5 rounded-[var(--radius-sm)] hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/20 text-[var(--color-muted)]"
+                      title="删除报告"
+                    >
+                      <Trash2 size={17} />
+                    </button>
+                    <button
+                      onClick={() => setSelectedReport(null)}
+                      className="p-1.5 rounded-[var(--radius-sm)] hover:bg-[var(--color-primary-muted)] text-[var(--color-muted)]"
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
                 </div>
 
                 {/* A-G Blocks */}
@@ -365,6 +422,14 @@ export default function ReportsPage() {
 
                 {/* Actions */}
                 <div className="flex items-center gap-2 pt-6 mt-4 border-t border-[var(--color-divider)]">
+                  <a
+                    href={`/api/reports/${selectedReport.reportNum}/pdf`}
+                    download
+                    className="inline-flex items-center justify-center gap-1 rounded-[var(--radius-sm)] bg-[var(--color-primary)] px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
+                  >
+                    <Download size={12} />
+                    下载 PDF
+                  </a>
                   <WarmButton
                     variant="ghost"
                     size="sm"

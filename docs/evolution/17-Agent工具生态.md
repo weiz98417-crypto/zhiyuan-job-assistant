@@ -18,7 +18,7 @@ Agent 工具系统是"真 Agent"的核心执行层，所有工具遵循统一的
      ┌────────▼────────┐   ┌────────▼────────┐   ┌────────▼────────┐
      │   Query Tools    │   │   Action Tools   │   │    MCP Shims    │
      │   (只读，不修改)  │   │  (修改数据/触发流)│   │ (代理到外部服务)  │
-     │      13 个       │   │      18 个       │   │      5 个       │
+      │      15 个       │   │      21 个       │   │      5 个       │
      └─────────────────┘   └─────────────────┘   └─────────────────┘
               │                      │                      │
               └──────────────────────┼──────────────────────┘
@@ -29,7 +29,7 @@ Agent 工具系统是"真 Agent"的核心执行层，所有工具遵循统一的
                           │       2 个            │
                           └─────────────────────┘
 
-共 38 个工具，覆盖查询、动作、面试、MCP 四大类别。
+共 43 个工具，覆盖查询、动作、面试、MCP 四大类别。
 ```
 
 ### 1.1 核心类型定义
@@ -132,15 +132,15 @@ Agent 工具生态的设计遵循一个看似朴素但极为强大的原则—�
 
 这种设计背后的深层逻辑是**组合优于配置**。工具本身不是"API 端点加了一层聊天包装"——而是可以被 LLM 编排的基础原语。一个复杂的求职评估任务可能涉及 5 个工具的链式调用：先 `fetch_jd_content` 抓取 JD 文本，再 `analyze_jd_risks` 扫描风险信号，然后 `evaluate_jd_full` 执行 7 维评估，如果用户对简历不放心，还可能调用 `check_ats_compatibility` 做格式检查。每一个工具独立可测试、独立可迭代，新增一个能力就是新增一个文件——定义 handler、写 formatResult、export 注册——不需要改动任何编排代码。
 
-工具的 **action/query 二分法**直接借鉴了 **CQRS（命令查询职责分离）** 模式。Query 工具（13 个）是纯读操作：不写入任何数据，不产生副作用，即使被 LLM 反复调用也不会造成数据污染。Action 工具（18 个）是写操作：会修改 SQLite、localStorage、触发网络请求或推进 SOP 状态机。这种分类不仅是文档层面的标注——ToolRegistry 的执行层可以利用这个分类做差异化处理：比如在测试环境中 stub 所有 Action 工具但让 Query 工具真实执行，从而安全地验证 Agent 的推理逻辑。
+工具的 **action/query 二分法**直接借鉴了 **CQRS（命令查询职责分离）** 模式。Query 工具（15 个）是纯读操作：不写入任何数据，不产生副作用，即使被 LLM 反复调用也不会造成数据污染。Action 工具（21 个）是写操作：会修改 SQLite、localStorage、触发网络请求或推进 SOP 状态机。这种分类不仅是文档层面的标注——ToolRegistry 的执行层可以利用这个分类做差异化处理：比如在测试环境中 stub 所有 Action 工具但让 Query 工具真实执行，从而安全地验证 Agent 的推理逻辑。
 
 新工具的注册流程也体现了极简设计原则。一个 `ToolDefinition` 只需要四个要素：name（唯一标识）、handler（执行逻辑）、formatResult（格式化输出给 LLM）、category（query/action）。没有复杂的配置文件，没有 XML 描述符，没有注解——就是一个 TypeScript 对象。`populateAgentTools()` 函数自动将工具按白名单注入到各个子 Agent，新工具被注册后 30 秒内就能在全系统中生效。这种轻量级的设计意味着扩展成本极低，鼓励"先做出来试试"的快速迭代节奏。
 
 ---
 
-## 2. 工具全景列表 (38 个)
+## 2. 工具全景列表 (43 个)
 
-### 2.1 Query 工具 (13 个 — 只读查询)
+### 2.1 Query 工具 (15 个 — 只读查询)
 
 | # | 工具名 | 中文名 | 描述 | 关键参数 |
 |---|--------|--------|------|----------|
@@ -150,18 +150,17 @@ Agent 工具生态的设计遵循一个看似朴素但极为强大的原则—�
 | 4 | `read_file` | 读取文件 | 智能路由文件读取：我的简历→CV API，参考简历→DB，文件路径→服务端 | `path*` (文件路径或资源名) |
 | 5 | `get_profile` | 读取求职画像 | 获取用户完整求职画像和简历全文（三管道：llmSummary + ProfileViewCard uiPayload） | 无参数 |
 | 6 | `get_recent_activity` | 近期活动 | 获取最近 10 条投递活动记录 | 无参数 |
-| 7 | `get_recommendations` | 岗位推荐 | 基于用户画像和偏好获取智能推荐岗位 | `limit?` |
-| 8 | `get_pipeline_status` | Pipeline 状态 | 获取 Pipeline 总体投递统计（按状态分组，平均分） | 无参数 |
-| 9 | `decode_black_market_terms` | 黑话解码 | 解释 JD 中的招聘黑话真实含义（如"亲自带"→无偿加班风险） | `phrase*` (要解码的短语) |
-| 10 | `check_pipeline_health` | 管道健康检查 | 检测超过 7 天未回复的投递项，按逾期天数降序排列 | 无参数 |
-| 11 | `get_profile_insights` | 画像洞察 | 从历史行为信号提炼求职偏好、行业倾向、投递模式 | 无参数 |
-| 12 | `detect_skill_gaps` | 技能缺口分析 | 对比 CV 和 JD，输出缺失技能/薄弱项/匹配项/学习建议 | `jd_text*`, `cv_text?` |
-| 13 | `check_ats_compatibility` | ATS 兼容检查 | 检查简历的 ATS 兼容性（联系方式/量化密度/关键词/格式） | `cv_text*` |
-| 14 | `generate_interview_questions` | 生成面试题 | 根据 JD/简历/模式生成 8-12 道面试题 | `jdText?`, `cvText?`, `company?`, `role?` |
-| 15 | `score_interview_answer` | 评分面试回答 | 对面试回答进行四维度评分 | `question*`, `answer*` |
-| 16 | — | — | — | — |
+| 7 | `get_recent_jd_context` | 最近 JD 上下文 | 读取最近保存或指定的 JD，用于“这份 JD/刚才那个 JD”续问 | `jdId?` |
+| 8 | `get_recommendations` | 岗位推荐 | 基于用户画像和偏好获取智能推荐岗位 | `limit?` |
+| 9 | `get_pipeline_status` | Pipeline 状态 | 获取 Pipeline 总体投递统计（按状态分组，平均分） | 无参数 |
+| 10 | `decode_black_market_terms` | 黑话解码 | 解释 JD 中的招聘黑话真实含义（如"亲自带"→无偿加班风险） | `phrase*` (要解码的短语) |
+| 11 | `check_pipeline_health` | 管道健康检查 | 检测超过 7 天未回复的投递项，按逾期天数降序排列 | 无参数 |
+| 12 | `get_profile_insights` | 画像洞察 | 从历史行为信号提炼求职偏好、行业倾向、投递模式 | 无参数 |
+| 13 | `detect_skill_gaps` | 技能缺口分析 | 对比 CV 和 JD，输出缺失技能/薄弱项/匹配项/学习建议 | `jd_text*`, `cv_text?` |
+| 14 | `check_ats_compatibility` | ATS 兼容检查 | 检查简历的 ATS 兼容性（联系方式/量化密度/关键词/格式） | `cv_text*` |
+| 15 | `read_offer_report` | 读取 Offer 报告 | 读取已保存的 Offer 对比/评估报告 | `id*` |
 
-### 2.2 Action 工具 (18 个 — 触发副作用 / 流式输出)
+### 2.2 Action 工具 (21 个 — 触发副作用 / 流式输出)
 
 | # | 工具名 | 中文名 | 描述 | 关键参数 |
 |---|--------|--------|------|----------|
@@ -179,10 +178,13 @@ Agent 工具生态的设计遵循一个看似朴素但极为强大的原则—�
 | 23 | `self_positioning` | 自我定位引导 | 启动 4 阶段职业方向探索（兴趣→能力→限幅→收敛） | 无参数 |
 | 24 | `prepare_interview_full` | 面试全案准备 | 生成完整面试方案（技术/行为/HR/群面/薪资/反问/STAR） | `company?`, `role?` |
 | 25 | `compare_offers_deep` | Offer 深度对比 | 从 6 维度对比多个 offer，给出加权推荐和谈判策略 | `offers*` (数组) |
-| 26 | `start_interview_session` | 启动模拟面试 | 启动交互式模拟面试会话 | `company*`, `role*` |
-| 27 | `optimize_resume_section` | 简历优化 | 优化简历板块（full/polish/expand/quantify 四种操作） | `section?`, `instruction?`, `operation?`, `effort?` |
-| 28 | `save_resume_section` | 保存到简历 | 用户确认后将优化方案写入简历（SQLite + localStorage） | `section*`, `content*` |
-| 29 | `download_report_pdf` | 导出报告 PDF | 获取评估报告数据，构建 HTML 页面并打开浏览器打印对话框 | `reportNum*` |
+| 26 | `generate_offer_negotiation_strategy` | 生成 Offer 谈判策略 | 基于 Offer 生成谈判重点、话术和让步边界 | `offerText*` |
+| 27 | `generate_offer_hr_question_list` | 生成 HR 问题清单 | 生成入职、薪资、合同、风险相关的 HR 问题列表 | `offerText*` |
+| 28 | `start_interview_session` | 启动模拟面试 | 启动交互式模拟面试会话 | `company*`, `role*` |
+| 29 | `optimize_resume_section` | 简历优化 | 优化简历板块（full/polish/expand/quantify 四种操作） | `section?`, `instruction?`, `operation?`, `effort?` |
+| 30 | `save_resume_section` | 保存到简历 | 用户确认后将优化方案写入简历（SQLite + localStorage） | `section*`, `content*` |
+| 31 | `download_report_pdf` | 导出报告 PDF | 获取评估报告数据，构建 HTML 页面并打开浏览器打印对话框 | `reportNum*` |
+| 32 | `update_report_metadata` | 更新报告信息 | 补充或修正已保存报告的公司、岗位、标题、关键词、风险备注 | `reportNum*`, `company?`, `role?`, `title?`, `keywords?`, `notes?` |
 
 ### 2.3 Interview 工具 (2 个)
 
@@ -324,8 +326,8 @@ populateAgentTools(agents)
 
 | Agent | 工具数量 | 白名单 |
 |-------|---------|--------|
-| **general** (通用助手) | 38 (全部) | `toolNames: []` — 空数组 = 全部工具 |
-| **evaluate** (JD 评估) | 10 | `evaluate_jd`, `evaluate_jd_full`, `fetch_jd_content`, `web_search`, `analyze_jd_risks`, `decode_black_market_terms`, `get_report_detail`, `export_file`, `download_report_pdf`, `get_profile` |
+| **general** (通用助手) | 43 (全部) | `toolNames: []` — 空数组 = 全部工具 |
+| **evaluate** (JD 评估) | 11 | `evaluate_jd_full`, `get_recent_jd_context`, `read_file`, `get_profile`, `fetch_jd_content`, `analyze_jd_risks`, `decode_black_market_terms`, `get_report_detail`, `update_report_metadata`, `export_file`, `download_report_pdf` |
 | **interview** (面试教练) | 4 | `generate_interview_questions`, `score_interview_answer`, `start_interview_session`, `prepare_interview_full` |
 | **profile** (求职画像) | 7 | `get_profile`, `get_recommendations`, `get_profile_insights`, `self_positioning`, `check_pipeline_health`, `get_recent_activity`, `mine_profile` |
 | **resume** (简历优化) | 9 | `read_file`, `import_resume`, `generate_cv`, `evaluate_jd`, `export_file`, `get_reference_detail`, `optimize_resume_section`, `save_resume_section`, `check_ats_compatibility` |
@@ -485,6 +487,7 @@ ToolDisplay {
 | `get_report_detail` | 查看评估报告 | 📊 |
 | `get_profile` | 读取求职画像 | 👤 |
 | `get_recent_activity` | 近期活动 | 🕐 |
+| `get_recent_jd_context` | 读取最近 JD | 📚 |
 | `get_recommendations` | 岗位推荐 | 💼 |
 | `get_pipeline_status` | Pipeline 状态 | 📡 |
 | `decode_black_market_terms` | 黑话解码 | 🔓 |
@@ -492,8 +495,7 @@ ToolDisplay {
 | `get_profile_insights` | 画像洞察 | 📊 |
 | `detect_skill_gaps` | 技能缺口分析 | 🔍 |
 | `check_ats_compatibility` | ATS 兼容检查 | 🤖 |
-| `generate_interview_questions` | 生成面试题 | 📝 |
-| `score_interview_answer` | 评分面试回答 | ⭐ |
+| `read_offer_report` | 读取 Offer 报告 | 📄 |
 
 **Action 工具**：
 
@@ -513,9 +515,13 @@ ToolDisplay {
 | `self_positioning` | 自我定位引导 | 🧭 |
 | `prepare_interview_full` | 面试全案准备 | 🎯 |
 | `compare_offers_deep` | Offer 深度对比 | ⚖️ |
+| `generate_offer_negotiation_strategy` | 生成谈判策略 | 💬 |
+| `generate_offer_hr_question_list` | 生成 HR 问题清单 | 🧾 |
 | `optimize_resume_section` | 简历优化 | ✏️ |
 | `save_resume_section` | 保存到简历 | 💾 |
 | `start_interview_session` | 启动模拟面试 | 🎙️ |
+| `download_report_pdf` | 导出报告 PDF | 🖨️ |
+| `update_report_metadata` | 更新报告信息 | ✏️ |
 
 **MCP 工具**：
 

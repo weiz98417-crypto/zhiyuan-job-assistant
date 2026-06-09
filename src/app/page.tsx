@@ -63,32 +63,19 @@ export default function HomePage() {
 
   useEffect(() => {
     async function load() {
-      // Primary: fetch from SQLite API; fallback: DexieDB
+      // Server data is authoritative; local storage is only used for local interview drafts.
       try {
         const [appsRes, reportsRes, offersRes] = await Promise.all([
-          fetch("/api/data/applications"),
-          fetch("/api/data/reports"),
-          fetch("/api/offers"),
+          fetch("/api/data/applications", { cache: "no-store" }),
+          fetch("/api/data/reports", { cache: "no-store" }),
+          fetch("/api/offers", { cache: "no-store" }),
         ]);
-        if (appsRes.ok) {
-          const json = await appsRes.json();
-          if (json.success && Array.isArray(json.data)) setApplications(json.data);
-        }
-        if (reportsRes.ok) {
-          const json = await reportsRes.json();
-          if (json.success && Array.isArray(json.data)) setReportCount(json.data.length);
-        }
-        if (offersRes.ok) {
-          const json = await offersRes.json();
-          if (json.success && Array.isArray(json.data)) setOfferCount(json.data.length);
-        }
-      } catch { /* fallback to DexieDB */ }
-      // Fallback: DexieDB if API failed
-      try {
-        if (applications.length === 0) {
-          const apps = await db.applications.toArray();
-          setApplications(apps);
-        }
+        if (!appsRes.ok || !reportsRes.ok || !offersRes.ok) throw new Error("server load failed");
+        const [appsJson, reportsJson, offersJson] = await Promise.all([appsRes.json(), reportsRes.json(), offersRes.json()]);
+        if (!appsJson.success || !reportsJson.success || !offersJson.success) throw new Error("server response failed");
+        setApplications(Array.isArray(appsJson.data) ? appsJson.data : []);
+        setReportCount(Array.isArray(reportsJson.data) ? reportsJson.data.length : 0);
+        setOfferCount(Array.isArray(offersJson.data) ? offersJson.data.length : 0);
         const ivs = await db.interviews.toArray();
         setInterviews(ivs);
       } catch {

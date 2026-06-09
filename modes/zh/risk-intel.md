@@ -93,6 +93,24 @@ terms:
     category: 加班信号
     false_positive_notes: ""
 
+  - term: "拆解报告"
+    meaning: "岗位更看重候选人的业务理解、问题拆解和结构化表达；这不是负面黑话，但暗示只投常规简历竞争力会弱"
+    severity: low
+    category: AI岗位筛选信号
+    false_positive_notes: "AI/产品/策略岗常见加分项，不等同于诈骗或加班风险"
+
+  - term: "Agent 作品"
+    meaning: "岗位希望看到可运行的 AI Agent/自动化工作流作品，筛选标准偏实操和作品集，不只是简历关键词"
+    severity: low
+    category: AI岗位筛选信号
+    false_positive_notes: "如果要求付费培训、代做作品或交源码账号，则需另行判断风险"
+
+  - term: "下午茶"
+    meaning: "偏非正式邀约/轻面试话术，通常表示优先沟通或快速初筛；不一定是风险，但说明对方想先看候选人的主动产出"
+    severity: low
+    category: 面试邀约信号
+    false_positive_notes: "大厂/创业团队招聘中可能只是轻松表达，不应直接判定为不正规"
+
   - term: "不强制加班/不提倡加班"
     meaning: "别人都在加你走一个试试——该加的班一样不少"
     severity: medium

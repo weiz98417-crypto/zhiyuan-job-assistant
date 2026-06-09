@@ -17,9 +17,7 @@ All scripts live in the project root as `.mjs` modules and are exposed via `npm 
 | `npm run update` | `update-system.mjs apply` | Apply upstream update |
 | `npm run rollback` | `update-system.mjs rollback` | Rollback last update |
 | `npm run liveness` | `check-liveness.mjs` | Test if job URLs are still active |
-| `npm run scan` | `scan.mjs` | Zero-token portal scanner (API-only) |
-| `npm run scan:worker` | `scripts/scan-worker.mjs` | Background scan daemon (API + Playwright) |
-| `npm run scan:once` | `scripts/scan-worker.mjs --once` | Single scan run, immediate results |
+| `npm run scan` | `scan.mjs` | Zero-token portal scanner |
 
 ---
 
@@ -189,25 +187,3 @@ npm run scan
 ```
 
 **Exit codes:** `0` scan completed, `1` configuration error or no portals.yml found.
-
----
-
-## scan:worker
-
-Background scan daemon that polls `scan_queue` for pending tasks, executes adapters (API + Playwright), and writes results to `scan_jobs`. Supports dual-channel: public API calls for Greenhouse/Lever, Playwright browser automation for Moka/Beisen/custom pages.
-
-```bash
-npm run scan:worker          # daemon mode — poll every 5s
-```
-
-With `server.mjs` as the entry point (`npm start`), the worker is automatically forked and supervised with crash recovery.
-
-## scan:once
-
-Single-run scan for debugging. Scans all companies or a single company and exits immediately. Title filter from `portals.yml` is applied.
-
-```bash
-npm run scan:once                          # scan all companies once
-node scripts/scan-worker.mjs --once --company 字节跳动  # single company
-node scripts/scan-worker.mjs --once --save-html         # save page HTML for debug
-```

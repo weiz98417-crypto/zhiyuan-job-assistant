@@ -6,7 +6,6 @@
   <img src="https://img.shields.io/badge/TypeScript-3178C6?style=flat&logo=typescript&logoColor=white" alt="TypeScript">
   <img src="https://img.shields.io/badge/React_19-61DAFB?style=flat&logo=react&logoColor=black" alt="React 19">
   <img src="https://img.shields.io/badge/SQLite-003B57?style=flat&logo=sqlite&logoColor=white" alt="SQLite">
-  <img src="https://img.shields.io/badge/Playwright-2EAD33?style=flat&logo=playwright&logoColor=white" alt="Playwright">
   <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT">
 </p>
 
@@ -71,14 +70,9 @@ AI-powered job search assistant for the Chinese market. Evaluate JDs, optimize r
 - Agent.md loaded: Interview coach soul in Markdown, four workflows defined cleanly
 
 ### Job Discovery (职位发现)
-- **30+ enterprise career site scanner**: Auto-scans company recruitment portals (not BOSS/51job) from Beijing, Shanghai, Shenzhen, Hangzhou, Guangzhou
-- **Dual-channel architecture**: Public API (Greenhouse/Lever, zero cost) + Playwright browser (Moka/Beisen/custom pages)
-- **LLM-powered extraction**: Claude Haiku extracts structured job data from arbitrary career pages (15 custom companies)
-- **Real-time scan UI**: Trigger scans from `/discover`, live progress with per-company status chips, inline evaluation slide-over panel
-- **Background worker**: `scan-worker.mjs` daemon with CAS task claiming, crash recovery, graceful shutdown, circuit breaker
-- **SQLite persistence**: `scan_queue` + `scan_jobs` tables with URL dedup, title filtering, per-user isolation
-- **title_filter**: Configurable positive/negative keyword filtering applied at extraction time
-- **5 adapters**: Greenhouse, Lever, Moka (12 companies), Beisen (5 companies), Custom/LLM (15 companies)
+- Configurable portal scanner with dedup history
+- Multi-keyword, multi-company search
+- JD liveness checker (is the posting still active?)
 
 ### Analytics (数据分析)
 - Application pipeline health dashboard

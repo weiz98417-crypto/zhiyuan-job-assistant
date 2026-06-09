@@ -1,7 +1,7 @@
 "use client";
 
 import { type ReactNode, useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   Home,
   FileSearch,
@@ -19,6 +19,7 @@ import {
   LogOut,
   Shield,
   TrendingUp,
+  Database,
 } from "lucide-react";
 import NavItem from "./NavItem";
 import { useTheme } from "@/components/providers/ThemeProvider";
@@ -57,7 +58,7 @@ const PHASE_GROUPS = [
   {
     label: "收尾 · Close",
     items: [
-      { href: "/compare", label: "Offer 对比", icon: Scale },
+      { href: "/compare", label: "Offer 评估", icon: Scale },
       { href: "/analytics", label: "数据分析", icon: BarChart3 },
     ],
   },
@@ -71,7 +72,9 @@ const MOBILE_ITEMS = [
 export default function AppShell({ children }: { children: ReactNode }) {
   const { theme, toggleTheme } = useTheme();
   const router = useRouter();
+  const pathname = usePathname();
   const [user, setUser] = useState<UserInfo | null>(null);
+  const isWorkspacePage = pathname === "/agent";
 
   useEffect(() => {
     fetch('/api/users/me')
@@ -156,6 +159,10 @@ export default function AppShell({ children }: { children: ReactNode }) {
                     <TrendingUp size={14} />
                     团队洞察
                   </a>
+                  <a href="/admin/memory" className="flex items-center gap-2 px-2 py-1.5 rounded-[var(--radius-sm)] text-xs font-medium text-[var(--color-primary)] hover:bg-[var(--color-primary-muted)] transition-colors duration-[var(--duration-fast)] no-underline">
+                    <Database size={14} />
+                    记忆治理
+                  </a>
                 </div>
               )}
 
@@ -192,7 +199,9 @@ export default function AppShell({ children }: { children: ReactNode }) {
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, ease: [0.19, 1, 0.22, 1] }}
-          className="h-full flex flex-col px-[var(--space-page)] py-[var(--space-section)] max-w-[1600px]"
+          className={`h-full flex flex-col px-[var(--space-page)] py-[var(--space-section)] ${
+            isWorkspacePage ? "w-full max-w-none" : "max-w-[1600px]"
+          }`}
         >
           {children}
         </motion.div>

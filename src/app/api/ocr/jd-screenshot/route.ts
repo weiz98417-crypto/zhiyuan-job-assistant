@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
+import { ZHIPU_API_URL, ZHIPU_VISION_MODEL } from "@/lib/zhipu";
+import { buildOCRImageCandidates } from "@/lib/server-image-variants";
 
-const ZHIPU_API_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions";
-const MODEL = "glm-4.6v-flashx";
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10MB
 const VALID_MIME_TYPES = ["image/png", "image/jpeg", "image/webp"];
 
@@ -82,6 +82,9 @@ export async function POST(request: Request) {
       );
     }
 
+    const candidates = await buildOCRImageCandidates(body.image).catch(() => []);
+    const imageForOCR = candidates[0]?.dataUri || body.image;
+
     const response = await fetch(ZHIPU_API_URL, {
       method: "POST",
       headers: {
@@ -89,7 +92,7 @@ export async function POST(request: Request) {
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: MODEL,
+        model: ZHIPU_VISION_MODEL,
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
           {
@@ -97,7 +100,7 @@ export async function POST(request: Request) {
             content: [
               {
                 type: "image_url",
-                image_url: { url: body.image },
+                image_url: { url: imageForOCR },
               },
               {
                 type: "text",

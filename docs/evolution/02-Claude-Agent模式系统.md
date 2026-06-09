@@ -43,7 +43,7 @@ Claude Mode 文件（`modes/zh/*.md`）保留的原因是：
     ▼
 Agent Loop (src/lib/agent/loop/)
     ├── callLLM() → DeepSeek Flash → Pro → GLM-4 → Qwen-Long (4级降级)
-    ├── Native function calling → 38 TypeScript 工具
+    ├── Native function calling → 43 TypeScript 工具
     ├── CJK token 估算 + 流式降级 + 行缓冲 + 超时保护
     └── Quality gate → checkResultQuality → self-healing
     │
@@ -57,12 +57,12 @@ Agent Loop (src/lib/agent/loop/)
 
 | Agent ID | 名称 | 工具白名单 | 触发条件 |
 |----------|------|-----------|---------|
-| `general` | 通用助手 | 全部 38 工具 | 兜底（空白名单=全部） |
-| `evaluate` | JD 评估 | evaluate_jd, evaluate_jd_full, fetch_jd_content, web_search, analyze_jd_risks, decode_terms, get_report_detail, export_file, download_report_pdf | 评估/分析 JD |
+| `general` | 通用助手 | 全部 43 工具 | 兜底（空白名单=全部） |
+| `evaluate` | JD 评估 | evaluate_jd_full, get_recent_jd_context, read_file, get_profile, fetch_jd_content, analyze_jd_risks, decode_black_market_terms, get_report_detail, update_report_metadata, export_file, download_report_pdf | 评估/分析 JD |
 | `resume` | 简历优化 | read_file, import_resume, generate_cv, evaluate_jd, export_file, get_reference_detail, optimize_resume_section, save_resume_section, check_ats_compatibility | 简历/优化/CV |
-| `interview` | 面试教练 | generate_interview_questions, score_interview_answer, start_interview_session, prepare_interview_full, web_search, read_file, search_applications, get_report_detail | 面试/准备 |
+| `interview` | 面试教练 | generate_interview_questions, score_interview_answer, start_interview_session, prepare_interview_full, read_file, get_recent_jd_context, search_applications, get_report_detail | 面试/准备 |
 | `profile` | 求职画像 | get_profile, get_recommendations, get_profile_insights, self_positioning, check_pipeline_health, get_recent_activity, mine_profile | 定位/画像 |
-| `offer` | Offer 评估 | evaluate_offer, compare_offers_deep, export_file, download_report_pdf | Offer/对比/选offer |
+| `offer` | Offer 评估 | evaluate_offer, read_offer_report, generate_offer_negotiation_strategy, generate_offer_hr_question_list, compare_offers_deep, export_file, download_report_pdf | Offer/对比/选offer/谈判 |
 
 ---
 

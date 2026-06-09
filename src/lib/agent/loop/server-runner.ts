@@ -12,6 +12,10 @@ import { isGarbledText } from "./text-quality";
 import { executeTool, formatToolResult, getTool } from "@/lib/agent/tools";
 import type { ToolResult, ErrorCategory } from "@/lib/agent/tools/types";
 import type { AgentDefinition } from "@/lib/agent/registry/types";
+import { enforceToolPolicy, inferCompanyFromMessages, isToolAllowedInMode } from "./tool-policy";
+import { ZHIPU_API_URL, ZHIPU_FALLBACK_MODEL } from "@/lib/zhipu";
+import type { InterviewSessionState } from "@/types";
+import type { InterviewRebindAction } from "@/lib/agent/interview-rebind-policy";
 
 /* ── Context cap (per-tool) ── */
 const DEFAULT_TOOL_CTX_CAP = 800;
@@ -72,12 +76,23 @@ function resolveErrorCategory(result: ToolResult): ErrorCategory {
   return result.success ? "ok" : "permanent";
 }
 
+function inferDecodeTextFromMessages(messages: DeepSeekMessage[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg.role !== "user") continue;
+    const text = msg.content?.trim();
+    if (!text || text.startsWith("<!--")) continue;
+    return text.length > 4000 ? text.slice(0, 4000) : text;
+  }
+  return null;
+}
+
 /* ── LLM API with fallback ── */
 
 const MODEL_CHAIN = [
   { model: "deepseek-v4-flash", url: "https://api.deepseek.com/chat/completions", keyEnv: "DEEPSEEK_API_KEY" },
   { model: "deepseek-v4-pro", url: "https://api.deepseek.com/chat/completions", keyEnv: "DEEPSEEK_API_KEY" },
-  { model: "glm-4.6v-flashx", url: "https://open.bigmodel.cn/api/paas/v4/chat/completions", keyEnv: "ZHIPU_API_KEY" },
+  { model: ZHIPU_FALLBACK_MODEL, url: ZHIPU_API_URL, keyEnv: "ZHIPU_API_KEY" },
   { model: "qwen-long", url: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", keyEnv: "DASHSCOPE_API_KEY" },
 ];
 
@@ -205,8 +220,10 @@ export async function* agentLoopServer(opts: {
   config?: LoopConfig;
   tools?: Array<{ type: string; function: object }>;
   signal?: AbortSignal;
+  interviewState?: InterviewSessionState;
+  interviewRebindAction?: InterviewRebindAction;
 }): AsyncGenerator<SSEEvent> {
-  const { systemPrompt, messages, config = DEFAULT_LOOP_CONFIG, tools, agent, signal } = opts;
+  const { systemPrompt, messages, config = DEFAULT_LOOP_CONFIG, tools, agent, signal, interviewState, interviewRebindAction } = opts;
   const modelPreference = agent?.model;
   const toolWhitelist = agent?.toolNames?.length ? agent.toolNames : undefined;
   const state: LoopState = {
@@ -286,6 +303,18 @@ export async function* agentLoopServer(opts: {
     for (const tc of toolCalls) {
       let params: Record<string, unknown>;
       try { params = JSON.parse(tc.arguments); } catch { continue; }
+      if (tc.name === "evaluate_jd_full" && typeof params.target_company !== "string") {
+        const inferredCompany = inferCompanyFromMessages(ctx);
+        if (inferredCompany) params.target_company = inferredCompany;
+      }
+      if (tc.name === "decode_black_market_terms") {
+        const hasDecodeText = [params.text, params.phrase, params.jd_text]
+          .some((value) => typeof value === "string" && value.trim());
+        if (!hasDecodeText) {
+          const inferredText = inferDecodeTextFromMessages(ctx);
+          if (inferredText) params.text = inferredText;
+        }
+      }
 
       const paramsKey = JSON.stringify(params);
       const recent = recentCalls.find((c) => c.name === tc.name && c.params === paramsKey);
@@ -300,11 +329,22 @@ export async function* agentLoopServer(opts: {
         yield { type: "phase", phase: "executing" };
         yield { type: "tool_call", name: tc.name, params };
 
-        if (toolWhitelist && !toolWhitelist.includes(tc.name)) {
+        if (!isToolAllowedInMode(tc.name, toolWhitelist)) {
           const errMsg = `工具 ${tc.name} 不在当前 Agent 模式下可用`;
           yield { type: "tool_result", name: tc.name, result: errMsg, success: false };
           ctx.push({ role: "user", content: `<!-- tool:${tc.name} result -->${errMsg}` });
           state.consecutiveFailures++;
+          continue;
+        }
+
+        const policyResult = enforceToolPolicy({ toolName: tc.name, params, messages: ctx, toolWhitelist, interviewState, interviewRebindAction });
+        if (policyResult) {
+          toolResult = policyResult;
+          formatted = formatToolResult(toolResult, tc.name);
+          yield { type: "tool_result", name: tc.name, result: formatted, success: false };
+          yield { type: "tool_error", name: tc.name, error: toolResult.error || "工具调用被策略拦截", recoverable: false };
+          ctx.push({ role: "user", content: `[TOOL_BLOCKED tool=${tc.name}] ${toolResult.llmSummary || toolResult.error || "工具调用被策略拦截"}\n\n请不要改用其它大工具重试。请基于已有本地上下文回答；缺少必要信息时只向用户索要那一项。` });
+          forceTextOnly = true;
           continue;
         }
 
@@ -382,7 +422,13 @@ export async function* agentLoopServer(opts: {
         const llmText = getLLMContext(toolResult, tc.name);
         ctx.push({
           role: "user",
-          content: `<!-- tool:${tc.name} result -->\n${llmText}${hint}\n\n【请基于以上工具返回的数据进行深度分析和扩容解释。不要仅复述数据——要分析原因、风险判断、面试追问策略和行动建议。】`,
+          content: `<!-- tool:${tc.name} result -->\n${llmText}${hint}\n\n${tc.name === "get_report_detail"
+            ? "【聊天框只输出一句摘要和提示用户点击报告卡片。禁止输出完整 A-G 报告正文。】"
+            : tc.name === "read_file" || tc.name === "get_profile"
+              ? "【只说明已读取简历/画像，并继续完成用户原任务。不要把简历全文粘贴到聊天框。】"
+              : tc.name === "update_report_metadata"
+                ? "【只确认已更新报告信息。不要重新评估，不要输出完整报告。】"
+                : "【请基于以上工具结果简洁回答。不要扩写成长报告；缺关键信息时只问缺的那一项。】"}`,
         });
       }
       state.contextSize = estimateTokens(ctx);

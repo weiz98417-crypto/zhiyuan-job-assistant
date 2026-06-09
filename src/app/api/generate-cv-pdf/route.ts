@@ -28,6 +28,9 @@ interface GenerateCvPdfRequest {
 const PROJECT_ROOT = path.join(process.cwd());
 
 function findChromiumExecutable(): string {
+  const bundled = chromium.executablePath();
+  if (bundled && fs.existsSync(bundled)) return bundled;
+
   const platform = os.platform();
   const exeName = platform === "win32" ? "chrome.exe" : "chrome";
   const subdir =

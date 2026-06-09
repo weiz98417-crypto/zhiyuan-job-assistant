@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/server-db';
-import { getCurrentUser } from '@/lib/auth';
+import { getCurrentUser, verifyTokenVersion } from '@/lib/auth';
+import { getDataRepositories } from '@/lib/data-repositories';
 
 export async function GET(request: NextRequest) {
   try {
@@ -8,20 +8,14 @@ export async function GET(request: NextRequest) {
     if (payload.role !== 'admin') {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
+    await verifyTokenVersion(payload);
 
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status');
 
-    const db = getDb();
-    let sql = 'SELECT * FROM users ORDER BY created_at DESC';
-    const params: string[] = [];
-
-    if (status && ['pending', 'active', 'rejected'].includes(status)) {
-      sql = 'SELECT * FROM users WHERE status = ? ORDER BY created_at DESC';
-      params.push(status);
-    }
-
-    const users = db.prepare(sql).all(...params) as Array<Record<string, unknown>>;
+    const users = await getDataRepositories().users.list(
+      status && ['pending', 'active', 'rejected'].includes(status) ? status : undefined,
+    );
 
     return NextResponse.json({
       users: users.map((u) => ({
@@ -36,7 +30,11 @@ export async function GET(request: NextRequest) {
       })),
     });
   } catch (err) {
-    if ((err as Error).message === 'Not authenticated') {
+    if (
+      (err as Error).message === 'Not authenticated' ||
+      (err as Error).message === 'Invalid or expired token' ||
+      (err as Error).message === 'Token has been revoked'
+    ) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
     console.error('[admin/users]', err);

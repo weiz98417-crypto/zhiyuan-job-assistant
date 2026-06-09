@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
-import { getDb } from "@/lib/server-db";
-import { getScanJobs } from "../../../../../lib/scan/orchestrator.mjs";
+import { getScanJobsForUser } from "@/lib/scan-data";
 
 export async function GET(request: NextRequest) {
   try {
@@ -13,8 +12,7 @@ export async function GET(request: NextRequest) {
     const page = parseInt(url.searchParams.get("page") || "1");
     const limit = parseInt(url.searchParams.get("limit") || "20");
 
-    const db = getDb();
-    const result = getScanJobs(db, String(user.userId), { status, page, limit });
+    const result = await getScanJobsForUser(String(user.userId), { status, page, limit });
 
     return NextResponse.json({ success: true, data: result });
   } catch (error: unknown) {

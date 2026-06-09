@@ -33,8 +33,12 @@ export async function POST(request: NextRequest) {
     if (updated.changes === 0) {
       const dedupKey = createHash('sha256').update(url).digest('hex');
       db.prepare(`
+        INSERT OR IGNORE INTO scan_queue (id, user_id, status, companies_total, companies_done, jobs_found, jobs_new, error_log)
+        VALUES ('manual', ?, 'done', 0, 0, 0, 0, '[]')
+      `).run(userId);
+      db.prepare(`
         INSERT OR IGNORE INTO scan_jobs (scan_id, user_id, company, title, url, jd_snippet, status, dedup_key)
-        VALUES (NULL, ?, ?, ?, ?, ?, 'evaluated', ?)
+        VALUES ('manual', ?, ?, ?, ?, ?, 'evaluated', ?)
       `).run(userId, company || '未知', title || '未知职位', url, jd_snippet || '', dedupKey);
     }
 

@@ -12,6 +12,18 @@ interface ReferenceOption {
   name: string;
 }
 
+interface ReferenceMemoryUsage {
+  snippetIds?: number[];
+  referenceResumeIds?: number[];
+  patternMemoryIds?: number[];
+  ranking?: Array<{
+    snippetId: number;
+    referenceResumeId: number;
+    score: number;
+    ranking?: Record<string, unknown>;
+  }>;
+}
+
 interface OptimizePanelProps {
   sectionId: string;
   sectionContent: string;
@@ -51,6 +63,7 @@ export default function OptimizePanel({
   const [enablePlaceholders, setEnablePlaceholders] = useState(true);
   const [enableQuestions, setEnableQuestions] = useState(false);
   const [variants, setVariants] = useState<OptimizeVariant[] | null>(null);
+  const [referenceMemory, setReferenceMemory] = useState<ReferenceMemoryUsage | null>(null);
   const [selectedRefIds, setSelectedRefIds] = useState<number[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -80,8 +93,13 @@ export default function OptimizePanel({
           variant_type: variantType || "",
           action,
           operation,
+          taskType: "cv_optimize",
+          roleCategory: roleDirection && roleDirection !== "auto"
+            ? roleDirection
+            : targetJD?.role || "",
           original_text: original,
           optimized_text: optimized,
+          referenceMemory,
         }),
       });
     } catch { /* best effort */ }
@@ -137,6 +155,7 @@ export default function OptimizePanel({
     setLoading(true);
     setError(null);
     setVariants(null);
+    setReferenceMemory(null);
     setQuestions([]);
     setQuestionAnswers({});
 
@@ -190,6 +209,7 @@ export default function OptimizePanel({
       }
 
       setVariants(data.data.variants);
+      setReferenceMemory(data.data.referenceMemory || null);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "未知错误";
       setError(message);
@@ -573,6 +593,7 @@ export default function OptimizePanel({
                   size="sm"
                   onClick={() => {
                     setVariants(null);
+                    setReferenceMemory(null);
                     setError(null);
                     setQuestions([]);
                     setQuestionAnswers({});

@@ -2,20 +2,33 @@
 
 import fs from "fs";
 import path from "path";
-import { listReports } from "@/lib/server-db";
+import { getCurrentUser } from "@/lib/auth";
+import { getDataRepositories } from "@/lib/data-repositories";
+import { ZHIPU_API_URL, ZHIPU_VISION_MODEL } from "@/lib/zhipu";
+import { buildOCRImageCandidates, normalizeImageDataUri } from "@/lib/server-image-variants";
 
 import { llmRetry, LLMError } from "@/lib/llm-retry";
 
 const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
 const DEEPSEEK_MODEL = "deepseek-v4-flash";
-const ZHIPU_API_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions";
-const ZHIPU_MODEL = "glm-4.6v-flashx";
 const MAX_IMAGES = 5;
+
+const OCR_SYSTEM_PROMPT = `你是一个专业的招聘 JD 图片识别助手。用户上传一张图片（可能是职位描述截图），你需要提取其中的结构化信息。
+
+## 提取规则
+1. 如果图片包含职位描述（JD），提取 company、role、body、skills、isJD
+2. 如果图片不包含 JD，返回 { "isJD": false, "reason": "说明原因" }
+3. 无法从图片中识别到的字段，填写空字符串
+4. skills 字段返回数组，如 ["React", "TypeScript", "Node.js"]
+5. body 字段返回完整的 JD 正文原文，保留换行和段落结构
+
+只返回 JSON，不要输出解释。`;
 
 /* ── Types ── */
 
-interface EvalInput { jdText?: string; jdUrl?: string; images?: string[]; cvText?: string; language?: "zh" | "en"; }
+interface EvalInput { jdText?: string; jdUrl?: string; images?: string[]; cvText?: string; targetCompany?: string; allowWebSearch?: boolean; language?: "zh" | "en"; memoryContext?: string; }
 interface BlockResult { content: string; score: number; }
+interface RiskSignal { signal: string; excerpt?: string; severity: string; source?: string; }
 interface EvalState {
   jdText: string;
   company: string;
@@ -26,6 +39,26 @@ interface EvalState {
   overallScore: number;
   reportNum: number;
   searchInfo: string;
+  riskSignals: RiskSignal[];
+  error?: string;
+}
+
+interface OCRPayload {
+  company?: string;
+  role?: string;
+  body?: string;
+  skills?: unknown;
+  isJD?: boolean;
+  reason?: string;
+}
+
+interface OCRSingleResult {
+  company: string;
+  role: string;
+  body: string;
+  skills: string[];
+  isJD: boolean;
+  error?: string;
 }
 
 /* ── SSE helpers ── */
@@ -173,50 +206,145 @@ async function quickLLM(systemPrompt: string, userMessage: string, signal?: Abor
 
 /* ── OCR: Zhipu GLM-4V ── */
 
-async function ocrSingle(
+function assessJDText(body: string): { ok: boolean; reason?: string } {
+  const text = body.replace(/\s+/g, " ").trim();
+  if (!text) return { ok: false, reason: "未识别到正文" };
+  if (/达到处理上限|重新提问|上传了\s*JD\s*截图|马上帮你评估|我来看看这份\s*JD|评估过程遇到/i.test(text)) {
+    return { ok: false, reason: "识别到的是聊天气泡/系统提示，不是 JD 正文" };
+  }
+
+  const keywordHits = [
+    /岗位|职位|职责|任职|要求|工作内容|薪资|经验|加分|团队|招聘/,
+    /responsibilit|requirement|qualification|salary|position|job|experience|candidate/i,
+  ].filter((pattern) => pattern.test(text)).length;
+
+  if (text.length >= 120 && keywordHits > 0) return { ok: true };
+  if (text.length >= 260) return { ok: true };
+  return { ok: false, reason: "识别文本过短或不像 JD 正文" };
+}
+
+async function ocrSingleCandidate(
   base64: string,
   signal?: AbortSignal,
-): Promise<{ company: string; role: string; body: string; skills: string[]; isJD: boolean; error?: string }> {
+  label = "图片",
+): Promise<OCRSingleResult> {
   const apiKey = process.env.ZHIPU_API_KEY;
   if (!apiKey) return { company: "", role: "", body: "", skills: [], isJD: true, error: "ZHIPU_API_KEY not configured" };
+  const normalized = normalizeImageDataUri(base64);
+  if (!normalized) {
+    return { company: "", role: "", body: "", skills: [], isJD: true, error: `${label}: 图片数据不是有效 PNG/JPEG/WebP` };
+  }
 
   try {
     const res = await fetch(ZHIPU_API_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
-        model: ZHIPU_MODEL,
-        messages: [{
-          role: "user",
-          content: [
-            { type: "image_url", image_url: { url: base64 } },
-            { type: "text", text: "请识别这张图片中的职位描述信息，提取公司名、职位名、JD正文。如果不是JD图片请注明。返回JSON格式：{\"company\":\"\",\"role\":\"\",\"body\":\"\",\"skills\":[],\"isJD\":true}" },
-          ],
-        }],
+        model: ZHIPU_VISION_MODEL,
+        messages: [
+          { role: "system", content: OCR_SYSTEM_PROMPT },
+          {
+            role: "user",
+            content: [
+              { type: "image_url", image_url: { url: normalized.dataUri } },
+              { type: "text", text: "请识别这张图片中的职位描述信息，提取结构化字段。如果这不是 JD 图片请明确说明。" },
+            ],
+          },
+        ],
         temperature: 0.1,
-        max_tokens: 2000,
+        max_tokens: 3000,
         response_format: { type: "json_object" },
       }),
       signal,
     });
 
-    if (!res.ok) return { company: "", role: "", body: "", skills: [], isJD: true, error: `OCR API ${res.status}` };
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      console.error("Zhipu OCR API error:", res.status, errText.slice(0, 500));
+      return {
+        company: "",
+        role: "",
+        body: "",
+        skills: [],
+        isJD: true,
+        error: `OCR API ${res.status}${errText ? `: ${errText.slice(0, 180)}` : ""}`,
+      };
+    }
 
     const data = await res.json();
     const content = data.choices?.[0]?.message?.content;
     if (!content) return { company: "", role: "", body: "", skills: [], isJD: true, error: "Empty OCR response" };
 
-    const parsed = JSON.parse(content);
+    const parsed = parseOCRPayload(content);
+    if (!parsed) {
+      return { company: "", role: "", body: "", skills: [], isJD: true, error: "OCR 返回格式解析失败" };
+    }
     return {
       company: parsed.company || "",
       role: parsed.role || "",
-      body: parsed.body || "",
+      body: cleanOCRBody(parsed.body || ""),
       skills: Array.isArray(parsed.skills) ? parsed.skills : [],
       isJD: parsed.isJD !== false,
+      error: parsed.isJD === false ? parsed.reason || "图片不像 JD" : undefined,
     };
   } catch (err) {
     return { company: "", role: "", body: "", skills: [], isJD: true, error: `OCR failed: ${err instanceof Error ? err.message : "unknown"}` };
   }
+}
+
+async function ocrSingle(
+  base64: string,
+  signal?: AbortSignal,
+): Promise<OCRSingleResult> {
+  let candidates = [{ label: "原图", dataUri: base64 }];
+  try {
+    candidates = await buildOCRImageCandidates(base64);
+  } catch (err) {
+    console.warn("OCR candidate build failed:", err instanceof Error ? err.message : String(err));
+  }
+
+  const failures: string[] = [];
+  for (const candidate of candidates) {
+    const result = await ocrSingleCandidate(candidate.dataUri, signal, candidate.label);
+    if (result.error && !result.body) {
+      failures.push(`${candidate.label}: ${result.error}`);
+      continue;
+    }
+    const quality = assessJDText(result.body);
+    if (result.isJD && quality.ok) return result;
+    failures.push(`${candidate.label}: ${result.error || quality.reason || "未识别到有效 JD"}`);
+  }
+
+  return {
+    company: "",
+    role: "",
+    body: "",
+    skills: [],
+    isJD: true,
+    error: failures.slice(0, 3).join("；") || "未能从截图中识别到有效 JD 正文",
+  };
+}
+
+function parseOCRPayload(content: string): OCRPayload | null {
+  const candidates = [
+    content.trim(),
+    content.match(/```(?:json)?\s*([\s\S]*?)```/)?.[1]?.trim(),
+    content.match(/\{[\s\S]*\}/)?.[0]?.trim(),
+  ].filter((value): value is string => Boolean(value));
+
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(candidate) as OCRPayload;
+    } catch {
+      // Try next candidate.
+    }
+  }
+  return null;
+}
+
+function cleanOCRBody(body: string): string {
+  const cleaned = body.replace(/【缺失】/g, "").trim();
+  return cleaned.length >= 20 ? cleaned : "";
 }
 
 /* ── Score extraction ── */
@@ -245,8 +373,18 @@ function extractScore(text: string, blockKey: string): number {
    ══════════════════════════════════════════════════════════════ */
 
 export async function POST(request: Request) {
+  let user;
+  try {
+    user = await getCurrentUser();
+  } catch {
+    return new Response(JSON.stringify({ success: false, error: "Unauthorized" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
   const body = (await request.json()) as EvalInput;
-  const { jdText: inputText, jdUrl, images, cvText, language = "zh" } = body;
+  const { jdText: inputText, jdUrl, images, cvText, targetCompany, allowWebSearch = false, language = "zh", memoryContext = "" } = body;
 
   // Priority: images > jdUrl > jdText
   const hasImages = Array.isArray(images) && images.length > 0;
@@ -265,9 +403,9 @@ export async function POST(request: Request) {
       const encoder = new TextEncoder();
       const signal = request.signal;
       const state: EvalState = {
-        jdText: "", company: "", role: "", archetype: "", language,
+        jdText: "", company: targetCompany?.trim() || "", role: "", archetype: "", language,
         blocks: {} as Record<string, BlockResult>,
-        overallScore: 0, reportNum: 0, searchInfo: "",
+        overallScore: 0, reportNum: 0, searchInfo: "", riskSignals: [],
       };
 
       try {
@@ -279,6 +417,7 @@ export async function POST(request: Request) {
 
           const bodies: string[] = [];
           const allSkills: string[] = [];
+          const ocrErrors: string[] = [];
 
           for (let i = 0; i < total; i++) {
             if (signal?.aborted) { controller.close(); return; }
@@ -286,7 +425,9 @@ export async function POST(request: Request) {
             const result = await ocrSingle(images![i], signal);
             let partialText = "";
 
-            if (!result.error && result.isJD) {
+            if (result.error) ocrErrors.push(`第 ${i + 1} 张：${result.error}`);
+
+            if (result.body && result.isJD) {
               if (result.body) bodies.push(result.body);
               if (result.company && !state.company) state.company = result.company;
               if (result.role && !state.role) state.role = result.role;
@@ -304,7 +445,11 @@ export async function POST(request: Request) {
 
           state.jdText = bodies.join("\n\n---\n\n");
           if (!state.jdText.trim()) {
-            emit(controller, { type: "error", message: "未能从截图中提取到有效 JD 文本，请尝试粘贴文本或链接" });
+            const error = ocrErrors.length > 0
+              ? `未能从截图中提取到有效 JD 文本（${ocrErrors.slice(0, 2).join("；")}）。请换一张更清晰的原始 JD 截图，或粘贴文本/链接。`
+              : "未能从截图中提取到有效 JD 文本，请尝试粘贴文本或链接";
+            state.error = error;
+            emit(controller, { type: "error", message: error });
             emit(controller, { type: "done" });
             controller.close();
             return;
@@ -324,7 +469,9 @@ export async function POST(request: Request) {
             const text = $("body").text().replace(/\s+/g, " ").trim().slice(0, 15000);
             state.jdText = `URL: ${jdUrl}\n\n${text}`;
           } catch (err) {
-            emit(controller, { type: "error", message: `URL 抓取失败: ${err instanceof Error ? err.message : "unknown"}。请尝试粘贴文本` });
+            const error = `URL 抓取失败: ${err instanceof Error ? err.message : "unknown"}。请尝试粘贴文本`;
+            state.error = error;
+            emit(controller, { type: "error", message: error });
             emit(controller, { type: "done" });
             controller.close();
             return;
@@ -367,7 +514,8 @@ export async function POST(request: Request) {
         if (!cvTextEffective) {
           try {
             const origin = request.headers.get("origin") || "http://localhost:3000";
-            const cvRes = await fetch(`${origin}/api/cv/data`, { signal }).catch(() => null);
+            const cookie = request.headers.get("cookie") || "";
+            const cvRes = await fetch(`${origin}/api/cv/data`, { headers: cookie ? { cookie } : undefined, signal }).catch(() => null);
             if (cvRes?.ok) {
               const cvJson = await cvRes.json();
               const cv = cvJson?.data;
@@ -437,7 +585,7 @@ export async function POST(request: Request) {
           const bp = blockPrompts[bk];
 
           // Block D: do search first
-          if (bk === "d") {
+          if (bk === "d" && allowWebSearch) {
             emit(controller, { type: "search_start", query: `${state.company || "公司"} ${state.role || "岗位"} 薪资`, source: "web" });
             try {
               const sq = `${state.company || ""} ${state.role || ""} 薪资`.trim();
@@ -476,8 +624,9 @@ export async function POST(request: Request) {
               });
               if (risksRes?.ok) {
                 const risksData = await risksRes.json();
-                const riskSignals = (risksData.data || []) as Array<{ signal: string; excerpt?: string; severity: string }>;
+                const riskSignals = (risksData.data || []) as RiskSignal[];
                 if (riskSignals.length > 0) {
+                  state.riskSignals = riskSignals;
                   const riskText = riskSignals.map((r) => {
                     const badge = r.severity === "critical" ? "🔴" : r.severity === "high" ? "🟠" : "🟡";
                     return `- ${badge} ${r.signal}${r.excerpt ? `: ${r.excerpt}` : ""}`;
@@ -517,13 +666,13 @@ export async function POST(request: Request) {
         /* ── Pre-allocate report number ── */
         let reportNum = 0;
         try {
-          const allReports = listReports();
+          const allReports = await getDataRepositories().reports.list(user.userId);
           const maxReportNum = allReports.reduce((max, r) => Math.max(max, r.report_num), 0);
           reportNum = maxReportNum + 1;
         } catch { /* non-blocking */ }
 
         /* ── Done: return full result data for client to confirm save ── */
-        const company = state.company || extractFromJD(state.jdText, "company");
+        const company = targetCompany?.trim() || state.company || extractFromJD(state.jdText, "company");
         const role = state.role || extractFromJD(state.jdText, "role");
 
         emit(controller, {
@@ -533,6 +682,8 @@ export async function POST(request: Request) {
           archetype: state.archetype,
           overallScore: state.overallScore,
           blocks: state.blocks,
+          risks: state.riskSignals,
+          riskSignals: state.riskSignals,
           jdText: state.jdText,
           reportNum,
         });
@@ -540,6 +691,7 @@ export async function POST(request: Request) {
         controller.close();
       } catch (err) {
         const message = err instanceof Error ? err.message : "unknown error";
+        state.error = `评估中断: ${message}`;
         emit(controller, { type: "error", message: `评估中断: ${message}` });
         emit(controller, { type: "done" });
         controller.close();

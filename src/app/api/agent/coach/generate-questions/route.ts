@@ -42,11 +42,14 @@ export async function POST(request: Request) {
 ## 出题要求
 - 生成 ${count} 道面试题目
 - 均匀分布在四个类别: behavioral(行为面试), technical(技术/专业), case-study(案例分析), culture(文化匹配)
-- 每道题必须提供: category, question(题目文本), context(出题依据，解释为什么问这道题), storyHint(准备提示，帮用户思考怎么准备)
+- 每道题必须提供: category, question(题目文本), context(一句话考察点，说明为什么问这道题), storyHint(一句话准备方向，必须点出 JD/简历关联和建议回答方法)
 - source 字段: 有JD时填 "jd"，无JD时填 "general"
 ${hasJD ? "- 基于提供的 JD 内容出题，每道题的 context 引用 JD 中的具体要求" : "- 基于通用面试出题，结合职位和公司信息"}
 ${hasCV ? "- 参考简历，针对简历中可能存在的弱项增加题目" : ""}
 ${company ? `- 如果${company}是大厂(字节/腾讯/阿里/百度)，侧重数据驱动和产品思维` : ""}
+- 题目必须清晰、口语化，question 字段只放问题本身，不要包含解释、引导语或多问号连环追问。
+- context 和 storyHint 都控制在 80 字以内。
+- 如果同时有 JD 和简历，storyHint 必须同时提到 JD 要求和简历经历之间的关系。
 
 ## 输出格式
 严格返回以下 JSON 对象（不要包含 markdown 代码块，只输出纯 JSON）：

@@ -5,33 +5,41 @@ import Link from "next/link";
 import { Search, ArrowRight } from "lucide-react";
 import { HandwritingTitle, PaperCard, ScoreBadge } from "@/components/design";
 import { StaggerList, StaggerItem } from "@/components/design/PageTransition";
-import db from "@/lib/db";
+import { normalizeReportBlocks, normalizeReportScores, parseJsonValue } from "@/lib/report-normalize";
 import type { EvaluationReport } from "@/types";
 
 export default function EvaluateHistoryPage() {
   const [reports, setReports] = useState<EvaluationReport[]>([]);
   const [search, setSearch] = useState("");
   const [mounted, setMounted] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     async function load() {
       try {
-        const res = await fetch("/api/data/reports");
+        const res = await fetch("/api/data/reports", { cache: "no-store" });
+        if (!res.ok) throw new Error("server load failed");
         const json = await res.json();
-        if (json.success && Array.isArray(json.data) && json.data.length > 0) {
-          const mapped = json.data.map((r: Record<string, unknown>) => ({
-            id: r.id, reportNum: r.report_num, date: r.date, company: r.company,
-            role: r.role, archetype: r.archetype, overallScore: r.overall_score,
-            legitimacy: r.legitimacy, blocks: typeof r.blocks_json === "string" ? JSON.parse(r.blocks_json) : (r.blocks_json || {}),
-            keywords: typeof r.keywords_json === "string" ? JSON.parse(r.keywords_json) : (r.keywords_json || []),
-            scores: {}, createdAt: r.created_at ? new Date(r.created_at as string) : new Date(),
-          }));
+        if (json.success && Array.isArray(json.data)) {
+          const mapped = json.data.map((r: Record<string, unknown>) => {
+            const storedBlocks = parseJsonValue(r.blocks_json, {});
+            return {
+              id: r.id, reportNum: r.report_num, date: r.date, company: r.company,
+              role: r.role, archetype: r.archetype, overallScore: r.overall_score,
+              legitimacy: r.legitimacy, blocks: normalizeReportBlocks(storedBlocks),
+              keywords: parseJsonValue(r.keywords_json, []),
+              scores: normalizeReportScores(storedBlocks), createdAt: r.created_at ? new Date(r.created_at as string) : new Date(),
+            };
+          });
           setReports(mapped as EvaluationReport[]);
           setMounted(true);
           return;
         }
-      } catch { /* fallback */ }
-      db.reports.orderBy("createdAt").reverse().toArray().then(setReports).finally(() => setMounted(true));
+        throw new Error("server response failed");
+      } catch {
+        setLoadError(true);
+        setMounted(true);
+      }
     }
     load();
   }, []);
@@ -47,6 +55,14 @@ export default function EvaluateHistoryPage() {
   });
 
   if (!mounted) return null;
+
+  if (loadError) {
+    return (
+      <div className="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] p-6 text-sm text-[var(--color-text-soft)]">
+        服务器数据加载失败，请稍后重试。
+      </div>
+    );
+  }
 
   if (reports.length === 0) {
     return (

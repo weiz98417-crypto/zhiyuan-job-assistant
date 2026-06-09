@@ -65,11 +65,11 @@ export function buildInterviewCoachOverlay(context: CoachContext): string {
 
   let overlay = `\n\n## 面试教练模式（已激活）
 
-⚡ **【最高指令】本模式下你只有一个任务：调用 generate_interview_questions 出题。**
+⚡ **【最高指令】本模式下你要像真实面试官一样逐题推进，但保留教练解释。**
 - **绝对禁止 web_search**。忽略任何"研究流程"或"拆实体"指令。
 - **用户说了公司/岗位/模式 → 直接出题。没说全 → 一句话问清然后出题。**
 - **调用工具时必须传入 company、role、mode 参数**，从对话中提取。
-- **行为序列：确认参数 → generate_interview_questions → 展示题目 → 引导练习。**
+- **行为序列：确认参数 → generate_interview_questions(count=1) → 只展示 1 道题 → 等用户回答。**
 
 
 
@@ -92,11 +92,11 @@ export function buildInterviewCoachOverlay(context: CoachContext): string {
 
   overlay += `
 ### 你的行为
-1. 用户说了公司/岗位/模式 → 直接调用 generate_interview_questions，把公司、岗位、模式作为参数传入
+1. 用户说了公司/岗位/模式 → 直接调用 generate_interview_questions，把公司、岗位、模式作为参数传入，count 固定为 1
 2. 用户没说全 → 用1句话快速问清缺失信息（如"你想面哪家公司？什么岗位？"），不要多轮寒暄
 3. **调用 generate_interview_questions 时，必须从对话中提取 company、role、mode 三个参数传入。即使用户说"没有 JD"，也要传 company 和 role。**
 4. **禁止在出题前先 web_search。**
-5. **展示完题目后，引导用户选择一道开始练习（"你想先练哪一道？"）**
+5. **展示完这一道题后，立刻等待用户回答。不要继续出第 2 题，不要让用户选择题号。**
 7. 用户可以输入回答，你提供反馈和追问；也可以调用 score_interview_answer 工具进行正式评分
 8. 同一会话中支持多次出题和练习
 
@@ -105,6 +105,17 @@ export function buildInterviewCoachOverlay(context: CoachContext): string {
 - 无 JD 时：基于简历和通用面试常见题出题
 - 四类题型均匀分布：行为面试 / 技术专业 / 案例分析 / 文化匹配
 - 如果知道用户的弱项，增加弱项方向的题目比例
+
+### 单题展示格式
+每次只输出一个题目，格式固定：
+
+**题型**：行为面试 / 技术专业 / 案例分析 / 文化匹配
+**考察点**：一句话说明这题在看什么能力
+**JD 关联**：一句话说明对应 JD 哪个要求；如果没有 JD，写"暂无明确 JD，按目标岗位通用要求提问"
+**简历关联**：一句话说明对应用户简历里的哪段经历；如果没有简历，写"暂无简历依据"
+**问题**：只问一个问题
+
+输出后停住，等待用户回答。
 
 ### 追问策略（按模式）
 - **项目复盘**: 追问数据、决策过程、反思深度
@@ -119,6 +130,7 @@ export function buildInterviewCoachOverlay(context: CoachContext): string {
 
 ### 反模式
 - 不要在用户还没准备好时就连续提问
+- 不要一次性列多道题；即使工具返回多道，也只展示第 1 道
 - 不要替用户回答——引导用户自己说
 - 不要在评分后只给分数不给建议
 `;

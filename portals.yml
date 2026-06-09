@@ -1,0 +1,133 @@
+title_filter:
+  positive:
+    - AI产品经理
+    - 大模型产品经理
+    - Agent产品经理
+    - 数据产品经理
+    - AI运营
+    - 数据运营
+    - 策略产品
+    - 平台产品
+    - 商业化产品
+    - Prompt
+    - AIGC
+  negative:
+    - 实习
+    - 销售
+    - 客服
+    - 外包
+    - 劳务
+    - 兼职
+    - 电话销售
+    - 地推
+    - 门店
+    - 纯技术后端
+
+tracked_companies:
+  - name: 字节跳动
+    careers_url: https://jobs.bytedance.com/zh/position
+    ats_type: custom
+    limits:
+      max_jobs: 100
+
+  - name: 腾讯
+    careers_url: https://join.qq.com/post.html
+    ats_type: custom
+    limits:
+      max_jobs: 80
+
+  - name: 阿里巴巴
+    careers_url: https://talent.alibaba.com
+    ats_type: custom
+    limits:
+      max_jobs: 80
+
+  - name: 蚂蚁集团
+    careers_url: https://talent.antgroup.com
+    ats_type: custom
+    limits:
+      max_jobs: 80
+
+  - name: 百度
+    careers_url: https://talent.baidu.com/jobs/social-list
+    ats_type: custom
+    limits:
+      max_jobs: 80
+
+  - name: 美团
+    careers_url: https://zhaopin.meituan.com/web/position
+    ats_type: custom
+    limits:
+      max_jobs: 80
+
+  - name: 快手
+    careers_url: https://zhaopin.kuaishou.cn/recruit/e/#/official/social/
+    ats_type: custom
+    limits:
+      max_jobs: 80
+
+  - name: 京东
+    careers_url: https://zhaopin.jd.com/web/job/job_list
+    ats_type: custom
+    limits:
+      max_jobs: 80
+
+  - name: 小米
+    careers_url: https://hr.xiaomi.com/job-list
+    ats_type: custom
+    limits:
+      max_jobs: 80
+
+  - name: 拼多多
+    careers_url: https://careers.pinduoduo.com/jobs
+    ats_type: custom
+    limits:
+      max_jobs: 80
+
+  - name: 小红书
+    careers_url: https://job.xiaohongshu.com/jobs
+    ats_type: custom
+    limits:
+      max_jobs: 80
+
+  - name: 哔哩哔哩
+    careers_url: https://jobs.bilibili.com/social
+    ats_type: custom
+    limits:
+      max_jobs: 80
+
+  - name: 网易
+    careers_url: https://hr.163.com/job-list.html
+    ats_type: custom
+    limits:
+      max_jobs: 80
+
+  - name: 滴滴
+    careers_url: https://talent.didiglobal.com/social/list
+    ats_type: custom
+    limits:
+      max_jobs: 80
+
+  - name: 米哈游
+    careers_url: https://jobs.mihoyo.com
+    ats_type: custom
+    limits:
+      max_jobs: 80
+
+  - name: 大疆
+    careers_url: https://we.dji.com/zh-CN/social
+    ats_type: custom
+    limits:
+      max_jobs: 80
+
+  - name: 华为
+    careers_url: https://career.huawei.com/reccampportal/portal5/index.html
+    ats_type: custom
+    limits:
+      max_jobs: 100
+
+  - name: 理想汽车
+    careers_url: https://www.lixiang.com/jobs
+    ats_type: custom
+    limits:
+      max_jobs: 80

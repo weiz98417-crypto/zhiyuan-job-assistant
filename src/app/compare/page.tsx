@@ -1,1025 +1,768 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import {
-  Plus,
-  Trash2,
-  ChevronDown,
-  X,
-  TrendingUp,
-  ShieldCheck,
-  BarChart3,
-  Calculator,
-  Lightbulb,
-} from "lucide-react";
-import {
-  HandwritingTitle,
-  WarmButton,
-  PaperCard,
-  ScoreBadge,
-} from "@/components/design";
-import db from "@/lib/db";
-import type { Offer, Application } from "@/types";
+import { useEffect, useMemo, useState } from "react";
+import { Bot, CheckSquare, FileText, HelpCircle, Pencil, Plus, Scale, X } from "lucide-react";
+import { HandwritingTitle, PaperCard, ScoreBadge, WarmButton } from "@/components/design";
+import type { Offer, OfferEvaluationModule, OfferVerdict } from "@/types";
 
-/* ── Radar dimension definition ── */
-interface Dimension {
-  key: string;
-  label: string;
-  score: number; // 1-5
+type OfferReportRow = {
+  id: number;
+  title: string;
+  report_type: string;
+  offer_id?: number | null;
+  overall_score: number;
+  verdict: OfferVerdict | "";
+  summary: string;
+  offer_snapshot_json: string;
+  modules_json: string;
+  red_flags_json: string;
+  missing_info_json: string;
+  negotiation_levers_json: string;
+  hr_questions_json: string;
+  assumptions_json: string;
+  take_home_json: string;
+  report_markdown: string;
+  created_at: string;
+};
+
+function parseJson<T>(value: unknown, fallback: T): T {
+  if (value === undefined || value === null || value === "") return fallback;
+  if (typeof value !== "string") return value as T;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
 }
 
-const DIMENSION_LABELS: Record<string, string> = {
-  salary: "薪资",
-  growth: "成长空间",
-  wlb: "WLB",
-  outlook: "公司前景",
-  match: "团队匹配",
-  risk: "风险",
-};
-
-const DEFAULT_WEIGHTS: Record<string, number> = {
-  salary: 25,
-  growth: 25,
-  wlb: 15,
-  outlook: 15,
-  match: 10,
-  risk: 10,
-};
+function cleanText(value: unknown, fallback = ""): string {
+  const text = String(value || "").trim();
+  if (!text || /^(unknown|未知公司|未知岗位|未填写)$/i.test(text)) return fallback;
+  return text;
+}
 
 function totalAnnualComp(offer: Offer): number {
-  const months = offer.monthsPerYear || 12;
-  const bonusMonths = offer.annualBonus || 0;
-  return offer.monthlySalary * (months + bonusMonths);
+  const monthly = Number(offer.monthlySalary || 0);
+  return monthly * ((offer.monthsPerYear || 12) + (offer.annualBonus || 0));
 }
 
-function fiveInsOneFundCost(offer: Offer): number {
-  // Approximate personal contribution: ~10.5% + housing fund
-  const housingRate = (offer.housingFundRate || 7) / 100;
-  const socialRate = 0.105;
-  const base = offer.hasSocialInsurance
-    ? offer.monthlySalary
-    : offer.monthlySalary * 0.3; // minimum base assumption
-  return Math.round(base * (socialRate + housingRate) * 12);
+function normalizeMonthlySalaryK(value: unknown): number {
+  const n = Number(value || 0);
+  if (!Number.isFinite(n)) return 0;
+  return n >= 1000 ? Math.round((n / 1000) * 10) / 10 : n;
+}
+
+function formatMoney(value?: number): string {
+  if (!value) return "未录入";
+  return value >= 1000 ? `${Math.round((value / 1000) * 10) / 10}K` : `${value}K`;
+}
+
+function formatVerdict(verdict: OfferVerdict | ""): string {
+  if (verdict === "accept") return "建议直接接受";
+  if (verdict === "accept_after_negotiation") return "建议谈判后接受";
+  if (verdict === "proceed_cautiously") return "建议谨慎推进";
+  if (verdict === "decline") return "不建议接受";
+  return "暂无";
+}
+
+function rowToOffer(row: Record<string, unknown>): Offer {
+  return {
+    id: Number(row.id),
+    company: cleanText(row.company, "未命名公司"),
+    role: cleanText(row.role, "未命名岗位"),
+    location: cleanText(row.location),
+    level: cleanText(row.level),
+    monthlySalary: normalizeMonthlySalaryK(row.monthly_salary),
+    monthsPerYear: Number(row.months_per_year || 12),
+    annualBonus: Number(row.annual_bonus || 0),
+    hasSocialInsurance: row.has_social_insurance !== 0,
+    housingFundRate: Number(row.housing_fund_rate || 7),
+    probationMonths: Number(row.probation_months || 3),
+    startDate: cleanText(row.start_date) || undefined,
+    options: cleanText(row.options) || undefined,
+    otherBenefits: cleanText(row.other_benefits) || undefined,
+    employmentForm: (cleanText(row.employment_form) || "unknown") as Offer["employmentForm"],
+    employerName: cleanText(row.employer_name) || undefined,
+    contractMonths: row.contract_months ? Number(row.contract_months) : undefined,
+    overtimePolicy: (cleanText(row.overtime_policy) || "unknown") as Offer["overtimePolicy"],
+    bonusGuarantee: (cleanText(row.bonus_guarantee) || "unknown") as Offer["bonusGuarantee"],
+    equityType: cleanText(row.equity_type) || undefined,
+    equityVesting: cleanText(row.equity_vesting) || undefined,
+    commuteMinutes: row.commute_minutes ? Number(row.commute_minutes) : undefined,
+    cityCostLevel: (cleanText(row.city_cost_level) || "unknown") as Offer["cityCostLevel"],
+    jobNature: cleanText(row.job_nature) || undefined,
+    latestReportId: row.latest_report_id ? Number(row.latest_report_id) : undefined,
+    updatedAt: cleanText(row.updated_at) || undefined,
+    createdAt: new Date(String(row.created_at || Date.now())),
+  };
+}
+
+function reportSnapshot(report: OfferReportRow): Record<string, unknown> {
+  return parseJson<Record<string, unknown>>(report.offer_snapshot_json, {});
+}
+
+function reportOfferId(report: OfferReportRow): number | undefined {
+  const fromReport = Number(report.offer_id || 0);
+  if (fromReport) return fromReport;
+  const fromSnapshot = Number(reportSnapshot(report).offerId || 0);
+  return fromSnapshot || undefined;
+}
+
+function reportForOffer(offer: Offer, reports: OfferReportRow[]): OfferReportRow | null {
+  if (offer.latestReportId) {
+    const report = reports.find((r) => r.id === offer.latestReportId);
+    if (report) return report;
+  }
+  return reports.find((r) => reportOfferId(r) === offer.id) || null;
+}
+
+function syntheticOfferFromReport(report: OfferReportRow): Offer | null {
+  if (report.report_type !== "single") return null;
+  const snapshot = reportSnapshot(report);
+  const company = cleanText(snapshot.company, cleanText(report.title.replace(/Offer.*$/, ""), "未命名公司"));
+  const role = cleanText(snapshot.role, "未命名岗位");
+  if (!company && !role) return null;
+  return {
+    id: reportOfferId(report) || -report.id,
+    company,
+    role,
+    location: cleanText(snapshot.location),
+    level: cleanText(snapshot.level),
+    monthlySalary: normalizeMonthlySalaryK(snapshot.monthlySalary),
+    monthsPerYear: Number(snapshot.monthsPerYear || 12),
+    annualBonus: Number(snapshot.annualBonus || 0),
+    hasSocialInsurance: snapshot.hasSocialInsurance !== false,
+    housingFundRate: Number(snapshot.housingFundRate || 7),
+    probationMonths: Number(snapshot.probationMonths || 3),
+    startDate: cleanText(snapshot.startDate) || undefined,
+    options: cleanText(snapshot.options) || undefined,
+    otherBenefits: cleanText(snapshot.otherBenefits) || undefined,
+    employmentForm: (cleanText(snapshot.employmentForm) || "unknown") as Offer["employmentForm"],
+    employerName: cleanText(snapshot.employerName) || undefined,
+    contractMonths: snapshot.contractMonths ? Number(snapshot.contractMonths) : undefined,
+    overtimePolicy: (cleanText(snapshot.overtimePolicy) || "unknown") as Offer["overtimePolicy"],
+    bonusGuarantee: (cleanText(snapshot.bonusGuarantee) || "unknown") as Offer["bonusGuarantee"],
+    equityType: cleanText(snapshot.equityType) || undefined,
+    equityVesting: cleanText(snapshot.equityVesting) || undefined,
+    commuteMinutes: snapshot.commuteMinutes ? Number(snapshot.commuteMinutes) : undefined,
+    cityCostLevel: (cleanText(snapshot.cityCostLevel) || "unknown") as Offer["cityCostLevel"],
+    jobNature: cleanText(snapshot.jobNature) || undefined,
+    latestReportId: report.id,
+    updatedAt: report.created_at,
+    createdAt: new Date(report.created_at || Date.now()),
+  };
+}
+
+function mergeOffersWithReports(offers: Offer[], reports: OfferReportRow[]): Offer[] {
+  const byId = new Map<number, Offer>();
+  for (const offer of offers) byId.set(offer.id!, offer);
+
+  for (const report of reports) {
+    const synthetic = syntheticOfferFromReport(report);
+    if (!synthetic?.id) continue;
+    const existing = byId.get(synthetic.id);
+    if (!existing) {
+      byId.set(synthetic.id, synthetic);
+      continue;
+    }
+    byId.set(synthetic.id, {
+      ...existing,
+      company: cleanText(existing.company) === "未命名公司" ? synthetic.company : existing.company,
+      role: cleanText(existing.role) === "未命名岗位" ? synthetic.role : existing.role,
+      monthlySalary: existing.monthlySalary || synthetic.monthlySalary,
+      monthsPerYear: existing.monthsPerYear || synthetic.monthsPerYear,
+      annualBonus: existing.annualBonus || synthetic.annualBonus,
+      latestReportId: existing.latestReportId || report.id,
+    });
+  }
+
+  return [...byId.values()].sort((a, b) => {
+    const aTime = new Date(a.updatedAt || a.createdAt).getTime();
+    const bTime = new Date(b.updatedAt || b.createdAt).getTime();
+    return bTime - aTime;
+  });
+}
+
+function offerForComparison(offer: Offer, reports: OfferReportRow[]): Offer {
+  const report = reportForOffer(offer, reports);
+  if (!report) return offer;
+  const snapshot = reportSnapshot(report);
+  return {
+    ...offer,
+    company: cleanText(snapshot.company, offer.company),
+    role: cleanText(snapshot.role, offer.role),
+    location: cleanText(snapshot.location, offer.location || "") || offer.location,
+    monthlySalary: normalizeMonthlySalaryK(snapshot.monthlySalary) || offer.monthlySalary,
+    monthsPerYear: Number(snapshot.monthsPerYear || offer.monthsPerYear || 12),
+    annualBonus: Number(snapshot.annualBonus || offer.annualBonus || 0),
+    hasSocialInsurance: snapshot.hasSocialInsurance !== undefined ? snapshot.hasSocialInsurance !== false : offer.hasSocialInsurance,
+    housingFundRate: Number(snapshot.housingFundRate || offer.housingFundRate || 7),
+    probationMonths: Number(snapshot.probationMonths || offer.probationMonths || 3),
+  };
+}
+
+function statusForOffer(offer: Offer, reports: OfferReportRow[]): "unevaluated" | "evaluated" | "stale" {
+  const report = reportForOffer(offer, reports);
+  if (!report) return "unevaluated";
+  const offerUpdated = offer.updatedAt ? new Date(offer.updatedAt).getTime() : 0;
+  const reportCreated = new Date(report.created_at).getTime();
+  return offerUpdated > reportCreated + 1000 ? "stale" : "evaluated";
+}
+
+function statusBadge(status: "unevaluated" | "evaluated" | "stale") {
+  const label = status === "evaluated" ? "已评估" : status === "stale" ? "待刷新" : "未评估";
+  const color = status === "evaluated"
+    ? "text-emerald-700 bg-emerald-50"
+    : status === "stale"
+      ? "text-amber-700 bg-amber-50"
+      : "text-slate-600 bg-slate-100";
+  return <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs ${color}`}>{label}</span>;
 }
 
 export default function ComparePage() {
   const [offers, setOffers] = useState<Offer[]>([]);
-  const [applications, setApplications] = useState<Application[]>([]);
-  const [showForm, setShowForm] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [reports, setReports] = useState<OfferReportRow[]>([]);
+  const [selectedOfferId, setSelectedOfferId] = useState<number | null>(null);
+  const [compareIds, setCompareIds] = useState<Set<number>>(new Set());
   const [compareMode, setCompareMode] = useState(false);
-  const [weights, setWeights] = useState({ ...DEFAULT_WEIGHTS });
-  const [showWeights, setShowWeights] = useState(false);
-  const [mounted, setMounted] = useState(false);
-
-  const [form, setForm] = useState<Partial<Offer>>({
-    monthlySalary: 0,
-    monthsPerYear: 12,
-    annualBonus: 0,
-    hasSocialInsurance: true,
-    housingFundRate: 7,
-    probationMonths: 3,
+  const [showForm, setShowForm] = useState(false);
+  const [editingOfferId, setEditingOfferId] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [form, setForm] = useState({
+    company: "",
+    role: "",
+    monthlySalary: "",
+    monthsPerYear: "12",
+    annualBonus: "0",
+    location: "",
+    otherBenefits: "",
   });
 
-  useEffect(() => {
-    async function load() {
-      const [local, apps] = await Promise.all([
-        db.offers.toArray(),
-        db.applications.where("status").equals("offer").toArray(),
+  const resetForm = () => {
+    setEditingOfferId(null);
+    setForm({ company: "", role: "", monthlySalary: "", monthsPerYear: "12", annualBonus: "0", location: "", otherBenefits: "" });
+  };
+
+  async function loadData() {
+    setLoading(true);
+    setError(null);
+    try {
+      const [offerRes, reportRes] = await Promise.all([
+        fetch("/api/offers"),
+        fetch("/api/offer-reports"),
       ]);
-      // Also fetch SQLite offers (saved by agent)
-      let remote: Offer[] = [];
-      try {
-        const res = await fetch("/api/offers");
-        const json = await res.json();
-        if (json.success && Array.isArray(json.data)) {
-          remote = json.data.map((r: Record<string, unknown>) => ({
-            id: r.id as number,
-            company: r.company as string || "",
-            role: r.role as string || "",
-            monthlySalary: (r.monthly_salary as number) || 0,
-            monthsPerYear: (r.months_per_year as number) || 12,
-            annualBonus: (r.annual_bonus as number) || 0,
-            location: r.location as string || "",
-            level: r.level as string || "",
-            hasSocialInsurance: (r.has_social_insurance as number) !== 0,
-            housingFundRate: (r.housing_fund_rate as number) || 7,
-            probationMonths: (r.probation_months as number) || 3,
-            options: r.options as string || undefined,
-            otherBenefits: r.other_benefits as string || undefined,
-            startDate: r.start_date as string || undefined,
-            createdAt: new Date((r.created_at as string) || Date.now()),
-          }));
-        }
-      } catch { /* non-fatal */ }
-      // Merge: local + remote (dedup by id)
-      const all = [...local];
-      for (const r of remote) {
-        if (!all.find(o => o.id === r.id)) all.push(r);
-      }
-      setOffers(all);
-      setApplications(apps);
-      setMounted(true);
+      const offerJson = await offerRes.json();
+      const reportJson = await reportRes.json();
+      const loadedReports = reportJson.success && Array.isArray(reportJson.data)
+        ? reportJson.data as OfferReportRow[]
+        : [];
+      const loadedOffers = offerJson.success && Array.isArray(offerJson.data)
+        ? offerJson.data.map(rowToOffer)
+        : [];
+      const merged = mergeOffersWithReports(loadedOffers, loadedReports);
+      setReports(loadedReports);
+      setOffers(merged);
+      setSelectedOfferId((current) => current ?? null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "加载失败");
+    } finally {
+      setLoading(false);
     }
-    load();
+  }
+
+  useEffect(() => {
+    loadData();
   }, []);
 
-  const addOffer = async () => {
-    if (!form.company || !form.role || !form.monthlySalary || form.monthlySalary <= 0) return;
-    const id = await db.offers.add({
-      ...(form as Required<Omit<Offer, "id" | "createdAt">>),
-      monthlySalary: Number(form.monthlySalary) || 0,
-      monthsPerYear: Number(form.monthsPerYear) || 12,
-      annualBonus: Number(form.annualBonus) || 0,
-      hasSocialInsurance: form.hasSocialInsurance ?? true,
-      housingFundRate: Number(form.housingFundRate) || 7,
-      probationMonths: Number(form.probationMonths) || 3,
-      createdAt: new Date(),
+  const selectedOffer = offers.find((o) => o.id === selectedOfferId) || null;
+  const selectedReport = selectedOffer ? reportForOffer(selectedOffer, reports) : null;
+  const selectedModules = selectedReport ? parseJson<OfferEvaluationModule[]>(selectedReport.modules_json, []) : [];
+  const selectedRedFlags = selectedReport ? parseJson<string[]>(selectedReport.red_flags_json, []) : [];
+  const selectedMissing = selectedReport ? parseJson<string[]>(selectedReport.missing_info_json, []) : [];
+  const selectedLevers = selectedReport ? parseJson<string[]>(selectedReport.negotiation_levers_json, []) : [];
+  const selectedQuestions = selectedReport ? parseJson<string[]>(selectedReport.hr_questions_json, []) : [];
+
+  const stats = useMemo(() => {
+    const evaluated = offers.filter((offer) => statusForOffer(offer, reports) === "evaluated").length;
+    const stale = offers.filter((offer) => statusForOffer(offer, reports) === "stale").length;
+    return { evaluated, stale };
+  }, [offers, reports]);
+
+  function toggleCompare(id: number) {
+    setCompareIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else if (next.size < 4) next.add(id);
+      return next;
     });
-    // Also save to SQLite with full fields
-    fetch("/api/offers", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        company: form.company,
-        role: form.role,
-        monthly_salary: Number(form.monthlySalary),
-        months_per_year: Number(form.monthsPerYear) || 12,
-        annual_bonus: Number(form.annualBonus) || 0,
-        has_social_insurance: form.hasSocialInsurance ?? true,
-        housing_fund_rate: Number(form.housingFundRate) || 7,
-        options: (form as Record<string,unknown>).options || null,
-        probation_months: Number(form.probationMonths) || 3,
-        start_date: (form as Record<string,unknown>).startDate || null,
-        other_benefits: (form as Record<string,unknown>).otherBenefits || null,
-        location: (form as Record<string,unknown>).location || "",
-        level: "",
-        benefits: {},
-      }),
-    }).catch(() => {});
-    const saved = await db.offers.get(id);
-    if (saved) setOffers((prev) => [...prev, saved]);
-    setShowForm(false);
+  }
+
+  function goEvaluate(offer: Offer) {
+    if (offer.id && offer.id > 0) {
+      window.location.href = `/agent?offerId=${offer.id}&intent=evaluate`;
+      return;
+    }
+    if (offer.latestReportId) {
+      window.location.href = `/agent?offerReportId=${offer.latestReportId}&intent=explain`;
+    }
+  }
+
+  function goNegotiation(reportId: number) {
+    window.location.href = `/agent?offerReportId=${reportId}&intent=negotiate`;
+  }
+
+  function goHrQuestions(reportId: number) {
+    window.location.href = `/agent?offerReportId=${reportId}&intent=ask_hr`;
+  }
+
+  function startAddOffer() {
     resetForm();
-  };
+    setShowForm(true);
+  }
 
-  const deleteOffer = async (id: number) => {
-    await db.offers.delete(id);
-    setOffers((prev) => prev.filter((o) => o.id !== id));
-    const next = new Set(selectedIds);
-    next.delete(id);
-    setSelectedIds(next);
-  };
-
-  const importFromApp = async (app: Application) => {
+  function startEditOffer(offer: Offer) {
+    if (!offer.id || offer.id < 0) return;
+    setEditingOfferId(offer.id);
     setForm({
-      company: app.company,
-      role: app.role,
-      monthlySalary: 0,
-      monthsPerYear: 12,
-      annualBonus: 0,
-      hasSocialInsurance: true,
-      housingFundRate: 7,
-      probationMonths: 3,
-      applicationId: app.id,
+      company: offer.company || "",
+      role: offer.role || "",
+      monthlySalary: offer.monthlySalary ? String(offer.monthlySalary) : "",
+      monthsPerYear: String(offer.monthsPerYear || 12),
+      annualBonus: String(offer.annualBonus || 0),
+      location: offer.location || "",
+      otherBenefits: offer.otherBenefits || "",
     });
     setShowForm(true);
-  };
+  }
 
-  const resetForm = () => {
-    setForm({
-      monthlySalary: 0,
-      monthsPerYear: 12,
-      annualBonus: 0,
-      hasSocialInsurance: true,
-      housingFundRate: 7,
-      probationMonths: 3,
+  async function deleteOffer(offerId: number) {
+    const offer = offers.find((item) => item.id === offerId);
+    if (!offer) return;
+    const confirmed = window.confirm(`确定删除 Offer「${offer.company} - ${offer.role}」吗？`);
+    if (!confirmed) return;
+    const isSyntheticReportOnly = offerId < 0 && offer.latestReportId;
+    const res = await fetch(isSyntheticReportOnly ? `/api/offer-reports/${offer.latestReportId}` : `/api/offers/${offerId}`, { method: "DELETE" });
+    const json = await res.json();
+    if (!json.success) {
+      setError(json.error || "删除失败");
+      return;
+    }
+    setCompareIds((prev) => {
+      const next = new Set(prev);
+      next.delete(offerId);
+      return next;
     });
-  };
-
-  const toggleSelect = (id: number) => {
-    const next = new Set(selectedIds);
-    if (next.has(id)) next.delete(id);
-    else if (next.size < 4) next.add(id);
-    setSelectedIds(next);
-  };
-
-  const selectedOffers = offers.filter((o) => selectedIds.has(o.id!));
-  const selectedForCompare = compareMode ? selectedOffers : offers.filter((o) => selectedIds.has(o.id!));
-
-  /* ── Dimension scoring (user-editable mock based on offer quality) ── */
-  const getDimensions = (offer: Offer): Dimension[] => {
-    const comp = totalAnnualComp(offer);
-    const salaryScore = comp >= 600 ? 5 : comp >= 400 ? 4 : comp >= 250 ? 3 : comp >= 150 ? 2 : 1;
-    return [
-      { key: "salary", label: "薪资", score: salaryScore },
-      { key: "growth", label: "成长空间", score: 3 },
-      { key: "wlb", label: "WLB", score: offer.probationMonths <= 3 ? 4 : 3 },
-      { key: "outlook", label: "公司前景", score: 3 },
-      { key: "match", label: "团队匹配", score: 3 },
-      { key: "risk", label: "风险", score: offer.hasSocialInsurance ? 4 : 2 },
-    ];
-  };
-
-  const weightedScore = (offer: Offer): number => {
-    const dims = getDimensions(offer);
-    let total = 0;
-    let weightSum = 0;
-    for (const d of dims) {
-      const w = weights[d.key] || 0;
-      total += d.score * w;
-      weightSum += w;
-    }
-    return weightSum > 0 ? Math.round((total / weightSum) * 10) / 10 : 0;
-  };
-
-  const sortedOffers = [...selectedForCompare].sort(
-    (a, b) => weightedScore(b) - weightedScore(a)
-  );
-
-  /* ── Export report helpers ── */
-  const buildReportMarkdown = () => {
-    const lines: string[] = [];
-    lines.push(`# Offer 对比报告`);
-    lines.push(`\n> 生成时间：${new Date().toLocaleString("zh-CN")} | 共 ${selectedForCompare.length} 个 Offer\n`);
-
-    // Summary table
-    lines.push(`## 概览\n`);
-    lines.push(`| # | 公司 | 岗位 | 税前月薪 | 发薪月数 | 年终奖 | 年总包 | 公积金 | 五险一金 | 试用期 | 期权 | 加权评分 |`);
-    lines.push(`|---|------|------|----------|----------|--------|--------|--------|----------|--------|------|----------|`);
-    for (const [i, o] of sortedOffers.entries()) {
-      lines.push(`| ${i + 1} | ${o.company} | ${o.role} | ${o.monthlySalary}K | ${o.monthsPerYear || 12}薪 | ${o.annualBonus || 0}个月 | ${totalAnnualComp(o)}K | ${o.housingFundRate || 7}% | ${o.hasSocialInsurance ? "全额" : "最低基数"} | ${o.probationMonths || 3}个月 | ${o.options || "—"} | ${weightedScore(o).toFixed(1)} |`);
-    }
-
-    // Detailed dimension breakdown
-    lines.push(`\n## 维度评分\n`);
-    for (const o of sortedOffers) {
-      lines.push(`### ${o.company} — ${o.role}\n`);
-      const dims = getDimensions(o);
-      lines.push(`| 维度 | 评分 | 权重 |`);
-      lines.push(`|------|------|------|`);
-      for (const d of dims) {
-        lines.push(`| ${d.label} | ${"★".repeat(d.score)}${"☆".repeat(5 - d.score)} (${d.score}/5) | ${weights[d.key] || 0}% |`);
-      }
-      lines.push(`| **加权总分** | **${weightedScore(o).toFixed(1)}** | |\n`);
-    }
-
-    // Rankings
-    lines.push(`## 排名\n`);
-    for (const [i, o] of sortedOffers.entries()) {
-      lines.push(`${i + 1}. **${o.company}** — ${o.role}（加权 ${weightedScore(o).toFixed(1)}/5，年总包 ${totalAnnualComp(o)}K）`);
-    }
-
-    // Negotiation tips
-    if (sortedOffers.length > 0) {
-      lines.push(`\n## 谈判建议\n`);
-      const tips = NegotiationTips({ topOffer: sortedOffers[0] });
-      for (const tip of tips) {
-        lines.push(`- ${tip}`);
-      }
-    }
-
-    // Radar chart description
-    lines.push(`\n## 雷达图维度说明\n`);
-    lines.push(`| 维度 | 说明 |`);
-    lines.push(`|------|------|`);
-    lines.push(`| 薪资 | 年总包在市场中的竞争力 |`);
-    lines.push(`| 成长空间 | 职级含金量、晋升通道、技术栈匹配度 |`);
-    lines.push(`| WLB | 工作强度、加班文化、双休/大小周/996 |`);
-    lines.push(`| 公司前景 | 融资阶段、业务稳定性、裁员风险 |`);
-    lines.push(`| 团队匹配 | 岗位匹配度、团队氛围、汇报线 |`);
-    lines.push(`| 风险 | 五险一金、竞业限制、试用期条款 |`);
-
-    lines.push(`\n---\n*本报告由 筝筝纸鸢 AI 求职助手自动生成*`);
-    return lines.join("\n");
-  };
-
-  const buildReportHTML = () => {
-    const md = buildReportMarkdown();
-    // Simple markdown-to-HTML conversion
-    let html = md
-      .replace(/^### (.+)$/gm, '<h3>$1</h3>')
-      .replace(/^## (.+)$/gm, '<h2>$1</h2>')
-      .replace(/^# (.+)$/gm, '<h1>$1</h1>')
-      .replace(/^\| (.+) \|$/gm, (line) => {
-        const cells = line.slice(1, -1).split("|").map(c => c.trim());
-        const tag = line.includes("---") ? "th" : "td";
-        return `<tr>${cells.map(c => `<${tag}>${c}</${tag}>`).join("")}</tr>`;
-      })
-      .replace(/^> (.+)$/gm, '<blockquote><p>$1</p></blockquote>')
-      .replace(/^- (.+)$/gm, '<li>$1</li>')
-      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-      .replace(/\n\n/g, '</p><p>')
-      .replace(/\n/g, '<br>');
-    html = html.replace(/<tr>/g, '<table><tr>').replace(/<\/tr>/g, '</tr></table>');
-    return `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<title>Offer 对比报告</title>
-<style>
-  body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; color: #333; line-height: 1.7; }
-  h1 { font-size: 1.5em; border-bottom: 2px solid #2563eb; padding-bottom: 8px; }
-  h2 { font-size: 1.15em; margin-top: 28px; color: #1e40af; }
-  h3 { font-size: 1.05em; margin-top: 20px; }
-  table { border-collapse: collapse; width: 100%; margin: 12px 0; }
-  th, td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; font-size: 0.9em; }
-  th { background: #f0f4ff; font-weight: 600; }
-  blockquote { border-left: 3px solid #2563eb; padding-left: 12px; color: #666; margin: 12px 0; }
-  @media print { body { margin: 0; padding: 20px; } }
-</style>
-</head>
-<body>
-${html}
-</body>
-</html>`;
-  };
-
-  const exportMarkdown = async () => {
-    const content = buildReportMarkdown();
-    const filename = `offer-compare-${selectedForCompare.map(o => o.company).join("-").slice(0, 60)}-${new Date().toISOString().slice(0, 10)}`;
-    const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${filename}.md`;
-    a.click();
-    URL.revokeObjectURL(url);
-
-    // Persist to SQLite
-    try {
-      await fetch("/api/offer-reports", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: `Offer 对比报告`,
-          offers_json: selectedForCompare.map(o => ({
-            company: o.company,
-            role: o.role,
-            monthlySalary: o.monthlySalary,
-            monthsPerYear: o.monthsPerYear,
-            annualBonus: o.annualBonus,
-            hasSocialInsurance: o.hasSocialInsurance,
-            housingFundRate: o.housingFundRate,
-            options: o.options,
-            probationMonths: o.probationMonths,
-          })),
-          report_markdown: content,
-        }),
-      });
-      // Also sync to export-file API for server-side download
-      await fetch("/api/export-file", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content, filename, format: "md" }),
-      });
-    } catch { /* non-critical */ }
-  };
-
-  const exportPDF = async () => {
-    const html = buildReportHTML();
-    const w = window.open("", "_blank");
-    if (!w) { alert("浏览器拦截了弹窗，请允许弹窗后重试"); return; }
-    w.document.write(html);
-    w.document.close();
-    setTimeout(() => w.print(), 800);
-
-    // Also persist to SQLite
-    const md = buildReportMarkdown();
-    try {
-      await fetch("/api/offer-reports", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: "Offer 对比报告",
-          offers_json: selectedForCompare.map(o => ({
-            company: o.company,
-            role: o.role,
-            monthlySalary: o.monthlySalary,
-            monthsPerYear: o.monthsPerYear,
-            annualBonus: o.annualBonus,
-          })),
-          report_markdown: md,
-        }),
-      });
-    } catch { /* non-critical */ }
-  };
-
-  /* ── Radar Chart (SVG) ── */
-  function RadarChart({ offers: radarOffers }: { offers: Offer[] }) {
-    const dims = ["salary", "growth", "wlb", "outlook", "match", "risk"];
-    const n = dims.length;
-    const size = 260;
-    const cx = size / 2;
-    const cy = size / 2;
-    const r = size / 2 - 24;
-    const levels = 5;
-
-    const angle = (i: number) => (Math.PI * 2 * i) / n - Math.PI / 2;
-    const point = (i: number, value: number) => {
-      const a = angle(i);
-      const dist = (r * value) / levels;
-      return { x: cx + dist * Math.cos(a), y: cy + dist * Math.sin(a) };
-    };
-
-    const colors = [
-      "oklch(75% 0.12 75)",
-      "oklch(55% 0.15 260)",
-      "oklch(60% 0.14 160)",
-      "oklch(50% 0.13 30)",
-    ];
-
-    return (
-      <svg viewBox={`0 0 ${size} ${size}`} className="w-full max-w-[260px] mx-auto">
-        {/* Grid levels */}
-        {Array.from({ length: levels }, (_, l) => l + 1).map((lv) => {
-          const pts = dims
-            .map((_, i) => {
-              const p = point(i, lv);
-              return `${p.x},${p.y}`;
-            })
-            .join(" ");
-          return (
-            <polygon
-              key={lv}
-              points={pts}
-              fill="none"
-              stroke="var(--color-divider)"
-              strokeWidth="1"
-            />
-          );
-        })}
-        {/* Axes */}
-        {dims.map((_, i) => {
-          const p = point(i, levels);
-          return (
-            <line
-              key={`a-${i}`}
-              x1={cx}
-              y1={cy}
-              x2={p.x}
-              y2={p.y}
-              stroke="var(--color-divider)"
-              strokeWidth="1"
-            />
-          );
-        })}
-        {/* Labels */}
-        {dims.map((d, i) => {
-          const p = point(i, levels + 0.6);
-          return (
-            <text
-              key={`l-${d}`}
-              x={p.x}
-              y={p.y}
-              textAnchor="middle"
-              dominantBaseline="middle"
-              className="fill-[var(--color-text-soft)]"
-              fontSize="11"
-              fontFamily="var(--font-body)"
-            >
-              {DIMENSION_LABELS[d]}
-            </text>
-          );
-        })}
-        {/* Data polygons */}
-        {radarOffers.map((offer, idx) => {
-          const dimsData = getDimensions(offer);
-          const pts = dims
-            .map((dk, i) => {
-              const d = dimsData.find((dd) => dd.key === dk);
-              const p = point(i, d ? d.score : 0);
-              return `${p.x},${p.y}`;
-            })
-            .join(" ");
-          return (
-            <polygon
-              key={offer.id}
-              points={pts}
-              fill={colors[idx % colors.length]}
-              fillOpacity="0.15"
-              stroke={colors[idx % colors.length]}
-              strokeWidth="2"
-            />
-          );
-        })}
-        {/* Data points */}
-        {radarOffers.map((offer, idx) => {
-          const dimsData = getDimensions(offer);
-          return dims.map((dk, i) => {
-            const d = dimsData.find((dd) => dd.key === dk);
-            const p = point(i, d ? d.score : 0);
-            return (
-              <circle
-                key={`${offer.id}-${dk}`}
-                cx={p.x}
-                cy={p.y}
-                r="4"
-                fill={colors[idx % colors.length]}
-              />
-            );
-          });
-        })}
-      </svg>
-    );
+    setSelectedOfferId((current) => (current === offerId ? null : current));
+    await loadData();
   }
 
-  /* ── Negotiation Tips ── */
-  function NegotiationTips({ topOffer }: { topOffer: Offer }) {
-    const annual = totalAnnualComp(topOffer);
-    const tips: string[] = [];
-    if (!topOffer.hasSocialInsurance) {
-      tips.push("要求五险一金全额缴纳——按最低基数缴，实际损失可达年薪的10-15%。");
+  async function deleteReport(reportId: number) {
+    const report = reports.find((item) => item.id === reportId);
+    if (!report) return;
+    const confirmed = window.confirm(`确定删除这条报告「${report.title}」吗？`);
+    if (!confirmed) return;
+    const res = await fetch(`/api/offer-reports/${reportId}`, { method: "DELETE" });
+    const json = await res.json();
+    if (!json.success) {
+      setError(json.error || "删除失败");
+      return;
     }
-    if ((topOffer.housingFundRate || 7) < 12) {
-      tips.push(`公积金比例 ${topOffer.housingFundRate}% 低于市场最高标准 12%，可争取上调——公积金是实打实的免税收入。`);
-    }
-    if ((topOffer.annualBonus || 0) < 2) {
-      tips.push("年终奖可争取保底条款（如'最低2个月'），而非'视经营情况'的模糊表述。");
-    }
-    if (topOffer.probationMonths > 3) {
-      tips.push(`试用期${topOffer.probationMonths}个月偏长，建议谈回3个月或争取试用期薪资不打折。`);
-    }
-    tips.push(`基于市场数据，该级别${topOffer.role}岗位的年总包大致在 ${Math.round(annual * 0.85)}-${Math.round(annual * 1.2)}K 区间。如果当前偏低，可以此为锚点谈判。`);
-    tips.push("谈判时先谈年终奖和公积金，再谈月薪基数——顺序影响心理锚定。");
-    return tips;
+    await loadData();
   }
 
-  if (!mounted) {
+  async function saveOffer() {
+    if (!form.company.trim() || !form.role.trim()) return;
+    const endpoint = editingOfferId ? `/api/offers/${editingOfferId}` : "/api/offers";
+    const res = await fetch(endpoint, {
+      method: editingOfferId ? "PUT" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        company: form.company.trim(),
+        role: form.role.trim(),
+        monthly_salary: Number(form.monthlySalary || 0),
+        months_per_year: Number(form.monthsPerYear || 12),
+        annual_bonus: Number(form.annualBonus || 0),
+        location: form.location.trim(),
+        other_benefits: form.otherBenefits.trim(),
+        benefits: {},
+      }),
+    });
+    const json = await res.json();
+    if (!json.success) {
+      setError(json.error || "保存失败");
+      return;
+    }
+    setShowForm(false);
+    resetForm();
+    await loadData();
+  }
+
+  const selectedForCompare = offers.filter((offer) => compareIds.has(offer.id!));
+
+  if (loading) {
     return (
       <div className="space-y-6 animate-pulse">
-        <div className="h-8 bg-[var(--color-divider)] rounded w-40" />
-        <div className="h-64 bg-[var(--color-divider)] rounded-[var(--radius-lg)]" />
+        <div className="h-28 bg-[var(--color-divider)] rounded-[var(--radius-lg)]" />
+        <div className="h-72 bg-[var(--color-divider)] rounded-[var(--radius-lg)]" />
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <p className="text-[var(--color-muted)] text-sm mb-1">
-            {offers.length} 个 Offer
-          </p>
-          <HandwritingTitle as="h1">Offer 对比</HandwritingTitle>
-        </div>
-        <div className="flex gap-2">
-          {selectedIds.size >= 2 && (
-            <WarmButton
-              variant={compareMode ? "primary" : "soft"}
-              size="sm"
-              onClick={() => setCompareMode(!compareMode)}
-            >
-              {compareMode ? "返回列表" : `对比 (${selectedIds.size})`}
-            </WarmButton>
-          )}
-          <WarmButton variant="primary" size="sm" onClick={() => setShowForm(true)}>
-            <Plus size={16} className="mr-1.5" />
-            添加 Offer
-          </WarmButton>
-        </div>
-      </div>
-
-      {/* ── Offer Form Modal ── */}
-      <AnimatePresence>
-        {showForm && (
-          <>
-            <motion.div
-              className="fixed inset-0 bg-black/20 z-40"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowForm(false)}
-            />
-            <motion.div
-              className="fixed inset-0 z-50 flex items-center justify-center p-4"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-            >
-              <motion.div
-                className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-[var(--radius-xl)] p-6 w-full max-w-lg max-h-[85vh] overflow-y-auto shadow-[var(--shadow-lg)]"
-                initial={{ scale: 0.95, y: 16 }}
-                animate={{ scale: 1, y: 0 }}
-                exit={{ scale: 0.95, y: 16 }}
-              >
-                <div className="flex items-center justify-between mb-4">
-                  <HandwritingTitle as="h2">录入 Offer</HandwritingTitle>
-                  <button onClick={() => setShowForm(false)}>
-                    <X size={20} className="text-[var(--color-muted)]" />
-                  </button>
-                </div>
-
-                {/* Import from tracker */}
-                {applications.length > 0 && (
-                  <PaperCard padding="sm" className="mb-4">
-                    <p className="text-sm text-[var(--color-text-soft)] mb-2">
-                      从已获 Offer 导入
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      {applications.map((app) => (
-                        <button
-                          key={app.id}
-                          onClick={() => importFromApp(app)}
-                          className="text-xs px-3 py-1.5 rounded-[var(--radius-sm)] bg-[var(--color-primary-muted)] text-[var(--color-text)] hover:bg-[var(--color-primary-soft)] transition-colors"
-                        >
-                          {app.company} — {app.role}
-                        </button>
-                      ))}
-                    </div>
-                  </PaperCard>
-                )}
-
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-sm text-[var(--color-text-soft)] mb-1">公司</label>
-                      <input
-                        value={form.company || ""}
-                        onChange={(e) => setForm({ ...form, company: e.target.value })}
-                        className="w-full bg-[var(--color-bg)] border border-[var(--color-border)] rounded-[var(--radius-sm)] px-3 py-2 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm text-[var(--color-text-soft)] mb-1">岗位</label>
-                      <input
-                        value={form.role || ""}
-                        onChange={(e) => setForm({ ...form, role: e.target.value })}
-                        className="w-full bg-[var(--color-bg)] border border-[var(--color-border)] rounded-[var(--radius-sm)] px-3 py-2 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-3">
-                    <div>
-                      <label className="block text-sm text-[var(--color-text-soft)] mb-1">税前月薪 (K)</label>
-                      <input
-                        type="number"
-                        value={form.monthlySalary || ""}
-                        onChange={(e) => setForm({ ...form, monthlySalary: Number(e.target.value) })}
-                        className="w-full bg-[var(--color-bg)] border border-[var(--color-border)] rounded-[var(--radius-sm)] px-3 py-2 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm text-[var(--color-text-soft)] mb-1">发薪月数</label>
-                      <input
-                        type="number"
-                        value={form.monthsPerYear || 12}
-                        onChange={(e) => setForm({ ...form, monthsPerYear: Number(e.target.value) })}
-                        className="w-full bg-[var(--color-bg)] border border-[var(--color-border)] rounded-[var(--radius-sm)] px-3 py-2 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm text-[var(--color-text-soft)] mb-1">年终奖 (月数)</label>
-                      <input
-                        type="number"
-                        value={form.annualBonus || 0}
-                        onChange={(e) => setForm({ ...form, annualBonus: Number(e.target.value) })}
-                        className="w-full bg-[var(--color-bg)] border border-[var(--color-border)] rounded-[var(--radius-sm)] px-3 py-2 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-sm text-[var(--color-text-soft)] mb-1">公积金比例 (%)</label>
-                      <select
-                        value={form.housingFundRate || 7}
-                        onChange={(e) => setForm({ ...form, housingFundRate: Number(e.target.value) })}
-                        className="w-full bg-[var(--color-bg)] border border-[var(--color-border)] rounded-[var(--radius-sm)] px-3 py-2 text-sm text-[var(--color-text)]"
-                      >
-                        {[5, 7, 8, 10, 12].map((v) => (
-                          <option key={v} value={v}>{v}%</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm text-[var(--color-text-soft)] mb-1">试用期 (月)</label>
-                      <select
-                        value={form.probationMonths || 3}
-                        onChange={(e) => setForm({ ...form, probationMonths: Number(e.target.value) })}
-                        className="w-full bg-[var(--color-bg)] border border-[var(--color-border)] rounded-[var(--radius-sm)] px-3 py-2 text-sm text-[var(--color-text)]"
-                      >
-                        {[1, 2, 3, 6].map((v) => (
-                          <option key={v} value={v}>{v}个月</option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-6">
-                    <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={form.hasSocialInsurance ?? true}
-                        onChange={(e) => setForm({ ...form, hasSocialInsurance: e.target.checked })}
-                        className="w-4 h-4 accent-[var(--color-primary)]"
-                      />
-                      <span className="text-[var(--color-text-soft)]">五险一金全额缴纳</span>
-                    </label>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm text-[var(--color-text-soft)] mb-1">期权/股票 (可选)</label>
-                    <input
-                      value={form.options || ""}
-                      onChange={(e) => setForm({ ...form, options: e.target.value })}
-                      placeholder="如：期权10万股/4年"
-                      className="w-full bg-[var(--color-bg)] border border-[var(--color-border)] rounded-[var(--radius-sm)] px-3 py-2 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)] placeholder:text-[var(--color-muted)]"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm text-[var(--color-text-soft)] mb-1">其他福利 (可选)</label>
-                    <textarea
-                      value={form.otherBenefits || ""}
-                      onChange={(e) => setForm({ ...form, otherBenefits: e.target.value })}
-                      placeholder="如：补充医疗保险、房补、餐补、交通补贴..."
-                      rows={2}
-                      className="w-full bg-[var(--color-bg)] border border-[var(--color-border)] rounded-[var(--radius-sm)] px-3 py-2 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)] placeholder:text-[var(--color-muted)] resize-none"
-                    />
-                  </div>
-
-                  <div className="flex gap-3 pt-2">
-                    <WarmButton variant="ghost" size="sm" onClick={() => setShowForm(false)}>
-                      取消
-                    </WarmButton>
-                    <WarmButton variant="primary" size="sm" onClick={addOffer}>
-                      保存 Offer
-                    </WarmButton>
-                  </div>
-                </div>
-              </motion.div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
-
-      {/* ── Compare Mode ── */}
-      {compareMode && selectedForCompare.length >= 2 ? (
-        <div className="space-y-6">
-          {/* Export action bar */}
-          <div className="flex items-center gap-3 justify-between">
-            <p className="text-sm text-[var(--color-muted)]">
-              对比 {selectedForCompare.length} 个 Offer
+      <PaperCard padding="md" className="space-y-4">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="text-xs uppercase tracking-wide text-[var(--color-muted)]">Offer Workspace</p>
+            <HandwritingTitle as="h1">Offer 评估工作台</HandwritingTitle>
+            <p className="mt-2 text-sm text-[var(--color-muted)] max-w-2xl">
+              单个 Offer 在这里查看评估结果和报告，对比只作为独立选择模式；谈判策略和 HR 问询交给 Agent 继续生成。
             </p>
-            <div className="flex gap-2">
-              <button
-                onClick={exportMarkdown}
-                className="inline-flex items-center gap-1.5 text-xs px-3 py-2 rounded-[var(--radius-sm)] bg-[var(--color-primary-muted)] text-[var(--color-text)] hover:bg-[var(--color-primary-soft)] transition-colors"
-              >
-                📄 导出 Markdown
-              </button>
-              <button
-                onClick={exportPDF}
-                className="inline-flex items-center gap-1.5 text-xs px-3 py-2 rounded-[var(--radius-sm)] bg-[var(--color-primary)] text-white hover:opacity-90 transition-opacity"
-              >
-                🖨️ 导出 PDF
-              </button>
-            </div>
           </div>
+          <div className="flex flex-wrap gap-2">
+            <WarmButton variant="soft" size="sm" onClick={startAddOffer}>
+              <Plus size={16} className="mr-1.5" />
+              录入 Offer
+            </WarmButton>
+            {compareIds.size >= 2 && (
+              <WarmButton variant={compareMode ? "primary" : "soft"} size="sm" onClick={() => setCompareMode(!compareMode)}>
+                <Scale size={16} className="mr-1.5" />
+                {compareMode ? "返回档案" : `对比 (${compareIds.size})`}
+              </WarmButton>
+            )}
+          </div>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-4">
+          <PaperCard padding="sm">
+            <p className="text-xs text-[var(--color-muted)]">Offer 总数</p>
+            <p className="mt-1 text-2xl font-bold text-[var(--color-text)]">{offers.length}</p>
+          </PaperCard>
+          <PaperCard padding="sm">
+            <p className="text-xs text-[var(--color-muted)]">已评估</p>
+            <p className="mt-1 text-2xl font-bold text-emerald-700">{stats.evaluated}</p>
+          </PaperCard>
+          <PaperCard padding="sm">
+            <p className="text-xs text-[var(--color-muted)]">待刷新</p>
+            <p className="mt-1 text-2xl font-bold text-amber-700">{stats.stale}</p>
+          </PaperCard>
+          <PaperCard padding="sm">
+            <p className="text-xs text-[var(--color-muted)]">已选对比</p>
+            <p className="mt-1 text-2xl font-bold text-[var(--color-primary)]">{compareIds.size}</p>
+          </PaperCard>
+        </div>
+      </PaperCard>
 
-          {/* Side-by-side table */}
-          <PaperCard padding="md">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-[var(--color-divider)]">
-                    <th className="text-left py-3 px-4 text-[var(--color-muted)] font-normal">维度</th>
+      {error && (
+        <div className="rounded-[var(--radius-md)] border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
+
+      {compareMode ? (
+        <PaperCard padding="md" className="space-y-4">
+          <div className="flex items-center gap-2">
+            <Scale size={18} className="text-[var(--color-primary)]" />
+            <HandwritingTitle as="h2" className="text-lg">Offer 对比</HandwritingTitle>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[var(--color-divider)]">
+                  <th className="text-left py-3 px-3 font-normal text-[var(--color-muted)]">维度</th>
+                  {selectedForCompare.map((offer) => (
+                    <th key={offer.id} className="text-left py-3 px-3 font-medium text-[var(--color-text)]">{offer.company}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[var(--color-divider)]">
+                {[
+                  ["岗位", (o: Offer) => o.role],
+                  ["城市", (o: Offer) => o.location || "未录入"],
+                  ["税前月薪", (o: Offer) => o.monthlySalary ? `${o.monthlySalary}K` : "未录入"],
+                  ["年总包", (o: Offer) => o.monthlySalary ? `${totalAnnualComp(o)}K` : "未录入"],
+                  ["评估分", (o: Offer) => reportForOffer(o, reports)?.overall_score ? `${reportForOffer(o, reports)?.overall_score}/5` : "未评估"],
+                ].map(([label, render]) => (
+                  <tr key={label as string}>
+                    <td className="py-3 px-3 text-[var(--color-muted)]">{label as string}</td>
                     {selectedForCompare.map((offer) => (
-                      <th key={offer.id} className="text-center py-3 px-4">
-                        <span className="font-[family-name:var(--font-display)] font-bold text-[var(--color-text)]">
-                          {offer.company}
-                        </span>
-                      </th>
+                      <td key={offer.id} className="py-3 px-3 text-[var(--color-text)]">{(render as (offer: Offer) => string)(offerForComparison(offer, reports))}</td>
                     ))}
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-[var(--color-divider)]">
-                  {[
-                    { label: "税前月薪", render: (o: Offer) => `${o.monthlySalary}K` },
-                    { label: "发薪月数", render: (o: Offer) => `${o.monthsPerYear || 12}薪` },
-                    { label: "年终奖", render: (o: Offer) => `${o.annualBonus || 0}个月` },
-                    {
-                      label: "年总包 (税前)",
-                      render: (o: Offer) => (
-                        <span className="font-[family-name:var(--font-display)] font-bold text-[var(--color-primary)]">
-                          {totalAnnualComp(o)}K
-                        </span>
-                      ),
-                    },
-                    {
-                      label: "五险一金个人年缴",
-                      render: (o: Offer) => `${fiveInsOneFundCost(o)}K`,
-                    },
-                    { label: "公积金比例", render: (o: Offer) => `${o.housingFundRate || 7}%` },
-                    { label: "试用期", render: (o: Offer) => `${o.probationMonths || 3}个月` },
-                    { label: "五险一金全额", render: (o: Offer) => (o.hasSocialInsurance ? "✅" : "⚠️ 最低基数") },
-                    { label: "期权/股票", render: (o: Offer) => o.options || "—" },
-                    { label: "加权评分", render: (o: Offer) => <ScoreBadge score={weightedScore(o)} size="sm" /> },
-                  ].map((row) => (
-                    <tr key={row.label} className="hover:bg-[var(--color-primary-muted)]/30 transition-colors">
-                      <td className="py-2.5 px-4 text-[var(--color-text-soft)]">{row.label}</td>
-                      {selectedForCompare.map((offer) => (
-                        <td key={offer.id} className="text-center py-2.5 px-4 text-[var(--color-text)]">
-                          {row.render(offer)}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </PaperCard>
-
-          {/* Radar Chart */}
-          <PaperCard padding="md">
-            <div className="flex items-center gap-2 mb-4">
-              <BarChart3 size={18} className="text-[var(--color-primary)]" />
-              <HandwritingTitle as="h3" className="text-lg">多维度雷达图</HandwritingTitle>
-            </div>
-            {/* eslint-disable-next-line */}
-            <RadarChart offers={selectedForCompare} />
-            {/* Legend */}
-            <div className="flex justify-center gap-6 mt-3">
-              {selectedForCompare.map((offer, i) => {
-                const colors = [
-                  "oklch(75% 0.12 75)",
-                  "oklch(55% 0.15 260)",
-                  "oklch(60% 0.14 160)",
-                  "oklch(50% 0.13 30)",
-                ];
-                return (
-                  <div key={offer.id} className="flex items-center gap-2 text-sm">
-                    <span
-                      className="w-3 h-3 rounded-full"
-                      style={{ backgroundColor: colors[i] }}
-                    />
-                    <span className="text-[var(--color-text)]">{offer.company}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </PaperCard>
-
-          {/* Decision Matrix */}
-          <PaperCard padding="md">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <Calculator size={18} className="text-[var(--color-primary)]" />
-                <HandwritingTitle as="h3" className="text-lg">决策矩阵</HandwritingTitle>
-              </div>
-              <WarmButton variant="ghost" size="sm" onClick={() => setShowWeights(!showWeights)}>
-                调整权重
-                <ChevronDown
-                  size={14}
-                  className={`ml-1 transition-transform ${showWeights ? "rotate-180" : ""}`}
-                />
-              </WarmButton>
-            </div>
-
-            {/* Weight sliders */}
-            <AnimatePresence>
-              {showWeights && (
-                <motion.div
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: "auto", opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  className="overflow-hidden"
-                >
-                  <div className="grid grid-cols-3 gap-3 mb-4 p-4 bg-[var(--color-primary-muted)] rounded-[var(--radius-md)]">
-                    {Object.entries(DIMENSION_LABELS).map(([key, label]) => (
-                      <div key={key} className="flex items-center gap-2">
-                        <span className="text-xs text-[var(--color-text-soft)] w-16">{label}</span>
-                        <input
-                          type="range"
-                          min="0"
-                          max="50"
-                          value={weights[key] || 0}
-                          onChange={(e) =>
-                            setWeights({ ...weights, [key]: Number(e.target.value) })
-                          }
-                          className="flex-1 accent-[var(--color-primary)]"
-                        />
-                        <span className="text-xs font-[family-name:var(--font-display)] text-[var(--color-text)] w-8 text-right">
-                          {weights[key]}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {/* Ranked results */}
-            <div className="space-y-2">
-              {sortedOffers.map((offer, idx) => (
-                <div
-                  key={offer.id}
-                  className="flex items-center gap-4 p-3 rounded-[var(--radius-md)] bg-[var(--color-primary-muted)]"
-                >
-                  <span className="font-[family-name:var(--font-display)] text-xl font-bold text-[var(--color-primary)] w-8 text-center">
-                    #{idx + 1}
-                  </span>
-                  <div className="flex-1">
-                    <p className="text-base font-medium text-[var(--color-text)]">{offer.company}</p>
-                    <p className="text-xs text-[var(--color-muted)]">
-                      {offer.role} · {totalAnnualComp(offer)}K/年
-                    </p>
-                  </div>
-                  <ScoreBadge score={weightedScore(offer)} size="sm" />
-                </div>
-              ))}
-            </div>
-          </PaperCard>
-
-          {/* Negotiation Tips */}
-          {sortedOffers.length > 0 && (
-            <PaperCard padding="md">
-              <div className="flex items-center gap-2 mb-4">
-                <Lightbulb size={18} className="text-[var(--color-primary)]" />
-                <HandwritingTitle as="h3" className="text-lg">谈判建议</HandwritingTitle>
-              </div>
-              <ul className="space-y-2">
-                {NegotiationTips({ topOffer: sortedOffers[0] }).map((tip, i) => (
-                  <li key={i} className="flex items-start gap-2 text-sm text-[var(--color-text-soft)]">
-                    <span className="text-[var(--color-primary)] mt-0.5">•</span>
-                    {tip}
-                  </li>
                 ))}
-              </ul>
-            </PaperCard>
-          )}
-        </div>
+              </tbody>
+            </table>
+          </div>
+        </PaperCard>
       ) : (
-        /* ── Offer List ── */
-        <div className="space-y-3">
-          {offers.length === 0 ? (
-            <div className="max-w-xl mx-auto py-16 text-center space-y-6">
-              <div className="w-16 h-16 mx-auto rounded-full bg-[var(--color-primary-muted)] flex items-center justify-center">
-                <TrendingUp size={24} className="text-[var(--color-primary)]" />
-              </div>
-              <div>
-                <HandwritingTitle as="h2">还没有 Offer 记录</HandwritingTitle>
-                <p className="text-[var(--color-muted)] text-sm mt-2">
-                  点击"添加 Offer"录入你的第一个 Offer
-                </p>
-              </div>
+        <div className="grid gap-4 xl:grid-cols-[0.95fr_1.35fr]">
+          <PaperCard padding="md" className="space-y-4">
+            <div className="flex items-center gap-2">
+              <FileText size={18} className="text-[var(--color-primary)]" />
+              <HandwritingTitle as="h2" className="text-lg">Offer 档案</HandwritingTitle>
             </div>
-          ) : (
-            <>
-              <p className="text-sm text-[var(--color-muted)]">
-                勾选 2-4 个 Offer，点击"对比"开始比较 · 共 {offers.length} 个
-              </p>
-              <div className="grid gap-3 sm:grid-cols-2">
-                {offers.map((offer) => (
-                  <PaperCard
-                    key={offer.id}
-                    padding="md"
-                    hover="lift"
-                    className={selectedIds.has(offer.id!) ? "ring-2 ring-[var(--color-primary)]" : ""}
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1" onClick={() => toggleSelect(offer.id!)}>
-                        <div className="flex items-center gap-3 mb-2">
+
+            {offers.length === 0 ? (
+              <div className="py-12 text-center">
+                <p className="text-sm text-[var(--color-muted)]">还没有 Offer。可以先在 Agent 里评估，也可以手动录入一条。</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {offers.map((offer) => {
+                  const report = reportForOffer(offer, reports);
+                  const status = statusForOffer(offer, reports);
+                  const active = offer.id === selectedOfferId;
+                  return (
+                    <div
+                      key={offer.id}
+                      className={[
+                        "rounded-[var(--radius-md)] border p-4 transition-colors",
+                        active ? "border-[var(--color-primary)] bg-[var(--color-primary-muted)]/35" : "border-[var(--color-border)] bg-[var(--color-bg)] hover:border-[var(--color-primary)]",
+                      ].join(" ")}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <button className="min-w-0 flex-1 text-left" onClick={() => setSelectedOfferId(offer.id!)}>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="font-bold text-[var(--color-text)] truncate">{offer.company}</p>
+                            {statusBadge(status)}
+                          </div>
+                          <p className="mt-1 text-sm text-[var(--color-muted)]">{offer.role}</p>
+                          <p className="mt-2 text-sm text-[var(--color-text-soft)]">
+                            {offer.monthlySalary ? `${offer.monthlySalary}K x ${offer.monthsPerYear || 12} | 年包 ${totalAnnualComp(offer)}K` : "薪资未录入"}
+                          </p>
+                        </button>
+                        <label className="flex items-center gap-1.5 text-xs text-[var(--color-muted)]">
                           <input
                             type="checkbox"
-                            checked={selectedIds.has(offer.id!)}
-                            onChange={() => toggleSelect(offer.id!)}
-                            disabled={!selectedIds.has(offer.id!) && selectedIds.size >= 4}
-                            className="w-4 h-4 accent-[var(--color-primary)]"
+                            checked={compareIds.has(offer.id!)}
+                            disabled={compareIds.size >= 4 && !compareIds.has(offer.id!)}
+                            onChange={(e) => {
+                              e.stopPropagation();
+                              toggleCompare(offer.id!);
+                            }}
+                            className="h-4 w-4 accent-[var(--color-primary)]"
                           />
-                          <h3 className="font-[family-name:var(--font-display)] font-bold text-[var(--color-text)]">
-                            {offer.company}
-                          </h3>
-                        </div>
-                        <p className="text-sm text-[var(--color-muted)] ml-7">{offer.role}</p>
-                        <div className="flex items-center gap-4 mt-3 ml-7 text-sm">
-                          <span className="font-[family-name:var(--font-display)] font-bold text-[var(--color-primary)]">
-                            {totalAnnualComp(offer)}K/年
-                          </span>
-                          <span className="text-[var(--color-text-soft)]">
-                            {offer.monthlySalary}K × {offer.monthsPerYear || 12}月
-                          </span>
-                          {!offer.hasSocialInsurance && (
-                            <span className="text-xs text-amber-600">⚠️ 最低基数</span>
-                          )}
-                        </div>
+                          对比
+                        </label>
                       </div>
-                      <button
-                        onClick={() => deleteOffer(offer.id!)}
-                        className="p-1.5 text-[var(--color-muted)] hover:text-red-400 transition-colors"
-                      >
-                        <Trash2 size={16} />
-                      </button>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          className="rounded-[var(--radius-sm)] px-3 py-1.5 text-xs text-[var(--color-text-soft)] hover:bg-[var(--color-primary-muted)]"
+                          onClick={() => setSelectedOfferId(offer.id!)}
+                        >
+                          详情
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </PaperCard>
+
+          <PaperCard padding="md" className="space-y-4">
+            {selectedOffer ? (
+              <>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <HandwritingTitle as="h2" className="text-xl">{selectedOffer.company}</HandwritingTitle>
+                      {statusBadge(statusForOffer(selectedOffer, reports))}
+                    </div>
+                    <p className="mt-1 text-sm text-[var(--color-muted)]">{selectedOffer.role}</p>
+                    <p className="mt-2 text-sm text-[var(--color-text-soft)]">
+                      {selectedOffer.location || "城市未录入"} · {selectedOffer.monthlySalary ? `${selectedOffer.monthlySalary}K x ${selectedOffer.monthsPerYear || 12}` : "薪资未录入"}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedReport && (
+                      <>
+                        <WarmButton variant="soft" size="sm" onClick={() => goNegotiation(selectedReport.id)}>
+                          <CheckSquare size={14} className="mr-1" />
+                          谈判策略
+                        </WarmButton>
+                        <WarmButton variant="soft" size="sm" onClick={() => goHrQuestions(selectedReport.id)}>
+                          <HelpCircle size={14} className="mr-1" />
+                          HR 问询
+                        </WarmButton>
+                        <button
+                          className="rounded-[var(--radius-sm)] px-3 py-1.5 text-xs text-red-600 hover:bg-red-50"
+                          onClick={() => deleteReport(selectedReport.id)}
+                        >
+                          删除报告
+                        </button>
+                      </>
+                    )}
+                    {selectedOffer.id && selectedOffer.id > 0 && (
+                      <WarmButton variant="soft" size="sm" onClick={() => startEditOffer(selectedOffer)}>
+                        <Pencil size={14} className="mr-1" />
+                        编辑 Offer
+                      </WarmButton>
+                    )}
+                    <button
+                      className="rounded-[var(--radius-sm)] px-3 py-1.5 text-xs text-red-600 hover:bg-red-50"
+                      onClick={() => deleteOffer(selectedOffer.id!)}
+                    >
+                      删除 Offer
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <PaperCard padding="sm">
+                    <p className="mb-2 text-sm font-medium text-[var(--color-text)]">Offer 详情</p>
+                    <div className="grid gap-2 text-sm text-[var(--color-text-soft)] sm:grid-cols-2">
+                      <div>公司：{selectedOffer.company}</div>
+                      <div>岗位：{selectedOffer.role}</div>
+                      <div>城市：{selectedOffer.location || "未录入"}</div>
+                      <div>级别：{selectedOffer.level || "未录入"}</div>
+                      <div>税前月薪：{formatMoney(selectedOffer.monthlySalary)}</div>
+                      <div>发薪月数：{selectedOffer.monthsPerYear || 12}</div>
+                      <div>年终奖：{selectedOffer.annualBonus ?? 0} 个月</div>
+                      <div>社保：{selectedOffer.hasSocialInsurance ? "有" : "无"}</div>
+                      <div>公积金：{selectedOffer.housingFundRate}%</div>
+                      <div>试用期：{selectedOffer.probationMonths} 个月</div>
+                      <div>聘用形式：{selectedOffer.employmentForm || "unknown"}</div>
+                      <div>用工主体：{selectedOffer.employerName || "未录入"}</div>
+                      <div>合同月数：{selectedOffer.contractMonths || "未录入"}</div>
+                      <div>加班情况：{selectedOffer.overtimePolicy || "unknown"}</div>
+                      <div>保底：{selectedOffer.bonusGuarantee || "unknown"}</div>
+                      <div>期权：{selectedOffer.options || "未录入"}</div>
+                      <div>其他福利：{selectedOffer.otherBenefits || "未录入"}</div>
                     </div>
                   </PaperCard>
-                ))}
+
+                  {selectedReport ? (
+                    <>
+                      <div className="grid gap-3 sm:grid-cols-3">
+                        <PaperCard padding="sm">
+                          <p className="text-xs text-[var(--color-muted)]">综合评分</p>
+                          <div className="mt-2"><ScoreBadge score={selectedReport.overall_score || 0} size="sm" /></div>
+                        </PaperCard>
+                        <PaperCard padding="sm">
+                          <p className="text-xs text-[var(--color-muted)]">结论</p>
+                          <p className="mt-2 text-sm text-[var(--color-text)]">{formatVerdict(selectedReport.verdict)}</p>
+                        </PaperCard>
+                        <PaperCard padding="sm">
+                          <p className="text-xs text-[var(--color-muted)]">报告时间</p>
+                          <p className="mt-2 text-sm text-[var(--color-text)]">{new Date(selectedReport.created_at).toLocaleString("zh-CN")}</p>
+                        </PaperCard>
+                      </div>
+
+                      <PaperCard padding="sm">
+                        <p className="mb-2 text-sm font-medium text-[var(--color-text)]">报告摘要</p>
+                        <p className="text-sm leading-6 text-[var(--color-text-soft)]">{selectedReport.summary || "暂无摘要"}</p>
+                      </PaperCard>
+
+                      {selectedModules.length > 0 && (
+                        <PaperCard padding="sm">
+                          <p className="mb-3 text-sm font-medium text-[var(--color-text)]">模块拆解</p>
+                          <div className="grid gap-2 md:grid-cols-2">
+                            {selectedModules.map((module) => (
+                              <div key={module.id} className="rounded-[var(--radius-sm)] border border-[var(--color-border)] p-3">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="text-sm font-medium text-[var(--color-text)]">{module.label}</span>
+                                  <span className="text-xs text-[var(--color-muted)]">{module.score}/5</span>
+                                </div>
+                                <p className="mt-2 text-xs leading-5 text-[var(--color-text-soft)]">{module.notes}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </PaperCard>
+                      )}
+
+                      <div className="grid gap-3 md:grid-cols-2">
+                        {[
+                          ["风险点", selectedRedFlags],
+                          ["缺失信息", selectedMissing],
+                          ["谈判抓手", selectedLevers],
+                          ["HR 问询清单", selectedQuestions.slice(0, 6)],
+                        ].map(([title, items]) => (
+                          <PaperCard key={title as string} padding="sm">
+                            <p className="mb-2 text-sm font-medium text-[var(--color-text)]">{title as string}</p>
+                            <ul className="space-y-1 text-sm text-[var(--color-text-soft)]">
+                              {((items as string[]).length ? items as string[] : ["暂无"]).map((item) => (
+                                <li key={item}>- {item}</li>
+                              ))}
+                            </ul>
+                          </PaperCard>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="rounded-[var(--radius-md)] border border-[var(--color-border)] px-4 py-6 text-center">
+                      <p className="text-sm text-[var(--color-muted)]">这个 Offer 还没有评估报告。</p>
+                      <WarmButton variant="soft" size="sm" className="mt-4" onClick={() => goEvaluate(selectedOffer)}>
+                        <Bot size={14} className="mr-1" />
+                        让 Agent 评估
+                      </WarmButton>
+                    </div>
+                  )}
+                  <div className="flex justify-end">
+                    <button
+                      className="rounded-[var(--radius-sm)] px-3 py-1.5 text-xs text-[var(--color-text-soft)] hover:bg-[var(--color-primary-muted)]"
+                      onClick={() => setSelectedOfferId(null)}
+                    >
+                      收起详情
+                    </button>
+                  </div>
+                </div>
+              </>
+            ) : (
+                  <div className="rounded-[var(--radius-md)] border border-[var(--color-border)] px-4 py-6 text-center">
+                    <p className="text-sm text-[var(--color-muted)]">先点击左侧 Offer 查看详情。</p>
+                  </div>
+            )}
+          </PaperCard>
+        </div>
+      )}
+
+      {showForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4">
+          <div className="w-full max-w-lg rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-6 shadow-[var(--shadow-lg)]">
+            <div className="mb-4 flex items-center justify-between">
+              <HandwritingTitle as="h2">{editingOfferId ? "编辑 Offer" : "录入 Offer"}</HandwritingTitle>
+              <button onClick={() => { setShowForm(false); resetForm(); }}><X size={20} className="text-[var(--color-muted)]" /></button>
+            </div>
+            <div className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="space-y-1 text-sm">
+                  <span className="text-[var(--color-text-soft)]">公司</span>
+                  <input value={form.company} onChange={(e) => setForm({ ...form, company: e.target.value })} className="w-full rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2" />
+                </label>
+                <label className="space-y-1 text-sm">
+                  <span className="text-[var(--color-text-soft)]">岗位</span>
+                  <input value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} className="w-full rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2" />
+                </label>
               </div>
-            </>
-          )}
+              <div className="grid gap-3 sm:grid-cols-3">
+                <label className="space-y-1 text-sm">
+                  <span className="text-[var(--color-text-soft)]">月薪 K</span>
+                  <input type="number" value={form.monthlySalary} onChange={(e) => setForm({ ...form, monthlySalary: e.target.value })} className="w-full rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2" />
+                </label>
+                <label className="space-y-1 text-sm">
+                  <span className="text-[var(--color-text-soft)]">发薪月数</span>
+                  <input type="number" value={form.monthsPerYear} onChange={(e) => setForm({ ...form, monthsPerYear: e.target.value })} className="w-full rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2" />
+                </label>
+                <label className="space-y-1 text-sm">
+                  <span className="text-[var(--color-text-soft)]">年终月数</span>
+                  <input type="number" value={form.annualBonus} onChange={(e) => setForm({ ...form, annualBonus: e.target.value })} className="w-full rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2" />
+                </label>
+              </div>
+              <label className="block space-y-1 text-sm">
+                <span className="text-[var(--color-text-soft)]">城市</span>
+                <input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} className="w-full rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2" />
+              </label>
+              <label className="block space-y-1 text-sm">
+                <span className="text-[var(--color-text-soft)]">补充信息</span>
+                <textarea value={form.otherBenefits} onChange={(e) => setForm({ ...form, otherBenefits: e.target.value })} rows={3} className="w-full resize-none rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2" />
+              </label>
+              <div className="flex justify-end gap-2">
+                <WarmButton variant="ghost" size="sm" onClick={() => { setShowForm(false); resetForm(); }}>取消</WarmButton>
+                <WarmButton variant="primary" size="sm" onClick={saveOffer}>保存</WarmButton>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

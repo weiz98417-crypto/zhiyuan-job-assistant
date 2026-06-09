@@ -44,6 +44,18 @@ function createDefaultCVData(): CVData {
   };
 }
 
+export function normalizeCVData(data: unknown): CVData {
+  if (isLegacyFormat(data)) {
+    return migrateFromLegacy(data);
+  }
+
+  if (data && typeof data === "object" && "activeVersion" in data && "versions" in data) {
+    return data as CVData;
+  }
+
+  return createDefaultCVData();
+}
+
 export function loadCVData(): CVData {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -52,18 +64,28 @@ export function loadCVData(): CVData {
     const parsed = JSON.parse(raw);
 
     if (isLegacyFormat(parsed)) {
-      const migrated = migrateFromLegacy(parsed);
+      const migrated = normalizeCVData(parsed);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
       return migrated;
     }
 
-    if (parsed && typeof parsed === "object" && "activeVersion" in parsed && "versions" in parsed) {
-      return parsed as CVData;
-    }
-
-    return createDefaultCVData();
+    return normalizeCVData(parsed);
   } catch {
     return createDefaultCVData();
+  }
+}
+
+export async function loadCVDataFromServer(): Promise<CVData | null> {
+  try {
+    const res = await fetch("/api/cv/data", { cache: "no-store" });
+    if (!res.ok) return null;
+    const json = await res.json();
+    if (!json.success || !json.data || Object.keys(json.data).length === 0) return null;
+    const data = normalizeCVData(json.data);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    return data;
+  } catch {
+    return null;
   }
 }
 

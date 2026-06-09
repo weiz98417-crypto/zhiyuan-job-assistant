@@ -1,12 +1,31 @@
 import { NextResponse } from "next/server";
-import { existsSync, readFileSync } from "fs";
-import { resolve } from "path";
-import { getDb } from "@/lib/server-db";
+import { getCurrentUser } from "@/lib/auth";
+import { getDataRepositories } from "@/lib/data-repositories";
+import { evaluateOfferSnapshot } from "@/lib/offer-evaluation";
 
-// POST — save an offer comparison report
 export async function POST(request: Request) {
   try {
-    const { title, offers_json, report_markdown } = await request.json();
+    const user = await getCurrentUser();
+    const body = await request.json();
+    const {
+      title,
+      offers_json,
+      report_markdown,
+      report_type,
+      model_version,
+      offer_id,
+      offer_snapshot,
+      overall_score,
+      verdict,
+      summary,
+      modules_json,
+      red_flags_json,
+      missing_info_json,
+      negotiation_levers_json,
+      hr_questions_json,
+      assumptions_json,
+      take_home_json,
+    } = body;
 
     if (!report_markdown || typeof report_markdown !== "string") {
       return NextResponse.json({ success: false, error: "report_markdown is required" }, { status: 400 });
@@ -14,38 +33,49 @@ export async function POST(request: Request) {
 
     const offersArr = Array.isArray(offers_json) ? offers_json : JSON.parse(offers_json || "[]");
     const numOffers = offersArr.length;
-    const titleStr = title || "Offer 对比报告";
+    const snapshot = offer_snapshot || (offersArr.length === 1 ? offersArr[0] : {});
+    const evaluated = snapshot?.company && snapshot?.role ? evaluateOfferSnapshot(snapshot) : null;
+    const titleStr = title || (evaluated ? `${evaluated.company} Offer 评估报告` : "Offer report");
 
-    const db = getDb();
-    // Ensure schema
-    const schemaPath = resolve(process.cwd(), "src", "lib", "server-schema.sql");
-    if (existsSync(schemaPath)) {
-      try {
-        const schema = readFileSync(schemaPath, "utf-8");
-        db.exec(schema);
-      } catch { /* schema already initialized */ }
-    }
+    const id = await getDataRepositories().offerReports.insert({
+      title: titleStr,
+      report_type: report_type || (numOffers > 1 ? "comparison" : "single"),
+      model_version: model_version || evaluated?.modelVersion || "",
+      offer_id: offer_id ?? evaluated?.offerId ?? null,
+      overall_score: overall_score ?? evaluated?.overallScore ?? 0,
+      verdict: verdict ?? evaluated?.verdict ?? "",
+      summary: summary ?? evaluated?.summary ?? "",
+      offer_snapshot_json: snapshot || evaluated?.offerSnapshot || {},
+      modules_json: modules_json ?? evaluated?.modules ?? [],
+      red_flags_json: red_flags_json ?? evaluated?.redFlags ?? [],
+      missing_info_json: missing_info_json ?? evaluated?.missingInfo ?? [],
+      negotiation_levers_json: negotiation_levers_json ?? evaluated?.negotiationLevers ?? [],
+      hr_questions_json: hr_questions_json ?? evaluated?.hrQuestions ?? [],
+      assumptions_json: assumptions_json ?? evaluated?.assumptions ?? [],
+      take_home_json: take_home_json ?? evaluated?.takeHomeEstimate ?? {},
+      offers_json: offersArr,
+      report_markdown,
+      num_offers: numOffers,
+    }, user.userId);
 
-    const result = db.prepare(
-      "INSERT INTO offer_reports (title, offers_json, report_markdown, num_offers) VALUES (?,?,?,?)"
-    ).run(titleStr, JSON.stringify(offersArr), report_markdown, numOffers);
-
-    const id = Number(result.lastInsertRowid);
     return NextResponse.json({ success: true, data: { id } }, { status: 201 });
   } catch (err) {
+    if (err instanceof Error && err.message === "Not authenticated") {
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+    }
     return NextResponse.json({ success: false, error: String(err) }, { status: 500 });
   }
 }
 
-// GET — list recent offer reports
 export async function GET() {
   try {
-    const db = getDb();
-    const rows = db.prepare(
-      "SELECT id, title, num_offers, created_at FROM offer_reports ORDER BY created_at DESC LIMIT 20"
-    ).all();
-return NextResponse.json({ success: true, data: rows });
+    const user = await getCurrentUser();
+    const rows = await getDataRepositories().offerReports.list(user.userId);
+    return NextResponse.json({ success: true, data: rows });
   } catch (err) {
+    if (err instanceof Error && err.message === "Not authenticated") {
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+    }
     return NextResponse.json({ success: false, error: String(err) }, { status: 500 });
   }
 }

@@ -107,17 +107,8 @@ export async function generateProfile(options?: {
   return buildFallbackProfile(stats);
 }
 
-function buildFallbackProfile(stats: MiningStats): ZhiyuanProfile {
+export function buildFallbackProfile(stats: MiningStats): ZhiyuanProfile {
   const skills: ProfileSkill[] = [];
-  if (stats.totalApplications > 0) {
-    skills.push({ name: "求职活跃度", proficiency: Math.min(100, stats.totalApplications * 10), evidence: [`投递 ${stats.totalApplications} 个岗位`] });
-  }
-  if (stats.passRate > 0) {
-    skills.push({ name: "简历转化率", proficiency: stats.passRate, evidence: [`通过率 ${stats.passRate}%`] });
-  }
-  if (stats.totalPracticeCount > 0) {
-    skills.push({ name: "面试练习", proficiency: Math.min(100, stats.totalPracticeCount * 10), evidence: [`练习 ${stats.totalPracticeCount} 次`] });
-  }
 
   const overallScore = stats.totalApplications > 0
     ? Math.round((stats.avgScore / 5) * 100)
@@ -150,6 +141,7 @@ function buildFallbackProfile(stats: MiningStats): ZhiyuanProfile {
         changes: [
           `基于 ${stats.totalApplications} 条投递记录生成基础画像`,
           `竞争力分数: ${overallScore}`,
+          `行为指标已保留在画像概览，不计入核心技能`,
         ],
       },
     ],

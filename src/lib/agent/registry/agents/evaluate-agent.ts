@@ -7,7 +7,7 @@
 import type { AgentDefinition, AgentPromptContext } from "@/lib/agent/registry/types";
 
 // ── Tool names ──
-const EVAL_TOOL_NAMES = ["evaluate_jd", "evaluate_jd_full", "fetch_jd_content", "web_search", "analyze_jd_risks", "decode_black_market_terms", "get_report_detail", "export_file", "download_report_pdf"];
+const EVAL_TOOL_NAMES = ["evaluate_jd_full", "get_recent_jd_context", "read_file", "get_profile", "fetch_jd_content", "analyze_jd_risks", "decode_black_market_terms", "get_report_detail", "update_report_metadata", "export_file", "download_report_pdf"];
 
 // ── Build system prompt from agent.md + context ──
 
@@ -23,10 +23,13 @@ function fallbackEvalPrompt(ctx: AgentPromptContext): string {
 
 ## 工具使用策略
 - evaluate_jd_full: 收到 JD 后直接调用，不要先问"确定要评估吗"
-- analyze_jd_risks: 评估前先跑风险扫描
+- get_recent_jd_context: 用户说"这份JD/刚才的JD/上面的JD"但本轮没贴 JD 时，先读最近保存的 JD；如果用户消息里有 jdId=数字，必须把 jdId 传给工具；不要抓网页
+- read_file(path="我的简历") / get_profile: 用户说"结合我的简历"时必须先读取简历，再评估；不要说没收到简历
+- update_report_metadata: 用户要修改/补充已保存报告的公司、岗位、标题、关键词、风险备注时使用；这只是改保存信息，不重新评估
 - get_report_detail + export_file: 用户说"下载报告"时用
 - download_report_pdf: 用户说"导出PDF"时用
-- web_search: 查公司背景/薪资时用，不要编数据
+- fetch_jd_content: 只有用户本轮明确给了 http/https 链接时才用
+- 禁止 web_search: JD 评估 Agent 不主动联网搜索；公开信息查询交给信息查询流程
 
 ## JD 评估引擎（A-G 7 维）
 | 板块 | 内容 | 权重 |
@@ -43,6 +46,9 @@ function fallbackEvalPrompt(ctx: AgentPromptContext): string {
 
 ## 边界
 - 不要反复追问用户"你确定要评估吗"，收到 JD 直接评估
+- 用户说"这是字节的JD""公司改成X""补进已保存报告""修改报告信息"时，先用 update_report_metadata。除非用户明确说"重新评估/重新打分/重跑"，否则禁止调用 evaluate_jd_full
+- 用户说"结合我的简历"时，必须先 read_file(path="我的简历") 或 get_profile；读不到才向用户要简历
+- 用户说"这个JD/刚才那个JD"时，必须先 get_recent_jd_context 或 get_report_detail；读不到才向用户要 JD
 - 不要帮用户写简历（那是简历 agent 的事）
 - 不要做面试模拟（那是面试 agent 的事）
 
@@ -121,6 +127,11 @@ const EVAL_INTENT_PATTERNS = [
   /(分析|评估).*(公司|企业|JD|jd)/i,
   /(分析|查|查一下).*(薪资|工资|待遇)/,
   /(下载|导出|保存|输出).*(报告|评估|PDF|pdf|md|markdown)/,
+  /(修改|更正|更新|补充|改成|改为).*(报告|评估|公司|岗位|JD|jd)/,
+  /(公司|岗位).*(是|改成|改为).*(报告|JD|jd|评估)/,
+  /(报告|评估).*(公司|岗位).*(是|改成|改为|补充|更新)/,
+  /(结合|根据|基于).*(我的)?(简历|CV|履历).*(评估|分析).*(JD|jd|职位|岗位|这个|这份)/,
+  /(评估|分析).*(这个|这份|刚才|上面|之前).*(JD|jd|职位|岗位)/,
   /(报告|评估).*(导出|下载|PDF|pdf)/,
   /(看|查看|展开|打开|显示).*(完整|详细|全部|全文).*(报告|评估)/,
   /(完整|详细|全部).*(报告|评估)/,

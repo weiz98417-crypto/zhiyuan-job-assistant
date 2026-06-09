@@ -23,6 +23,7 @@ export interface AgentPromptContext {
   careerDNA: string;
   /** Session memory digest (generated when ≥5 user messages) */
   memoryDigest?: string;
+  agentStateInjection?: string;
   /** Recent conversation messages */
   currentMessages: { role: string; content: string }[];
   /** Agent-specific knowledge injection text */
@@ -58,4 +59,5 @@ export interface AgentDefinition {
   model?: string;
   /** Pro tier model (activated by user keywords like "深度评估") */
   modelPro?: string;
+  sessionState?: Record<string, unknown>;
 }

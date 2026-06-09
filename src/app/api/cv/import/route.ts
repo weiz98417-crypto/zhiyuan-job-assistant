@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { ZHIPU_API_URL, ZHIPU_VISION_MODEL } from "@/lib/zhipu";
 
 const DASHSCOPE_BASE = "https://dashscope.aliyuncs.com/compatible-mode/v1";
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
@@ -46,16 +47,16 @@ function fmtField(v: unknown): string {
   return String(v);
 }
 
-// ── Zhipu glm-4.6v-flashx multimodal → direct JSON (images) ──
+// ── Zhipu vision multimodal → direct JSON (images) ──
 
 async function parseViaZhipu(dataUri: string): Promise<Record<string, string>> {
   const apiKey = process.env.ZHIPU_API_KEY;
   if (!apiKey) throw new Error("未配置 ZHIPU_API_KEY");
-  const res = await fetch("https://open.bigmodel.cn/api/paas/v4/chat/completions", {
+  const res = await fetch(ZHIPU_API_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
-      model: "glm-4.6v-flashx",
+      model: ZHIPU_VISION_MODEL,
       messages: [{ role: "user", content: [
         { type: "image_url", image_url: { url: dataUri } },
         { type: "text", text: `阅读这份简历图片，理解内容后按栏目归类提取JSON。每个栏目保留原文完整内容：
@@ -313,7 +314,7 @@ export async function POST(request: Request) {
         // PDF → Qwen-Long (dedicated document channel)
         sections = await parseViaQwenLong(buffer, "application/pdf", file.name);
       } else if (["png", "jpg", "jpeg", "webp"].includes(ext)) {
-        // Image → Zhipu glm-4.6v-flashx → direct JSON
+        // Image → Zhipu vision model → direct JSON
         const mimeType = ext === "jpg" || ext === "jpeg" ? "image/jpeg" : `image/${ext}`;
         const dataUri = `data:${mimeType};base64,${buffer.toString("base64")}`;
         sections = await parseViaZhipu(dataUri);

@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
-import { getDb } from "@/lib/server-db";
-import { updateJobStatus } from "../../../../../../lib/scan/orchestrator.mjs";
+import { updateScanJobStatusForUser } from "@/lib/scan-data";
 
 export async function PATCH(
   request: NextRequest,
@@ -15,7 +14,7 @@ export async function PATCH(
     const body = await request.json();
     const newStatus = body?.status;
 
-    const validStatuses = ["new", "dismissed", "evaluated"];
+    const validStatuses = ["new", "viewed", "saved", "evaluating", "evaluated", "dismissed"];
     if (!newStatus || !validStatuses.includes(newStatus)) {
       return NextResponse.json(
         { error: `Invalid status. Must be: ${validStatuses.join(", ")}` },
@@ -23,8 +22,7 @@ export async function PATCH(
       );
     }
 
-    const db = getDb();
-    const result = updateJobStatus(db, parseInt(id), String(user.userId), newStatus);
+    const result = await updateScanJobStatusForUser(parseInt(id), String(user.userId), newStatus);
 
     if (!result.success) {
       return NextResponse.json({ error: "Job not found" }, { status: 404 });

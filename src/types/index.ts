@@ -132,18 +132,127 @@ export interface Offer {
   id?: number;
   company: string;
   role: string;
-  monthlySalary: number; // 税前月薪 (K)
-  monthsPerYear: number; // 发薪月数 (12/13/14)
-  annualBonus?: number; // 年终奖 (月数)
-  hasSocialInsurance: boolean; // 五险一金全额缴纳
-  housingFundRate: number; // 公积金比例
-  options?: string; // 期权/股票
-  probationMonths: number; // 试用期月数
+  location?: string;
+  level?: string;
+  monthlySalary: number;
+  monthsPerYear: number;
+  annualBonus?: number;
+  hasSocialInsurance: boolean;
+  socialInsuranceBaseType?: OfferSocialInsuranceBaseType;
+  socialInsuranceBaseK?: number;
+  housingFundRate: number;
+  options?: string;
+  probationMonths: number;
   startDate?: string;
   otherBenefits?: string;
   applicationId?: number;
   reportId?: number;
   createdAt: Date;
+  employmentForm?: "direct_hire" | "dispatch" | "outsourcing" | "intern" | "contractor" | "unknown";
+  employerName?: string;
+  contractMonths?: number;
+  overtimePolicy?: "none" | "occasional" | "common" | "intense" | "unknown";
+  bonusGuarantee?: "guaranteed" | "partial" | "uncertain" | "none" | "unknown";
+  equityType?: string;
+  equityVesting?: string;
+  commuteMinutes?: number;
+  cityCostLevel?: "low" | "medium" | "high" | "very_high" | "unknown";
+  jobNature?: string;
+  latestReportId?: number;
+  updatedAt?: string;
+}
+
+export type OfferEmploymentForm =
+  | "direct_hire"
+  | "dispatch"
+  | "outsourcing"
+  | "intern"
+  | "contractor"
+  | "unknown";
+
+export type OfferVerdict =
+  | "accept"
+  | "accept_after_negotiation"
+  | "proceed_cautiously"
+  | "decline";
+
+export type OfferRiskLevel = "low" | "medium" | "high" | "critical";
+
+export type OfferSocialInsuranceBaseType =
+  | "full_salary"
+  | "minimum_base"
+  | "unknown";
+
+export interface OfferSnapshot {
+  offerId?: number;
+  company: string;
+  role: string;
+  location?: string;
+  level?: string;
+  monthlySalary: number;
+  monthsPerYear: number;
+  annualBonus?: number;
+  hasSocialInsurance: boolean;
+  socialInsuranceBaseType?: OfferSocialInsuranceBaseType;
+  socialInsuranceBaseK?: number;
+  housingFundRate: number;
+  probationMonths: number;
+  startDate?: string;
+  otherBenefits?: string;
+  options?: string;
+  employmentForm?: OfferEmploymentForm;
+  employerName?: string;
+  contractMonths?: number;
+  overtimePolicy?: "none" | "occasional" | "common" | "intense" | "unknown";
+  bonusGuarantee?: "guaranteed" | "partial" | "uncertain" | "none" | "unknown";
+  equityType?: string;
+  equityVesting?: string;
+  commuteMinutes?: number;
+  cityCostLevel?: "low" | "medium" | "high" | "very_high" | "unknown";
+  jobNature?: string;
+  applicationId?: number;
+  sourceLabel?: string;
+  evaluatedAt?: string;
+}
+
+export interface OfferEvaluationModule {
+  id: string;
+  label: string;
+  score: number; // 1-5
+  weight: number; // percentage weight
+  confidence: number; // 0-1
+  evidence: string[];
+  risks: string[];
+  missingInfo: string[];
+  notes: string;
+}
+
+export interface OfferEvaluationReport {
+  id?: number;
+  reportType: "single" | "comparison";
+  modelVersion: string;
+  offerId?: number;
+  company: string;
+  role: string;
+  overallScore: number;
+  verdict: OfferVerdict;
+  summary: string;
+  assumptions: string[];
+  redFlags: string[];
+  missingInfo: string[];
+  negotiationLevers: string[];
+  hrQuestions: string[];
+  modules: OfferEvaluationModule[];
+  takeHomeEstimate?: {
+    monthlyNetMin: number;
+    monthlyNetMax: number;
+    annualNetMin: number;
+    annualNetMax: number;
+    assumptions: string[];
+  };
+  offerSnapshot: OfferSnapshot;
+  createdAt: string;
+  updatedAt?: string;
 }
 
 /* ── Interview Prep ── */
@@ -339,7 +448,7 @@ export interface OptimizeSectionResponse {
 
 /* ── JD Library ── */
 
-export type JDSourceType = "paste" | "ocr" | "url" | "agent";
+export type JDSourceType = "paste" | "ocr" | "url" | "agent" | "discovery";
 
 export interface JDRecord {
   id?: number;
@@ -724,6 +833,8 @@ export interface AgentTool {
 export interface AgentMessage {
   role: "user" | "assistant" | "tool";
   content: string;
+  /** Data URL attachments for user-uploaded JD screenshots or files. */
+  images?: string[];
   mode?: "explore" | "execute" | "interview-coach";
   /** Which sub-agent produced this message (V2: multi-agent architecture) */
   agent_id?: string;
@@ -737,10 +848,145 @@ export interface ChatSession {
   title: string;
   messages: AgentMessage[];
   memoryDigest?: string;
+  interviewState?: InterviewSessionState;
+  agentState?: AgentSessionState;
   pinned: boolean;
   deletedAt?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface AgentSessionState {
+  offer?: OfferAgentSessionState;
+  [key: string]: unknown;
+}
+
+export interface OfferAgentSessionState {
+  activeOfferId?: number;
+  activeOfferReportId?: number;
+  activeCompareSet?: number[];
+  lastUserIntent?: "evaluate" | "compare" | "negotiate" | "ask_hr" | "explain" | "edit_offer";
+  lastOfferSnapshot?: OfferSnapshot;
+  lastEvaluationSummary?: {
+    company: string;
+    role: string;
+    overallScore: number;
+    verdict: OfferVerdict;
+    summary: string;
+  };
+  missingInfo?: string[];
+  redFlags?: string[];
+  userPriorities?: {
+    salary?: number;
+    stability?: number;
+    growth?: number;
+    workLifeBalance?: number;
+    cityPreference?: string[];
+  };
+  staleReportReason?: string;
+  updatedAt?: string;
+}
+
+export type InterviewSessionStatus = "active" | "paused" | "completed" | "abandoned";
+
+export type InterviewQuestionKind = "main" | "follow_up" | "probe" | "clarification" | "reverse_question";
+
+export interface InterviewPlanSnapshot {
+  snapshotId: string;
+  source: {
+    jdId?: number;
+    resumeId?: string;
+  };
+  jdSnapshot?: {
+    company?: string;
+    role?: string;
+    body?: string;
+  };
+  resumeSnapshot?: {
+    title?: string;
+    body?: string;
+  };
+  mode: string;
+  difficulty: "normal" | "hard" | "pressure";
+  focusAreas: string[];
+  allowFollowUps: boolean;
+  createdAt: string;
+}
+
+export interface InterviewTurn {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  questionNodeId?: string;
+  createdAt: string;
+}
+
+export interface InterviewQuestionNode {
+  id: string;
+  kind: InterviewQuestionKind;
+  parentId?: string;
+  reason?: string;
+  question: string;
+  answerTurnIds: string[];
+  score?: InterviewScore;
+  createdAt: string;
+}
+
+export interface InterviewScore {
+  overall: number;
+  dimensions?: Record<string, number>;
+  feedback?: string;
+}
+
+export interface InterviewScoreArtifact {
+  id: string;
+  questionNodeId?: string;
+  answerTurnIds: string[];
+  score: InterviewScore;
+  sourceTool?: string;
+  createdAt: string;
+}
+
+export interface InterviewRecap {
+  generatedAt: string;
+  overallVerdict: string;
+  strengths: string[];
+  weaknesses: string[];
+  followUpPerformance?: string[];
+  evidenceFromAnswers?: string[];
+  weakSpots?: string[];
+  nextPracticePlan: string[];
+  questionFeedback?: {
+    questionNodeId?: string;
+    question: string;
+    kind?: InterviewQuestionKind;
+    parentQuestion?: string;
+    answerExcerpt?: string;
+    sourceTurnIds?: string[];
+    score?: number;
+    feedback?: string;
+  }[];
+  sourceTurnIds?: string[];
+  rawText?: string;
+}
+
+export interface InterviewRebindEvent {
+  from?: { jdId?: number; resumeId?: string };
+  to?: { jdId?: number; resumeId?: string };
+  reason: string;
+  createdAt: string;
+}
+
+export interface InterviewSessionState {
+  sessionId?: number;
+  planSnapshot: InterviewPlanSnapshot;
+  status: InterviewSessionStatus;
+  currentQuestionId?: string;
+  questionGraph: InterviewQuestionNode[];
+  transcript: InterviewTurn[];
+  scoreArtifacts?: InterviewScoreArtifact[];
+  recap?: InterviewRecap;
+  rebindHistory: InterviewRebindEvent[];
 }
 
 /* ── API ── */

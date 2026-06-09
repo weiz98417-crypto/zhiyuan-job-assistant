@@ -17,15 +17,13 @@ import {
   Filter,
   Sparkles,
   ArrowRight,
+  Download,
 } from "lucide-react";
 import { WarmButton, PaperCard } from "@/components/design";
 import { StaggerList, StaggerItem } from "@/components/design/PageTransition";
-import db from "@/lib/db";
 import {
-  getAllJDs,
   deleteJD,
   updateJD,
-  searchJDs,
 } from "@/lib/jd-storage";
 import type { JDRecord, JDSourceType } from "@/types";
 
@@ -34,6 +32,7 @@ const SOURCE_ICONS: Record<JDSourceType, typeof Clipboard> = {
   ocr: Image,
   url: Link,
   agent: Clipboard,
+  discovery: Search,
 };
 
 const SOURCE_LABELS: Record<JDSourceType, string> = {
@@ -41,6 +40,7 @@ const SOURCE_LABELS: Record<JDSourceType, string> = {
   ocr: "OCR 识别",
   url: "链接",
   agent: "Agent",
+  discovery: "职位发现",
 };
 
 function truncateBody(body: string, maxLen = 200): string {
@@ -57,19 +57,24 @@ export default function JDLibraryPage() {
   const [selectedJD, setSelectedJD] = useState<JDRecord | null>(null);
   const [editingJD, setEditingJD] = useState<JDRecord | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<JDRecord | null>(null);
+  const [loadError, setLoadError] = useState(false);
 
   const loadJDs = useCallback(async () => {
     try {
-      const res = await fetch("/api/data/jds");
+      setLoadError(false);
+      const res = await fetch("/api/data/jds", { cache: "no-store" });
+      if (!res.ok) throw new Error("server load failed");
       const json = await res.json();
       if (json.success && Array.isArray(json.data)) {
         setJDs(json.data);
         return;
       }
-    } catch { /* fallback to DexieDB */ }
-    const data = search.trim() ? await searchJDs(search.trim()) : await getAllJDs();
-    setJDs(data);
-  }, [search]);
+      throw new Error("server response failed");
+    } catch {
+      setLoadError(true);
+      setJDs([]);
+    }
+  }, []);
 
   useEffect(() => {
     loadJDs();
@@ -77,6 +82,15 @@ export default function JDLibraryPage() {
 
   const filtered = useMemo(() => {
     let result = jds;
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      result = result.filter((jd) =>
+        jd.company.toLowerCase().includes(q) ||
+        jd.role.toLowerCase().includes(q) ||
+        jd.body.toLowerCase().includes(q) ||
+        jd.keywords.some((kw) => kw.toLowerCase().includes(q))
+      );
+    }
     if (sourceFilter) {
       result = result.filter((jd) => jd.sourceType === sourceFilter);
     }
@@ -86,11 +100,18 @@ export default function JDLibraryPage() {
       result = result.filter((jd) => jd.reportId == null);
     }
     return result;
-  }, [jds, sourceFilter, reportFilter]);
+  }, [jds, search, sourceFilter, reportFilter]);
 
   const handleDelete = async () => {
     if (!deleteConfirm || deleteConfirm.id == null) return;
-    await deleteJD(deleteConfirm.id);
+    try {
+      const res = await fetch(`/api/data/jds?id=${deleteConfirm.id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("server delete failed");
+      await deleteJD(deleteConfirm.id).catch(() => {});
+    } catch {
+      setLoadError(true);
+      return;
+    }
     setDeleteConfirm(null);
     setSelectedJD(null);
     loadJDs();
@@ -98,17 +119,39 @@ export default function JDLibraryPage() {
 
   const handleSaveEdit = async () => {
     if (!editingJD || editingJD.id == null) return;
+    const res = await fetch("/api/data/jds", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: editingJD.id,
+        company: editingJD.company,
+        role: editingJD.role,
+        body: editingJD.body,
+      }),
+    });
+    if (!res.ok) {
+      setLoadError(true);
+      return;
+    }
     await updateJD(editingJD.id, {
       company: editingJD.company,
       role: editingJD.role,
       body: editingJD.body,
-    });
+    }).catch(() => {});
     setEditingJD(null);
     setSelectedJD(null);
     loadJDs();
   };
 
   const hasFilters = sourceFilter || reportFilter;
+
+  if (loadError) {
+    return (
+      <div className="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] p-6 text-sm text-[var(--color-text-soft)]">
+        服务器数据加载失败，请稍后重试。
+      </div>
+    );
+  }
 
   return (
     <div className="">
@@ -148,7 +191,7 @@ export default function JDLibraryPage() {
         <span className="text-xs text-[var(--color-muted)] flex items-center gap-1">
           <Filter size={12} /> 筛选：
         </span>
-        {(["paste", "ocr", "url"] as JDSourceType[]).map((type) => (
+        {(["paste", "ocr", "url", "agent", "discovery"] as JDSourceType[]).map((type) => (
           <button
             key={type}
             onClick={() => setSourceFilter(sourceFilter === type ? null : type)}
@@ -242,6 +285,16 @@ export default function JDLibraryPage() {
                     </p>
                   </div>
                   <div className="flex items-center gap-1.5 ml-2 shrink-0">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeleteConfirm(jd);
+                      }}
+                      className="p-1 rounded-[var(--radius-sm)] text-[var(--color-muted)] hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/20"
+                      title="删除 JD"
+                    >
+                      <Trash2 size={13} />
+                    </button>
                     {jd.reportId != null && (
                       <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/20 text-emerald-600 dark:text-emerald-400">
                         已评估
@@ -290,12 +343,21 @@ export default function JDLibraryPage() {
                   <h3 className="font-[family-name:var(--font-display)] text-lg font-bold text-[var(--color-text)]">
                     JD 详情
                   </h3>
-                  <button
-                    onClick={() => setSelectedJD(null)}
-                    className="p-1.5 rounded-[var(--radius-sm)] hover:bg-[var(--color-primary-muted)] text-[var(--color-muted)]"
-                  >
-                    <X size={18} />
-                  </button>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => setDeleteConfirm(selectedJD)}
+                      className="p-1.5 rounded-[var(--radius-sm)] hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/20 text-[var(--color-muted)]"
+                      title="删除 JD"
+                    >
+                      <Trash2 size={17} />
+                    </button>
+                    <button
+                      onClick={() => setSelectedJD(null)}
+                      className="p-1.5 rounded-[var(--radius-sm)] hover:bg-[var(--color-primary-muted)] text-[var(--color-muted)]"
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
                 </div>
 
                 {/* Source badge + date */}
@@ -315,6 +377,15 @@ export default function JDLibraryPage() {
                       className="text-xs text-blue-500 hover:underline flex items-center gap-1"
                     >
                       <ExternalLink size={10} /> 来源链接
+                    </a>
+                  )}
+                  {selectedJD.reportId != null && (
+                    <a
+                      href={`/api/reports/${selectedJD.reportId}/pdf`}
+                      download
+                      className="text-xs px-2 py-0.5 rounded bg-[var(--color-primary)] text-white hover:opacity-90 flex items-center gap-1"
+                    >
+                      <Download size={10} /> 下载 PDF
                     </a>
                   )}
                   {selectedJD.reportId != null && (

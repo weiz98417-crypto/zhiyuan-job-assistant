@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { ZHIPU_API_URL, ZHIPU_FALLBACK_MODEL } from "@/lib/zhipu";
 
 const MAX_MESSAGES = 10;
 const MAX_MSG_LEN = 2000;
@@ -8,10 +9,10 @@ function sse(event: { type: string } & Record<string, unknown>): string {
   return `data: ${JSON.stringify(event)}\n\n`;
 }
 
-// Model fallback chain: DeepSeek → GLM-4 → Qwen-Long
+// Model fallback chain: DeepSeek → Zhipu → Qwen-Long
 const MODEL_CHAIN = [
   { model: "deepseek-v4-flash", url: "https://api.deepseek.com/chat/completions", keyEnv: "DEEPSEEK_API_KEY" },
-  { model: "glm-4.6v-flashx", url: "https://open.bigmodel.cn/api/paas/v4/chat/completions", keyEnv: "ZHIPU_API_KEY" },
+  { model: ZHIPU_FALLBACK_MODEL, url: ZHIPU_API_URL, keyEnv: "ZHIPU_API_KEY" },
   { model: "qwen-long", url: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", keyEnv: "DASHSCOPE_API_KEY" },
 ];
 
@@ -77,7 +78,7 @@ export async function POST(request: Request) {
       totalChars = truncated.reduce((sum, m) => sum + (typeof m.content === "string" ? m.content.length : 0), 0);
     }
 
-    // Use fallback chain: DeepSeek → GLM-4 → Qwen-Long
+    // Use fallback chain: DeepSeek → Zhipu → Qwen-Long
     let response: Response;
     let modelUsed: string;
     try {

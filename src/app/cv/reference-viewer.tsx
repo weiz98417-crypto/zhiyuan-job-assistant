@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Pencil, Check, BookOpen, Tag, Calendar, FileText } from "lucide-react";
+import { X, Pencil, Check, BookOpen, Tag, Calendar, FileText, Gauge, Share2, RotateCcw, Ban } from "lucide-react";
 import { WarmButton, PaperCard } from "@/components/design";
 
 interface CVSection {
@@ -19,6 +19,13 @@ interface ReferenceDetail {
   tags: string[];
   notes: string;
   created_at: string;
+  roleCategory?: string;
+  visibility?: string;
+  status?: string;
+  qualityScore?: number;
+  anonymized?: boolean;
+  ownedByUser?: boolean;
+  updated_at?: string;
 }
 
 interface ReferenceSummary {
@@ -28,6 +35,13 @@ interface ReferenceSummary {
   tags: string[];
   notes: string;
   created_at: string;
+  roleCategory?: string;
+  visibility?: string;
+  status?: string;
+  qualityScore?: number;
+  anonymized?: boolean;
+  ownedByUser?: boolean;
+  updated_at?: string;
 }
 
 interface ReferenceViewerProps {
@@ -53,6 +67,7 @@ export default function ReferenceViewer({
   const [isEditingNotes, setIsEditingNotes] = useState(false);
   const [editNotes, setEditNotes] = useState(resume.notes);
   const [saving, setSaving] = useState(false);
+  const canEdit = resume.ownedByUser !== false;
 
   useEffect(() => {
     setSections(resume.sections);
@@ -60,6 +75,21 @@ export default function ReferenceViewer({
     setEditNotes(resume.notes);
     setEditSectionId(null);
   }, [resume]);
+
+  const visibilityLabel = resume.visibility === "team"
+    ? "团队共享"
+    : resume.visibility === "team_pending"
+      ? "待审核共享"
+      : resume.visibility === "disabled"
+        ? "已停用"
+        : "私有";
+  const statusLabel = resume.status === "pending"
+    ? "待审核"
+    : resume.status === "disabled"
+      ? "已停用"
+      : resume.status === "index_failed"
+        ? "索引失败"
+        : "可用";
 
   // Cross-reference: same-tag resumes
   const relatedResumes = allResumes
@@ -101,6 +131,12 @@ export default function ReferenceViewer({
     setIsEditingNotes(false);
   };
 
+  const handleReferenceAction = async (action: "request_team_share" | "withdraw_team_share" | "disable" | "restore") => {
+    setSaving(true);
+    await onUpdate(resume.id, { action });
+    setSaving(false);
+  };
+
   return (
     <AnimatePresence>
       <motion.div
@@ -137,9 +173,9 @@ export default function ReferenceViewer({
                 </div>
               ) : (
                 <h2
-                  className="font-[family-name:var(--font-display)] text-lg font-bold text-[var(--color-text)] truncate cursor-pointer hover:text-[var(--color-primary)]"
-                  onClick={() => setIsEditingName(true)}
-                  title="点击编辑名称"
+                  className={`font-[family-name:var(--font-display)] text-lg font-bold text-[var(--color-text)] truncate ${canEdit ? "cursor-pointer hover:text-[var(--color-primary)]" : ""}`}
+                  onClick={() => { if (canEdit) setIsEditingName(true); }}
+                  title={canEdit ? "点击编辑名称" : undefined}
                 >
                   {resume.name}
                 </h2>
@@ -151,12 +187,29 @@ export default function ReferenceViewer({
           </div>
 
           {/* Meta bar */}
-          <div className="flex items-center gap-3 px-6 py-2 text-xs text-[var(--color-muted)] border-b border-[var(--color-divider)] shrink-0">
+          <div className="flex flex-wrap items-center gap-2 px-6 py-2 text-xs text-[var(--color-muted)] border-b border-[var(--color-divider)] shrink-0">
             <span className="flex items-center gap-1">
               <Calendar size={12} />
               {new Date(resume.created_at).toLocaleDateString("zh-CN")}
             </span>
             <span>{resume.source === "upload" ? "📄 上传" : "📋 粘贴"}</span>
+            {resume.roleCategory && (
+              <span className="px-1.5 py-0.5 rounded-full bg-[var(--color-primary-muted)] text-[var(--color-text-soft)]">
+                {resume.roleCategory}
+              </span>
+            )}
+            <span className="px-1.5 py-0.5 rounded-full bg-[var(--color-primary-muted)] text-[var(--color-text-soft)]">
+              {visibilityLabel}
+            </span>
+            <span className="px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">
+              {statusLabel}
+            </span>
+            {typeof resume.qualityScore === "number" && (
+              <span className="flex items-center gap-1">
+                <Gauge size={12} />
+                质量 {Math.round(resume.qualityScore * 100)}
+              </span>
+            )}
             {resume.tags.length > 0 && (
               <div className="flex items-center gap-1">
                 <Tag size={12} />
@@ -169,6 +222,65 @@ export default function ReferenceViewer({
             )}
           </div>
 
+          {canEdit && (
+            <div className="flex flex-wrap items-center gap-2 px-6 py-2 border-b border-[var(--color-divider)] shrink-0">
+              {(resume.visibility === "private" || !resume.visibility) && resume.status !== "disabled" && (
+                <button
+                  type="button"
+                  onClick={() => handleReferenceAction("request_team_share")}
+                  disabled={saving}
+                  className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-[var(--radius-sm)] bg-[var(--color-primary)] text-white disabled:opacity-50"
+                >
+                  <Share2 size={12} />
+                  申请团队共享
+                </button>
+              )}
+              {resume.visibility === "team_pending" && (
+                <button
+                  type="button"
+                  onClick={() => handleReferenceAction("withdraw_team_share")}
+                  disabled={saving}
+                  className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-[var(--radius-sm)] border border-[var(--color-border)] text-[var(--color-text-soft)] disabled:opacity-50"
+                >
+                  <RotateCcw size={12} />
+                  撤回共享申请
+                </button>
+              )}
+              {resume.visibility === "team" && (
+                <button
+                  type="button"
+                  onClick={() => handleReferenceAction("withdraw_team_share")}
+                  disabled={saving}
+                  className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-[var(--radius-sm)] border border-[var(--color-border)] text-[var(--color-text-soft)] disabled:opacity-50"
+                >
+                  <RotateCcw size={12} />
+                  转回私有
+                </button>
+              )}
+              {resume.status === "disabled" || resume.visibility === "disabled" ? (
+                <button
+                  type="button"
+                  onClick={() => handleReferenceAction("restore")}
+                  disabled={saving}
+                  className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-[var(--radius-sm)] bg-emerald-50 text-emerald-700 disabled:opacity-50"
+                >
+                  <RotateCcw size={12} />
+                  恢复使用
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => handleReferenceAction("disable")}
+                  disabled={saving}
+                  className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-[var(--radius-sm)] bg-red-50 text-red-600 disabled:opacity-50"
+                >
+                  <Ban size={12} />
+                  停用
+                </button>
+              )}
+            </div>
+          )}
+
           {/* Body — scrollable sections */}
           <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4 scrollbar-thin">
             {sections.filter(s => s.content?.trim()).map((section) => (
@@ -177,20 +289,22 @@ export default function ReferenceViewer({
                   <h3 className="font-[family-name:var(--font-display)] font-bold text-sm text-[var(--color-text)]">
                     {section.title}
                   </h3>
-                  <button
-                    onClick={() => {
-                      if (editSectionId === section.id) {
-                        setEditSectionId(null);
-                      } else {
-                        setEditSectionId(section.id);
-                        setEditContent(section.content);
-                      }
-                    }}
-                    className="flex items-center gap-1 text-xs px-2 py-1 rounded-[var(--radius-sm)] text-[var(--color-muted)] hover:text-[var(--color-primary)] hover:bg-[var(--color-primary-muted)]"
-                  >
-                    <Pencil size={11} />
-                    {editSectionId === section.id ? "取消" : "编辑"}
-                  </button>
+                  {canEdit && (
+                    <button
+                      onClick={() => {
+                        if (editSectionId === section.id) {
+                          setEditSectionId(null);
+                        } else {
+                          setEditSectionId(section.id);
+                          setEditContent(section.content);
+                        }
+                      }}
+                      className="flex items-center gap-1 text-xs px-2 py-1 rounded-[var(--radius-sm)] text-[var(--color-muted)] hover:text-[var(--color-primary)] hover:bg-[var(--color-primary-muted)]"
+                    >
+                      <Pencil size={11} />
+                      {editSectionId === section.id ? "取消" : "编辑"}
+                    </button>
+                  )}
                 </div>
 
                 {editSectionId === section.id ? (
@@ -228,20 +342,22 @@ export default function ReferenceViewer({
                   <FileText size={14} />
                   备注
                 </h3>
-                <button
-                  onClick={() => {
-                    if (isEditingNotes) {
-                      handleSaveNotes();
-                    } else {
-                      setIsEditingNotes(true);
-                      setEditNotes(resume.notes);
-                    }
-                  }}
-                  className="flex items-center gap-1 text-xs px-2 py-1 rounded-[var(--radius-sm)] text-[var(--color-muted)] hover:text-[var(--color-primary)] hover:bg-[var(--color-primary-muted)]"
-                >
-                  <Pencil size={11} />
-                  {isEditingNotes ? "保存" : "编辑"}
-                </button>
+                {canEdit && (
+                  <button
+                    onClick={() => {
+                      if (isEditingNotes) {
+                        handleSaveNotes();
+                      } else {
+                        setIsEditingNotes(true);
+                        setEditNotes(resume.notes);
+                      }
+                    }}
+                    className="flex items-center gap-1 text-xs px-2 py-1 rounded-[var(--radius-sm)] text-[var(--color-muted)] hover:text-[var(--color-primary)] hover:bg-[var(--color-primary-muted)]"
+                  >
+                    <Pencil size={11} />
+                    {isEditingNotes ? "保存" : "编辑"}
+                  </button>
+                )}
               </div>
               {isEditingNotes ? (
                 <textarea

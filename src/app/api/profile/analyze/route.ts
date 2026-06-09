@@ -1,7 +1,7 @@
 import { checkApiKey } from "@/lib/stream-utils";
 import { runProfileEngine } from "@/lib/server-profile-engine";
-import { getProfile, upsertProfile, getProfileGoals, querySignals } from "@/lib/server-db";
 import { getCurrentUser } from "@/lib/auth";
+import { getDataRepositories } from "@/lib/data-repositories";
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 
@@ -11,12 +11,13 @@ export async function POST(request: Request) {
 
   try {
     const user = await getCurrentUser();
+    const repos = getDataRepositories();
     const body = await request.json().catch(() => ({}));
     const force = body.force === true;
 
     // Incremental check: skip if updated within 24h and not forced
     if (!force) {
-      const existing = getProfile(user.userId);
+      const existing = await repos.profiles.get(user.userId);
       if (existing) {
         const lastUpdate = new Date(existing.last_updated).getTime();
         const hoursSince = (Date.now() - lastUpdate) / (1000 * 60 * 60);
@@ -37,18 +38,19 @@ export async function POST(request: Request) {
     }
 
     // Run server-side engine
-    const profile = await runProfileEngine({ force });
+    const profile = await runProfileEngine({ force, userId: user.userId });
 
     // Preserve existing goals (user-confirmed goals are not overwritten by engine)
-    const existingGoals = getProfileGoals(user.userId);
-    const existingRow = getProfile(user.userId);
+    const existingRow = await repos.profiles.get(user.userId);
+    const existingGoals = existingRow ? JSON.parse(existingRow.goals_json || "{}") : {};
     const existingHistory = existingRow ? JSON.parse(existingRow.history_json || "[]") : [];
 
     // Merge signal deal-breakers into goals.dealBreakers
-    const rawBreakers = querySignals({ signal_type: "dealbreaker", limit: 50 }, user.userId)
+    const rawBreakers = (await repos.signals.query({ signal_type: "dealbreaker", limit: 50 }, user.userId))
       .map((s) => {
         try {
           const c = typeof s.content_json === "string" ? JSON.parse(s.content_json) : s.content_json;
+          if ((c as { status?: string }).status === "rejected") return "";
           const raw = (c as { value?: string }).value || "";
           return raw.replace(/[，,。.！!、\s]+$/g, "").replace(/^[，,。.！!、\s]+/g, "").trim();
         } catch { return ""; }
@@ -82,7 +84,8 @@ export async function POST(request: Request) {
     // Merge: engine history + existing history, engine data, existing goals
     const mergedHistory = [...existingHistory, ...profile.history];
 
-    upsertProfile(
+    await repos.profiles.upsert(
+      user.userId,
       JSON.stringify({
         skills: profile.skills,
         preferences: profile.preferences,
@@ -90,7 +93,6 @@ export async function POST(request: Request) {
       }),
       JSON.stringify(mergedHistory),
       JSON.stringify(goalsToStore),
-      user.userId,
     );
 
     return Response.json({

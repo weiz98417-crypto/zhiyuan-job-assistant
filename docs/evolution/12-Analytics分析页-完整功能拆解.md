@@ -24,8 +24,8 @@
 
 ```
 Analytics 页面
-├─ 数据加载: 前端通过 Dexie wrapper 读取本地缓存
-│   └─ 唯一数据源: SQLite (后端 scripts/db-write.mjs 写入)
+├─ 数据加载: 优先通过 API 读取 SQLite，Dexie 作为本地 fallback
+│   └─ 唯一数据源: SQLite (server-db.ts/API routes 写入)
 ├─ 指标计算: 纯前端 (lib/analytics.ts)
 │   ├─ computeFunnel()     -- 漏斗分析
 │   ├─ analyzeFollowUps()  -- 跟进建议

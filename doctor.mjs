@@ -6,6 +6,7 @@
  */
 
 import { existsSync, mkdirSync, readdirSync } from 'fs';
+import { spawnSync } from 'child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -132,6 +133,31 @@ function checkFonts() {
   return { pass: true, label: 'Fonts directory ready' };
 }
 
+function checkPostgres() {
+  const wantsPostgres = (process.env.DB_DRIVER || '').toLowerCase() === 'postgres' || Boolean((process.env.DATABASE_URL || '').trim());
+  if (!wantsPostgres) {
+    return { pass: true, label: 'PostgreSQL foundation not configured (optional)' };
+  }
+
+  const result = spawnSync(process.execPath, [join(projectRoot, 'scripts', 'check-postgres.mjs')], {
+    env: process.env,
+    encoding: 'utf-8',
+  });
+
+  if (result.status === 0) {
+    return { pass: true, label: 'PostgreSQL connection and pgvector ready' };
+  }
+
+  return {
+    pass: false,
+    label: 'PostgreSQL connection or pgvector check failed',
+    fix: [
+      'Run: npm run check:postgres',
+      'Verify DATABASE_URL points to a reachable PostgreSQL instance with pgvector available',
+    ],
+  };
+}
+
 function checkAutoDir(name) {
   const dirPath = join(projectRoot, name);
   if (existsSync(dirPath)) {
@@ -161,6 +187,7 @@ async function main() {
     checkProfile(),
     checkPortals(),
     checkFonts(),
+    checkPostgres(),
     checkAutoDir('data'),
     checkAutoDir('output'),
     checkAutoDir('reports'),

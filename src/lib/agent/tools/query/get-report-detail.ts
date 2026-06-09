@@ -51,24 +51,27 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
       d: "D · 薪资与市场", e: "E · 定制化方案", f: "F · 面试准备", g: "G · 职位合法性",
     };
 
-    // Build llmSummary — full A-G content for LLM
-    const llmParts: string[] = [];
-    llmParts.push(`# ${d.company || "未知公司"} — ${d.role || "未知岗位"}`);
-    llmParts.push(`**${d.overall_score || "-"}/5** | ${d.archetype || ""} | ${d.date || ""}`);
-    llmParts.push(`报告编号: ${d.report_num || "-"}`);
+    // Build concise LLM summary. Full blocks stay in uiPayload/rawData, not chat context.
+    const blockHints: string[] = [];
     for (const key of ["a", "b", "c", "d", "e", "f", "g"]) {
       const block = blocks[key];
       if (!block) continue;
       const content = typeof block === "string" ? block : (block.content || "");
       if (!content.trim()) continue;
-      llmParts.push(`## ${labels[key] || key.toUpperCase()}`);
-      llmParts.push(content);
+      const oneLine = content.replace(/\s+/g, " ").slice(0, 120);
+      blockHints.push(`${labels[key] || key.toUpperCase()}: ${oneLine}${content.length > 120 ? "..." : ""}`);
     }
+    const llmSummary = [
+      `报告 #${d.report_num || "-"}: ${d.company || "未知公司"} — ${d.role || "未知岗位"}`,
+      `总分 ${d.overall_score || "-"}/5；类型 ${d.archetype || "未识别"}；日期 ${d.date || ""}`,
+      blockHints.length ? `板块摘要:\n${blockHints.join("\n")}` : "报告暂无板块内容。",
+      "完整 A-G 正文只在报告详情页展示。聊天里只输出摘要和入口，不要复述完整报告。",
+    ].join("\n");
 
     return {
       success: true,
       errorCategory: "ok",
-      llmSummary: llmParts.join("\n\n") || `报告 #${d.report_num} 内容为空`,
+      llmSummary,
       uiPayload: {
         type: "report_blocks",
         company: d.company,
@@ -100,5 +103,5 @@ export const getReportDetail: ToolDefinition = {
     reportNum: { type: "number", required: false, description: "报告编号（list=true 时不需要）" },
     list: { type: "boolean", required: false, description: "true=列出最近 20 份报告摘要（发现模式）" },
   },
-  category: "query", handler, formatResult, toolCtxCap: 8000,
+  category: "query", handler, formatResult, toolCtxCap: 1200,
 };

@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import path from "path";
 import fs from "fs";
+import { getDatabaseDriver } from "@/lib/postgres";
 
 const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), "data");
 const DB_PATH = path.join(DATA_DIR, "zhiyuan.db");
@@ -9,6 +10,9 @@ const SCHEMA_PATH = path.join(process.cwd(), "src", "lib", "server-schema.sql");
 let _db: Database.Database | null = null;
 
 export function getDb(): Database.Database {
+  if (getDatabaseDriver() === "postgres" && process.env.ALLOW_SQLITE_LEGACY !== "1") {
+    throw new Error("SQLite getDb() used while DB_DRIVER=postgres. Use data repositories for authoritative server data.");
+  }
   if (!_db) {
     const dir = path.dirname(DB_PATH);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -17,6 +21,45 @@ export function getDb(): Database.Database {
     _db.pragma("foreign_keys = ON");
     const schema = fs.readFileSync(SCHEMA_PATH, "utf-8");
     _db.exec(schema);
+
+    // Migration: jds.report_id stores the public report_num used by the UI,
+    // not the internal reports.id primary key.
+    const jdForeignKeys = _db.prepare("PRAGMA foreign_key_list(jds)").all() as { from: string; table: string; to: string }[];
+    const jdReportIdReferencesInternalId = jdForeignKeys.some(
+      (fk) => fk.from === "report_id" && fk.table === "reports" && fk.to === "id",
+    );
+    if (jdReportIdReferencesInternalId) {
+      _db.pragma("foreign_keys = OFF");
+      _db.exec(`
+        DROP TABLE IF EXISTS jds_new;
+        CREATE TABLE jds_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          company TEXT NOT NULL DEFAULT '',
+          role TEXT NOT NULL DEFAULT '',
+          source_type TEXT NOT NULL DEFAULT 'paste',
+          source_url TEXT,
+          body TEXT NOT NULL DEFAULT '',
+          keywords_json TEXT NOT NULL DEFAULT '[]',
+          report_id INTEGER REFERENCES reports(report_num),
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        INSERT INTO jds_new (id, company, role, source_type, source_url, body, keywords_json, report_id, created_at)
+        SELECT
+          j.id,
+          j.company,
+          j.role,
+          j.source_type,
+          j.source_url,
+          j.body,
+          j.keywords_json,
+          COALESCE((SELECT r.report_num FROM reports r WHERE r.id = j.report_id), j.report_id),
+          j.created_at
+        FROM jds j;
+        DROP TABLE jds;
+        ALTER TABLE jds_new RENAME TO jds;
+      `);
+      _db.pragma("foreign_keys = ON");
+    }
 
     // Migration: add goals_json column to existing profiles table
     const cols = _db.prepare("PRAGMA table_info(profiles)").all() as { name: string }[];
@@ -30,12 +73,23 @@ export function getDb(): Database.Database {
       _db.exec("ALTER TABLE optimization_preferences ADD COLUMN operation TEXT NOT NULL DEFAULT ''");
     }
 
-    // Migration: scan tables
+    // Migration: source hash for idempotent report persistence
+    const reportCols = _db.prepare("PRAGMA table_info(reports)").all() as { name: string }[];
+    if (!reportCols.some((c) => c.name === "source_hash")) {
+      _db.exec("ALTER TABLE reports ADD COLUMN source_hash TEXT NOT NULL DEFAULT ''");
+    }
+    _db.exec("CREATE INDEX IF NOT EXISTS idx_reports_source_hash ON reports(source_hash)");
+
+    // Migration: job discovery scan queue + discovered jobs
     _db.exec(`
       CREATE TABLE IF NOT EXISTS scan_queue (
         id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL REFERENCES users(id),
         status TEXT DEFAULT 'pending',
+        title_positive_json TEXT DEFAULT '[]',
+        title_negative_json TEXT DEFAULT '[]',
+        location_filter TEXT DEFAULT '',
+        max_results INTEGER DEFAULT 50,
         companies_total INTEGER DEFAULT 0,
         companies_done INTEGER DEFAULT 0,
         jobs_found INTEGER DEFAULT 0,
@@ -48,6 +102,7 @@ export function getDb(): Database.Database {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         scan_id TEXT NOT NULL REFERENCES scan_queue(id),
         user_id TEXT NOT NULL REFERENCES users(id),
+        jd_id INTEGER REFERENCES jds(id),
         company TEXT NOT NULL,
         title TEXT NOT NULL,
         url TEXT NOT NULL,
@@ -55,6 +110,7 @@ export function getDb(): Database.Database {
         department TEXT DEFAULT '',
         jd_snippet TEXT DEFAULT '',
         status TEXT DEFAULT 'new',
+        last_error TEXT DEFAULT '',
         dedup_key TEXT NOT NULL UNIQUE,
         first_seen_at TEXT DEFAULT (datetime('now')),
         last_interaction_at TEXT,
@@ -62,14 +118,38 @@ export function getDb(): Database.Database {
       );
       CREATE INDEX IF NOT EXISTS idx_scan_jobs_user_status ON scan_jobs(user_id, status);
       CREATE INDEX IF NOT EXISTS idx_scan_jobs_scan ON scan_jobs(scan_id);
+      CREATE INDEX IF NOT EXISTS idx_scan_jobs_jd ON scan_jobs(jd_id);
       CREATE INDEX IF NOT EXISTS idx_scan_queue_user ON scan_queue(user_id, status);
     `);
+
+    const scanQueueCols = _db.prepare("PRAGMA table_info(scan_queue)").all() as { name: string }[];
+    if (!scanQueueCols.some((c) => c.name === "title_positive_json")) {
+      _db.exec("ALTER TABLE scan_queue ADD COLUMN title_positive_json TEXT DEFAULT '[]'");
+    }
+    if (!scanQueueCols.some((c) => c.name === "title_negative_json")) {
+      _db.exec("ALTER TABLE scan_queue ADD COLUMN title_negative_json TEXT DEFAULT '[]'");
+    }
+    if (!scanQueueCols.some((c) => c.name === "location_filter")) {
+      _db.exec("ALTER TABLE scan_queue ADD COLUMN location_filter TEXT DEFAULT ''");
+    }
+    if (!scanQueueCols.some((c) => c.name === "max_results")) {
+      _db.exec("ALTER TABLE scan_queue ADD COLUMN max_results INTEGER DEFAULT 50");
+    }
+
+    const scanJobCols = _db.prepare("PRAGMA table_info(scan_jobs)").all() as { name: string }[];
+    if (!scanJobCols.some((c) => c.name === "jd_id")) {
+      _db.exec("ALTER TABLE scan_jobs ADD COLUMN jd_id INTEGER REFERENCES jds(id)");
+    }
+    if (!scanJobCols.some((c) => c.name === "last_error")) {
+      _db.exec("ALTER TABLE scan_jobs ADD COLUMN last_error TEXT DEFAULT ''");
+    }
+    _db.exec("CREATE INDEX IF NOT EXISTS idx_scan_jobs_jd ON scan_jobs(jd_id)");
 
     // Migration: multi-user auth — add user_id to private + attribution tables
     const userTables = [
       'profiles', 'profile_signals', 'sessions', 'stories', 'cv_data',
       'applications', 'agent_preferences', 'session_memory',
-      'optimization_preferences', 'reports',
+      'optimization_preferences', 'reports', 'jds', 'reference_resumes',
     ];
     for (const table of userTables) {
       const tCols = _db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
@@ -77,6 +157,78 @@ export function getDb(): Database.Database {
         _db.exec(`ALTER TABLE ${table} ADD COLUMN user_id TEXT REFERENCES users(id)`);
       }
     }
+
+    const sessionCols = _db.prepare("PRAGMA table_info(sessions)").all() as { name: string }[];
+    if (!sessionCols.some((c) => c.name === "interview_state_json")) {
+      _db.exec("ALTER TABLE sessions ADD COLUMN interview_state_json TEXT NOT NULL DEFAULT '{}'");
+    }
+    if (!sessionCols.some((c) => c.name === "agent_state_json")) {
+      _db.exec("ALTER TABLE sessions ADD COLUMN agent_state_json TEXT NOT NULL DEFAULT '{}'");
+    }
+
+    const referenceResumeCols = _db.prepare("PRAGMA table_info(reference_resumes)").all() as { name: string }[];
+    const referenceResumeMigrations = [
+      ["role_category", "ALTER TABLE reference_resumes ADD COLUMN role_category TEXT NOT NULL DEFAULT ''"],
+      ["industry_tags", "ALTER TABLE reference_resumes ADD COLUMN industry_tags TEXT NOT NULL DEFAULT '[]'"],
+      ["seniority", "ALTER TABLE reference_resumes ADD COLUMN seniority TEXT NOT NULL DEFAULT ''"],
+      ["visibility", "ALTER TABLE reference_resumes ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private'"],
+      ["status", "ALTER TABLE reference_resumes ADD COLUMN status TEXT NOT NULL DEFAULT 'active'"],
+      ["quality_score", "ALTER TABLE reference_resumes ADD COLUMN quality_score REAL NOT NULL DEFAULT 0"],
+      ["anonymized", "ALTER TABLE reference_resumes ADD COLUMN anonymized INTEGER NOT NULL DEFAULT 0"],
+      ["shared_text_redacted", "ALTER TABLE reference_resumes ADD COLUMN shared_text_redacted TEXT NOT NULL DEFAULT ''"],
+      ["source_hash", "ALTER TABLE reference_resumes ADD COLUMN source_hash TEXT NOT NULL DEFAULT ''"],
+      ["metadata_json", "ALTER TABLE reference_resumes ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'"],
+      ["approved_by", "ALTER TABLE reference_resumes ADD COLUMN approved_by TEXT"],
+      ["approved_at", "ALTER TABLE reference_resumes ADD COLUMN approved_at TEXT"],
+      ["updated_at", "ALTER TABLE reference_resumes ADD COLUMN updated_at TEXT NOT NULL DEFAULT (datetime('now'))"],
+    ];
+    for (const [name, sql] of referenceResumeMigrations) {
+      if (!referenceResumeCols.some((c) => c.name === name)) _db.exec(sql);
+    }
+    _db.exec("CREATE INDEX IF NOT EXISTS idx_reference_resumes_user ON reference_resumes(user_id, created_at)");
+    _db.exec("CREATE INDEX IF NOT EXISTS idx_reference_resumes_visibility ON reference_resumes(visibility, status, role_category)");
+    _db.exec("CREATE INDEX IF NOT EXISTS idx_reference_resumes_hash ON reference_resumes(source_hash)");
+
+    const offerCols = _db.prepare("PRAGMA table_info(offers)").all() as { name: string }[];
+    const offerMigrations = [
+      ["employment_form", "ALTER TABLE offers ADD COLUMN employment_form TEXT NOT NULL DEFAULT 'unknown'"],
+      ["employer_name", "ALTER TABLE offers ADD COLUMN employer_name TEXT"],
+      ["contract_months", "ALTER TABLE offers ADD COLUMN contract_months INTEGER"],
+      ["overtime_policy", "ALTER TABLE offers ADD COLUMN overtime_policy TEXT NOT NULL DEFAULT 'unknown'"],
+      ["bonus_guarantee", "ALTER TABLE offers ADD COLUMN bonus_guarantee TEXT NOT NULL DEFAULT 'unknown'"],
+      ["equity_type", "ALTER TABLE offers ADD COLUMN equity_type TEXT"],
+      ["equity_vesting", "ALTER TABLE offers ADD COLUMN equity_vesting TEXT"],
+      ["commute_minutes", "ALTER TABLE offers ADD COLUMN commute_minutes INTEGER"],
+      ["city_cost_level", "ALTER TABLE offers ADD COLUMN city_cost_level TEXT NOT NULL DEFAULT 'unknown'"],
+      ["job_nature", "ALTER TABLE offers ADD COLUMN job_nature TEXT"],
+      ["latest_report_id", "ALTER TABLE offers ADD COLUMN latest_report_id INTEGER"],
+      ["updated_at", "ALTER TABLE offers ADD COLUMN updated_at TEXT NOT NULL DEFAULT (datetime('now'))"],
+    ];
+    for (const [name, sql] of offerMigrations) {
+      if (!offerCols.some((c) => c.name === name)) _db.exec(sql);
+    }
+
+    const offerReportCols = _db.prepare("PRAGMA table_info(offer_reports)").all() as { name: string }[];
+    const offerReportMigrations = [
+      ["report_type", "ALTER TABLE offer_reports ADD COLUMN report_type TEXT NOT NULL DEFAULT 'comparison'"],
+      ["model_version", "ALTER TABLE offer_reports ADD COLUMN model_version TEXT NOT NULL DEFAULT ''"],
+      ["offer_id", "ALTER TABLE offer_reports ADD COLUMN offer_id INTEGER REFERENCES offers(id)"],
+      ["overall_score", "ALTER TABLE offer_reports ADD COLUMN overall_score REAL NOT NULL DEFAULT 0"],
+      ["verdict", "ALTER TABLE offer_reports ADD COLUMN verdict TEXT NOT NULL DEFAULT ''"],
+      ["summary", "ALTER TABLE offer_reports ADD COLUMN summary TEXT NOT NULL DEFAULT ''"],
+      ["offer_snapshot_json", "ALTER TABLE offer_reports ADD COLUMN offer_snapshot_json TEXT NOT NULL DEFAULT '{}'"],
+      ["modules_json", "ALTER TABLE offer_reports ADD COLUMN modules_json TEXT NOT NULL DEFAULT '[]'"],
+      ["red_flags_json", "ALTER TABLE offer_reports ADD COLUMN red_flags_json TEXT NOT NULL DEFAULT '[]'"],
+      ["missing_info_json", "ALTER TABLE offer_reports ADD COLUMN missing_info_json TEXT NOT NULL DEFAULT '[]'"],
+      ["negotiation_levers_json", "ALTER TABLE offer_reports ADD COLUMN negotiation_levers_json TEXT NOT NULL DEFAULT '[]'"],
+      ["hr_questions_json", "ALTER TABLE offer_reports ADD COLUMN hr_questions_json TEXT NOT NULL DEFAULT '[]'"],
+      ["assumptions_json", "ALTER TABLE offer_reports ADD COLUMN assumptions_json TEXT NOT NULL DEFAULT '[]'"],
+      ["take_home_json", "ALTER TABLE offer_reports ADD COLUMN take_home_json TEXT NOT NULL DEFAULT '{}'"],
+    ];
+    for (const [name, sql] of offerReportMigrations) {
+      if (!offerReportCols.some((c) => c.name === name)) _db.exec(sql);
+    }
+    _db.exec("CREATE INDEX IF NOT EXISTS idx_offer_reports_offer ON offer_reports(offer_id, created_at)");
   }
   return _db;
 }
@@ -116,7 +268,7 @@ export function upsertApp(app: AppRow, userId?: string): void {
 
 export interface ReportRow {
   id?: number; report_num: number; date: string; company: string; role: string;
-  archetype: string; overall_score: number; legitimacy: string; blocks_json: string; keywords_json: string;
+  archetype: string; overall_score: number; legitimacy: string; blocks_json: string; keywords_json: string; source_hash?: string; created_at?: string;
 }
 
 export function listReports(userId?: string): ReportRow[] {
@@ -132,30 +284,63 @@ export function getReport(reportNum: number): ReportRow | undefined {
 
 export function upsertReport(r: ReportRow, userId?: string): void {
   getDb().prepare(`
-    INSERT INTO reports (user_id, report_num, date, company, role, archetype, overall_score, legitimacy, blocks_json, keywords_json)
-    VALUES (@userId, @report_num, @date, @company, @role, @archetype, @overall_score, @legitimacy, @blocks_json, @keywords_json)
+    INSERT INTO reports (user_id, report_num, date, company, role, archetype, overall_score, legitimacy, blocks_json, keywords_json, source_hash)
+    VALUES (@userId, @report_num, @date, @company, @role, @archetype, @overall_score, @legitimacy, @blocks_json, @keywords_json, @source_hash)
     ON CONFLICT(report_num) DO UPDATE SET
+      date=excluded.date, company=excluded.company, role=excluded.role, archetype=excluded.archetype,
       overall_score=excluded.overall_score, legitimacy=excluded.legitimacy,
-      blocks_json=excluded.blocks_json, keywords_json=excluded.keywords_json
-  `).run({ ...r, userId: userId || null });
+      blocks_json=excluded.blocks_json, keywords_json=excluded.keywords_json,
+      source_hash=excluded.source_hash
+  `).run({ ...r, source_hash: r.source_hash || "", userId: userId || null });
 }
 
 /* ── JDs ── */
 
 export interface JDRow {
-  id?: number; company: string; role: string; source_type: string;
-  source_url?: string; body: string; keywords_json: string; report_id?: number;
+  id?: number; user_id?: string | null; company: string; role: string; source_type: string;
+  source_url?: string; body: string; keywords_json: string; report_id?: number; created_at?: string;
 }
 
 export function listJDs(): JDRow[] {
   return getDb().prepare("SELECT * FROM jds ORDER BY id DESC").all() as JDRow[];
 }
 
-export function insertJD(jd: JDRow): void {
-  getDb().prepare(`
-    INSERT INTO jds (company, role, source_type, source_url, body, keywords_json, report_id)
-    VALUES (@company, @role, @source_type, @source_url, @body, @keywords_json, @report_id)
-  `).run(jd);
+export function getJD(id: number): JDRow | undefined {
+  return getDb().prepare("SELECT * FROM jds WHERE id = ?").get(id) as JDRow | undefined;
+}
+
+export function insertJD(jd: JDRow, userId?: string): number {
+  const result = getDb().prepare(`
+    INSERT INTO jds (user_id, company, role, source_type, source_url, body, keywords_json, report_id)
+    VALUES (@user_id, @company, @role, @source_type, @source_url, @body, @keywords_json, @report_id)
+  `).run({
+    ...jd,
+    user_id: userId || jd.user_id || null,
+    source_url: jd.source_url || "",
+    report_id: jd.report_id ?? null,
+  });
+  return Number(result.lastInsertRowid);
+}
+
+function normalizeBodyForMatch(body: string): string {
+  return body.replace(/\s+/g, " ").trim().slice(0, 500).toLowerCase();
+}
+
+export function findReusableJD(input: { source_url?: string; body?: string }, userId?: string): JDRow | undefined {
+  const db = getDb();
+  if (input.source_url) {
+    const byUrl = userId
+      ? db.prepare("SELECT * FROM jds WHERE source_url = ? AND (user_id = ? OR user_id IS NULL) ORDER BY id DESC LIMIT 1").get(input.source_url, userId) as JDRow | undefined
+      : db.prepare("SELECT * FROM jds WHERE source_url = ? ORDER BY id DESC LIMIT 1").get(input.source_url) as JDRow | undefined;
+    if (byUrl) return byUrl;
+  }
+
+  const normalized = normalizeBodyForMatch(input.body || "");
+  if (!normalized) return undefined;
+  const rows = (userId
+    ? db.prepare("SELECT * FROM jds WHERE body != '' AND (user_id = ? OR user_id IS NULL) ORDER BY id DESC LIMIT 200").all(userId)
+    : db.prepare("SELECT * FROM jds WHERE body != '' ORDER BY id DESC LIMIT 200").all()) as JDRow[];
+  return rows.find((row) => normalizeBodyForMatch(row.body) === normalized);
 }
 
 /* ── Profiles ── */
@@ -315,36 +500,80 @@ export function clearProfileSignals(): number {
 
 export interface ReferenceResumeRow {
   id: number;
+  user_id?: string | null;
   name: string;
   source: string;
   sections_json: string;
   raw_text: string;
   tags: string;
   notes: string;
+  role_category?: string;
+  industry_tags?: string;
+  seniority?: string;
+  visibility?: string;
+  status?: string;
+  quality_score?: number;
+  anonymized?: number | boolean;
+  shared_text_redacted?: string;
+  source_hash?: string;
+  metadata_json?: string;
+  approved_by?: string | null;
+  approved_at?: string | null;
+  updated_at?: string;
   created_at: string;
 }
 
 export interface ReferenceResumeSummary {
   id: number;
+  user_id?: string | null;
   name: string;
   source: string;
   tags: string;
   notes: string;
+  role_category?: string;
+  visibility?: string;
+  status?: string;
+  quality_score?: number;
+  anonymized?: number | boolean;
   created_at: string;
+  updated_at?: string;
 }
 
-export function insertReferenceResume(r: {
+export interface ReferenceResumeInsertInput {
   name: string;
   source: string;
   sections_json: string;
   raw_text: string;
   tags?: string;
   notes?: string;
-}): number {
+  role_category?: string;
+  industry_tags?: string;
+  seniority?: string;
+  visibility?: string;
+  status?: string;
+  quality_score?: number;
+  anonymized?: number | boolean;
+  shared_text_redacted?: string;
+  source_hash?: string;
+  metadata_json?: string;
+  approved_by?: string | null;
+  approved_at?: string | null;
+  created_at: string;
+}
+
+export function insertReferenceResume(r: Omit<ReferenceResumeInsertInput, "created_at">): number {
   const db = getDb();
   const result = db.prepare(`
-    INSERT INTO reference_resumes (name, source, sections_json, raw_text, tags, notes)
-    VALUES (@name, @source, @sections_json, @raw_text, @tags, @notes)
+    INSERT INTO reference_resumes (
+      name, source, sections_json, raw_text, tags, notes, role_category,
+      industry_tags, seniority, visibility, status, quality_score, anonymized,
+      shared_text_redacted, source_hash, metadata_json, approved_by, approved_at
+    )
+    VALUES (
+      @name, @source, @sections_json, @raw_text, @tags, @notes, @role_category,
+      @industry_tags, @seniority, @visibility, @status, @quality_score, @anonymized,
+      @shared_text_redacted, @source_hash, @metadata_json, @approved_by, @approved_at
+    )
   `).run({
     name: r.name,
     source: r.source,
@@ -352,6 +581,18 @@ export function insertReferenceResume(r: {
     raw_text: r.raw_text,
     tags: r.tags || "[]",
     notes: r.notes || "",
+    role_category: r.role_category || "",
+    industry_tags: r.industry_tags || "[]",
+    seniority: r.seniority || "",
+    visibility: r.visibility || "private",
+    status: r.status || "active",
+    quality_score: r.quality_score || 0,
+    anonymized: r.anonymized ? 1 : 0,
+    shared_text_redacted: r.shared_text_redacted || "",
+    source_hash: r.source_hash || "",
+    metadata_json: r.metadata_json || "{}",
+    approved_by: r.approved_by || null,
+    approved_at: r.approved_at || null,
   });
   return result.lastInsertRowid as number;
 }

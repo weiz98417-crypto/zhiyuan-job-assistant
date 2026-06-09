@@ -28,6 +28,14 @@ export interface InterviewSession {
   id: string;
   company: string;
   role: string;
+  sourceBinding?: {
+    jdId?: number;
+    reportNum?: number;
+    resumeId?: number;
+    jdText?: string;
+    cvText?: string;
+    memoryContext?: string;
+  };
   phase: InterviewPhase;
   questionIndex: number;
   questions: InterviewQuestion[];
@@ -40,11 +48,12 @@ const PHASE_ORDER: InterviewPhase[] = ["intro", "tech", "tech", "tech", "behavio
 const PHASE_QUESTION_COUNTS: Record<string, number> = { intro: 1, tech: 3, behavioral: 2, reverse: 3, summary: 0 };
 
 /** Create a new interview session */
-export function createSession(company: string, role: string): InterviewSession {
+export function createSession(company: string, role: string, sourceBinding?: InterviewSession["sourceBinding"]): InterviewSession {
   return {
     id: `iv_${Date.now()}`,
     company,
     role,
+    sourceBinding,
     phase: "intro",
     questionIndex: 0,
     questions: [],

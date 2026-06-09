@@ -41,6 +41,7 @@ export default function SessionList({
 
   function renderItem(session: ChatSession) {
     const isActive = session.id === currentSessionId;
+    const title = session.title?.trim() || "新对话";
 
     return (
       <motion.div
@@ -49,39 +50,43 @@ export default function SessionList({
         animate={{ opacity: 1, x: 0 }}
         exit={{ opacity: 0, x: -12 }}
         transition={{ duration: 0.2 }}
-        className={`group relative rounded-[var(--radius-md)] cursor-pointer transition-colors overflow-hidden ${
+        className={`group relative rounded-[var(--radius-md)] cursor-pointer transition-colors ${
           isActive
             ? "bg-[var(--color-primary-muted)] border border-[var(--color-primary)]/20"
             : "hover:bg-[var(--color-bg)] border border-transparent"
         }`}
         onClick={() => onSelect(session.id!)}
       >
-        <div className="flex items-center gap-1 px-2.5 py-1.5">
-          <span className="text-xs font-medium text-[var(--color-text)] truncate min-w-0 flex-1">
-            {session.title}
+        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-1 px-2.5 py-1.5">
+          <span className="min-w-0 truncate text-xs font-medium text-[var(--color-text)]" title={title}>
+            {title}
           </span>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onPin(session.id!, !session.pinned);
-            }}
-            className={`p-0.5 rounded hover:bg-[var(--color-divider)] flex-shrink-0 ${
-              session.pinned ? "text-[var(--color-primary)]" : "text-[var(--color-muted)] hover:text-[var(--color-text)]"
-            }`}
-            title={session.pinned ? "取消置顶" : "置顶"}
-          >
-            <Pin size={11} />
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete(session.id!);
-            }}
-            className="p-0.5 rounded hover:bg-red-100 dark:hover:bg-red-900/20 text-[var(--color-muted)] hover:text-red-500 flex-shrink-0"
-            title="删除会话"
-          >
-            <Trash2 size={11} />
-          </button>
+          <div className="flex items-center gap-0.5 flex-shrink-0">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onPin(session.id!, !session.pinned);
+              }}
+              className={`p-1 rounded hover:bg-[var(--color-divider)] ${
+                session.pinned ? "text-[var(--color-primary)]" : "text-[var(--color-muted)] hover:text-[var(--color-text)]"
+              }`}
+              title={session.pinned ? "取消置顶" : "置顶"}
+              aria-label={session.pinned ? "取消置顶" : "置顶"}
+            >
+              <Pin size={12} />
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(session.id!);
+              }}
+              className="p-1 rounded text-[var(--color-muted)] hover:bg-red-100 hover:text-red-500 dark:hover:bg-red-900/20"
+              title="删除对话"
+              aria-label="删除对话"
+            >
+              <Trash2 size={12} />
+            </button>
+          </div>
         </div>
       </motion.div>
     );
@@ -89,7 +94,6 @@ export default function SessionList({
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
       <div className="flex items-center justify-between px-2.5 py-2 border-b border-[var(--color-divider)]">
         <span className="text-xs font-semibold text-[var(--color-text)]">对话</span>
         <button
@@ -101,7 +105,6 @@ export default function SessionList({
         </button>
       </div>
 
-      {/* Search */}
       <div className="px-2.5 py-1.5">
         <div className="relative">
           <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-[var(--color-muted)]" />
@@ -122,7 +125,6 @@ export default function SessionList({
         </div>
       </div>
 
-      {/* List */}
       <div className="flex-1 overflow-y-auto px-1.5 py-1 space-y-0.5">
         <AnimatePresence>
           {pinnedSessions.length > 0 && (
@@ -141,7 +143,6 @@ export default function SessionList({
         )}
       </div>
 
-      {/* Undo Toast */}
       <AnimatePresence>
         {showUndoToast && (
           <motion.div
@@ -150,7 +151,7 @@ export default function SessionList({
             exit={{ opacity: 0, y: 16 }}
             className="fixed bottom-4 left-72 bg-[var(--color-surface-raised)] border border-[var(--color-border)] rounded-[var(--radius-md)] px-3 py-2 shadow-lg flex items-center justify-between z-50 max-w-sm"
           >
-            <span className="text-xs text-[var(--color-text)]">
+            <span className="min-w-0 truncate text-xs text-[var(--color-text)]">
               已删除 · {showUndoToast.title}
             </span>
             <button

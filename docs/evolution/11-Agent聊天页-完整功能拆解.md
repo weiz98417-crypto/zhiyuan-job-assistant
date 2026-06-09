@@ -25,8 +25,8 @@
 │                          │                     │            │
 │                          ▼                     ▼            │
 │  ┌───────────────────────────────────────────────────────┐  │
-│  │              38 工具 (ToolRegistry)                    │  │
-│  │  Query(13) │ Action(18) │ Interview(2) │ MCP(5)        │  │
+│  │              43 工具 (ToolRegistry)                    │  │
+│  │  Query(15) │ Action(21) │ Interview(2) │ MCP(5)        │  │
 │  └───────────────────────────────────────────────────────┘  │
 │                          │                     │            │
 │                          ▼                     ▼            │
@@ -56,14 +56,14 @@
 |---|------|------|--------|
 | 1 | 意图分类路由 | `orchestrator/classifyIntent()` -- 6 个 Agent | 用户输入 |
 | 2 | 6 子 Agent 系统 | Agent Registry + 各自 System Prompt | Career DNA + Knowledge |
-| 3 | 38 工具生态 | ToolRegistry + 工具展示名 | 内部 + 外部 API |
+| 3 | 43 工具生态 | ToolRegistry + 工具展示名 | 内部 + 外部 API |
 | 4 | 双 Agent Loop | server-runner.ts / client-runner.ts | DeepSeek API (SSE) |
 | 5 | 流式响应 + 阶段指示 | AgentChat SSE events + 阶段状态栏 | `/api/agent/run` |
 | 6 | 会话管理 (SQLite) | 创建/列表/切换/删除/恢复/Pin | SQLite sessions 表 |
 | 7 | 分层记忆系统 | Layer 1 Working / Layer 2 Episodic / Layer 3 Semantic | SQLite |
 | 8 | 记忆摘要生成 | `memory/coordinator.ts` → DeepSeek 摘要 | SQLite |
 | 9 | 工具调用日志 + 阶段展示 | AgentChat 内联 ToolCallLog + Phase 指示器 | Agent Loop 输出 |
-| 10 | 工具展示名系统 | `tool-display-names.ts` (38 映射) | 硬编码 |
+| 10 | 工具展示名系统 | `tool-display-names.ts` (43 映射) | 硬编码 |
 | 11 | Claude 活动上下文 | `getClaudeAgentActivity()` | `/api/agent/claude-activity` → SQLite |
 | 12 | Agent 选择切换 | 自动路由 + AgentSelector | 6 个 Agent |
 | 13 | 建议快捷词 | `SuggestionChips` 组件 | 各 Agent 预设快捷提问 |
@@ -109,10 +109,11 @@ export async function orchestrate(content, ctx): OrchestratorResult {
 
 | Agent | ID | Priority | 工具白名单 | 触发词示例 |
 |-------|-----|----------|-----------|-----------|
-| 面试教练 | `interview` | 10 | `generate_interview_questions`, `score_interview_answer`, `web_search`, `get_profile`, `start_interview_session`, `prepare_interview_full` | "面试"/"模拟面试"/"准备面试" |
-| JD 评估 | `evaluate` | 10 | `evaluate_jd`, `evaluate_jd_full`, `fetch_jd_content`, `web_search`, `analyze_jd_risks`, `decode_black_market_terms` | "评估"/"分析JD"/"这个岗位" |
+| 面试教练 | `interview` | 10 | `generate_interview_questions`, `score_interview_answer`, `start_interview_session`, `prepare_interview_full`, `read_file`, `get_recent_jd_context`, `search_applications`, `get_report_detail` | "面试"/"模拟面试"/"准备面试" |
+| JD 评估 | `evaluate` | 10 | `evaluate_jd_full`, `get_recent_jd_context`, `read_file`, `get_profile`, `fetch_jd_content`, `analyze_jd_risks`, `decode_black_market_terms`, `get_report_detail`, `update_report_metadata`, `export_file`, `download_report_pdf` | "评估"/"分析JD"/"这个岗位" |
 | 求职画像 | `profile` | 10 | `mine_profile`, `get_profile`, `self_positioning`, `get_profile_insights`, `detect_skill_gaps`, `web_search` | "定位"/"方向"/"我适合" |
 | 简历 Agent | `resume` | 8 | `import_resume`, `generate_cv`, `evaluate_jd`, `export_file`, `get_profile`, `optimize_resume_section`, `save_resume_section`, `check_ats_compatibility` | "简历"/"CV"/"修改简历" |
+| Offer 顾问 | `offer` | 11 | `evaluate_offer`, `read_offer_report`, `generate_offer_negotiation_strategy`, `generate_offer_hr_question_list`, `compare_offers_deep`, `export_file`, `download_report_pdf` | "offer"/"对比offer"/"怎么谈" |
 | 通用助手 | `general` | 1 | 全部工具（无限制） | 兜底 |
 
 **Agent 定义接口** (`registry/types.ts`):
@@ -144,17 +145,20 @@ interface AgentDefinition {
 6. Semantic Context: 跨会话事实 → 语义记忆层
 ```
 
-### 3. 工具生态系统 (38 Tools)
+### 3. 工具生态系统 (43 Tools)
 
 所有工具注册在 `src/lib/agent/tools/index.ts`，统一通过 `ToolRegistry` 管理。
 
-**Query 工具 (13)** -- 只读查询：
+**Query 工具 (15)** -- 只读查询：
 | 工具名 | 功能 | 展示标签 |
 |--------|------|---------|
 | `search_applications` | 搜索投递记录 | 📋 搜索投递记录 |
 | `get_report_detail` | 查看评估报告详情 | 📊 查看评估报告 |
+| `get_reference_detail` | 查看参考简历详情 | 📚 参考简历详情 |
+| `read_file` | 读取简历/报告/参考资料 | 📖 读取文件 |
 | `get_profile` | 读取求职画像 | 👤 读取求职画像 |
 | `get_recent_activity` | 查看近期活动 | 🕐 近期活动 |
+| `get_recent_jd_context` | 读取最近保存 JD | 🧾 最近 JD |
 | `get_recommendations` | 推荐适合岗位 | 💼 岗位推荐 |
 | `get_pipeline_status` | 查看管道状态 | 📡 Pipeline 状态 |
 | `decode_black_market_terms` | 黑话术语解码 | 🔓 黑话解码 |
@@ -162,8 +166,9 @@ interface AgentDefinition {
 | `get_profile_insights` | 个人画像洞察 | 📊 画像洞察 |
 | `detect_skill_gaps` | 技能缺口分析 | 🔍 技能缺口分析 |
 | `check_ats_compatibility` | ATS 兼容检查 | 🤖 ATS 兼容检查 |
+| `read_offer_report` | 读取 Offer 报告 | 📄 读取 Offer 报告 |
 
-**Action 工具 (18)** -- 有副作用的操作：
+**Action 工具 (21)** -- 有副作用的操作：
 | 工具名 | 功能 | 展示标签 |
 |--------|------|---------|
 | `evaluate_jd` | 基本 JD 评估 | 🔍 评估 JD |
@@ -182,7 +187,11 @@ interface AgentDefinition {
 | `mine_profile` | 自定位挖掘 (dingwei SOP) | ⛏️ 挖掘画像 |
 | `self_positioning` | 自我定位引导 | 🧭 自我定位引导 |
 | `prepare_interview_full` | 面试全案准备 | 🎯 面试全案准备 |
+| `generate_offer_negotiation_strategy` | 生成 Offer 谈判策略 | 💬 生成谈判策略 |
+| `generate_offer_hr_question_list` | 生成 HR 问题清单 | 🧾 HR 问题清单 |
 | `start_interview_session` | 启动模拟面试 | 🎙️ 启动模拟面试 |
+| `download_report_pdf` | 导出评估报告 PDF | 🖨️ 导出报告 PDF |
+| `update_report_metadata` | 更新报告公司/岗位/关键词 | ✏️ 更新报告信息 |
 
 **Interview 工具 (2)** -- 面试教练专用：
 | 工具名 | 功能 | 展示标签 |
@@ -416,7 +425,7 @@ Agent 执行过程中的工具调用链实时展示在聊天流中：
 将下划线命名（`evaluate_jd_full`）映射为中文标签（"JD 完整评估"）和 emoji（🛡️）：
 
 ```typescript
-// 38 条映射
+// 43 条映射
 const TOOL_DISPLAY: Record<string, ToolDisplay> = {
   evaluate_jd_full:     { label: "JD 完整评估",  emoji: "🛡️" },
   analyze_jd_risks:     { label: "JD 风险扫描",  emoji: "⚠️" },

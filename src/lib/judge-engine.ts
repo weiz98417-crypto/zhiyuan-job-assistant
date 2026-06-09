@@ -4,6 +4,8 @@
 import type { Operation } from "@/types";
 import { getReferenceResume, getRecentPreferences } from "@/lib/server-db";
 import { injectRoleWritingGuide } from "@/lib/agent/knowledge/role-writing-guides";
+import type { ReferenceResumeSnippet } from "@/lib/reference-resume-vector";
+import type { ExcellentResumePatternMemory } from "@/lib/excellent-resume-patterns";
 
 interface TargetJD {
   role: string;
@@ -140,7 +142,12 @@ export function buildReferencePrompt(refIds?: number[], sectionId?: string, enab
   const refFullCV: string[] = [];
 
   for (const refId of refIds.slice(0, 3)) {
-    const ref = getReferenceResume(refId);
+    let ref;
+    try {
+      ref = getReferenceResume(refId);
+    } catch {
+      continue;
+    }
     if (!ref) continue;
     const sections = JSON.parse(ref.sections_json || "[]") as { id: string; title: string; content: string }[];
 
@@ -198,6 +205,50 @@ ${refFullCV.join("\n\n---\n\n")}
 ${enablePlaceholders ? "用 [XX] 占位符标注需要用户确认的量化数据。" : "用自然语言描述推断的量化数据，不要使用 [XX] 占位符。"}
 
 ${refSections.length > 0 ? `### 当前板块参考\n${refSections[0].slice(0, 2000)}\n` : ""}`;
+}
+
+export function buildSemanticReferencePrompt(snippets?: ReferenceResumeSnippet[]): string {
+  if (!snippets?.length) return "";
+  const lines = snippets.slice(0, 5).map((snippet, index) => `### Reference pattern ${index + 1}: ${snippet.name} / ${snippet.sectionType}
+- role: ${snippet.roleCategory || "general"}
+- similarity: ${snippet.similarity.toFixed(2)}, quality: ${snippet.score.toFixed(2)}
+- transferable pattern:
+${snippet.snippet}`);
+
+  return `## Shared Excellent Resume Reference Patterns
+
+The following snippets come from approved or private excellent resumes. Use them as style, structure, keyword coverage, and achievement-expression guidance.
+
+Rules:
+- Do not copy the reference wording verbatim.
+- Preserve the user's actual facts and scope.
+- Transfer the writing pattern: context, decision logic, action detail, metric framing, and result clarity.
+- If a reference conflicts with the JD or the user's facts, prefer the JD and user's facts.
+
+${lines.join("\n\n")}`;
+}
+
+export function buildExcellentResumePatternMemoryPrompt(patterns?: ExcellentResumePatternMemory[]): string {
+  if (!patterns?.length) return "";
+  const lines = patterns.slice(0, 6).map((pattern, index) => {
+    const role = typeof pattern.metadata.roleCategory === "string" ? pattern.metadata.roleCategory : "general";
+    const section = typeof pattern.metadata.sectionTitle === "string" ? pattern.metadata.sectionTitle : "";
+    return `### Abstract pattern ${index + 1}${section ? ` / ${section}` : ""}
+- role: ${role}
+- confidence: ${pattern.confidence.toFixed(2)}, importance: ${pattern.importance.toFixed(2)}
+- writing move: ${pattern.canonicalText}`;
+  });
+
+  return `## Excellent Resume Abstract Pattern Memory
+
+These are abstract writing patterns learned from saved excellent resumes. They are not facts about the current user.
+
+Rules:
+- Use these patterns only to improve structure, specificity, metric framing, and story logic.
+- Do not copy source wording or invent facts.
+- If a pattern conflicts with the current CV or JD, prefer the user's current CV and JD.
+
+${lines.join("\n\n")}`;
 }
 
 /* ── Preference Prompt ── */
@@ -277,6 +328,8 @@ export interface JudgePromptParams {
   };
   roleDirection?: string;
   questionAnswers?: { question: string; answer: string }[];
+  referenceSnippets?: ReferenceResumeSnippet[];
+  patternMemory?: ExcellentResumePatternMemory[];
 }
 
 export function buildJudgePrompt(params: JudgePromptParams): string {
@@ -293,6 +346,8 @@ export function buildJudgePrompt(params: JudgePromptParams): string {
     userProfile,
     roleDirection,
     questionAnswers,
+    referenceSnippets,
+    patternMemory,
   } = params;
 
   // Build CV context
@@ -340,6 +395,8 @@ ${questionAnswers.map(qa => `- **${qa.question}** → ${qa.answer}`).join("\n")}
     buildOperationPrompt(operation, enablePlaceholders),
     buildJDFilterPrompt(targetJD),
     buildReferencePrompt(referenceIds, sectionId, enablePlaceholders),
+    buildSemanticReferencePrompt(referenceSnippets),
+    buildExcellentResumePatternMemoryPrompt(patternMemory),
     buildPreferencePrompt(),
     buildEffortPrompt(effort, enablePlaceholders),
     buildPlaceholderRules(enablePlaceholders, effort),

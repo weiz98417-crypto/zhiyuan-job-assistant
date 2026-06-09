@@ -71,6 +71,26 @@ node cv-sync-check.mjs      # Check configuration
 node verify-pipeline.mjs     # Check pipeline integrity
 ```
 
+## PostgreSQL Foundation (Optional for Now)
+
+If you want to prepare the PostgreSQL + pgvector foundation work, configure:
+
+```bash
+DATABASE_URL=postgresql://user:password@localhost:5432/zhiyuan
+DB_DRIVER=sqlite
+POSTGRES_SCHEMA_PATH=src/lib/postgres-schema.sql
+```
+
+Then verify connectivity:
+
+```bash
+npm run check:postgres
+```
+
+The app still runs on SQLite until the cutover change is applied, so this step only prepares the future database foundation.
+
+When you are ready to copy existing SQLite data into PostgreSQL without changing the runtime driver, follow [POSTGRES_MIGRATION.md](POSTGRES_MIGRATION.md).
+
 ## Build Dashboard (Optional)
 
 ```bash

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { useToast } from '@/lib/use-toast';
 
 interface UserItem {
@@ -15,6 +16,7 @@ interface UserItem {
 }
 
 export default function AdminUsersPage() {
+  const router = useRouter();
   const [users, setUsers] = useState<UserItem[]>([]);
   const [filter, setFilter] = useState<string>('all');
   const [loading, setLoading] = useState(true);
@@ -26,6 +28,18 @@ export default function AdminUsersPage() {
     loadUsers();
   }, []);
 
+  async function handleUnauthorized() {
+    showToast('登录状态已失效，请重新登录', 'error');
+    await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+    router.push('/login');
+    router.refresh();
+  }
+
+  async function readError(res: Response, fallback: string) {
+    const data = await res.json().catch(() => ({}));
+    return typeof data.error === 'string' ? data.error : fallback;
+  }
+
   async function loadUsers(statusFilter?: string) {
     setLoading(true);
     try {
@@ -33,9 +47,15 @@ export default function AdminUsersPage() {
         ? `/api/admin/users?status=${statusFilter}`
         : '/api/admin/users';
       const res = await fetch(url);
+      if (res.status === 401) {
+        await handleUnauthorized();
+        return;
+      }
       if (res.ok) {
         const data = await res.json();
         setUsers(data.users);
+      } else {
+        showToast(await readError(res, '加载用户失败'), 'error');
       }
     } catch { /* network error — retain old list */ }
     setLoading(false);
@@ -53,8 +73,13 @@ export default function AdminUsersPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: 'active' }),
     });
+    if (res.status === 401) {
+      await handleUnauthorized();
+      setActionLoading(null);
+      return;
+    }
     if (res.ok) showToast('审批通过');
-    else showToast((await res.json()).error || '操作失败', 'error');
+    else showToast(await readError(res, '操作失败'), 'error');
     setActionLoading(null);
     loadUsers(filter === 'all' ? undefined : filter);
   }
@@ -66,8 +91,13 @@ export default function AdminUsersPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: 'rejected' }),
     });
+    if (res.status === 401) {
+      await handleUnauthorized();
+      setActionLoading(null);
+      return;
+    }
     if (res.ok) showToast('已拒绝');
-    else showToast((await res.json()).error || '操作失败', 'error');
+    else showToast(await readError(res, '操作失败'), 'error');
     setActionLoading(null);
     loadUsers(filter === 'all' ? undefined : filter);
   }
@@ -82,8 +112,13 @@ export default function AdminUsersPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ newPassword: pw }),
     });
+    if (res.status === 401) {
+      await handleUnauthorized();
+      setActionLoading(null);
+      return;
+    }
     if (res.ok) showToast('密码已重置');
-    else showToast((await res.json()).error || '操作失败', 'error');
+    else showToast(await readError(res, '操作失败'), 'error');
     setActionLoading(null);
   }
 
@@ -95,8 +130,13 @@ export default function AdminUsersPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ role: newRole }),
     });
+    if (res.status === 401) {
+      await handleUnauthorized();
+      setActionLoading(null);
+      return;
+    }
     if (res.ok) showToast(`已改为${newRole === 'admin' ? '管理员' : '成员'}`);
-    else showToast((await res.json()).error || '操作失败', 'error');
+    else showToast(await readError(res, '操作失败'), 'error');
     setActionLoading(null);
     loadUsers(filter === 'all' ? undefined : filter);
   }
@@ -104,13 +144,16 @@ export default function AdminUsersPage() {
   async function deleteUser(id: string) {
     setActionLoading(id);
     const res = await fetch(`/api/admin/users/${id}`, { method: 'DELETE' });
-    if (res.ok) {
+    if (res.status === 401) {
+      await handleUnauthorized();
+      setActionLoading(null);
+      return;
+    } else if (res.ok) {
       showToast('用户已删除');
       setDeleteTarget(null);
       loadUsers(filter === 'all' ? undefined : filter);
     } else {
-      const data = await res.json();
-      showToast(data.error || '删除失败', 'error');
+      showToast(await readError(res, '删除失败'), 'error');
     }
     setActionLoading(null);
   }

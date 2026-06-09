@@ -29,9 +29,11 @@ function loadRiskIntel() {
 }
 
 export async function POST(request: Request) {
-  const { phrase } = await request.json();
-  if (!phrase || typeof phrase !== "string" || !phrase.trim()) {
-    return NextResponse.json({ success: false, error: "请提供要解码的短语" }, { status: 400 });
+  const body = await request.json();
+  const text = [body.text, body.phrase, body.jd_text]
+    .find((value) => typeof value === "string" && value.trim()) as string | undefined;
+  if (!text || !text.trim()) {
+    return NextResponse.json({ success: false, error: "请提供要解码的短语或 JD 文本" }, { status: 400 });
   }
 
   const data = loadRiskIntel();
@@ -40,7 +42,7 @@ export async function POST(request: Request) {
   }
 
   const terms = data.terms as Array<{ term: string; meaning: string; severity: string }>;
-  const matches = terms.filter((t) => phrase.includes(t.term)).map((t) => ({
+  const matches = terms.filter((t) => text.includes(t.term)).map((t) => ({
     term: t.term,
     meaning: t.meaning,
     severity: t.severity || "medium",

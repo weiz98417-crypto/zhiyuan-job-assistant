@@ -5,6 +5,7 @@ import { searchApplications } from "./query/search-applications";
 import { getReportDetail } from "./query/get-report-detail";
 import { getProfile } from "./query/get-profile";
 import { getRecentActivity } from "./query/get-recent-activity";
+import { getRecentJDContext } from "./query/get-recent-jd-context";
 import { getRecommendations } from "./query/get-recommendations";
 import { getPipelineStatus } from "./query/get-pipeline-status";
 import { decodeBlackMarketTerms } from "./query/decode-terms";
@@ -12,6 +13,7 @@ import { checkPipelineHealth } from "./query/check-pipeline-health";
 import { getProfileInsights } from "./query/get-profile-insights";
 import { detectSkillGaps } from "./query/detect-skill-gaps";
 import { checkATS } from "./query/ats-check";
+import { readOfferReport } from "./query/read-offer-report";
 
 // Action tools
 import { evaluateJD } from "./action/evaluate-jd";
@@ -28,12 +30,16 @@ import { analyzeJDRisks } from "./action/analyze-jd-risks";
 import { selfPositioning } from "./action/self-positioning";
 import { prepareInterviewFull } from "./action/prepare-interview-full";
 import { compareOffersDeep } from "./action/compare-offers-deep";
+import { generateOfferNegotiationStrategy } from "./action/generate-offer-negotiation-strategy";
+import { generateOfferHRQuestionList } from "./action/generate-offer-hr-question-list";
 import { startInterviewSession } from "./action/start-interview-session";
 import { optimizeResumeSection } from "./action/optimize-resume-section";
 import { saveResumeSection } from "./action/save-resume-section";
+import { saveReferenceResume } from "./action/save-reference-resume";
 import { getReferenceDetail } from "./query/get-reference-detail";
 import { readFile } from "./query/read-file";
 import { downloadReportPDF } from "./action/download-report-pdf";
+import { updateReportMetadata } from "./action/update-report-metadata";
 
 // Interview tools
 import { generateInterviewQuestions, scoreInterviewAnswer } from "./interview-tools";
@@ -56,6 +62,7 @@ registry.register(getReferenceDetail);
 registry.register(readFile);
 registry.register(getProfile);
 registry.register(getRecentActivity);
+registry.register(getRecentJDContext);
 registry.register(getRecommendations);
 registry.register(getPipelineStatus);
 registry.register(decodeBlackMarketTerms);
@@ -63,6 +70,7 @@ registry.register(checkPipelineHealth);
 registry.register(getProfileInsights);
 registry.register(detectSkillGaps);
 registry.register(checkATS);
+registry.register(readOfferReport);
 
 // Action tools
 registry.register(evaluateJD);
@@ -79,10 +87,14 @@ registry.register(analyzeJDRisks);
 registry.register(selfPositioning);
 registry.register(prepareInterviewFull);
 registry.register(compareOffersDeep);
+registry.register(generateOfferNegotiationStrategy);
+registry.register(generateOfferHRQuestionList);
 registry.register(startInterviewSession);
 registry.register(optimizeResumeSection);
 registry.register(saveResumeSection);
+registry.register(saveReferenceResume);
 registry.register(downloadReportPDF);
+registry.register(updateReportMetadata);
 
 // Interview tools
 registry.register(generateInterviewQuestions);

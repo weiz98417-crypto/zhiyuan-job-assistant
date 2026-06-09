@@ -3,10 +3,29 @@ import { DEFAULT_LOOP_CONFIG } from "./types";
 import { isGarbledText } from "./text-quality";
 import { executeTool, formatToolResult, getTool } from "@/lib/agent/tools";
 import type { ToolResult, ErrorCategory } from "@/lib/agent/tools/types";
+import { enforceToolPolicy, inferCompanyFromMessages, isToolAllowedInMode } from "./tool-policy";
+import type { InterviewSessionState } from "@/types";
+import type { InterviewRebindAction } from "@/lib/agent/interview-rebind-policy";
 import db from "@/lib/db";
 import { createJD } from "@/lib/jd-storage";
+import { buildImageIntakeToolCall, inferPreferredDocumentTypeFromText, type ImageDocumentType, type ImageIntakeResult } from "@/lib/agent/image-intake";
+import { buildImageRouteAssistantReply, routeImageIntake } from "@/lib/agent/image-intake-router";
+import {
+  completePendingReferenceResumeSave,
+  type PendingReferenceResumeSaveAction,
+} from "@/lib/agent/reference-resume-save-flow";
 
 export type { SSEEvent };
+
+type LoopMessage = { role: string; content: string; images?: string[] };
+
+interface AgentLoopRuntimeContext {
+  imageIntake?: ImageIntakeResult | null;
+  preferredDocumentType?: ImageDocumentType;
+  interviewState?: InterviewSessionState;
+  interviewRebindAction?: InterviewRebindAction;
+  pendingReferenceResumeSave?: PendingReferenceResumeSaveAction;
+}
 
 /* ── Result quality check ── */
 
@@ -58,6 +77,19 @@ function resolveErrorCategory(result: ToolResult): ErrorCategory {
 const MAX_MESSAGES = 30;
 const MAX_CONTEXT_TOKENS = 64000;
 
+function injectLatestImagesForImageTool(
+  toolName: string,
+  params: Record<string, unknown>,
+  messages: LoopMessage[],
+): void {
+  const toolDef = getTool(toolName);
+  if (!toolDef?.parameters?.images) return;
+  const hasImages = Array.isArray(params.images) && params.images.length > 0;
+  if (hasImages) return;
+  const inferredImages = latestUserImages(messages);
+  if (inferredImages.length > 0) params.images = inferredImages;
+}
+
 /* ── Tool call handling (native function calling) ── */
 
 type NativeToolCall = { id: string; name: string; arguments: string };
@@ -69,16 +101,16 @@ function estimateTokens(messages: { role: string; content: string }[]): number {
 }
 
 function truncateContext(
-  messages: { role: string; content: string }[],
+  messages: LoopMessage[],
   keepLast: number,
-): { role: string; content: string }[] {
+): LoopMessage[] {
   if (messages.length <= keepLast) return messages;
   return messages.slice(-keepLast);
 }
 
 /** Enforce context budget before pushing. Harness hard-gate, not prompt suggestion. */
 function pushWithBudget(
-  ctx: { role: string; content: string }[],
+  ctx: LoopMessage[],
   msg: { role: string; content: string },
   maxTokens: number,
 ): void {
@@ -90,6 +122,38 @@ function pushWithBudget(
     ctx.length = 0;
     ctx.push(...kept);
   }
+}
+
+function inferDecodeTextFromMessages(messages: { role: string; content: string }[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg.role !== "user") continue;
+    const text = msg.content?.trim();
+    if (!text || text.startsWith("<!--")) continue;
+    return text.length > 4000 ? text.slice(0, 4000) : text;
+  }
+  return null;
+}
+
+function latestUserImages(messages: LoopMessage[]): string[] {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg.role !== "user") continue;
+    if (!Array.isArray(msg.images)) continue;
+    const images = msg.images.filter((src) => typeof src === "string" && src.startsWith("data:image/"));
+    if (images.length > 0) return images.slice(0, 5);
+  }
+  return [];
+}
+
+function latestUserText(messages: LoopMessage[]): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg.role !== "user") continue;
+    const text = msg.content?.trim();
+    if (text) return text;
+  }
+  return "";
 }
 
 /** Get LLM context text from a ToolResult.
@@ -108,6 +172,174 @@ function getLLMContext(result: ToolResult, toolName: string): string {
   const max = toolDef?.toolCtxCap ?? DEFAULT_TOOL_CTX_CAP;
   if (text.length <= max) return text;
   return text.slice(0, max) + "\n<!-- 结果已截断，完整数据仅展示在 UI 中 -->";
+}
+
+type JDEvalBlock = { content?: string; score?: number | string };
+type JDRiskSignal = { signal?: unknown; excerpt?: unknown; severity?: unknown };
+
+const JD_SUMMARY_BLOCK_LABELS: Record<string, string> = {
+  a: "A 职位概览",
+  b: "B 简历匹配",
+  c: "C 职级与策略",
+  d: "D 薪资与市场",
+  e: "E 定制化方案",
+  f: "F 面试准备",
+  g: "G 职位合法性",
+};
+
+function numericScore(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+function cleanBlockLine(content: string): string {
+  const tableCandidate = pickTableCandidate(content);
+  const lines = content
+    .split(/\r?\n/)
+    .map((line) => normalizeSummaryLine(line))
+    .filter(Boolean)
+    .filter((line) => !isNoiseSummaryLine(line));
+  const picked = tableCandidate || lines[0] || "";
+  return truncateSummaryLine(picked);
+}
+
+function isNoiseSummaryLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed) return true;
+  if (/^\|.*\|$/.test(trimmed)) return true;
+  if (/^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?$/.test(trimmed)) return true;
+  if (/^A-G|^评分|^得分|^Score/i.test(trimmed)) return true;
+  if (/^(好的|已完成|我已完成|作为AI求职评估引擎|以下是|下面是)/.test(trimmed)) return true;
+  if (/修改前.*修改后.*原因/.test(trimmed)) return true;
+  if (/^(题型|考察点|JD\s*关联|简历关联|面试准备建议)[:：]/i.test(trimmed)) return true;
+  return false;
+}
+
+function normalizeSummaryLine(line: string): string {
+  return line
+    .replace(/^[-*#>\s]+/, "")
+    .replace(/\*\*/g, "")
+    .replace(/^#+\s*/, "")
+    .trim();
+}
+
+function truncateSummaryLine(line: string, max = 70): string {
+  const clean = line.replace(/\s+/g, " ").trim();
+  return clean.length > max ? `${clean.slice(0, max)}...` : clean;
+}
+
+function pickTableCandidate(content: string): string {
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!/^\|.*\|$/.test(line)) continue;
+    const cells = line
+      .slice(1, -1)
+      .split("|")
+      .map((cell) => cell.replace(/\*\*/g, "").trim())
+      .filter(Boolean);
+    if (cells.length < 2) continue;
+    if (cells.every((cell) => /^:?-{2,}:?$/.test(cell))) continue;
+    const joined = cells.join(" ");
+    if (/修改前.*修改后.*原因/.test(joined)) continue;
+    if (/^(字段|维度|项目|JD要求|要求|问题|场景)$/.test(cells[0]) && /^(内容|分析|匹配|建议|原因|回答)$/.test(cells[1])) continue;
+
+    const candidate = cells.length === 2
+      ? `${cells[0]}：${cells[1]}`
+      : cells.slice(0, 3).join("；");
+    if (!isNoiseSummaryLine(candidate)) return candidate;
+  }
+  return "";
+}
+
+function blockSummaryFallback(blockKey: string): string {
+  const fallback: Record<string, string> = {
+    a: "职位基础信息已提取，需核对公司、岗位、领域与工作模式。",
+    b: "需要结合简历判断核心要求、证据强弱和主要能力缺口。",
+    c: "需要确认岗位职级、经验年限和候选人当前阶段是否匹配。",
+    d: "薪资范围、奖金、五险一金和加班强度仍需进一步核实。",
+    e: "简历需要围绕 JD 关键词、项目证据和量化结果做定制化表达。",
+    f: "面试应重点准备岗位核心能力、缺口解释和 STAR 项目故事。",
+    g: "需要核实职位真实性、用工形式、隐性强度和招聘风险。",
+  };
+  return fallback[blockKey] || "该维度已完成评估，建议查看完整报告确认细节。";
+}
+
+function formatBlockSummary(blockKey: string, value: JDEvalBlock | string | undefined): string {
+  const block = typeof value === "string" ? { content: value } : value;
+  const score = numericScore(block?.score);
+  const scoreText = score === null ? "" : `（${Number(score.toFixed(1))}/5）`;
+  const content = typeof block?.content === "string" ? cleanBlockLine(block.content) : "";
+  return `${JD_SUMMARY_BLOCK_LABELS[blockKey]}${scoreText}：${content || blockSummaryFallback(blockKey)}`;
+}
+
+function formatRiskSignals(data: Record<string, unknown>): string[] {
+  const raw = Array.isArray(data.risks) ? data.risks : Array.isArray(data.riskSignals) ? data.riskSignals : [];
+  const signals = raw
+    .map((item) => {
+      const risk = (item && typeof item === "object" ? item : {}) as JDRiskSignal;
+      const signal = typeof risk.signal === "string" ? risk.signal.trim() : "";
+      const excerpt = typeof risk.excerpt === "string" ? risk.excerpt.trim() : "";
+      const severity = typeof risk.severity === "string" ? risk.severity.trim() : "";
+      if (!signal) return "";
+      const label = severity === "critical" ? "严重" : severity === "high" ? "高风险" : severity === "medium" ? "中风险" : "提示";
+      return `${label}：${signal}${excerpt ? `（${truncateSummaryLine(excerpt, 34)}）` : ""}`;
+    })
+    .filter(Boolean)
+    .slice(0, 3);
+  return signals.length > 0 ? signals : ["暂未命中已知招聘黑话/风险词，但仍建议面试核验工作强度、用工形式和薪资结构。"];
+}
+
+function blockRiskFallback(blockKey: string): string {
+  const fallback: Record<string, string> = {
+    a: "公司与岗位信息仍需确认真实性和稳定性。",
+    b: "岗位描述里可能存在强度、合规或隐性要求风险。",
+    c: "你的经历与 JD 核心要求之间可能存在明显差距。",
+    d: "薪资、职级或发展空间需要进一步确认。",
+    e: "岗位能力模型与现有背景的迁移成本需要评估。",
+    f: "投递策略需要结合你的优先级再判断。",
+    g: "需要补充关键信息后再做最终决策。",
+  };
+  return fallback[blockKey] || "该维度存在不确定性，建议面试前重点核实。";
+}
+
+export function formatJDEvaluationSummary(data: Record<string, unknown>): string {
+  const company = String(data.company || "未知公司");
+  const role = String(data.role || "未知岗位");
+  const score = numericScore(data.overallScore);
+  const scoreText = score === null ? "已生成" : `${Number(score.toFixed(1))}/5`;
+  const verdict = score === null
+    ? "已完成评估"
+    : score >= 4.2
+      ? "建议投递"
+      : score >= 3.5
+        ? "可以投递，但需要确认风险"
+        : score >= 2.5
+          ? "谨慎投递"
+          : "不建议投递";
+  const archetype = data.archetype ? ` · ${String(data.archetype)}` : "";
+  const reportNum = data.reportNum ? `报告 #${String(data.reportNum).padStart(3, "0")}` : "报告已保存";
+  const blocks = (data.blocks && typeof data.blocks === "object" ? data.blocks : {}) as Record<string, JDEvalBlock | string>;
+  const blockLines = Object.keys(JD_SUMMARY_BLOCK_LABELS).map((key) => formatBlockSummary(key, blocks[key]));
+  const riskLines = formatRiskSignals(data);
+
+  return [
+    "## JD 评估摘要",
+    "",
+    `结论：${verdict}（总分 ${scoreText}）`,
+    `岗位：${company} — ${role}${archetype}`,
+    "",
+    "A-G 速览：",
+    ...blockLines.map((line) => `- ${line}`),
+    "",
+    "行业黑话 / 风险扫描：",
+    ...riskLines.map((line) => `- ${line}`),
+    "",
+    `${reportNum}，完整 A-G 报告已保存，可在报告库或 JD 管理查看，也可下载 PDF。`,
+  ].join("\n");
 }
 
 /* ── Think proxy helpers ── */
@@ -181,8 +413,8 @@ async function fetchFromThinkProxy(
 /* ── Streaming Think Response Collector ── */
 
 /**
- * Reads SSE stream from think proxy and yields text chunks as they arrive.
- * Tool calls are accumulated and yielded as a final event.
+ * Reads SSE stream from think proxy. Text is buffered until we know whether
+ * the model is calling tools, so pre-tool chatter does not leak into chat.
  */
 async function* collectThinkResponseStreaming(
   response: Response,
@@ -222,7 +454,6 @@ async function* collectThinkResponseStreaming(
           const parsed = JSON.parse(data);
           if (parsed.type === "text" && parsed.content) {
             fullText += parsed.content;
-            yield { type: "text", content: parsed.content };
           } else if (parsed.type === "finish_reason" && parsed.finish_reason) {
             finishReason = parsed.finish_reason as string;
           } else if (parsed.type === "tool_calls" && Array.isArray(parsed.tool_calls)) {
@@ -241,6 +472,8 @@ async function* collectThinkResponseStreaming(
 
   if (toolCalls.length > 0) {
     yield { type: "tool_calls", tool_calls: toolCalls };
+  } else if (fullText) {
+    yield { type: "text", content: fullText };
   }
 
   return { text: fullText, toolCalls, finishReason };
@@ -250,12 +483,13 @@ async function* collectThinkResponseStreaming(
 
 export async function* agentLoopClient(
   systemPrompt: string,
-  messages: { role: string; content: string }[],
+  messages: LoopMessage[],
   config: LoopConfig = DEFAULT_LOOP_CONFIG,
   signal?: AbortSignal,
   skipResearchProtocol?: boolean,
   toolWhitelist?: string[],
   tools?: Array<{ type: string; function: object }>,
+  runtimeContext?: AgentLoopRuntimeContext,
 ): AsyncGenerator<SSEEvent> {
   const state: LoopState = {
     iteration: 0,
@@ -264,7 +498,7 @@ export async function* agentLoopClient(
     phase: "understanding",
   };
 
-  let ctx = [...messages];
+  let ctx: LoopMessage[] = messages.map((m) => ({ role: m.role, content: m.content, images: m.images }));
   let firstIteration = true;
   let autoRetryCount = 0;
   let forceTextOnly = false; // Set after degradeToUser: next iteration LLM responds with text only, no tools
@@ -272,6 +506,8 @@ export async function* agentLoopClient(
   const recentCalls: { name: string; params: string; result: string }[] = [];
   // LangChain intermediate_steps pattern: accumulate structured step records for debugging & graceful degradation
   const intermediateSteps: { tool: string; params: string; category: ErrorCategory; summary: string }[] = [];
+  let forcedImageToolConsumed = false;
+  let forcedToolCall: NativeToolCall | null = null;
 
   while (state.iteration < config.maxIterations) {
     if (signal?.aborted) {
@@ -297,30 +533,96 @@ export async function* agentLoopClient(
 
     const searchProgress = buildSearchProgress(recentCalls, firstIteration);
 
+    if (firstIteration && runtimeContext?.pendingReferenceResumeSave) {
+      const text = latestUserText(ctx);
+      const completion = completePendingReferenceResumeSave(runtimeContext.pendingReferenceResumeSave, text);
+      if (completion && "cancelled" in completion) {
+        state.phase = "responding";
+        yield { type: "phase", phase: "responding" };
+        yield { type: "text", content: "好的，这次不保存为优秀简历。后续你想沉淀样本时再告诉我。" };
+        yield { type: "done" };
+        return;
+      }
+      if (completion && isToolAllowedInMode("save_reference_resume", toolWhitelist)) {
+        forcedToolCall = {
+          id: `forced-pending-save-reference-resume-${Date.now()}`,
+          name: "save_reference_resume",
+          arguments: JSON.stringify(completion),
+        };
+      }
+    }
+
+    if (firstIteration && !forcedImageToolConsumed && !forcedToolCall) {
+      const images = latestUserImages(ctx);
+      const text = latestUserText(ctx);
+      const preferredDocumentType =
+        runtimeContext?.preferredDocumentType ?? inferPreferredDocumentTypeFromText(text);
+      const imagePlan = buildImageIntakeToolCall(
+        text,
+        images,
+        runtimeContext?.imageIntake ?? null,
+        toolWhitelist,
+        preferredDocumentType,
+      );
+      const decision = images.length > 0
+        ? routeImageIntake(text, runtimeContext?.imageIntake ?? null)
+        : null;
+      if (
+        decision &&
+        !imagePlan &&
+        decision.route !== "evaluate_jd" &&
+        decision.route !== "evaluate_offer"
+      ) {
+        state.phase = "responding";
+        yield { type: "phase", phase: "responding" };
+        yield {
+          type: "text",
+          content: buildImageRouteAssistantReply(decision, runtimeContext?.imageIntake ?? null),
+        };
+        yield { type: "done" };
+        return;
+      }
+      if (imagePlan) {
+        forcedImageToolConsumed = true;
+        forcedToolCall = {
+          id: `forced-image-${imagePlan.name}-${Date.now()}`,
+          name: imagePlan.name,
+          arguments: JSON.stringify(imagePlan.params),
+        };
+      }
+    }
+
     let thinkText: string;
     let toolCalls: NativeToolCall[];
     let finishReason: string;
     try {
-      const thinkResponse = await fetchFromThinkProxy(systemPrompt, ctx, signal, searchProgress, skipResearchProtocol, tools);
-      if (!thinkResponse.ok) {
-        yield { type: "phase", phase: "responding" };
-        yield { type: "text", content: `AI 请求失败: ${thinkResponse.status}` };
-        yield { type: "done" };
-        return;
-      }
+      if (forcedToolCall) {
+        thinkText = "";
+        toolCalls = [forcedToolCall];
+        finishReason = "tool_calls";
+        forcedToolCall = null;
+      } else {
+        const thinkResponse = await fetchFromThinkProxy(systemPrompt, ctx, signal, searchProgress, skipResearchProtocol, tools);
+        if (!thinkResponse.ok) {
+          yield { type: "phase", phase: "responding" };
+          yield { type: "text", content: `AI 请求失败: ${thinkResponse.status}` };
+          yield { type: "done" };
+          return;
+        }
 
-      // Use streaming collector — yields text chunks as they arrive
-      const streamGen = collectThinkResponseStreaming(thinkResponse, signal);
-      let streamResult: IteratorResult<SSEEvent, { text: string; toolCalls: NativeToolCall[]; finishReason: string }>;
-      while (true) {
-        streamResult = await streamGen.next();
-        if (streamResult.done) break;
-        yield streamResult.value;
+        // Use streaming collector — yields text chunks as they arrive
+        const streamGen = collectThinkResponseStreaming(thinkResponse, signal);
+        let streamResult: IteratorResult<SSEEvent, { text: string; toolCalls: NativeToolCall[]; finishReason: string }>;
+        while (true) {
+          streamResult = await streamGen.next();
+          if (streamResult.done) break;
+          yield streamResult.value;
+        }
+        thinkText = streamResult.value.text;
+        toolCalls = streamResult.value.toolCalls;
+        finishReason = streamResult.value.finishReason;
+        console.log("[loop] thinkText length:", thinkText.length, "toolCalls:", toolCalls.length, "finishReason:", finishReason);
       }
-      thinkText = streamResult.value.text;
-      toolCalls = streamResult.value.toolCalls;
-      finishReason = streamResult.value.finishReason;
-      console.log("[loop] thinkText length:", thinkText.length, "toolCalls:", toolCalls.length, "finishReason:", finishReason);
     } catch (err) {
       yield { type: "phase", phase: "responding" };
       yield { type: "text", content: `请求失败: ${err instanceof Error ? err.message : "未知错误"}` };
@@ -367,12 +669,30 @@ export async function* agentLoopClient(
     // Anthropic parallel tool_use pattern: independent query tools run concurrently
     const allIndependent = toolCalls.length > 1 && toolCalls.every(tc => {
       try { const p = JSON.parse(tc.arguments); return p && typeof p === "object"; } catch { return false; }
-    }) && toolCalls.every(tc => !toolWhitelist || toolWhitelist.includes(tc.name));
+    }) && toolCalls.every(tc => isToolAllowedInMode(tc.name, toolWhitelist))
+      && toolCalls.every(tc => {
+        try {
+          return !enforceToolPolicy({
+            toolName: tc.name,
+            params: JSON.parse(tc.arguments) as Record<string, unknown>,
+            messages: ctx,
+            toolWhitelist,
+            interviewState: runtimeContext?.interviewState,
+            interviewRebindAction: runtimeContext?.interviewRebindAction,
+          });
+        } catch {
+          return false;
+        }
+      });
 
     if (allIndependent) {
       state.phase = "executing";
       yield { type: "phase", phase: "executing" };
-      const parallelParams = toolCalls.map(tc => ({ tc, params: JSON.parse(tc.arguments) as Record<string, unknown> }));
+      const parallelParams = toolCalls.map(tc => {
+        const params = JSON.parse(tc.arguments) as Record<string, unknown>;
+        injectLatestImagesForImageTool(tc.name, params, ctx);
+        return { tc, params };
+      });
       for (const { tc, params } of parallelParams) yield { type: "tool_call", name: tc.name, params };
 
       const timeoutResult = { success: false, data: null, error: '工具执行超时', errorCategory: 'transient' as const, recoverable: true };
@@ -400,6 +720,16 @@ export async function* agentLoopClient(
           const errorObs = `[TOOL_ERROR tool=${tc.name} category=${category}] ${toolResult.error || "操作失败"}\n\n请基于此错误告知用户发生了什么，并给出具体的下一步建议。`;
           ctx.push({ role: "user", content: errorObs });
           forceTextOnly = true;
+        } else if (tc.name === "evaluate_jd_full" && toolResult.success && toolResult.data && typeof toolResult.data === "object") {
+          const jdData = toolResult.data as Record<string, unknown>;
+          ctx.push({
+            role: "assistant",
+            content: formatJDEvaluationSummary(jdData),
+          });
+          yield { type: "phase", phase: "responding" };
+          yield { type: "text", content: formatJDEvaluationSummary(jdData) };
+          yield { type: "done" };
+          return;
         } else {
           if (action.autoRetry) autoRetryCount++; else autoRetryCount = 0;
           // Terminal export tools: don't feed content back to LLM context — just confirm download
@@ -412,7 +742,7 @@ export async function* agentLoopClient(
             const ctxCap = 500;
             const llmText = getLLMContext(toolResult, tc.name);
             const capped = llmText.length > ctxCap ? llmText.slice(0, ctxCap) + "\n<!-- 并行结果截断，需要详情的工具结果请在下一轮单读 -->" : llmText;
-            ctx.push({ role: "user", content: `<!-- tool:${tc.name} result -->\n${capped}${catHints[category]}\n\n【请基于以上工具返回数据进行分析。】` });
+            ctx.push({ role: "user", content: `<!-- tool:${tc.name} result -->\n${capped}${catHints[category]}\n\n【请基于以上工具返回数据简洁回答。不要把简历全文或完整报告正文粘贴到聊天框。】` });
           }
         }
         intermediateSteps.push({ tool: tc.name, params: paramsKey, category, summary: toolResult.success ? formatted.slice(0, 100) : (toolResult.error || "失败").slice(0, 100) });
@@ -431,6 +761,19 @@ export async function* agentLoopClient(
     for (const tc of toolCalls) {
       let params: Record<string, unknown>;
       try { params = JSON.parse(tc.arguments); } catch { continue; }
+      if (tc.name === "evaluate_jd_full" && typeof params.target_company !== "string") {
+        const inferredCompany = inferCompanyFromMessages(ctx);
+        if (inferredCompany) params.target_company = inferredCompany;
+      }
+      injectLatestImagesForImageTool(tc.name, params, ctx);
+      if (tc.name === "decode_black_market_terms") {
+        const hasDecodeText = [params.text, params.phrase, params.jd_text]
+          .some((value) => typeof value === "string" && value.trim());
+        if (!hasDecodeText) {
+          const inferredText = inferDecodeTextFromMessages(ctx);
+          if (inferredText) params.text = inferredText;
+        }
+      }
 
       const paramsKey = JSON.stringify(params);
       const recent = recentCalls.find((c) => c.name === tc.name && c.params === paramsKey);
@@ -445,12 +788,30 @@ export async function* agentLoopClient(
         yield { type: "phase", phase: "executing" };
         yield { type: "tool_call", name: tc.name, params };
 
-        if (toolWhitelist && !toolWhitelist.includes(tc.name)) {
+        if (!isToolAllowedInMode(tc.name, toolWhitelist)) {
           const errMsg = `工具 ${tc.name} 不在当前 Agent 模式下可用`;
           console.warn(`[loop] blocked: ${errMsg}`);
           yield { type: "tool_result", name: tc.name, result: errMsg, success: false };
           ctx.push({ role: "user", content: `<!-- tool:${tc.name} result -->${errMsg}。请使用可用工具重新尝试，或直接基于已有知识回答。` });
           state.consecutiveFailures++;
+          continue;
+        }
+
+        const policyResult = enforceToolPolicy({
+          toolName: tc.name,
+          params,
+          messages: ctx,
+          toolWhitelist,
+          interviewState: runtimeContext?.interviewState,
+          interviewRebindAction: runtimeContext?.interviewRebindAction,
+        });
+        if (policyResult) {
+          toolResult = policyResult;
+          formatted = formatToolResult(toolResult, tc.name);
+          yield { type: "tool_result", name: tc.name, result: formatted, success: false, data: toolResult.data, uiPayload: toolResult.uiPayload };
+          yield { type: "tool_error", name: tc.name, error: toolResult.error || "工具调用被策略拦截", recoverable: false };
+          ctx.push({ role: "user", content: `[TOOL_BLOCKED tool=${tc.name}] ${toolResult.llmSummary || toolResult.error || "工具调用被策略拦截"}\n\n请不要改用其它大工具重试。请基于已有本地上下文回答；缺少必要信息时只向用户索要那一项。` });
+          forceTextOnly = true;
           continue;
         }
 
@@ -474,6 +835,7 @@ export async function* agentLoopClient(
           const decoder = new TextDecoder();
           let buf = "";
           let finalData: Record<string, unknown> = {};
+          let streamError = "";
 
           try {
             while (true) {
@@ -489,8 +851,16 @@ export async function* agentLoopClient(
                   const event = JSON.parse(streamLine.slice(6));
                   // Forward stream events to UI
                   yield event as SSEEvent;
-                  // Extract finalData from the done event (flat fields, NOT nested under .data)
-                  if (event.type === "done" && event.company) {
+                  if (event.type === "error" && typeof event.message === "string") {
+                    streamError = event.message;
+                  }
+                  // Extract finalData from the done event (flat fields, NOT nested under .data).
+                  // Some valid evaluations may only have fallback company/role after OCR,
+                  // while fatal OCR failures emit a bare done event with no jdText/blocks.
+                  if (
+                    event.type === "done" &&
+                    (event.company || event.role || event.blocks || event.jdText || event.overallScore)
+                  ) {
                     finalData = event as Record<string, unknown>;
                   }
                 } catch { /* skip malformed */ }
@@ -498,6 +868,22 @@ export async function* agentLoopClient(
             }
           } finally {
             reader.releaseLock();
+          }
+
+          const hasUsableEvalData = Boolean(finalData.jdText || finalData.blocks || finalData.overallScore);
+          if (streamError && !hasUsableEvalData) {
+            formatted = `评估失败: ${streamError}`;
+            yield { type: "tool_result", name: tc.name, result: formatted, success: false, data: { error: streamError } };
+            yield { type: "tool_error", name: tc.name, error: streamError, recoverable: false };
+            yield { type: "phase", phase: "responding" };
+            const retryHint = tc.name === "evaluate_jd_full"
+              ? "可以重新上传一张更清晰的原始 JD 截图，或直接粘贴 JD 文本/链接。"
+              : tc.name === "evaluate_offer"
+                ? "可以重新上传一张更清晰的原始 Offer 截图，或直接粘贴 Offer 文本。"
+                : "可以重新上传一张更清晰的原始截图，或直接粘贴对应文本。";
+            yield { type: "text", content: `${streamError}\n\n${retryHint}` };
+            yield { type: "done" };
+            return;
           }
 
           // Persist after stream completes
@@ -555,6 +941,7 @@ export async function* agentLoopClient(
                       sourceType: "agent",
                       body: jdText,
                       keywords: (Array.isArray(d.keywords) ? d.keywords : []) as string[],
+                      reportId: reportNum,
                     });
                   } catch (e) { console.warn("[loop] dexie JD save failed:", e); }
                 }
@@ -577,15 +964,37 @@ export async function* agentLoopClient(
           formatted = formatToolResult({ success: true, data: finalData, errorCategory: "ok" as const }, tc.name);
           yield { type: "tool_result", name: tc.name, result: formatted, success: true, data: finalData, uiPayload: toolResult.uiPayload };
 
+          if (tc.name === "evaluate_jd_full") {
+            const summary = formatJDEvaluationSummary(finalData);
+            yield { type: "phase", phase: "responding" };
+            yield { type: "text", content: summary };
+            yield { type: "done" };
+            return;
+          }
+
           // Push formatted result to context for LLM summary in next iteration
           if (tc.name === "export_file" || tc.name === "download_report_pdf") {
             const d = (finalData as { filename?: string }) || {};
             ctx.push({ role: "user", content: `<!-- tool:${tc.name} result -->已导出文件: ${d.filename || "download"}。用户设备已自动下载。` });
           } else {
             const llmText2 = getLLMContext(toolResult, tc.name);
+            const followupInstruction = tc.name === "evaluate_jd_full"
+              ? "【正式回复只输出结果摘要：最多 6 行。不要说“已读取/我先/正在/加载完毕”。不要输出完整 A-G 报告正文，不要输出表格。完整内容已保存到报告详情和 PDF。】"
+              : tc.name === "generate_interview_questions"
+                ? "【面试题已由 UI 卡片展示。你只允许输出一句话：请开始回答这一题。不要复述题目，不要输出题型/考察点/JD关联/简历关联，不要说已读取文件。】"
+              : tc.name === "get_report_detail"
+                ? "【聊天框只输出一句摘要和提示用户点击报告卡片。不要说“已读取/我先/正在/加载完毕”。禁止输出完整 A-G 报告正文。】"
+                : tc.name === "read_file" || tc.name === "get_profile"
+                  ? "【不要说明读取过程，直接继续完成用户原任务。不要说“已读取/我先读取/加载完毕/让我再读”。不要把简历全文粘贴到聊天框。】"
+                  : tc.name === "update_report_metadata"
+                    ? "【只确认已更新报告信息。不要重新评估，不要输出完整报告。】"
+                    : "【正式回复直接给结果或下一步。不要说“已读取/我先/正在/加载完毕”。不要扩写成长报告；缺关键信息时只问缺的那一项。】";
             ctx.push({
               role: "user",
-              content: `<!-- tool:${tc.name} result -->\n${llmText2}\n\n【请基于以上工具返回的数据进行深度分析和扩容解释。不要仅复述数据——要分析原因、风险判断、面试追问策略和行动建议。】`,
+              content: `<!-- tool:${tc.name} result -->
+${llmText2}
+
+${followupInstruction}`,
             });
             // If a report was persisted, also push the reportNum so LLM can retrieve it later
             if ((finalData as Record<string, unknown>).reportNum) {
@@ -607,6 +1016,13 @@ export async function* agentLoopClient(
       }
 
       yield { type: "tool_result", name: tc.name, result: formatted, success: toolResult.success, data: toolResult.data, uiPayload: toolResult.uiPayload };
+
+      if (tc.name === "save_reference_resume" && toolResult.success) {
+        yield { type: "phase", phase: "responding" };
+        yield { type: "text", content: toolResult.llmSummary || formatted || "优秀简历已保存。" };
+        yield { type: "done" };
+        return;
+      }
 
       // ── Self-healing ──
       if (!toolResult.success) {
@@ -676,7 +1092,15 @@ export async function* agentLoopClient(
       } else {
         ctx.push({
           role: "user",
-          content: `<!-- tool:${tc.name} result -->\n${getLLMContext(toolResult, tc.name)}${hint}\n\n【请基于以上工具返回的数据进行深度分析和扩容解释。不要仅复述数据——要分析原因、风险判断、面试追问策略和行动建议。】`,
+          content: `<!-- tool:${tc.name} result -->\n${getLLMContext(toolResult, tc.name)}${hint}\n\n${tc.name === "get_report_detail"
+            ? "【聊天框只输出一句摘要和提示用户点击报告卡片。不要说“已读取/我先/正在/加载完毕”。禁止输出完整 A-G 报告正文。】"
+            : tc.name === "generate_interview_questions"
+              ? "【面试题已由 UI 卡片展示。你只允许输出一句话：请开始回答这一题。不要复述题目，不要输出题型/考察点/JD关联/简历关联，不要说已读取文件。】"
+            : tc.name === "read_file" || tc.name === "get_profile"
+              ? "【不要说明读取过程，直接继续完成用户原任务。不要说“已读取/我先读取/加载完毕/让我再读”。不要把简历全文粘贴到聊天框。】"
+              : tc.name === "update_report_metadata"
+                ? "【只确认已更新报告信息。不要重新评估，不要输出完整报告。】"
+                : "【正式回复直接给结果或下一步。不要说“已读取/我先/正在/加载完毕”。不要扩写成长报告；缺关键信息时只问缺的那一项。】"}`,
         });
       }
       state.contextSize = estimateTokens(ctx);
@@ -716,10 +1140,9 @@ export async function* agentLoopClient(
     state.phase = "responding";
     yield { type: "phase", phase: "responding" };
     if (intermediateSteps.length > 0) {
-      const lines = intermediateSteps.map(s => `- ${s.tool}: ${s.summary} [${s.category}]`);
-      yield { type: "text", content: `已尝试 ${intermediateSteps.length} 次工具调用，未能完成任务。以下是尝试记录：\n${lines.join("\n")}\n\n请重新描述你的需求，或换个方式提问。` };
+      yield { type: "text", content: "任务未完成，请补充更多信息后再试一次。" };
     } else {
-      yield { type: "text", content: "达到处理上限，请重新提问。" };
+      yield { type: "text", content: "暂未完成，请重新提问。" };
     }
   }
 

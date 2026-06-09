@@ -14,7 +14,7 @@ Phase 2 的 Agent 系统存在一个架构性缺陷：**大模型 API Key 裸露
 | 网络跳数翻倍 | 浏览器 → Next.js → DeepSeek → Next.js → 浏览器；工具调用同理 |
 | 纯文本工具调用 | 前端发 fetch 执行工具，没有服务端上下文（文件系统、环境变量） |
 
-**目标**：把整个 Agent ReAct Loop 搬到服务端，前端只消费 SSE 事件流。
+**目标**：把整个 Agent ReAct Loop 搬到服务端，前端只消费 SSE 事件流。评估类工具完成后由服务端接口写入 SQLite，前端统计和列表通过数据 API 读取服务端事实源。
 
 ```
 Before (client-runner):                  After (server-runner):
@@ -83,6 +83,7 @@ DeepSeek API                              │  │   ├─ executeTool (服务�
 | **LLM 调用** | 服务端直连 DeepSeek/GLM/Qwen | 经 `/api/agent/think` 代理 |
 | **API Key** | 服务端环境变量，不外泄 | 无 Key（由 think route 持有） |
 | **工具执行** | `registry.execute()` 服务端 | `executeTool()` 浏览器端 |
+| **评估持久化** | `/api/agent/persist-eval`、`/api/report/save`、`/api/data/jds`、`/api/data/reports` | Dexie 降级缓存 |
 | **研究协议注入** | 无（由 system prompt 处理） | `RESEARCH_PROTOCOL` 注入用户消息 |
 | **搜索进度追踪** | 无 | `buildSearchProgress` |
 | **输出流** | SSE → `ReadableStream` | `AsyncGenerator<SSEEvent>` |
@@ -700,6 +701,16 @@ return new Response(stream, {
 ```
 
 **前端 AgentChat 组件通过 `EventSource` 或 `fetch` + `ReadableStream` 消费 SSE 流，按 `event.type` 分发到对应的状态更新逻辑。**
+
+### 7.5 评估结果持久化链路
+
+评估类工具的输出不只返回给聊天 UI，也会进入服务端数据层：
+
+1. `evaluate_jd_full` 或评估管道产出 JD 正文、A-G 报告块、分数、风险信号和关键词。
+2. `/api/agent/persist-eval` 写入 `applications` 与 `reports`，并在 JD 正文足够完整时写入 `jds`。
+3. `/api/report/save` 覆盖人工确认保存场景，可按 `actions.saveJD` 与 `actions.addToTracker` 决定是否保存 JD 和追踪记录。
+4. `/api/data/jds` 与 `/api/data/reports` 是评估页统计、JD 库、报告库的第一读取来源；Dexie 只作为 API 不可用时的 fallback。
+5. `jds.report_id` 存储公开报告编号 `reports.report_num`，不是内部自增 `reports.id`。
 
 ---
 
