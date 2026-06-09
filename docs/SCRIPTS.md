@@ -1,189 +1,87 @@
 # Scripts Reference
 
-All scripts live in the project root as `.mjs` modules and are exposed via `npm run <name>`.
+All commands below are exposed through `package.json`.
 
-## Quick Reference
+## Development
+
+| Command | Purpose |
+| --- | --- |
+| `npm run dev` | Start Next.js development server. |
+| `npm run build` | Build the production app. |
+| `npm run start` | Start the built app. Runs `prestart` first. |
+| `npm run build:railway` | Build for Railway with browser downloads skipped. |
+| `npm run doctor` | Validate local prerequisites and project setup. |
+| `npm run check-onboarding` | First-run onboarding validation. |
+
+## Testing And Evals
+
+| Command | Purpose |
+| --- | --- |
+| `npm run test` | Run the Vitest suite. |
+| `npm run eval:memory` | Run deterministic long-term memory evals. |
+| `npm run smoke:embedding` | Opt-in live embedding provider smoke test. |
+| `npx tsc --noEmit` | Type-check without emitting files. |
+
+`eval:memory` uses local fixtures and deterministic keyword embeddings. It does not call PostgreSQL, pgvector, OCR, or a live model provider.
+
+`smoke:embedding` reads local secrets and must not print API keys or authorization headers.
+
+## PostgreSQL And Migration
 
 | Command | Script | Purpose |
-|---------|--------|---------|
-| `npm run doctor` | `doctor.mjs` | Validate setup prerequisites |
-| `npm run verify` | `verify-pipeline.mjs` | Check pipeline data integrity |
-| `npm run normalize` | `normalize-statuses.mjs` | Fix non-canonical statuses |
-| `npm run dedup` | `dedup-tracker.mjs` | Remove duplicate tracker entries |
-| `npm run merge` | `merge-tracker.mjs` | Merge batch TSVs into applications.md |
-| `npm run pdf` | `generate-pdf.mjs` | Convert HTML to ATS-optimized PDF |
-| `npm run sync-check` | `cv-sync-check.mjs` | Validate CV/profile consistency |
-| `npm run update:check` | `update-system.mjs check` | Check for upstream updates |
-| `npm run update` | `update-system.mjs apply` | Apply upstream update |
-| `npm run rollback` | `update-system.mjs rollback` | Rollback last update |
-| `npm run liveness` | `check-liveness.mjs` | Test if job URLs are still active |
-| `npm run scan` | `scan.mjs` | Zero-token portal scanner |
+| --- | --- | --- |
+| `npm run check:postgres` | `scripts/check-postgres.mjs` | Verify `DATABASE_URL`, connectivity, and pgvector availability. |
+| `npm run migrate:postgres` | `scripts/migrate-sqlite-to-postgres.mjs` | Dry-run or apply SQLite to PostgreSQL migration. |
+| `npm run check:postgres-migration` | `scripts/check-postgres-migration.mjs` | Compare source/target counts, samples, and user isolation after migration. |
 
----
-
-## doctor
-
-Validates that all prerequisites are in place: Node.js >= 18, dependencies installed, Playwright chromium, required files (`cv.md`, `config/profile.yml`, `portals.yml`), fonts directory, and auto-creates `data/`, `output/`, `reports/` if missing.
+Common sequence:
 
 ```bash
-npm run doctor
+npm run check:postgres
+npm run migrate:postgres -- --dry-run --default-owner admin --report reports/postgres-migration-dry-run.md
+npm run migrate:postgres -- --apply --default-owner admin --report reports/postgres-migration-apply.md
+npm run check:postgres-migration -- --default-owner admin --report reports/postgres-migration-verify.md
 ```
 
-**Exit codes:** `0` all checks passed, `1` one or more checks failed (fix messages printed).
+## Memory And Profile Maintenance
 
----
+| Command | Script | Purpose |
+| --- | --- | --- |
+| `npm run backfill:memory` | `scripts/backfill-memory.mjs` | Backfill memory chunks/embeddings for existing reference resumes. |
+| `npm run cleanup:profile-signals` | `scripts/cleanup-profile-signals.mjs` | Remove low-quality profile signals and duplicate fragments. |
 
-## verify
+Use `cleanup:profile-signals` after changing extraction quality gates or after importing noisy conversation history.
 
-Health check for pipeline data integrity. Validates `data/applications.md` against seven rules: canonical statuses (per `templates/states.yml`), no duplicate company+role pairs, all report links point to existing files, scores match `X.XX/5` / `N/A` / `DUP`, rows have proper pipe-delimited format, no pending TSVs in `batch/tracker-additions/`, and no markdown bold in scores.
+## Discovery Scanner
 
-```bash
-npm run verify
-```
+| Command | Script | Purpose |
+| --- | --- | --- |
+| `npm run scan` | `scan.mjs` | Legacy zero-token portal scan. |
+| `npm run scan:worker` | `scripts/scan-worker.mjs` | Run the discovery worker loop. |
+| `npm run scan:once` | `scripts/scan-worker.mjs --once` | Process one discovery cycle. |
+| `npm run scan-risks` | `scripts/scan-risks.mjs` | Run JD risk pattern detection. |
 
-**Exit codes:** `0` pipeline clean (zero errors), `1` errors found. Warnings (e.g. possible duplicates) do not cause a non-zero exit.
+The web app discovery UI uses `/api/scan/*` routes and the `scan_queue`/`scan_jobs` tables. Some scanner flows are intentionally conservative during PostgreSQL migration to avoid stuck pending jobs.
 
----
+## Legacy Career-Ops Utilities
 
-## normalize
+These remain for compatibility with the original project data files:
 
-Maps non-canonical statuses to their canonical equivalents and strips markdown bold and dates from the status column. Aliases like `Enviada` become `Aplicado`, `CERRADA` becomes `Descartado`, etc. DUPLICADO info is moved to the notes column.
+| Command | Purpose |
+| --- | --- |
+| `npm run verify` | Check legacy pipeline data integrity. |
+| `npm run normalize` | Normalize legacy application statuses. |
+| `npm run dedup` | De-duplicate legacy tracker entries. |
+| `npm run merge` | Merge legacy batch TSV tracker additions. |
+| `npm run pdf` | Convert HTML to PDF. |
+| `npm run sync-check` | Validate legacy CV/profile consistency. |
+| `npm run liveness` | Check whether job URLs still look active. |
 
-```bash
-npm run normalize             # apply changes
-npm run normalize -- --dry-run  # preview without writing
-```
+## Turso Compatibility
 
-Creates a `.bak` backup of `applications.md` before writing.
+| Command | Purpose |
+| --- | --- |
+| `npm run turso-push` | Push local SQLite data to Turso if configured. |
+| `npm run prestart` | Pull Turso data before `npm start`. |
 
-**Exit codes:** `0` always (changes or no changes).
-
----
-
-## dedup
-
-Removes duplicate entries from `applications.md` by grouping on normalized company name + fuzzy role match. Keeps the entry with the highest score. If a removed entry had a more advanced pipeline status, that status is promoted to the keeper.
-
-```bash
-npm run dedup             # apply changes
-npm run dedup -- --dry-run  # preview without writing
-```
-
-Creates a `.bak` backup before writing.
-
-**Exit codes:** `0` always.
-
----
-
-## merge
-
-Merges batch tracker additions (`batch/tracker-additions/*.tsv`) into `applications.md`. Handles 9-column TSV, 8-column TSV, and pipe-delimited markdown formats. Detects duplicates by report number, entry number, and company+role fuzzy match. Higher-scored re-evaluations update existing entries in place.
-
-```bash
-npm run merge                 # apply merge
-npm run merge -- --dry-run    # preview without writing
-npm run merge -- --verify     # merge then run verify-pipeline
-```
-
-Processed TSVs are moved to `batch/tracker-additions/merged/`.
-
-**Exit codes:** `0` success, `1` verification errors (with `--verify`).
-
----
-
-## pdf
-
-Renders an HTML file to a print-quality, ATS-parseable PDF via headless Chromium. Resolves font paths from `fonts/`, normalizes Unicode for ATS compatibility (em-dashes, smart quotes, zero-width characters), and reports page count and file size.
-
-```bash
-npm run pdf -- input.html output.pdf
-npm run pdf -- input.html output.pdf --format=letter   # US letter
-npm run pdf -- input.html output.pdf --format=a4        # A4 (default)
-```
-
-**Exit codes:** `0` PDF generated, `1` missing arguments or generation failure.
-
----
-
-## sync-check
-
-Validates that the career-ops setup is internally consistent: `cv.md` exists and is not too short, `config/profile.yml` exists with required fields, no hardcoded metrics in `modes/_shared.md` or `batch/batch-prompt.md`, and `article-digest.md` freshness (warns if older than 30 days).
-
-```bash
-npm run sync-check
-```
-
-**Exit codes:** `0` no errors (warnings allowed), `1` errors found.
-
----
-
-## update:check
-
-Checks whether a newer version of career-ops is available upstream. Outputs JSON to stdout:
-
-```bash
-npm run update:check
-```
-
-Possible JSON responses:
-
-| `status` | Meaning |
-|----------|---------|
-| `up-to-date` | Local version matches remote |
-| `update-available` | Newer version exists (includes `local`, `remote`, `changelog`) |
-| `dismissed` | User dismissed the update prompt |
-| `offline` | Could not reach GitHub |
-
-**Exit codes:** `0` always.
-
----
-
-## update
-
-Applies the upstream update. Creates a backup branch (`backup-pre-update-{version}`), fetches from the canonical repo, checks out only system-layer files, runs `npm install`, and commits. User-layer files (`cv.md`, `config/profile.yml`, `data/`, etc.) are never touched.
-
-```bash
-npm run update
-```
-
-**Exit codes:** `0` success, `1` lock conflict or safety violation.
-
----
-
-## rollback
-
-Restores system-layer files from the most recent backup branch created during an update.
-
-```bash
-npm run rollback
-```
-
-**Exit codes:** `0` success, `1` no backup branch found or git error.
-
----
-
-## liveness
-
-Tests whether job posting URLs are still live using headless Chromium. Detects expired patterns (e.g. "job no longer available"), HTTP 404/410, ATS redirect patterns, and apply-button presence. Supports multi-language expired patterns (English, German, French).
-
-```bash
-npm run liveness -- https://example.com/job/123
-npm run liveness -- https://a.com/job/1 https://b.com/job/2
-npm run liveness -- --file urls.txt
-```
-
-Each URL gets a verdict: `active`, `expired`, or `uncertain` with a reason.
-
-**Exit codes:** `0` all URLs active, `1` any expired or uncertain.
-
----
-
-## scan
-
-Zero-token portal scanner. Hits ATS APIs (Greenhouse, Ashby, Lever) and career pages directly — no LLM tokens consumed. Reads `portals.yml` for target companies and search queries, outputs matching listings to stdout and optionally appends to `data/pipeline.md`.
-
-```bash
-npm run scan
-```
-
-**Exit codes:** `0` scan completed, `1` configuration error or no portals.yml found.
+PostgreSQL/pgvector is now the strategic database path for durable server data and long-term memory. Turso commands are retained for existing deployments.

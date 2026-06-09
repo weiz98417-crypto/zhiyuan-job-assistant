@@ -112,5 +112,5 @@ openspec/changes/*
 !openspec/changes/harden-profile-signal-quality-gate/**
 !openspec/changes/wire-agents-to-long-term-memory/
 !openspec/changes/wire-agents-to-long-term-memory/**
-auth
-auth-wal
+/auth
+/auth-wal
