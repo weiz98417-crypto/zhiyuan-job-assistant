@@ -5,7 +5,7 @@
 - [x] 1.1 Inventory all action tools that mutate CV, JD, reports, offers, profile, memory, sessions, or files.
 - [x] 1.2 Classify tools by risk: read-only, low-risk write, high-risk write, destructive write.
 - [x] 1.3 Identify all runtime SQLite imports and confirm which are still reachable with `DB_DRIVER=postgres`.
-- [ ] 1.4 Add regression fixtures for current failure modes: placeholder resume save, half-written content, markdown/code fences in CV, false success claims, lost run state after refresh.
+- [x] 1.4 Add regression fixtures for current failure modes: placeholder resume save, half-written content, markdown/code fences in CV, false success claims, lost run state after refresh.
 
 ## 2. Postgres Canonical Runtime Gates
 
@@ -81,8 +81,8 @@
 
 ## 11. Evals And Release Gates
 
-- [ ] 11.1 Add baseline eval for resume edit corruption.
-- [ ] 11.2 Add boundary eval for short-but-valid manual edits vs invalid agent writes.
-- [ ] 11.3 Add regression eval for "agent claims saved but verifier failed".
-- [ ] 11.4 Add window-switch recovery eval.
+- [x] 11.1 Add baseline eval for resume edit corruption.
+- [x] 11.2 Add boundary eval for short-but-valid manual edits vs invalid agent writes.
+- [x] 11.3 Add regression eval for "agent claims saved but verifier failed".
+- [x] 11.4 Add window-switch recovery eval.
 - [ ] 11.5 Run OpenSpec validation, TypeScript, targeted tests, full test suite, and LAN smoke before apply is considered complete.

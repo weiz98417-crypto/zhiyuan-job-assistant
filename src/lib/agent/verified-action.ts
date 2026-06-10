@@ -86,6 +86,11 @@ const MARKDOWN_CONTROL_PATTERNS: Array<{ pattern: RegExp; code: string; message:
     message: "Document fields must not store modification comparison tables.",
   },
   {
+    pattern: /^\s*\|.+\|\s*\n\s*\|?\s*:?-{2,}:?\s*(?:\|\s*:?-{2,}:?\s*)+\|?/m,
+    code: "markdown.diff_table",
+    message: "Document fields must not store markdown tables.",
+  },
+  {
     pattern: /^\s*#{1,6}\s+/m,
     code: "markdown.heading",
     message: "Markdown headings are not allowed in this document field.",

@@ -182,7 +182,7 @@ export function buildResumeSavePlan(messages: ResumeSaveGuardMessage[], toolWhit
 }
 
 export function claimsResumeSaved(text: string): boolean {
-  return SAVE_CLAIM_RE.test(text);
+  return SAVE_CLAIM_RE.test(text) || /(?:successfully|already|has been).{0,12}(?:saved|updated|written).{0,20}(?:resume|cv)/i.test(text);
 }
 
 export function sanitizeUnsupportedResumeSaveClaim(text: string, saveSucceeded: boolean): string {
