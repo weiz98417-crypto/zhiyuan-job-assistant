@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildResumeSavePlan,
   claimsResumeSaved,
@@ -6,6 +6,10 @@ import {
   validateResumeSectionContent,
 } from "@/lib/agent/resume-save-guard";
 import { saveResumeSection } from "@/lib/agent/tools/action/save-resume-section";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("resume save guard", () => {
   it("builds a real save plan from a pasted revised skills list", () => {
@@ -102,5 +106,47 @@ SQL / 数据分析
     expect(claimsResumeSaved(text)).toBe(true);
     expect(sanitizeUnsupportedResumeSaveClaim(text, false)).toContain("还没有真正写入简历页面");
     expect(sanitizeUnsupportedResumeSaveClaim(text, true)).toBe(text);
+  });
+
+  it("requires canonical read-back verification before reporting a section save", async () => {
+    const oldCv = {
+      activeVersion: "v1",
+      versions: {
+        v1: {
+          sections: [
+            { id: "skills", title: "技能", content: "旧技能清单" },
+          ],
+        },
+      },
+    };
+    const nextContent = "核心能力\nAI产品全链路设计\nPrompt Engineering\nRAG知识库构建";
+    const newCv = {
+      activeVersion: "v1",
+      versions: {
+        v1: {
+          sections: [
+            { id: "skills", title: "技能", content: nextContent },
+          ],
+        },
+      },
+    };
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true, data: oldCv }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true, data: newCv }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await saveResumeSection.handler({
+      section: "技能",
+      content: nextContent,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.verifiedAction?.success).toBe(true);
+    expect(result.verifiedAction?.readBack).toMatchObject({
+      ok: true,
+      code: "read_back.match",
+    });
   });
 });

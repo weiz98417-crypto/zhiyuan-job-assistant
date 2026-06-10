@@ -1,4 +1,5 @@
 import type { AgentToolParam } from "@/types";
+import type { VerifiedActionResult } from "@/lib/agent/verified-action";
 
 export interface ToolParameter {
   type: "string" | "number" | "boolean" | "object" | "array";
@@ -55,6 +56,8 @@ export interface ToolResult {
   uiPayload?: Record<string, unknown>;
   /** Raw complete data for storage/logging. Falls back to uiPayload + llmSummary if absent. */
   rawData?: unknown;
+  /** Machine-checkable evidence for durable mutations. Required for high-risk writes as tools migrate. */
+  verifiedAction?: VerifiedActionResult;
 }
 
 export interface ToolDefinition<TParams = Record<string, unknown>> {

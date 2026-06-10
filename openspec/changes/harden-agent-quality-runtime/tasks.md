@@ -2,14 +2,14 @@
 
 ## 1. Baseline Audit
 
-- [ ] 1.1 Inventory all action tools that mutate CV, JD, reports, offers, profile, memory, sessions, or files.
-- [ ] 1.2 Classify tools by risk: read-only, low-risk write, high-risk write, destructive write.
-- [ ] 1.3 Identify all runtime SQLite imports and confirm which are still reachable with `DB_DRIVER=postgres`.
+- [x] 1.1 Inventory all action tools that mutate CV, JD, reports, offers, profile, memory, sessions, or files.
+- [x] 1.2 Classify tools by risk: read-only, low-risk write, high-risk write, destructive write.
+- [x] 1.3 Identify all runtime SQLite imports and confirm which are still reachable with `DB_DRIVER=postgres`.
 - [ ] 1.4 Add regression fixtures for current failure modes: placeholder resume save, half-written content, markdown/code fences in CV, false success claims, lost run state after refresh.
 
 ## 2. Postgres Canonical Runtime Gates
 
-- [ ] 2.1 Add a Postgres cutover checklist script that reports runtime driver, reachable SQLite imports, row counts, and hash checks.
+- [x] 2.1 Add a Postgres cutover checklist script that reports runtime driver, reachable SQLite imports, row counts, and hash checks.
 - [ ] 2.2 Add Postgres backup and restore scripts for local/LAN deployment.
 - [ ] 2.3 Mark SQLite as read-only archive when Postgres is active.
 - [ ] 2.4 Remove or isolate production server routes that instantiate SQLite directly under Postgres mode.
@@ -32,8 +32,8 @@
 
 ## 5. Verified Write Tool Protocol
 
-- [ ] 5.1 Define shared `VerifiedActionResult` with `precheck`, `mutation`, `readBack`, `verifier`, `rollback`, and `evidence`.
-- [ ] 5.2 Add deterministic validators for document fields: min length, placeholder text, code fences, markdown control text, truncated output, and target-section mismatch.
+- [x] 5.1 Define shared `VerifiedActionResult` with `precheck`, `mutation`, `readBack`, `verifier`, `rollback`, and `evidence`.
+- [x] 5.2 Add deterministic validators for document fields: min length, placeholder text, code fences, markdown control text, truncated output, and target-section mismatch.
 - [ ] 5.3 Require read-back verification for every high-risk action tool.
 - [ ] 5.4 Add optimistic concurrency checks using base hash or version id.
 - [ ] 5.5 Prevent tools from returning `success: true` unless read-back verification passes.

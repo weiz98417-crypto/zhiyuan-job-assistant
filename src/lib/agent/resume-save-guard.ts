@@ -1,3 +1,5 @@
+import { validateDocumentFieldContent } from "@/lib/agent/verified-action";
+
 export type ResumeSectionId = "summary" | "experience" | "projects" | "education" | "skills";
 
 type ResumeSaveGuardMessage = { role: string; content: string };
@@ -39,6 +41,7 @@ const NON_RESUME_CONTENT_PATTERNS: Array<{ pattern: RegExp; reason: string }> = 
   { pattern: /(?:工作经历|项目经验|项目经历|技能清单|个人概述).{0,40}→\s*(?:替换为|修改为|改为)\s*[：:]?\s*$/i, reason: "内容是板块替换说明，不是完整板块正文" },
   { pattern: /^\s*\|?\s*修改前\s*\|\s*修改后\s*\|\s*原因\s*\|?/im, reason: "内容是修改对照表，不应直接写入简历" },
   { pattern: /已更新「.+」板块到 CV|打开\s+https?:\/\/localhost/i, reason: "内容是工具结果或页面提示，不是简历正文" },
+  { pattern: /(?:达到处理上限|重新提问|被截断|补读完整|正在分析|马上给你结果)/i, reason: "内容包含对话过程或失败提示，不是简历正文" },
 ];
 
 function cleanRevisionContent(raw: string): string {
@@ -81,6 +84,12 @@ export function validateResumeSectionContent(
   if (!options.skipMinLength && compact.length < minLength) {
     return { valid: false, reason: `内容过短，不像完整的${section === "projects" ? "项目经验" : "简历"}板块` };
   }
+
+  const generic = validateDocumentFieldContent(trimmed, {
+    minCompactLength: options.skipMinLength ? 1 : minLength,
+    targetLabel: section,
+  });
+  if (!generic.valid) return { valid: false, reason: generic.reason || "内容未通过写入校验" };
 
   return { valid: true };
 }

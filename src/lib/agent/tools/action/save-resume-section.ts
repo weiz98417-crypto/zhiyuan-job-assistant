@@ -1,5 +1,10 @@
 import type { ToolDefinition, ToolResult } from "../types";
 import { validateResumeSectionContent, type ResumeSectionId } from "@/lib/agent/resume-save-guard";
+import {
+  buildVerifiedActionFailure,
+  buildVerifiedActionSuccess,
+  validateDocumentFieldContent,
+} from "@/lib/agent/verified-action";
 
 const SECTION_MAP: Record<string, string> = {
   "个人概述": "summary", "概述": "summary", "summary": "summary",
@@ -20,12 +25,18 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
   const sectionId = (SECTION_MAP[section] || section) as ResumeSectionId;
   const validation = validateResumeSectionContent(sectionId, newContent);
   if (!validation.valid) {
+    const verifiedAction = buildVerifiedActionFailure({
+      action: "save_resume_section",
+      targetType: "cv",
+      error: validation.reason || "内容不像完整简历板块",
+    });
     return {
       success: false,
       data: null,
       error: `保存被拦截: ${validation.reason || "内容不像完整简历板块"}`,
       recoverable: false,
       retryHint: "请提供要写入该板块的完整正文，不要只提供修改说明、占位符或对照表。",
+      verifiedAction,
     };
   }
 
@@ -87,10 +98,60 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
   } catch { putOk = false; }
 
   if (!putOk) {
-    return { success: false, data: null, error: "CV 数据写入 SQLite 失败", recoverable: true, retryHint: "SQLite 写入失败，请重试保存操作" };
+    return {
+      success: false,
+      data: null,
+      error: "CV 数据写入失败",
+      recoverable: true,
+      retryHint: "CV 写入失败，请重试保存操作",
+      verifiedAction: buildVerifiedActionFailure({
+        action: "save_resume_section",
+        targetType: "cv",
+        error: "CV 数据写入失败",
+      }),
+    };
   }
 
-  // 5. localStorage as cache only (SQLite is canonical)
+  // 5. Read back the canonical store before claiming success.
+  let readBackContent = "";
+  try {
+    const verifyRes = await fetch("/api/cv/data", { cache: "no-store" });
+    if (verifyRes.ok) {
+      const verifyJson = await verifyRes.json();
+      const verifyData = verifyJson.data || {};
+      const verifyVersions = verifyData.versions as Record<string, { sections?: Array<{ id: string; content: string }> }> | undefined;
+      const verifyActive = verifyVersions?.[verifyData.activeVersion as string];
+      readBackContent = verifyActive?.sections?.find((s) => s.id === sectionId)?.content || "";
+    }
+  } catch {
+    readBackContent = "";
+  }
+
+  const documentValidation = validateDocumentFieldContent(newContent, {
+    minCompactLength: 1,
+    targetLabel: sectionId,
+  });
+  const verifiedAction = buildVerifiedActionSuccess({
+    action: "save_resume_section",
+    targetType: "cv",
+    targetField: sectionId,
+    data: { sectionId, saved: true },
+    expectedContent: newContent,
+    readBackContent,
+    checks: documentValidation.checks,
+  });
+  if (!verifiedAction.success) {
+    return {
+      success: false,
+      data: null,
+      error: "CV 写入后校验失败：读取到的内容与预期不一致，已阻止成功提示",
+      recoverable: true,
+      retryHint: "请重新读取简历后再生成差异并保存。",
+      verifiedAction,
+    };
+  }
+
+  // 6. localStorage as cache only (server store is canonical)
   try {
     localStorage.setItem("zhiyuan-cv", JSON.stringify(cvData));
   } catch { /* localStorage may be full — non-critical since SQLite succeeded */ }
@@ -100,6 +161,7 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
   return {
     success: true,
     data: { sectionId, sectionLabel: sectionLabels[sectionId] || sectionId, saved: true },
+    verifiedAction,
   };
 }
 
