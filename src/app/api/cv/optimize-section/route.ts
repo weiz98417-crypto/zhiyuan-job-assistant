@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { buildJudgePrompt, getTemperatureByEffort } from "@/lib/judge-engine";
 import type { Operation } from "@/types";
 import { getCurrentUser } from "@/lib/auth";
+import { getDataRepositories } from "@/lib/data-repositories";
 import { retrieveReferenceResumeSnippets } from "@/lib/reference-resume-vector";
 import { retrieveExcellentResumePatternMemory } from "@/lib/excellent-resume-patterns";
 
@@ -64,6 +65,16 @@ export async function POST(request: Request) {
       ? roleDirection
       : targetJD?.role || userProfile?.targetRoles?.[0]?.name || "";
 
+    const repos = getDataRepositories();
+    const [explicitReferenceResumes, recentPreferences] = await Promise.all([
+      referenceIds?.length
+        ? Promise.all(
+            referenceIds.slice(0, 3).map((id) => repos.referenceResumes.get(id, user.userId)),
+          ).then((items) => items.filter(Boolean) as { name: string; sections_json: string }[])
+        : Promise.resolve([]),
+      repos.preferences.listRecent(user.userId, 10).catch(() => []),
+    ]);
+
     const semanticReferenceSnippets = await retrieveReferenceResumeSnippets({
       userId: user.userId,
       query: [
@@ -96,12 +107,14 @@ export async function POST(request: Request) {
       enablePlaceholders,
       targetJD,
       referenceIds,
+      referenceResumes: explicitReferenceResumes,
       intent,
       userProfile,
       roleDirection,
       questionAnswers,
       referenceSnippets: semanticReferenceSnippets,
       patternMemory,
+      preferences: recentPreferences,
     });
 
     const temperature = getTemperatureByEffort(effort);

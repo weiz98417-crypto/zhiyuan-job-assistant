@@ -203,6 +203,7 @@ export interface DataRepositories {
   };
   preferences: {
     record(preference: PreferenceRow, userId: string): Promise<void>;
+    listRecent(userId: string, limit?: number): Promise<PreferenceRow[]>;
   };
   agentPreferences: {
     list(userId: string): Promise<AnyRow[]>;
@@ -391,6 +392,14 @@ function createSqliteRepositories(): DataRepositories {
           operation: preference.operation || "",
         });
       },
+      async listRecent(userId, limit = 10) {
+        return getDb().prepare(`
+          SELECT * FROM optimization_preferences
+          WHERE user_id = ? OR user_id IS NULL
+          ORDER BY created_at DESC
+          LIMIT ?
+        `).all(userId, limit) as PreferenceRow[];
+      },
     },
     agentPreferences: createSqliteAgentPreferenceRepository(),
   };
@@ -421,6 +430,14 @@ function createPostgresRepositories(): DataRepositories {
           INSERT INTO optimization_preferences (user_id, section_id, variant_type, action, original_text, optimized_text, operation)
           VALUES ($1, $2, $3, $4, $5, $6, $7)
         `, [userId, preference.section_id, preference.variant_type, preference.action, preference.original_text || null, preference.optimized_text || null, preference.operation || ""]));
+      },
+      async listRecent(userId: string, limit = 10) {
+        return withPostgresClient(async (client) => rows<PreferenceRow>((await client.query(`
+          SELECT * FROM optimization_preferences
+          WHERE user_id = $1
+          ORDER BY created_at DESC
+          LIMIT $2
+        `, [userId, limit])).rows));
       },
     },
     agentPreferences: createPostgresAgentPreferenceRepository(),

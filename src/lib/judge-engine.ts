@@ -2,7 +2,6 @@
    Four-dimension priority model: Operation > JD ≈ Reference > Effort */
 
 import type { Operation } from "@/types";
-import { getReferenceResume, getRecentPreferences } from "@/lib/server-db";
 import { injectRoleWritingGuide } from "@/lib/agent/knowledge/role-writing-guides";
 import type { ReferenceResumeSnippet } from "@/lib/reference-resume-vector";
 import type { ExcellentResumePatternMemory } from "@/lib/excellent-resume-patterns";
@@ -17,8 +16,13 @@ interface PreferenceRow {
   section_id: string;
   variant_type: string;
   action: string;
-  created_at: string;
+  created_at?: string;
   operation?: string;
+}
+
+interface ReferenceResumePromptSource {
+  name: string;
+  sections_json: string;
 }
 
 /* ── Temperature by Effort ── */
@@ -135,20 +139,17 @@ export function buildJDFilterPrompt(jd?: TargetJD): string {
 
 /* ── Reference Prompt ── */
 
-export function buildReferencePrompt(refIds?: number[], sectionId?: string, enablePlaceholders = true): string {
-  if (!refIds || refIds.length === 0) return "";
+export function buildReferencePrompt(
+  references?: ReferenceResumePromptSource[],
+  sectionId?: string,
+  enablePlaceholders = true,
+): string {
+  if (!references || references.length === 0) return "";
 
   const refSections: string[] = [];
   const refFullCV: string[] = [];
 
-  for (const refId of refIds.slice(0, 3)) {
-    let ref;
-    try {
-      ref = getReferenceResume(refId);
-    } catch {
-      continue;
-    }
-    if (!ref) continue;
+  for (const ref of references.slice(0, 3)) {
     const sections = JSON.parse(ref.sections_json || "[]") as { id: string; title: string; content: string }[];
 
     // Full CV structure for overall analysis
@@ -254,7 +255,7 @@ ${lines.join("\n\n")}`;
 /* ── Preference Prompt ── */
 
 export function buildPreferencePrompt(prefs?: PreferenceRow[]): string {
-  const effectivePrefs = prefs || getRecentPreferences(10);
+  const effectivePrefs = prefs || [];
   if (effectivePrefs.length === 0) return "";
 
   const lines = effectivePrefs.map((p) => {
@@ -320,6 +321,7 @@ export interface JudgePromptParams {
   enablePlaceholders: boolean;
   targetJD?: TargetJD;
   referenceIds?: number[];
+  referenceResumes?: ReferenceResumePromptSource[];
   intent?: string;
   userProfile?: {
     headline: string;
@@ -330,6 +332,7 @@ export interface JudgePromptParams {
   questionAnswers?: { question: string; answer: string }[];
   referenceSnippets?: ReferenceResumeSnippet[];
   patternMemory?: ExcellentResumePatternMemory[];
+  preferences?: PreferenceRow[];
 }
 
 export function buildJudgePrompt(params: JudgePromptParams): string {
@@ -342,12 +345,14 @@ export function buildJudgePrompt(params: JudgePromptParams): string {
     enablePlaceholders,
     targetJD,
     referenceIds,
+    referenceResumes,
     intent,
     userProfile,
     roleDirection,
     questionAnswers,
     referenceSnippets,
     patternMemory,
+    preferences,
   } = params;
 
   // Build CV context
@@ -394,10 +399,10 @@ ${questionAnswers.map(qa => `- **${qa.question}** → ${qa.answer}`).join("\n")}
     buildRoleGuidance(userProfile, roleDirection),
     buildOperationPrompt(operation, enablePlaceholders),
     buildJDFilterPrompt(targetJD),
-    buildReferencePrompt(referenceIds, sectionId, enablePlaceholders),
+    buildReferencePrompt(referenceResumes, sectionId, enablePlaceholders),
     buildSemanticReferencePrompt(referenceSnippets),
     buildExcellentResumePatternMemoryPrompt(patternMemory),
-    buildPreferencePrompt(),
+    buildPreferencePrompt(preferences),
     buildEffortPrompt(effort, enablePlaceholders),
     buildPlaceholderRules(enablePlaceholders, effort),
     intentLine,
