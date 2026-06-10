@@ -81,6 +81,12 @@ describe("postgres cutover scan", () => {
       'import { getDb } from "@/lib/server-db";\nexport function GET() { return getDb().prepare("SELECT 1").get(); }\n',
       "utf-8",
     );
+    fs.mkdirSync(path.join(dir, "src", "app", "api", "types-only"), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "src", "app", "api", "types-only", "route.ts"),
+      'import type { ReportRow } from "@/lib/server-db";\nexport const row: ReportRow | null = null;\n',
+      "utf-8",
+    );
     fs.writeFileSync(
       path.join(dir, "src", "lib", "data-repositories.ts"),
       'import { getDb } from "@/lib/server-db";\nexport function bridge() { return getDb(); }\n',
@@ -98,5 +104,6 @@ describe("postgres cutover scan", () => {
         expect.objectContaining({ file: "src/lib/data-repositories.ts", allowed: true }),
       ]),
     );
+    expect(hits.some((hit) => hit.file === "src/app/api/types-only/route.ts")).toBe(false);
   });
 });

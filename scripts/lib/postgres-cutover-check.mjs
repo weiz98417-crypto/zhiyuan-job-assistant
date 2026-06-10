@@ -19,13 +19,13 @@ const DEFAULT_SCAN_ROOTS = [
 
 const SQLITE_IMPORT_PATTERNS = [
   { kind: "better-sqlite3", pattern: /from\s+["']better-sqlite3["']|import\s+Database\s+from\s+["']better-sqlite3["']/ },
-  { kind: "server-db-import", pattern: /from\s+["'][^"']*server-db["']/ },
   { kind: "getDb-call", pattern: /\bgetDb\s*\(/ },
 ];
 
 const SQLITE_RUNTIME_ALLOWLIST = new Map([
   ["src/lib/server-db.ts", "legacy SQLite adapter with DB_DRIVER=postgres guard"],
   ["src/lib/data-repositories.ts", "dual-driver repository factory"],
+  ["src/lib/memory/governance.ts", "driver-gated memory governance bridge"],
   ["src/lib/scan-data.ts", "driver-gated scan repository bridge"],
   ["src/lib/team-insights.ts", "driver-gated analytics bridge"],
 ]);
@@ -61,6 +61,7 @@ export function scanRuntimeSqliteImports(options = {}) {
       for (const { kind, pattern } of SQLITE_IMPORT_PATTERNS) {
         if (pattern.test(content)) fileHits.push(kind);
       }
+      if (hasRuntimeServerDbImport(content)) fileHits.push("server-db-import");
       if (fileHits.length === 0) continue;
       const allowReason = SQLITE_RUNTIME_ALLOWLIST.get(rel);
       hits.push({
@@ -73,6 +74,22 @@ export function scanRuntimeSqliteImports(options = {}) {
   }
 
   return hits.sort((a, b) => a.file.localeCompare(b.file));
+}
+
+function hasRuntimeServerDbImport(content) {
+  return content
+    .split(/\r?\n/)
+    .some((line) => {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("import ") || trimmed.startsWith("import type ")) return false;
+      if (!/from\s+["'][^"']*server-db["']/.test(trimmed)) return false;
+      const namedImport = trimmed.match(/^import\s+\{([^}]+)\}\s+from/);
+      if (namedImport) {
+        const specifiers = namedImport[1].split(",").map((item) => item.trim()).filter(Boolean);
+        if (specifiers.length > 0 && specifiers.every((item) => item.startsWith("type "))) return false;
+      }
+      return true;
+    });
 }
 
 export function collectSqliteRowCounts(sqlitePath = DEFAULT_SQLITE_PATH) {

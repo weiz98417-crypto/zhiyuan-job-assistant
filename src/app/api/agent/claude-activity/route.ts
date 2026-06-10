@@ -1,26 +1,23 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
-import { getDb } from "@/lib/server-db";
+import { getDataRepositories } from "@/lib/data-repositories";
 
 export async function GET() {
   try {
     let user;
     try { user = await getCurrentUser(); } catch { return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 }); }
 
-    const db = getDb();
-
-    const recent = db
-      .prepare(
-        `SELECT company, role, score, status, date, notes
-         FROM applications
-         WHERE user_id = ? AND status NOT IN ('SKIP','Discarded')
-         ORDER BY num DESC LIMIT 5`
-      )
-      .all(user.userId) as { company: string; role: string; score: number; status: string; date: string; notes: string }[];
-
-    const pipeline = db
-      .prepare("SELECT status, COUNT(*) as cnt FROM applications WHERE user_id = ? GROUP BY status")
-      .all(user.userId) as { status: string; cnt: number }[];
+    const apps = await getDataRepositories().applications.list({ limit: 200 }, user.userId);
+    const recent = apps
+      .filter((app) => !["SKIP", "Discarded"].includes(String(app.status || "")))
+      .slice(0, 5) as { company: string; role: string; score: number; status: string; date: string; notes: string }[];
+    const pipeline = Array.from(
+      apps.reduce((map, app) => {
+        const status = String(app.status || "");
+        map.set(status, (map.get(status) || 0) + 1);
+        return map;
+      }, new Map<string, number>()),
+    ).map(([status, cnt]) => ({ status, cnt }));
 
     const parts: string[] = [];
     parts.push("[Claude Agent 最近活动]");

@@ -1,4 +1,4 @@
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import { getDatabaseDriver, withPostgresClient } from "./postgres";
 import { getDb } from "./server-db";
 import {
@@ -113,6 +113,57 @@ export async function attachJdToScanJobForUser(jobId: number, userId: string, jd
     "UPDATE scan_jobs SET jd_id = $1, status = $2, last_error = '', last_interaction_at = now() WHERE id = $3 AND user_id = $4",
     [jdId, status, jobId, userId],
   ));
+}
+
+export async function enqueueEvaluatedScanJobForUser(
+  userId: string,
+  input: { url: string; company?: string; title?: string; jdSnippet?: string },
+) {
+  if (getDatabaseDriver() !== "postgres") {
+    const db = getDb();
+    const updated = db.prepare(`
+      UPDATE scan_jobs SET status = 'evaluated', last_interaction_at = datetime('now')
+      WHERE url = ? AND user_id = ?
+    `).run(input.url, userId);
+
+    if (updated.changes === 0) {
+      const dedupKey = createHash("sha256").update(input.url).digest("hex");
+      db.prepare(`
+        INSERT OR IGNORE INTO scan_queue (id, user_id, status, companies_total, companies_done, jobs_found, jobs_new, error_log)
+        VALUES ('manual', ?, 'done', 0, 0, 0, 0, '[]')
+      `).run(userId);
+      db.prepare(`
+        INSERT OR IGNORE INTO scan_jobs (scan_id, user_id, company, title, url, jd_snippet, status, dedup_key)
+        VALUES ('manual', ?, ?, ?, ?, ?, 'evaluated', ?)
+      `).run(userId, input.company || "未知", input.title || "未知职位", input.url, input.jdSnippet || "", dedupKey);
+    }
+
+    return { updated: updated.changes > 0 };
+  }
+
+  return withPostgresClient(async (client) => {
+    const updated = await client.query(`
+      UPDATE scan_jobs SET status = 'evaluated', last_interaction_at = now()
+      WHERE url = $1 AND user_id = $2
+    `, [input.url, userId]);
+
+    if (!updated.rowCount) {
+      const dedupKey = createHash("sha256").update(input.url).digest("hex");
+      const manualScanId = `manual:${userId}`;
+      await client.query(`
+        INSERT INTO scan_queue (id, user_id, status, companies_total, companies_done, jobs_found, jobs_new, error_log)
+        VALUES ($1, $2, 'done', 0, 0, 0, 0, '[]'::jsonb)
+        ON CONFLICT (id) DO NOTHING
+      `, [manualScanId, userId]);
+      await client.query(`
+        INSERT INTO scan_jobs (scan_id, user_id, company, title, url, jd_snippet, status, dedup_key)
+        VALUES ($1, $2, $3, $4, $5, $6, 'evaluated', $7)
+        ON CONFLICT (dedup_key) DO NOTHING
+      `, [manualScanId, userId, input.company || "未知", input.title || "未知职位", input.url, input.jdSnippet || "", dedupKey]);
+    }
+
+    return { updated: Boolean(updated.rowCount) };
+  });
 }
 
 export async function getScanStatusForUser(scanId: string, userId: string) {

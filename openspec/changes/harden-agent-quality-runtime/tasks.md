@@ -12,7 +12,7 @@
 - [x] 2.1 Add a Postgres cutover checklist script that reports runtime driver, reachable SQLite imports, row counts, and hash checks.
 - [ ] 2.2 Add Postgres backup and restore scripts for local/LAN deployment.
 - [ ] 2.3 Mark SQLite as read-only archive when Postgres is active.
-- [ ] 2.4 Remove or isolate production server routes that instantiate SQLite directly under Postgres mode.
+- [x] 2.4 Remove or isolate production server routes that instantiate SQLite directly under Postgres mode.
 - [ ] 2.5 Add tests proving CV/session/report/JD writes use Postgres repositories when `DB_DRIVER=postgres`.
 
 ## 3. Agent Run Ledger

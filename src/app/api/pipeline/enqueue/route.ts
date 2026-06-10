@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createHash } from "crypto";
 import { getCurrentUser } from "@/lib/auth";
-import { getDb } from "@/lib/server-db";
+import { enqueueEvaluatedScanJobForUser } from "@/lib/scan-data";
 
 export async function POST(request: NextRequest) {
   try {
@@ -20,27 +19,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid URL format" }, { status: 400 });
     }
 
-    const db = getDb();
     const userId = String(user.userId);
-
-    // Mark the job as evaluated if it was from a scan (existing scan_jobs row)
-    const updated = db.prepare(`
-      UPDATE scan_jobs SET status = 'evaluated', last_interaction_at = datetime('now')
-      WHERE url = ? AND user_id = ?
-    `).run(url, userId);
-
-    // If not from a scan, insert a new row with NULL scan_id
-    if (updated.changes === 0) {
-      const dedupKey = createHash('sha256').update(url).digest('hex');
-      db.prepare(`
-        INSERT OR IGNORE INTO scan_queue (id, user_id, status, companies_total, companies_done, jobs_found, jobs_new, error_log)
-        VALUES ('manual', ?, 'done', 0, 0, 0, 0, '[]')
-      `).run(userId);
-      db.prepare(`
-        INSERT OR IGNORE INTO scan_jobs (scan_id, user_id, company, title, url, jd_snippet, status, dedup_key)
-        VALUES ('manual', ?, ?, ?, ?, ?, 'evaluated', ?)
-      `).run(userId, company || '未知', title || '未知职位', url, jd_snippet || '', dedupKey);
-    }
+    await enqueueEvaluatedScanJobForUser(userId, {
+      url,
+      company: company || "未知",
+      title: title || "未知职位",
+      jdSnippet: jd_snippet || "",
+    });
 
     return NextResponse.json({
       success: true,

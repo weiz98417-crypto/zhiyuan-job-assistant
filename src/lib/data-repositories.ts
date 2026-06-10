@@ -182,6 +182,10 @@ export interface DataRepositories {
     get(id: number, userId: string): Promise<AnyRow | undefined>;
     update(id: number, userId: string, updates: AnyRow): Promise<boolean>;
   };
+  stories: {
+    list(userId: string): Promise<AnyRow[]>;
+    create(input: { title: string; situation?: string; task?: string; action?: string; result?: string; tags?: unknown[] }, userId: string): Promise<number>;
+  };
   offers: {
     list(userId: string): Promise<AnyRow[]>;
     get(id: number, userId: string): Promise<AnyRow | undefined>;
@@ -374,6 +378,7 @@ function createSqliteRepositories(): DataRepositories {
     signals: createSqliteSignalRepository(),
     referenceResumes: createSqliteReferenceResumeRepository(),
     sessions: createSqliteSessionRepository(),
+    stories: createSqliteStoryRepository(),
     offers: createSqliteOfferRepository(),
     offerReports: createSqliteOfferReportRepository(),
     news: createSqliteNewsRepository(),
@@ -421,6 +426,7 @@ function createPostgresRepositories(): DataRepositories {
     signals: createPostgresSignalRepository(),
     referenceResumes: createPostgresReferenceResumeRepository(),
     sessions: createPostgresSessionRepository(),
+    stories: createPostgresStoryRepository(),
     offers: createPostgresOfferRepository(),
     offerReports: createPostgresOfferReportRepository(),
     news: createPostgresNewsRepository(),
@@ -1115,6 +1121,54 @@ function createPostgresSessionRepository(): DataRepositories["sessions"] {
       if (!sets.length) return false;
       values.push(id, userId);
       return withPostgresClient(async (client) => Boolean((await client.query(`UPDATE sessions SET ${sets.join(", ")}, updated_at = now() WHERE id = $${values.length - 1} AND user_id = $${values.length}`, values)).rowCount));
+    },
+  };
+}
+
+function createSqliteStoryRepository(): DataRepositories["stories"] {
+  return {
+    async list(userId) {
+      return getDb().prepare("SELECT * FROM stories WHERE user_id = ? ORDER BY created_at DESC").all(userId) as AnyRow[];
+    },
+    async create(input, userId) {
+      return Number(getDb().prepare(`
+        INSERT INTO stories (user_id, title, situation, task, action, result, tags_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        userId,
+        input.title,
+        input.situation || "",
+        input.task || "",
+        input.action || "",
+        input.result || "",
+        JSON.stringify(input.tags || []),
+      ).lastInsertRowid);
+    },
+  };
+}
+
+function createPostgresStoryRepository(): DataRepositories["stories"] {
+  return {
+    async list(userId) {
+      return withPostgresClient(async (client) => rows<AnyRow>((await client.query(
+        "SELECT * FROM stories WHERE user_id = $1 ORDER BY created_at DESC",
+        [userId],
+      )).rows));
+    },
+    async create(input, userId) {
+      return withPostgresClient(async (client) => Number((await client.query(`
+        INSERT INTO stories (user_id, title, situation, task, action, result, tags_json)
+        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+        RETURNING id
+      `, [
+        userId,
+        input.title,
+        input.situation || "",
+        input.task || "",
+        input.action || "",
+        input.result || "",
+        JSON.stringify(input.tags || []),
+      ])).rows[0].id));
     },
   };
 }

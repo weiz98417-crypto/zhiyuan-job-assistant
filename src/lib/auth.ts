@@ -1,7 +1,6 @@
 import { SignJWT, jwtVerify } from 'jose';
 import bcrypt from 'bcryptjs';
 import { cookies } from 'next/headers';
-import { getDb } from './server-db';
 import { getDataRepositories } from './data-repositories';
 
 // ── JWT Secret (lazy — defers validation to runtime, not build-time) ──
@@ -91,26 +90,4 @@ export async function verifyTokenVersion(payload: JWTPayload): Promise<void> {
   if (!valid) {
     throw new Error('Token has been revoked');
   }
-}
-
-// ── Scoped DB Helper ──
-/**
- * Returns a scoped DB helper that auto-injects userId as the first parameter.
- * Use for private-table queries. For public tables, use `scoped.raw`.
- */
-export function scopedDb(userId: string) {
-  const db = getDb();
-  return {
-    all(sql: string, ...params: unknown[]) {
-      return db.prepare(sql).all(userId, ...params);
-    },
-    get(sql: string, ...params: unknown[]) {
-      return db.prepare(sql).get(userId, ...params);
-    },
-    run(sql: string, ...params: unknown[]) {
-      return db.prepare(sql).run(userId, ...params);
-    },
-    /** Raw db handle — for public tables or complex queries */
-    raw: db,
-  };
 }
