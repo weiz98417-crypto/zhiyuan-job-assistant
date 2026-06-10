@@ -15,9 +15,18 @@ import { logInteraction } from "@/lib/agent/memory";
 import { migrateExploreToAgent } from "@/lib/agent/migrate";
 import { orchestrate } from "@/lib/agent/orchestrator";
 import { agentLoopClient } from "@/lib/agent/loop/client-runner";
-import { inferPreferredDocumentTypeFromText, type ImageIntakeResult } from "@/lib/agent/image-intake";
+import { inferPreferredDocumentTypeFromText, type ImageDocumentType, type ImageIntakeResult } from "@/lib/agent/image-intake";
 import { buildImageIntakeStatusText, buildImageIntakeToolSummary, routeImageIntake } from "@/lib/agent/image-intake-router";
 import type { AgentDefinition } from "@/lib/agent/registry/types";
+import { createAgentTaskContract, type AgentTaskType } from "@/lib/agent/task-contract";
+import {
+  appendAgentRunStepClient,
+  createAgentRunClient,
+  listActiveAgentRunsClient,
+  updateAgentRunClient,
+  type ClientAgentRunRecord,
+} from "@/lib/agent/run-ledger-client";
+import type { AgentRunStatus } from "@/lib/agent/run-ledger";
 import { triggerProfileUpdate } from "@/lib/profile-update";
 import { scanMessage, deduplicateSignals, maybeRawContext } from "@/lib/agent/signal-extractor";
 import type { ExtractedSignal } from "@/lib/agent/signal-extractor";
@@ -66,9 +75,85 @@ import type { AgentMessage, AgentInteraction, ChatSession } from "@/types";
 type AgentPhase = "understanding" | "executing" | "verifying" | "reflecting" | "responding" | "done" | "compressing_context" | "extracting_ocr" | "extracting_jd" | "jd_extracted" | "detecting_archetype" | "archetype_detected" | null;
 
 const CONTEXT_COMPRESSION_STATUS_MS = 120;
+const LEDGER_TEXT_LIMIT = 240;
+
+type ActiveRunNotice = {
+  id: string;
+  taskType: string;
+  agentId: string;
+  status: AgentRunStatus;
+  phase?: string;
+  toolName?: string;
+  updatedAt?: string;
+};
 
 function waitForStatusPaint(ms = CONTEXT_COMPRESSION_STATUS_MS): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function truncateLedgerText(value: unknown, max = LEDGER_TEXT_LIMIT): string {
+  if (value === undefined || value === null) return "";
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  const clean = text.replace(/data:image\/[^;\s]+;base64,[A-Za-z0-9+/=]+/g, "[image]").replace(/\s+/g, " ").trim();
+  return clean.length <= max ? clean : `${clean.slice(0, max)}...`;
+}
+
+function summarizeLedgerParams(params: Record<string, unknown> | undefined): string {
+  if (!params) return "";
+  const safe: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(params)) {
+    if (key.toLowerCase().includes("image")) {
+      safe[key] = Array.isArray(value) ? `[${value.length} image(s)]` : "[image]";
+    } else if (typeof value === "string") {
+      safe[key] = truncateLedgerText(value, 120);
+    } else {
+      safe[key] = value;
+    }
+  }
+  return truncateLedgerText(safe);
+}
+
+function inferAgentTaskType(
+  agentId: string,
+  content: string,
+  imageIntake?: ImageIntakeResult | null,
+  preferredDocumentType?: ImageDocumentType,
+): AgentTaskType | null {
+  const documentType = imageIntake?.documentType || preferredDocumentType;
+  if (agentId === "evaluate" || documentType === "jd") return "jd_evaluation";
+  if (agentId === "offer" || documentType === "offer") return "offer_evaluation";
+  if (agentId === "interview") return "interview_coaching";
+  if (agentId === "profile") return "profile_update";
+  if (agentId === "resume" || documentType === "resume") {
+    return /\b(pdf|download|export|markdown|md)\b/i.test(content) ? "file_export" : "resume_edit";
+  }
+  return null;
+}
+
+function buildRunTarget(
+  content: string,
+  agent: AgentDefinition,
+  imageIntake?: ImageIntakeResult | null,
+): string {
+  const structured = imageIntake?.structured || {};
+  const company = typeof structured.company === "string" ? structured.company : "";
+  const role = typeof structured.role === "string" ? structured.role : "";
+  const structuredTarget = [company, role].filter(Boolean).join(" / ");
+  if (structuredTarget) return truncateLedgerText(structuredTarget, 120);
+  if (imageIntake?.documentType && imageIntake.documentType !== "unknown") {
+    return `${imageIntake.documentType}:${agent.id}`;
+  }
+  return truncateLedgerText(content || agent.name || agent.id, 120) || agent.id;
+}
+
+function activeNoticeFromRun(run: ClientAgentRunRecord): ActiveRunNotice {
+  return {
+    id: run.id,
+    taskType: run.task_type,
+    agentId: run.agent_id,
+    status: run.status,
+    updatedAt: run.updated_at,
+  };
 }
 
 async function loadInterviewMaterialRecords(): Promise<InterviewMaterialRecord[]> {
@@ -177,6 +262,7 @@ function AgentPageInner() {
   const [completionInfo, setCompletionInfo] = useState<CompletionInfo | null>(null);
   const [resultQuality, setResultQuality] = useState<string | null>(null);
   const [sessionLoadError, setSessionLoadError] = useState<string | null>(null);
+  const [activeRunNotice, setActiveRunNotice] = useState<ActiveRunNotice | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
   const streamContentRef = useRef("");
@@ -271,6 +357,24 @@ function AgentPageInner() {
       streamContentRef.current = "";
     });
   }, [mounted, searchParams, currentSessionId]);
+
+  useEffect(() => {
+    if (!mounted || !currentSessionId) return;
+    let cancelled = false;
+
+    listActiveAgentRunsClient(currentSessionId)
+      .then(({ data }) => {
+        if (cancelled) return;
+        setActiveRunNotice(data[0] ? activeNoticeFromRun(data[0]) : null);
+      })
+      .catch(() => {
+        if (!cancelled) setActiveRunNotice(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [mounted, currentSessionId]);
 
   const sendMessage = useCallback(
     async (content: string, images?: string[], options?: { hideUserMessage?: boolean }) => {
@@ -400,6 +504,7 @@ function AgentPageInner() {
 
       const controller = new AbortController();
       abortRef.current = controller;
+      let durableRunId: string | null = null;
 
       try {
         // ── Client-side orchestration: classify + agentLoopClient ──
@@ -616,6 +721,73 @@ Rules:
 
         setActiveAgent(agent);
 
+        const taskType = inferAgentTaskType(agent.id, content, imageIntake, preferredDocumentType);
+        if (taskType) {
+          try {
+            const contract = createAgentTaskContract({
+              taskType,
+              target: buildRunTarget(content, agent, imageIntake),
+              requiresUserApproval: taskType === "resume_edit",
+            });
+            const createdRun = await createAgentRunClient({
+              sessionId: currentSessionId,
+              taskType,
+              agentId: agent.id,
+              contract,
+            });
+            durableRunId = createdRun?.id || null;
+            if (createdRun) {
+              setActiveRunNotice({
+                ...activeNoticeFromRun(createdRun),
+                status: "running",
+                phase: "understanding",
+              });
+              await updateAgentRunClient(createdRun.id, "running").catch(() => null);
+            }
+          } catch {
+            durableRunId = null;
+          }
+        }
+
+        const recordRunStep = (input: {
+          phase: string;
+          toolName?: string;
+          status?: string;
+          inputSummary?: string;
+          outputSummary?: string;
+          verifier?: unknown;
+          error?: unknown;
+        }) => {
+          if (!durableRunId) return;
+          const runId = durableRunId;
+          setActiveRunNotice((prev) =>
+            prev?.id === runId
+              ? {
+                  ...prev,
+                  phase: input.phase,
+                  toolName: input.toolName || prev.toolName,
+                  status: input.phase === "verifying" ? "verifying" : input.phase === "repairing" ? "repairing" : prev.status,
+                }
+              : prev,
+          );
+          appendAgentRunStepClient(runId, input).catch(() => {});
+        };
+
+        const updateRunStatus = async (
+          status: AgentRunStatus,
+          patch: { result?: unknown; error?: unknown } = {},
+        ) => {
+          if (!durableRunId) return;
+          const runId = durableRunId;
+          setActiveRunNotice((prev) => (prev?.id === runId ? { ...prev, status } : prev));
+          await updateAgentRunClient(runId, status, patch).catch(() => null);
+          if (status === "succeeded" || status === "cancelled") {
+            window.setTimeout(() => {
+              setActiveRunNotice((prev) => (prev?.id === runId ? null : prev));
+            }, 2500);
+          }
+        };
+
         let toolResultInfo: { name: string; result: string; success: boolean; data?: unknown; uiPayload?: Record<string, unknown> } | null = null;
         let assistantText = "";
         let nextOfferState = agentState?.offer;
@@ -641,13 +813,33 @@ Rules:
         )) {
           if (firstEvent) { setStartTime(Date.now()); firstEvent = false; }
           switch (event.type) {
-            case "phase": setPhase(event.phase); break;
+            case "phase": {
+              setPhase(event.phase);
+              if (event.phase) recordRunStep({ phase: event.phase, status: "running" });
+              break;
+            }
             case "intent": break;
             case "agent_switch": break;
             case "thinking_content": setThinkingContent(event.content); break;
-            case "tool_call": setExecutingTool(event.name); setResultQuality(null); break;
+            case "tool_call":
+              setExecutingTool(event.name);
+              setResultQuality(null);
+              recordRunStep({
+                phase: "executing",
+                toolName: event.name,
+                status: "running",
+                inputSummary: summarizeLedgerParams(event.params),
+              });
+              break;
             case "tool_result":
               toolResultInfo = { name: event.name, result: event.result, success: event.success, data: event.data, uiPayload: (event as { uiPayload?: Record<string, unknown> }).uiPayload };
+              recordRunStep({
+                phase: "verifying",
+                toolName: event.name,
+                status: event.success ? "succeeded" : "failed",
+                outputSummary: truncateLedgerText(event.result),
+                verifier: { success: event.success, hasUiPayload: Boolean((event as { uiPayload?: Record<string, unknown> }).uiPayload) },
+              });
               if (event.name === "save_resume_section" && event.success) {
                 resumeSectionSaveSucceeded = true;
               }
@@ -732,8 +924,23 @@ Rules:
                 return copy;
               });
               break;
-            case "tool_error": console.warn(`[agent] tool error: ${event.name} -> ${event.error}`); break;
-            case "result_quality": setResultQuality(event.quality); break;
+            case "tool_error":
+              console.warn(`[agent] tool error: ${event.name} -> ${event.error}`);
+              recordRunStep({
+                phase: event.recoverable ? "repairing" : "verifying",
+                toolName: event.name,
+                status: "failed",
+                error: { message: truncateLedgerText(event.error), recoverable: event.recoverable },
+              });
+              break;
+            case "result_quality":
+              setResultQuality(event.quality);
+              recordRunStep({
+                phase: "verifying",
+                status: event.quality === "good" ? "succeeded" : "failed",
+                verifier: { quality: event.quality },
+              });
+              break;
             case "text": assistantText += event.content; streamContentRef.current = assistantText; setStreamText(assistantText); break;
             case "block_start":
               setEvalProgress(prev => {
@@ -903,11 +1110,28 @@ Rules:
           if (!hideUserMessage) {
             try { persistMessages([...updated, finalAssistant]); } catch { /* ok */ }
           }
+          const finalRunStatus: AgentRunStatus = toolResultInfo && !toolResultInfo.success ? "failed" : "succeeded";
+          await updateRunStatus(finalRunStatus, {
+            result: {
+              assistantLength: finalAssistantContent.length,
+              lastTool: toolResultInfo
+                ? { name: toolResultInfo.name, success: toolResultInfo.success }
+                : null,
+            },
+          });
+        } else {
+          await updateRunStatus("failed", {
+            error: { message: "Agent loop completed without assistant output or tool result." },
+          });
         }
       } catch (err: unknown) {
         if (err instanceof DOMException && err.name === "AbortError") return;
         const errorMsg = err instanceof Error ? err.message : "未知错误";
         console.error("Stream error:", errorMsg);
+        if (durableRunId) {
+          await updateAgentRunClient(durableRunId, "failed", { error: { message: errorMsg } }).catch(() => null);
+          setActiveRunNotice((prev) => (prev?.id === durableRunId ? { ...prev, status: "failed" } : prev));
+        }
         setStreaming(false);
         setPhase(null);
         setMessages((prev) => {
@@ -1226,6 +1450,16 @@ Rules:
             </WarmButton>
           </div>
         </div>
+
+        {activeRunNotice && (
+          <div className="mt-3 flex flex-shrink-0 flex-wrap items-center gap-2 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-xs text-[var(--color-muted)]">
+            <span className="font-medium text-[var(--color-text)]">Agent run</span>
+            <span>{activeRunNotice.taskType}</span>
+            <span>status: {activeRunNotice.status}</span>
+            {activeRunNotice.phase && <span>phase: {activeRunNotice.phase}</span>}
+            {activeRunNotice.toolName && <span>tool: {activeRunNotice.toolName}</span>}
+          </div>
+        )}
 
         {/* AgentChat */}
         <AgentChat
