@@ -75,8 +75,9 @@ function resolveErrorCategory(result: ToolResult): ErrorCategory {
   return result.success ? "ok" : "permanent";
 }
 
-const MAX_MESSAGES = 30;
-const MAX_CONTEXT_TOKENS = 64000;
+export const AGENT_LOOP_MAX_MESSAGES = 30;
+export const AGENT_LOOP_MAX_CONTEXT_TOKENS = 64000;
+export const AGENT_LOOP_COMPRESSED_KEEP_LAST = 15;
 
 function injectLatestImagesForImageTool(
   toolName: string,
@@ -107,6 +108,16 @@ function truncateContext(
 ): LoopMessage[] {
   if (messages.length <= keepLast) return messages;
   return messages.slice(-keepLast);
+}
+
+function willTruncateOutboundMessages(
+  messages: LoopMessage[],
+  searchProgress: string,
+  skipResearchProtocol?: boolean,
+): boolean {
+  const protocolCount = skipResearchProtocol ? 0 : 1;
+  const searchProgressCount = searchProgress ? 1 : 0;
+  return messages.length + protocolCount + searchProgressCount > AGENT_LOOP_MAX_MESSAGES;
 }
 
 /** Enforce context budget before pushing. Harness hard-gate, not prompt suggestion. */
@@ -392,7 +403,7 @@ async function fetchFromThinkProxy(
   if (searchProgress) {
     withDirective = [...withDirective, { role: "user" as const, content: searchProgress }];
   }
-  const truncated = withDirective.slice(-MAX_MESSAGES);
+  const truncated = withDirective.slice(-AGENT_LOOP_MAX_MESSAGES);
   // Combine user abort signal with a 120s timeout
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(new Error('think proxy timeout')), 120_000);
@@ -518,8 +529,11 @@ export async function* agentLoopClient(
 
     state.iteration++;
 
-    if (state.contextSize > MAX_CONTEXT_TOKENS) {
-      ctx = truncateContext(ctx, 15);
+    if (state.contextSize > AGENT_LOOP_MAX_CONTEXT_TOKENS) {
+      state.phase = "compressing_context";
+      yield { type: "phase", phase: "compressing_context" };
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      ctx = truncateContext(ctx, AGENT_LOOP_COMPRESSED_KEEP_LAST);
       state.contextSize = estimateTokens(ctx);
     }
 
@@ -617,6 +631,11 @@ export async function* agentLoopClient(
         finishReason = "tool_calls";
         forcedToolCall = null;
       } else {
+        if (willTruncateOutboundMessages(ctx, searchProgress, skipResearchProtocol)) {
+          state.phase = "compressing_context";
+          yield { type: "phase", phase: "compressing_context" };
+          await new Promise((resolve) => setTimeout(resolve, 120));
+        }
         const thinkResponse = await fetchFromThinkProxy(systemPrompt, ctx, signal, searchProgress, skipResearchProtocol, tools);
         if (!thinkResponse.ok) {
           yield { type: "phase", phase: "responding" };

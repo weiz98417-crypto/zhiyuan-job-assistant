@@ -31,6 +31,7 @@ import {
   pinSession,
   ensureDefaultSession,
   generateMemoryDigest,
+  MEMORY_DIGEST_USER_MESSAGE_THRESHOLD,
 } from "@/lib/agent/sessions";
 import {
   persistInterviewRecap,
@@ -62,7 +63,13 @@ import type { AgentMessage, AgentInteraction, ChatSession } from "@/types";
 
 /* ── Agent phase ── */
 
-type AgentPhase = "understanding" | "executing" | "verifying" | "reflecting" | "responding" | "done" | "extracting_ocr" | "extracting_jd" | "jd_extracted" | "detecting_archetype" | "archetype_detected" | null;
+type AgentPhase = "understanding" | "executing" | "verifying" | "reflecting" | "responding" | "done" | "compressing_context" | "extracting_ocr" | "extracting_jd" | "jd_extracted" | "detecting_archetype" | "archetype_detected" | null;
+
+const CONTEXT_COMPRESSION_STATUS_MS = 120;
+
+function waitForStatusPaint(ms = CONTEXT_COMPRESSION_STATUS_MS): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
 
 async function loadInterviewMaterialRecords(): Promise<InterviewMaterialRecord[]> {
   const [jdResult, refResult] = await Promise.allSettled([
@@ -183,6 +190,18 @@ function AgentPageInner() {
     const cleaned = text.replace(/\s+/g, " ").trim();
     if (!cleaned) return "新对话";
     return cleaned.length <= 10 ? cleaned : cleaned.slice(0, 10) + "...";
+  }, []);
+
+  const generateMemoryDigestWithStatus = useCallback(async (
+    fullMessages: AgentMessage[],
+    fallbackDigest?: string,
+  ): Promise<string | undefined> => {
+    const userMsgCount = fullMessages.filter((m) => m.role === "user").length;
+    if (userMsgCount < MEMORY_DIGEST_USER_MESSAGE_THRESHOLD) return fallbackDigest;
+    setPhase("compressing_context");
+    setExecutingTool(undefined);
+    await waitForStatusPaint();
+    return generateMemoryDigest(fullMessages) || fallbackDigest;
   }, []);
 
   const renameSessionFromFirstUserMessage = useCallback(async (sessionId: number, firstText: string) => {
@@ -527,11 +546,11 @@ function AgentPageInner() {
                   !currentSessionForRun.title ||
                   currentSessionForRun.title === "新对话" ||
                   currentSessionForRun.title === "新的对话");
-              const userMsgCount = fullMessages.filter((m) => m.role === "user").length;
+              const nextMemoryDigest = await generateMemoryDigestWithStatus(fullMessages, memoryDigest);
               await updateSession(currentSessionId, {
                 messages: fullMessages,
                 title: needsTitle ? makeSessionTitle(content) : undefined,
-                memoryDigest: userMsgCount >= 5 ? generateMemoryDigest(fullMessages) || undefined : memoryDigest,
+                memoryDigest: nextMemoryDigest,
                 interviewState: currentSessionForRun.interviewState,
                 agentState: {
                   ...(agentState || {}),
@@ -837,8 +856,10 @@ Rules:
                 nextInterviewState = persistInterviewRecap(nextInterviewState, taggedAssistant.content);
               }
               const isFirstUserMsg = currentSession.messages.filter((m) => m.role === "user").length === 0;
-              const userMsgCount = fullMessages.filter((m) => m.role === "user").length;
-              const memoryDigest = userMsgCount >= 5 ? generateMemoryDigest(fullMessages) : undefined;
+              const memoryDigest = await generateMemoryDigestWithStatus(
+                fullMessages,
+                currentSession.memoryDigest || currentSessionForRun?.memoryDigest,
+              );
 
               // Set title from FIRST user message (not current message)
               const needsTitle =
@@ -906,7 +927,7 @@ Rules:
         abortRef.current = null;
       }
     },
-    [messages, currentSessionId, makeSessionTitle, renameSessionFromFirstUserMessage],
+    [messages, currentSessionId, makeSessionTitle, renameSessionFromFirstUserMessage, generateMemoryDigestWithStatus],
   );
 
   useEffect(() => {

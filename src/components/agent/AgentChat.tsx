@@ -18,7 +18,7 @@ const VALID_FILE_TYPES = ["image/png", "image/jpeg", "image/webp", "application/
 
 /* ── Types ── */
 
-type AgentPhase = "understanding" | "executing" | "verifying" | "reflecting" | "responding" | "done" | "extracting_ocr" | "extracting_jd" | "jd_extracted" | "detecting_archetype" | "archetype_detected" | null;
+type AgentPhase = "understanding" | "executing" | "verifying" | "reflecting" | "responding" | "done" | "compressing_context" | "extracting_ocr" | "extracting_jd" | "jd_extracted" | "detecting_archetype" | "archetype_detected" | null;
 
 export interface EvalBlockProgress {
   block: string;
@@ -478,6 +478,7 @@ const PHASE_LABELS: Record<string, { emoji: string; label: string }> = {
   executing: { emoji: "🔧", label: "执行中" },
   verifying: { emoji: "🔍", label: "验证中" },
   responding: { emoji: "✏️", label: "输出中" },
+  compressing_context: { emoji: "🧠", label: "正在压缩上下文" },
   extracting_ocr: { emoji: "📷", label: "截图识别" },
   extracting_jd: { emoji: "🌐", label: "抓取JD" },
   jd_extracted: { emoji: "📄", label: "JD提取完成" },

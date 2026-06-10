@@ -2,6 +2,7 @@ import db from "@/lib/db";
 import type { AgentMessage, AgentSessionState, ChatSession, InterviewSessionState } from "@/types";
 
 const MAX_MESSAGES_PER_SESSION = 200;
+export const MEMORY_DIGEST_USER_MESSAGE_THRESHOLD = 5;
 
 function makeTitle(messages: AgentMessage[]): string {
   const firstUser = messages.find((m) => m.role === "user");
@@ -199,7 +200,7 @@ export async function ensureDefaultSession(): Promise<number> {
 
 export function generateMemoryDigest(messages: AgentMessage[]): string | null {
   const userMessages = messages.filter((m) => m.role === "user");
-  if (userMessages.length < 5) return null;
+  if (userMessages.length < MEMORY_DIGEST_USER_MESSAGE_THRESHOLD) return null;
 
   const assistantMessages = messages.filter((m) => m.role === "assistant" && m.content);
   const userText = userMessages.map((m) => m.content).join(" ");

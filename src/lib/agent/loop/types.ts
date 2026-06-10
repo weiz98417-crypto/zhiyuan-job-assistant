@@ -14,6 +14,7 @@ export type ResultQuality = "good" | "empty" | "irrelevant" | "garbled";
 
 export type AgentPhase =
   | "understanding" | "executing" | "verifying" | "reflecting" | "responding" | "done"
+  | "compressing_context"
   | "extracting_ocr" | "extracting_jd" | "jd_extracted"
   | "detecting_archetype" | "archetype_detected";
 
