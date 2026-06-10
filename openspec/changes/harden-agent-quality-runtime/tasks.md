@@ -57,11 +57,11 @@
 
 ## 8. Self-Healing Policy Engine
 
-- [ ] 8.1 Define error categories: transient, validation_failed, read_back_mismatch, base_version_conflict, unclear_intent, destructive_risk, policy_denied.
-- [ ] 8.2 Add bounded retry policy for transient failures.
-- [ ] 8.3 Add rollback policy for read-back mismatch or partial writes.
-- [ ] 8.4 Add one-question clarification policy for unclear intent or content mismatch.
-- [ ] 8.5 Add safe-failure user messages that include what was protected and what the user can do next.
+- [x] 8.1 Define error categories: transient, validation_failed, read_back_mismatch, base_version_conflict, unclear_intent, destructive_risk, policy_denied.
+- [x] 8.2 Add bounded retry policy for transient failures.
+- [x] 8.3 Add rollback policy for read-back mismatch or partial writes.
+- [x] 8.4 Add one-question clarification policy for unclear intent or content mismatch.
+- [x] 8.5 Add safe-failure user messages that include what was protected and what the user can do next.
 
 ## 9. UI And Observability
 
