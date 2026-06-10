@@ -73,8 +73,8 @@
 
 ## 10. Framework Adapter Spike
 
-- [ ] 10.1 Define `AgentRuntimeAdapter` interface.
-- [ ] 10.2 Implement current orchestrator behind the adapter.
+- [x] 10.1 Define `AgentRuntimeAdapter` interface.
+- [x] 10.2 Implement current orchestrator behind the adapter.
 - [ ] 10.3 Prototype one external runtime option against the resume draft/apply flow.
 - [ ] 10.4 Compare current orchestrator vs external runtime on reliability, run recovery, tool governance, latency, integration cost, and developer ergonomics.
 - [ ] 10.5 Decide whether to keep current orchestrator, wrap it, or migrate incrementally.
