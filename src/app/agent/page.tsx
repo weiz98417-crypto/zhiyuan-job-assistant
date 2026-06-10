@@ -56,6 +56,7 @@ import {
   type PendingReferenceResumeSaveAction,
   type ReferenceResumeSaveSessionState,
 } from "@/lib/agent/reference-resume-save-flow";
+import { sanitizeUnsupportedResumeSaveClaim } from "@/lib/agent/resume-save-guard";
 import type { AgentMessage, AgentInteraction, ChatSession } from "@/types";
 
 
@@ -599,6 +600,7 @@ Rules:
         let toolResultInfo: { name: string; result: string; success: boolean; data?: unknown; uiPayload?: Record<string, unknown> } | null = null;
         let assistantText = "";
         let nextOfferState = agentState?.offer;
+        let resumeSectionSaveSucceeded = false;
 
         const msgList = updated.map((m, index) => ({
           role: m.role,
@@ -627,6 +629,9 @@ Rules:
             case "tool_call": setExecutingTool(event.name); setResultQuality(null); break;
             case "tool_result":
               toolResultInfo = { name: event.name, result: event.result, success: event.success, data: event.data, uiPayload: (event as { uiPayload?: Record<string, unknown> }).uiPayload };
+              if (event.name === "save_resume_section" && event.success) {
+                resumeSectionSaveSucceeded = true;
+              }
               const offerPayload = (event as { uiPayload?: Record<string, unknown> }).uiPayload;
               if (offerPayload?.type === "offer_evaluation" || offerPayload?.type === "offer_report") {
                 nextOfferState = {
@@ -749,8 +754,12 @@ Rules:
         }
 
         // ── Finalize ──
-        streamContentRef.current = assistantText;
-        setStreamText(assistantText);
+        const finalAssistantContent = sanitizeUnsupportedResumeSaveClaim(
+          assistantText || "操作完成。",
+          resumeSectionSaveSucceeded,
+        );
+        streamContentRef.current = finalAssistantContent;
+        setStreamText(finalAssistantContent);
         setPhase(null);
         setExecutingTool(undefined);
         setEvalProgress([]);
@@ -759,7 +768,7 @@ Rules:
           // Build final assistant
           const finalAssistant: AgentMessage = {
             ...assistantMsg,
-            content: assistantText || "操作完成。",
+            content: finalAssistantContent,
           };
 
           setMessages((prev) => {

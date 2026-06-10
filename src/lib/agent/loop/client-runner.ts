@@ -14,6 +14,7 @@ import {
   completePendingReferenceResumeSave,
   type PendingReferenceResumeSaveAction,
 } from "@/lib/agent/reference-resume-save-flow";
+import { buildResumeSavePlan } from "@/lib/agent/resume-save-guard";
 
 export type { SSEEvent };
 
@@ -552,6 +553,20 @@ export async function* agentLoopClient(
       }
     }
 
+    if (firstIteration && !forcedToolCall) {
+      const resumeSavePlan = buildResumeSavePlan(ctx, toolWhitelist);
+      if (resumeSavePlan) {
+        forcedToolCall = {
+          id: `forced-save-resume-section-${Date.now()}`,
+          name: "save_resume_section",
+          arguments: JSON.stringify({
+            section: resumeSavePlan.section,
+            content: resumeSavePlan.content,
+          }),
+        };
+      }
+    }
+
     if (firstIteration && !forcedImageToolConsumed && !forcedToolCall) {
       const images = latestUserImages(ctx);
       const text = latestUserText(ctx);
@@ -1016,6 +1031,13 @@ ${followupInstruction}`,
       }
 
       yield { type: "tool_result", name: tc.name, result: formatted, success: toolResult.success, data: toolResult.data, uiPayload: toolResult.uiPayload };
+
+      if (tc.name === "save_resume_section" && toolResult.success) {
+        yield { type: "phase", phase: "responding" };
+        yield { type: "text", content: formatted || "简历已保存。" };
+        yield { type: "done" };
+        return;
+      }
 
       if (tc.name === "save_reference_resume" && toolResult.success) {
         yield { type: "phase", phase: "responding" };
