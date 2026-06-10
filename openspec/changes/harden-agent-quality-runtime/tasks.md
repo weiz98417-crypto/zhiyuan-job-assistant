@@ -21,7 +21,7 @@
 - [x] 3.2 Add repository methods to create, update, append step, cancel, resume, and list active runs.
 - [x] 3.3 Emit run events from the agent loop and persist phase/tool/verifier state.
 - [x] 3.4 Recover active run state when the user refreshes, switches session, or returns to the agent page.
-- [ ] 3.5 Add admin/debug view for recent failed runs without leaking full private document text.
+- [x] 3.5 Add admin/debug view for recent failed runs without leaking full private document text.
 
 ## 4. Task Contracts
 
@@ -69,7 +69,7 @@
 - [ ] 9.2 Show verifier evidence for high-risk writes in a compact status card.
 - [ ] 9.3 Add "resume run" and "cancel run" controls for active durable runs.
 - [ ] 9.4 Add user-facing rollback affordance for the latest document edit.
-- [ ] 9.5 Log verifier failures with task type, tool, run id, and redacted reason.
+- [x] 9.5 Log verifier failures with task type, tool, run id, and redacted reason.
 
 ## 10. Framework Adapter Spike
 

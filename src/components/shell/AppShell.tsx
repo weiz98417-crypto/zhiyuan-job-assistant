@@ -151,6 +151,10 @@ export default function AppShell({ children }: { children: ReactNode }) {
               {/* Admin links */}
               {user.role === 'admin' && (
                 <div className="mt-1 space-y-0.5">
+                  <a href="/admin/agent-runs" className="flex items-center gap-2 px-2 py-1.5 rounded-[var(--radius-sm)] text-xs font-medium text-[var(--color-primary)] hover:bg-[var(--color-primary-muted)] transition-colors duration-[var(--duration-fast)] no-underline">
+                    <Bot size={14} />
+                    Agent Run Debug
+                  </a>
                   <a href="/admin/users" className="flex items-center gap-2 px-2 py-1.5 rounded-[var(--radius-sm)] text-xs font-medium text-[var(--color-primary)] hover:bg-[var(--color-primary-muted)] transition-colors duration-[var(--duration-fast)] no-underline">
                     <Shield size={14} />
                     管理后台

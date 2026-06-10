@@ -39,6 +39,10 @@ export interface AgentRunStepRecord {
   created_at: string;
 }
 
+export interface AgentRunDebugRecord extends AgentRunRecord {
+  recent_steps: AgentRunStepRecord[];
+}
+
 export interface CreateAgentRunInput {
   userId: string;
   sessionId?: number | null;
@@ -169,6 +173,41 @@ export async function listAgentRunSteps(runId: string): Promise<AgentRunStepReco
   return withPostgresClient(async (client) => {
     const result = await client.query("SELECT * FROM agent_run_steps WHERE run_id = $1 ORDER BY created_at ASC", [runId]);
     return result.rows.map(normalizeStep);
+  });
+}
+
+export async function listRecentFailedAgentRuns(limit = 50): Promise<AgentRunDebugRecord[]> {
+  assertLedgerAvailable();
+  const safeLimit = Math.max(1, Math.min(100, Math.floor(limit)));
+  return withPostgresClient(async (client) => {
+    const runResult = await client.query(`
+      SELECT *
+      FROM agent_runs
+      WHERE status = ANY($1)
+      ORDER BY updated_at DESC
+      LIMIT $2
+    `, [["failed", "rolled_back"], safeLimit]);
+    const runs = runResult.rows.map(normalizeRun);
+    if (runs.length === 0) return [];
+
+    const ids = runs.map((run) => run.id);
+    const stepResult = await client.query(`
+      SELECT *
+      FROM agent_run_steps
+      WHERE run_id = ANY($1)
+      ORDER BY created_at DESC
+    `, [ids]);
+    const stepsByRun = new Map<string, AgentRunStepRecord[]>();
+    for (const row of stepResult.rows.map(normalizeStep)) {
+      const existing = stepsByRun.get(row.run_id) || [];
+      if (existing.length < 6) existing.push(row);
+      stepsByRun.set(row.run_id, existing);
+    }
+
+    return runs.map((run) => ({
+      ...run,
+      recent_steps: stepsByRun.get(run.id) || [],
+    }));
   });
 }
 
