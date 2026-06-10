@@ -84,6 +84,7 @@ type ActiveRunNotice = {
   status: AgentRunStatus;
   phase?: string;
   toolName?: string;
+  verifierSummary?: string;
   updatedAt?: string;
 };
 
@@ -780,6 +781,7 @@ Rules:
                   ...prev,
                   phase: input.phase,
                   toolName: input.toolName || prev.toolName,
+                  verifierSummary: input.verifier ? truncateLedgerText(input.verifier, 140) : prev.verifierSummary,
                   status: input.phase === "verifying" ? "verifying" : input.phase === "repairing" ? "repairing" : prev.status,
                 }
               : prev,
@@ -1472,6 +1474,7 @@ Rules:
             <span>status: {activeRunNotice.status}</span>
             {activeRunNotice.phase && <span>phase: {activeRunNotice.phase}</span>}
             {activeRunNotice.toolName && <span>tool: {activeRunNotice.toolName}</span>}
+            {activeRunNotice.verifierSummary && <span>verifier: {activeRunNotice.verifierSummary}</span>}
           </div>
         )}
 

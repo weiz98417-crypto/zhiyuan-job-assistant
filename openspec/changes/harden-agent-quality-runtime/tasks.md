@@ -66,7 +66,7 @@
 ## 9. UI And Observability
 
 - [x] 9.1 Show run phases: planning, executing, verifying, repairing, waiting for approval, succeeded, failed.
-- [ ] 9.2 Show verifier evidence for high-risk writes in a compact status card.
+- [x] 9.2 Show verifier evidence for high-risk writes in a compact status card.
 - [ ] 9.3 Add "resume run" and "cancel run" controls for active durable runs.
 - [ ] 9.4 Add user-facing rollback affordance for the latest document edit.
 - [x] 9.5 Log verifier failures with task type, tool, run id, and redacted reason.
