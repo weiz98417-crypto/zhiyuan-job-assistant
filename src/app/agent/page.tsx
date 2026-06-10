@@ -1098,7 +1098,7 @@ Rules:
     : undefined;
 
   return (
-    <div className="flex h-[calc(100vh-(var(--space-section)*2))] min-h-[560px] max-h-[calc(100vh-(var(--space-section)*2))] flex-1 gap-0 overflow-hidden">
+    <div className="flex h-[calc(100vh-(var(--space-section)*2))] min-h-[560px] max-h-[calc(100vh-(var(--space-section)*2))] w-full min-w-0 max-w-full flex-1 gap-0 overflow-hidden">
       {/* Desktop SessionList Sidebar (>=1280px) */}
       <div className="hidden h-full w-[220px] flex-shrink-0 overflow-hidden border-r border-[var(--color-divider)] bg-[var(--color-bg)]/50 pr-3 lg:flex">
         <SessionList

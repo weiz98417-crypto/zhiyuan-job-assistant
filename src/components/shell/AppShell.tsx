@@ -90,7 +90,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <ToastProvider>
-    <div className="flex min-h-full">
+    <div className="flex min-h-full min-w-0 overflow-x-hidden">
       {/* Desktop Side Nav — the "table of contents" of the journal */}
       <aside className="hidden lg:flex flex-col fixed left-0 top-0 bottom-0 w-56 bg-[var(--color-surface)] border-r border-[var(--color-border)] px-3 py-6">
         {/* Brand */}
@@ -193,13 +193,13 @@ export default function AppShell({ children }: { children: ReactNode }) {
       </aside>
 
       {/* Main content area — the "pages" of the journal */}
-      <main className="flex-1 lg:ml-56">
+      <main className="min-w-0 flex-1 overflow-x-hidden lg:ml-56">
         <motion.div
           key="page-content"
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, ease: [0.19, 1, 0.22, 1] }}
-          className={`h-full flex flex-col px-[var(--space-page)] py-[var(--space-section)] ${
+          className={`h-full min-w-0 overflow-x-hidden flex flex-col px-[var(--space-page)] py-[var(--space-section)] ${
             isWorkspacePage ? "w-full max-w-none" : "max-w-[1600px]"
           }`}
         >

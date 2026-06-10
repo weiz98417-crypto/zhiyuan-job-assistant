@@ -34,7 +34,7 @@ export default function RootLayout({
           rel="stylesheet"
         />
       </head>
-      <body className="h-full">
+      <body className="h-full overflow-x-hidden">
         <ThemeProvider>
           <AuthGate>{children}</AuthGate>
         </ThemeProvider>
