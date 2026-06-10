@@ -8,6 +8,11 @@ export interface ResumeSavePlan {
   reason: "direct-pasted-revision" | "recent-optimization-result" | "recent-assistant-proposal";
 }
 
+export interface ResumeSectionValidation {
+  valid: boolean;
+  reason?: string;
+}
+
 const SAVE_INTENT_RE = /(应用|保存|写入|确认|采用|用这个|就这个|直接改|帮我改|替我改|改了|没改|没有保存|没保存|落到简历|同步到简历)/i;
 const REFERENCE_RESUME_RE = /(优秀|参考|标杆|样例|范例).{0,12}(简历|CV|履历)|(简历|CV|履历).{0,12}(优秀|参考|标杆|样例|范例)/i;
 const SAVE_CLAIM_RE = /(已|已经|成功).{0,8}(保存|写入|更新|同步).{0,12}(简历|CV|技能|技能清单|板块)|已更新「.+」板块到 CV/i;
@@ -18,6 +23,22 @@ const SECTION_HINTS: Array<[ResumeSectionId, RegExp]> = [
   ["experience", /(工作经历|实习经历|经历|experience|work)/i],
   ["summary", /(个人概述|个人总结|自我评价|概述|summary)/i],
   ["education", /(教育背景|教育经历|学历|education)/i],
+];
+
+const SECTION_MIN_COMPACT_LENGTH: Record<ResumeSectionId, number> = {
+  summary: 20,
+  experience: 80,
+  projects: 80,
+  education: 10,
+  skills: 20,
+};
+
+const NON_RESUME_CONTENT_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
+  { pattern: /(?:替换为|修改为|改为)\s*[：:]?\s*$/i, reason: "内容停在“替换为/改为”占位符，没有真实正文" },
+  { pattern: /(?:保持原有|保持不变|不动).{0,40}(?:替换为|修改为|改为)/i, reason: "内容是修改指令，不是可保存的简历正文" },
+  { pattern: /(?:工作经历|项目经验|项目经历|技能清单|个人概述).{0,40}→\s*(?:替换为|修改为|改为)\s*[：:]?\s*$/i, reason: "内容是板块替换说明，不是完整板块正文" },
+  { pattern: /^\s*\|?\s*修改前\s*\|\s*修改后\s*\|\s*原因\s*\|?/im, reason: "内容是修改对照表，不应直接写入简历" },
+  { pattern: /已更新「.+」板块到 CV|打开\s+https?:\/\/localhost/i, reason: "内容是工具结果或页面提示，不是简历正文" },
 ];
 
 function cleanRevisionContent(raw: string): string {
@@ -40,7 +61,28 @@ function inferSectionId(...texts: string[]): ResumeSectionId {
 
 function isSubstantialRevision(content: string): boolean {
   const compact = content.replace(/\s/g, "");
-  return compact.length >= 20 && !/(请确认|回复|选择|保存哪|要用哪)/.test(content);
+  return compact.length >= 20 && validateResumeSectionContent("skills", content, { skipMinLength: true }).valid && !/(请确认|回复|选择|保存哪|要用哪)/.test(content);
+}
+
+export function validateResumeSectionContent(
+  section: ResumeSectionId,
+  content: string,
+  options: { skipMinLength?: boolean } = {},
+): ResumeSectionValidation {
+  const trimmed = content.replace(/\r/g, "").trim();
+  const compact = trimmed.replace(/\s/g, "");
+  if (!compact) return { valid: false, reason: "内容为空" };
+
+  for (const { pattern, reason } of NON_RESUME_CONTENT_PATTERNS) {
+    if (pattern.test(trimmed)) return { valid: false, reason };
+  }
+
+  const minLength = SECTION_MIN_COMPACT_LENGTH[section];
+  if (!options.skipMinLength && compact.length < minLength) {
+    return { valid: false, reason: `内容过短，不像完整的${section === "projects" ? "项目经验" : "简历"}板块` };
+  }
+
+  return { valid: true };
 }
 
 function extractAfterRevisionMarker(text: string): string | null {
@@ -93,8 +135,10 @@ export function buildResumeSavePlan(messages: ResumeSaveGuardMessage[], toolWhit
 
   const pasted = extractAfterRevisionMarker(userText);
   if (pasted) {
+    const section = inferSectionId(userText, pasted);
+    if (!validateResumeSectionContent(section, pasted).valid) return null;
     return {
-      section: inferSectionId(userText, pasted),
+      section,
       content: pasted,
       reason: "direct-pasted-revision",
     };
@@ -105,16 +149,20 @@ export function buildResumeSavePlan(messages: ResumeSaveGuardMessage[], toolWhit
     const content = message.content || "";
     const optimized = extractVariantFromOptimization(content, userText);
     if (optimized) {
+      const section = inferSectionId(userText, content);
+      if (!validateResumeSectionContent(section, optimized).valid) continue;
       return {
-        section: inferSectionId(userText, content),
+        section,
         content: optimized,
         reason: "recent-optimization-result",
       };
     }
     const proposal = extractAfterRevisionMarker(content);
     if (proposal) {
+      const section = inferSectionId(userText, content, proposal);
+      if (!validateResumeSectionContent(section, proposal).valid) continue;
       return {
-        section: inferSectionId(userText, content, proposal),
+        section,
         content: proposal,
         reason: "recent-assistant-proposal",
       };

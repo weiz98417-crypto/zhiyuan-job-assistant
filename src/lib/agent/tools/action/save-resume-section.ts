@@ -1,4 +1,5 @@
 import type { ToolDefinition, ToolResult } from "../types";
+import { validateResumeSectionContent, type ResumeSectionId } from "@/lib/agent/resume-save-guard";
 
 const SECTION_MAP: Record<string, string> = {
   "个人概述": "summary", "概述": "summary", "summary": "summary",
@@ -16,7 +17,17 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
     return { success: false, data: null, error: "新内容不能为空", recoverable: false, retryHint: "请提供要保存的完整板块内容" };
   }
 
-  const sectionId = SECTION_MAP[section] || section;
+  const sectionId = (SECTION_MAP[section] || section) as ResumeSectionId;
+  const validation = validateResumeSectionContent(sectionId, newContent);
+  if (!validation.valid) {
+    return {
+      success: false,
+      data: null,
+      error: `保存被拦截: ${validation.reason || "内容不像完整简历板块"}`,
+      recoverable: false,
+      retryHint: "请提供要写入该板块的完整正文，不要只提供修改说明、占位符或对照表。",
+    };
+  }
 
   // 1. Read current CV from SQLite (canonical source)
   let cvData: Record<string, unknown> = {};

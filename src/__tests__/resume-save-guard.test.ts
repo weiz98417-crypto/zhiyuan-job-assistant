@@ -3,7 +3,9 @@ import {
   buildResumeSavePlan,
   claimsResumeSaved,
   sanitizeUnsupportedResumeSaveClaim,
+  validateResumeSectionContent,
 } from "@/lib/agent/resume-save-guard";
+import { saveResumeSection } from "@/lib/agent/tools/action/save-resume-section";
 
 describe("resume save guard", () => {
   it("builds a real save plan from a pasted revised skills list", () => {
@@ -71,6 +73,27 @@ SQL / 数据分析
     ]);
 
     expect(plan).toBeNull();
+  });
+
+  it("rejects placeholder edit instructions instead of treating them as project content", async () => {
+    const corrupted = "**工作经历 — 携程**（保持原有详细描述，不动）\n\n**项目经验** → 替换为：";
+
+    expect(validateResumeSectionContent("projects", corrupted)).toMatchObject({
+      valid: false,
+    });
+
+    const plan = buildResumeSavePlan([
+      {
+        role: "assistant",
+        content: `修改后：\n${corrupted}`,
+      },
+      { role: "user", content: "就按这个保存到项目经验" },
+    ]);
+    expect(plan).toBeNull();
+
+    const result = await saveResumeSection.handler({ section: "项目经验", content: corrupted });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("保存被拦截");
   });
 
   it("rewrites unsupported save claims when no save tool succeeded", () => {
