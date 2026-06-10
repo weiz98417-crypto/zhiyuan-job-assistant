@@ -18,7 +18,7 @@ import { agentLoopClient } from "@/lib/agent/loop/client-runner";
 import { inferPreferredDocumentTypeFromText, type ImageDocumentType, type ImageIntakeResult } from "@/lib/agent/image-intake";
 import { buildImageIntakeStatusText, buildImageIntakeToolSummary, routeImageIntake } from "@/lib/agent/image-intake-router";
 import type { AgentDefinition } from "@/lib/agent/registry/types";
-import { createAgentTaskContract, type AgentTaskType } from "@/lib/agent/task-contract";
+import { createAgentTaskContract, createResumeBaseSnapshot, type AgentTaskBaseSnapshot, type AgentTaskType } from "@/lib/agent/task-contract";
 import {
   appendAgentRunStepClient,
   createAgentRunClient,
@@ -154,6 +154,18 @@ function activeNoticeFromRun(run: ClientAgentRunRecord): ActiveRunNotice {
     status: run.status,
     updatedAt: run.updated_at,
   };
+}
+
+async function loadTaskBaseSnapshot(taskType: AgentTaskType): Promise<AgentTaskBaseSnapshot> {
+  if (taskType !== "resume_edit") return {};
+  try {
+    const res = await fetch("/api/cv/data", { cache: "no-store" });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || !json.success) return {};
+    return createResumeBaseSnapshot(json.data);
+  } catch {
+    return {};
+  }
 }
 
 async function loadInterviewMaterialRecords(): Promise<InterviewMaterialRecord[]> {
@@ -724,10 +736,12 @@ Rules:
         const taskType = inferAgentTaskType(agent.id, content, imageIntake, preferredDocumentType);
         if (taskType) {
           try {
+            const baseSnapshot = await loadTaskBaseSnapshot(taskType);
             const contract = createAgentTaskContract({
               taskType,
               target: buildRunTarget(content, agent, imageIntake),
               requiresUserApproval: taskType === "resume_edit",
+              ...baseSnapshot,
             });
             const createdRun = await createAgentRunClient({
               sessionId: currentSessionId,

@@ -1,3 +1,5 @@
+import { stableContentHash } from "@/lib/agent/verified-action";
+
 export type AgentTaskType =
   | "resume_edit"
   | "jd_evaluation"
@@ -15,6 +17,11 @@ export interface AgentTaskContract {
   successCriteria: string[];
   validators: string[];
   createdAt: string;
+}
+
+export interface AgentTaskBaseSnapshot {
+  baseVersion?: string;
+  baseHash?: string;
 }
 
 const DEFAULT_SUCCESS_CRITERIA: Record<AgentTaskType, string[]> = {
@@ -81,6 +88,21 @@ export function createAgentTaskContract(input: {
     successCriteria: input.successCriteria || DEFAULT_SUCCESS_CRITERIA[input.taskType],
     validators: input.validators || DEFAULT_VALIDATORS[input.taskType],
     createdAt: new Date().toISOString(),
+  };
+}
+
+export function createResumeBaseSnapshot(cvData: unknown): AgentTaskBaseSnapshot {
+  if (!cvData || typeof cvData !== "object") return {};
+  const record = cvData as Record<string, unknown>;
+  const activeVersion = typeof record.activeVersion === "string" ? record.activeVersion : undefined;
+  const versions = record.versions && typeof record.versions === "object"
+    ? record.versions as Record<string, unknown>
+    : {};
+  const activeData = activeVersion ? versions[activeVersion] : undefined;
+  const hashSource = activeData || cvData;
+  return {
+    baseVersion: activeVersion,
+    baseHash: stableContentHash(hashSource),
   };
 }
 

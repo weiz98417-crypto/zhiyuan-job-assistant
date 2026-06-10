@@ -11,6 +11,7 @@ import {
 import {
   canClaimTaskSuccess,
   createAgentTaskContract,
+  createResumeBaseSnapshot,
   unmetSuccessCriteria,
 } from "@/lib/agent/task-contract";
 
@@ -135,6 +136,24 @@ describe("agent run ledger and task contracts", () => {
     expect(canClaimTaskSuccess(contract, ["draft generated"])).toBe(false);
     expect(unmetSuccessCriteria(contract, ["draft generated"])).toContain("user approved draft");
     expect(canClaimTaskSuccess(contract, contract.successCriteria)).toBe(true);
+  });
+
+  it("captures resume base version and hash for durable edit contracts", () => {
+    const snapshot = createResumeBaseSnapshot({
+      activeVersion: "v2",
+      versions: {
+        v1: { sections: [{ id: "skills", content: "old" }] },
+        v2: { sections: [{ id: "skills", content: "SQL / RAG" }] },
+      },
+    });
+    const contract = createAgentTaskContract({
+      taskType: "resume_edit",
+      target: "cv.skills",
+      ...snapshot,
+    });
+
+    expect(contract.baseVersion).toBe("v2");
+    expect(contract.baseHash).toMatch(/^fnv1a32:/);
   });
 });
 
