@@ -8,6 +8,11 @@ import {
   buildVerifiedActionSuccess,
   validateDocumentFieldContent,
 } from "@/lib/agent/verified-action";
+import {
+  canClaimTaskSuccess,
+  createAgentTaskContract,
+  unmetSuccessCriteria,
+} from "@/lib/agent/task-contract";
 
 import { scanRuntimeSqliteImports } from "../../scripts/lib/postgres-cutover-check.mjs";
 
@@ -105,5 +110,29 @@ describe("postgres cutover scan", () => {
       ]),
     );
     expect(hits.some((hit) => hit.file === "src/app/api/types-only/route.ts")).toBe(false);
+  });
+});
+
+describe("agent run ledger and task contracts", () => {
+  it("defines durable Postgres tables for agent runs and steps", () => {
+    const schema = fs.readFileSync(path.join(process.cwd(), "src", "lib", "postgres-schema.sql"), "utf-8");
+
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS agent_runs");
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS agent_run_steps");
+    expect(schema).toContain("idx_agent_runs_user_status");
+  });
+
+  it("requires task criteria before an agent can claim durable success", () => {
+    const contract = createAgentTaskContract({
+      taskType: "resume_edit",
+      target: "cv.projects",
+      baseHash: "hash:old",
+    });
+
+    expect(contract.requiresUserApproval).toBe(true);
+    expect(contract.successCriteria).toContain("target section read-back hash matches applied content");
+    expect(canClaimTaskSuccess(contract, ["draft generated"])).toBe(false);
+    expect(unmetSuccessCriteria(contract, ["draft generated"])).toContain("user approved draft");
+    expect(canClaimTaskSuccess(contract, contract.successCriteria)).toBe(true);
   });
 });

@@ -17,15 +17,15 @@
 
 ## 3. Agent Run Ledger
 
-- [ ] 3.1 Add Postgres schema for `agent_runs` and `agent_run_steps`.
-- [ ] 3.2 Add repository methods to create, update, append step, cancel, resume, and list active runs.
+- [x] 3.1 Add Postgres schema for `agent_runs` and `agent_run_steps`.
+- [x] 3.2 Add repository methods to create, update, append step, cancel, resume, and list active runs.
 - [ ] 3.3 Emit run events from the agent loop and persist phase/tool/verifier state.
 - [ ] 3.4 Recover active run state when the user refreshes, switches session, or returns to the agent page.
 - [ ] 3.5 Add admin/debug view for recent failed runs without leaking full private document text.
 
 ## 4. Task Contracts
 
-- [ ] 4.1 Define task contract schema for `resume_edit`, `jd_evaluation`, `offer_evaluation`, `interview_coaching`, `profile_update`, and `file_export`.
+- [x] 4.1 Define task contract schema for `resume_edit`, `jd_evaluation`, `offer_evaluation`, `interview_coaching`, `profile_update`, and `file_export`.
 - [ ] 4.2 Build contract creation before high-risk tool execution.
 - [ ] 4.3 Store base version/hash and success criteria in the run ledger.
 - [ ] 4.4 Prevent final success messages when the contract has unmet criteria.
