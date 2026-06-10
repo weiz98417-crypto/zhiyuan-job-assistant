@@ -1242,10 +1242,10 @@ function MessageBubble({
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
-      className={`flex ${isUser ? "justify-end" : "justify-start"}`}
+      className={`flex w-full min-w-0 ${isUser ? "justify-end" : "justify-start"}`}
     >
       <div
-        className={`max-w-[90%] rounded-[var(--radius-lg)] px-4 py-3 text-base leading-relaxed ${
+        className={`max-w-[90%] min-w-0 overflow-hidden rounded-[var(--radius-lg)] px-4 py-3 text-base leading-relaxed ${
           isUser
             ? "bg-[var(--color-primary)] text-[var(--color-surface-raised)] cursor-default"
             : "bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text)] cursor-default"
@@ -1433,7 +1433,7 @@ export default function AgentChat({
       <InterviewBindingBar state={interviewState} />
 
       {/* Messages */}
-      <div className="flex-1 min-h-0 overflow-y-auto py-4 space-y-4 cursor-default">
+      <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden py-4 space-y-4 cursor-default">
         {messages.map((msg, i) => {
           // Last assistant: this msg is assistant AND no assistant messages appear after it
           const isLastAssistant =
