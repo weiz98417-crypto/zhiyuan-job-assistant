@@ -22,6 +22,8 @@
     "liveness": "node check-liveness.mjs",
     "check:postgres": "node scripts/check-postgres.mjs",
     "check:postgres-cutover": "node scripts/check-postgres-cutover.mjs",
+    "backup:postgres": "node scripts/backup-postgres.mjs",
+    "restore:postgres": "node scripts/restore-postgres.mjs",
     "migrate:postgres": "node scripts/migrate-sqlite-to-postgres.mjs",
     "check:postgres-migration": "node scripts/check-postgres-migration.mjs",
     "backfill:memory": "node scripts/backfill-memory.mjs",

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -22,6 +22,7 @@ afterEach(() => {
   for (const dir of cleanupPaths.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+  vi.restoreAllMocks();
 });
 
 describe("agent action risk audit", () => {
@@ -134,5 +135,39 @@ describe("agent run ledger and task contracts", () => {
     expect(canClaimTaskSuccess(contract, ["draft generated"])).toBe(false);
     expect(unmetSuccessCriteria(contract, ["draft generated"])).toContain("user approved draft");
     expect(canClaimTaskSuccess(contract, contract.successCriteria)).toBe(true);
+  });
+});
+
+describe("SQLite archive policy", () => {
+  const originalDriver = process.env.DB_DRIVER;
+  const originalLegacy = process.env.ALLOW_SQLITE_LEGACY;
+
+  afterEach(() => {
+    if (originalDriver === undefined) delete process.env.DB_DRIVER;
+    else process.env.DB_DRIVER = originalDriver;
+    if (originalLegacy === undefined) delete process.env.ALLOW_SQLITE_LEGACY;
+    else process.env.ALLOW_SQLITE_LEGACY = originalLegacy;
+    vi.resetModules();
+  });
+
+  it("blocks SQLite runtime access under Postgres unless archive mode is readonly", async () => {
+    process.env.DB_DRIVER = "postgres";
+    delete process.env.ALLOW_SQLITE_LEGACY;
+    vi.resetModules();
+
+    const blocked = await import("@/lib/server-db");
+    expect(() => blocked.getDb()).toThrow(/DB_DRIVER=postgres/);
+  });
+
+  it("opens SQLite as a read-only archive when explicitly requested", async () => {
+    process.env.DB_DRIVER = "postgres";
+    process.env.ALLOW_SQLITE_LEGACY = "readonly";
+    vi.resetModules();
+
+    const archive = await import("@/lib/server-db");
+    const db = archive.getDb();
+    expect(() => db.prepare("SELECT 1").get()).not.toThrow();
+    expect(() => db.prepare("CREATE TABLE IF NOT EXISTS readonly_probe (id INTEGER)").run()).toThrow();
+    db.close();
   });
 });

@@ -59,6 +59,54 @@ npm run check:postgres-migration -- --default-owner admin --report reports/postg
 
 Only proceed to the cutover change when the report says `Status: PASS`.
 
+## Runtime Cutover Checks
+
+After setting `DB_DRIVER=postgres`, run the cutover checklist:
+
+```powershell
+$env:DB_DRIVER="postgres"
+$env:DATABASE_URL="postgresql://postgres@localhost:55432/zhiyuan"
+npm run check:postgres-cutover
+```
+
+The `runtime_sqlite_imports` gate must pass before SQLite can be treated as an archive. The migration/hash gate may fail after Postgres has received new writes; that means SQLite is no longer an exact live mirror and should not be used as a rollback target without a deliberate resync plan.
+
+## PostgreSQL Backup And Restore
+
+For local/LAN deployments, use the Node JSON backup when `pg_dump` or `psql` is not installed:
+
+```powershell
+npm run backup:postgres -- --output data/backups/postgres-after-cutover.json
+```
+
+Restore is dry-run by default:
+
+```powershell
+npm run restore:postgres -- --input data/backups/postgres-after-cutover.json
+```
+
+To restore into an empty database:
+
+```powershell
+npm run restore:postgres -- --input data/backups/postgres-after-cutover.json --apply
+```
+
+To replace an existing target database, require both explicit flags:
+
+```powershell
+npm run restore:postgres -- --input data/backups/postgres-after-cutover.json --apply --allow-overwrite
+```
+
+## SQLite Archive Mode
+
+When `DB_DRIVER=postgres`, direct SQLite runtime access is blocked. For intentional archive inspection only:
+
+```powershell
+$env:ALLOW_SQLITE_LEGACY="readonly"
+```
+
+This opens `data/zhiyuan.db` as a read-only archive. It must not be used for production writes.
+
 ## Excluded Tables
 
 These SQLite tables are intentionally not migrated:

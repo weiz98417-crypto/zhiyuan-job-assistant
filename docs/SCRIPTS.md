@@ -31,6 +31,9 @@ All commands below are exposed through `package.json`.
 | Command | Script | Purpose |
 | --- | --- | --- |
 | `npm run check:postgres` | `scripts/check-postgres.mjs` | Verify `DATABASE_URL`, connectivity, and pgvector availability. |
+| `npm run check:postgres-cutover` | `scripts/check-postgres-cutover.mjs` | Report runtime driver, SQLite runtime reachability, row counts, and migration hash gates. |
+| `npm run backup:postgres` | `scripts/backup-postgres.mjs` | Write a self-contained JSON backup for local/LAN PostgreSQL deployments. |
+| `npm run restore:postgres` | `scripts/restore-postgres.mjs` | Dry-run or apply a JSON backup restore into PostgreSQL. |
 | `npm run migrate:postgres` | `scripts/migrate-sqlite-to-postgres.mjs` | Dry-run or apply SQLite to PostgreSQL migration. |
 | `npm run check:postgres-migration` | `scripts/check-postgres-migration.mjs` | Compare source/target counts, samples, and user isolation after migration. |
 
@@ -41,6 +44,8 @@ npm run check:postgres
 npm run migrate:postgres -- --dry-run --default-owner admin --report reports/postgres-migration-dry-run.md
 npm run migrate:postgres -- --apply --default-owner admin --report reports/postgres-migration-apply.md
 npm run check:postgres-migration -- --default-owner admin --report reports/postgres-migration-verify.md
+npm run check:postgres-cutover
+npm run backup:postgres -- --output data/backups/postgres-after-cutover.json
 ```
 
 ## Memory And Profile Maintenance

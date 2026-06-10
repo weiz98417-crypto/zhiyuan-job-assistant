@@ -10,13 +10,18 @@ const SCHEMA_PATH = path.join(process.cwd(), "src", "lib", "server-schema.sql");
 let _db: Database.Database | null = null;
 
 export function getDb(): Database.Database {
-  if (getDatabaseDriver() === "postgres" && process.env.ALLOW_SQLITE_LEGACY !== "1") {
-    throw new Error("SQLite getDb() used while DB_DRIVER=postgres. Use data repositories for authoritative server data.");
+  const archiveReadonly = getDatabaseDriver() === "postgres" && process.env.ALLOW_SQLITE_LEGACY === "readonly";
+  if (getDatabaseDriver() === "postgres" && !archiveReadonly) {
+    throw new Error("SQLite getDb() used while DB_DRIVER=postgres. Use data repositories for authoritative server data, or ALLOW_SQLITE_LEGACY=readonly for archive reads.");
   }
   if (!_db) {
     const dir = path.dirname(DB_PATH);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    _db = new Database(DB_PATH);
+    if (!fs.existsSync(dir) && !archiveReadonly) fs.mkdirSync(dir, { recursive: true });
+    _db = new Database(DB_PATH, archiveReadonly ? { readonly: true, fileMustExist: true } : undefined);
+    if (archiveReadonly) {
+      console.warn("[server-db] SQLite opened as read-only archive because ALLOW_SQLITE_LEGACY=readonly.");
+      return _db;
+    }
     _db.pragma("journal_mode = WAL");
     _db.pragma("foreign_keys = ON");
     const schema = fs.readFileSync(SCHEMA_PATH, "utf-8");
