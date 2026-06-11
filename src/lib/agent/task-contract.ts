@@ -81,6 +81,7 @@ const DEFAULT_SUCCESS_CRITERIA: Record<AgentTaskType, string[]> = {
     "export generated",
     "file exists",
     "file size is non-zero",
+    "file hash verified",
   ],
 };
 
@@ -262,11 +263,14 @@ export function inferCompletedCriteriaFromToolResult(
   }
 
   if (contract.taskType === "file_export" && (signals.toolName === "export_file" || signals.toolName === "download_report_pdf")) {
-    completed.add("export generated");
+    const readBackVerified = signals.readBackVerified === true || data.readBackVerified === true || uiPayload.readBackVerified === true;
     const size = typeof data.size === "number" ? data.size : Number(uiPayload.size || 0);
+    const hash = typeof data.sha256 === "string" ? data.sha256 : typeof uiPayload.sha256 === "string" ? uiPayload.sha256 : "";
     const filename = data.filename || uiPayload.filename || data.downloadUrl || uiPayload.downloadUrl;
-    if (filename) completed.add("file exists");
-    if (size > 0 || data.downloadUrl || uiPayload.downloadUrl) completed.add("file size is non-zero");
+    if (readBackVerified) completed.add("export generated");
+    if (readBackVerified && filename) completed.add("file exists");
+    if (readBackVerified && size > 0) completed.add("file size is non-zero");
+    if (readBackVerified && hash.trim().length > 0) completed.add("file hash verified");
   }
 
   return contract.successCriteria.filter((criterion) => completed.has(criterion));

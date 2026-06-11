@@ -6,6 +6,18 @@ const MIME: Record<string, string> = {
   txt: "text/plain",
 };
 
+function hex(buffer: ArrayBuffer): string {
+  return Array.from(new Uint8Array(buffer)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  if (!globalThis.crypto?.subtle) return "";
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", copy.buffer);
+  return hex(digest);
+}
+
 /* ── Markdown → HTML (browser-side, lightweight) ── */
 
 function escapeHtml(s: string): string {
@@ -131,6 +143,8 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
   // Browser context: Blob download
   if (typeof window !== "undefined" && typeof document !== "undefined") {
     const blobContent = ext === "html" ? wrapHtmlDoc(filename as string, bodyContent) : rawContent;
+    const bytes = new TextEncoder().encode(blobContent);
+    const hash = await sha256Hex(bytes);
     const mime = MIME[ext] || MIME.md;
     const blob = new Blob([blobContent], { type: mime });
     const url = URL.createObjectURL(blob);
@@ -141,15 +155,18 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
     URL.revokeObjectURL(url);
 
     // Also sync raw markdown to server (server does its own md→html conversion)
+    let serverReadBackVerified = false;
     try {
-      await fetch("/api/export-file", {
+      const res = await fetch("/api/export-file", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content: rawContent, filename, format: ext }),
       });
+      const json = await res.json().catch(() => ({}));
+      serverReadBackVerified = res.ok && json.success === true && json.data?.readBackVerified === true;
     } catch { /* non-critical */ }
 
-    return { success: true, data: { filename: fullName, size: rawContent.length, downloaded: true } };
+    return { success: true, data: { filename: fullName, size: bytes.byteLength, sha256: hash, downloaded: true, readBackVerified: Boolean(hash), serverReadBackVerified } };
   }
 
   // Server context: save to output/ via API
@@ -162,7 +179,13 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
       body: JSON.stringify({ content: rawContent, filename, format: ext }),
     });
     const json = await res.json();
-    if (!json.success) return { success: false, data: null, error: json.error || "导出失败" };
+    const verified = json.success === true &&
+      json.data?.readBackVerified === true &&
+      typeof json.data?.size === "number" &&
+      json.data.size > 0 &&
+      typeof json.data?.sha256 === "string" &&
+      json.data.sha256.length > 0;
+    if (!verified) return { success: false, data: null, error: json.error || "export file read-back verification failed" };
     return { success: true, data: json.data };
   } catch (err) {
     return { success: false, data: null, error: `导出失败: ${err instanceof Error ? err.message : "unknown"}` };
@@ -171,7 +194,7 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
 
 function formatResult(result: ToolResult): string {
   if (!result.success) return `导出失败: ${result.error}`;
-  const d = result.data as { filename?: string; size?: number; downloadUrl?: string; downloaded?: boolean } | null;
+  const d = result.data as { filename?: string; size?: number; downloadUrl?: string; downloaded?: boolean; sha256?: string } | null;
   if (d?.downloadUrl) {
     // Server context: file saved, link available
     return `文件已保存到服务器: ${d.filename || "unknown"} (${d.size || 0} 字符)\n\n下载链接: ${d.downloadUrl}\n\n请在回复中直接给用户这个下载链接，不要告诉用户"去下载"。`;

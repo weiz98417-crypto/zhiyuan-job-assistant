@@ -3,6 +3,7 @@ import { chromium } from "playwright";
 import fs from "fs";
 import os from "os";
 import path from "path";
+import { createHash } from "crypto";
 import { getCurrentUser } from "@/lib/auth";
 import { getDataRepositories } from "@/lib/data-repositories";
 import { markdownToSafeHtml } from "@/lib/server-markdown";
@@ -17,6 +18,10 @@ const BLOCK_LABELS: Record<string, string> = {
   f: "F 面试准备",
   g: "G 合法性与风险",
 };
+
+function sha256(buffer: Buffer): string {
+  return createHash("sha256").update(buffer).digest("hex");
+}
 
 function findChromiumExecutable(): string | undefined {
   const bundled = chromium.executablePath();
@@ -178,13 +183,19 @@ export async function GET(_request: Request, { params }: { params: Promise<{ rep
       await browser.close();
     }
 
+    if (pdf.length <= 0 || pdf.subarray(0, 4).toString("utf-8") !== "%PDF") {
+      return NextResponse.json({ success: false, error: "PDF 生成后校验失败，已阻止空文件下载" }, { status: 500 });
+    }
+
     const filename = `report-${report.report_num}-${report.company}-${report.role}.pdf`
       .replace(/[\\/:*?"<>|]/g, "-");
+    const pdfHash = sha256(pdf);
     return new NextResponse(new Uint8Array(pdf), {
       headers: {
         "Content-Type": "application/pdf",
         "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
         "Content-Length": String(pdf.length),
+        "X-Content-SHA256": pdfHash,
       },
     });
   } catch (error) {

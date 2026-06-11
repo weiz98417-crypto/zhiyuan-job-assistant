@@ -1,6 +1,24 @@
 import { NextResponse } from "next/server";
-import { writeFileSync, mkdirSync, existsSync } from "fs";
+import { writeFileSync, mkdirSync, existsSync, readFileSync, statSync } from "fs";
 import { resolve } from "path";
+import { createHash } from "crypto";
+
+function sha256(buffer: Buffer): string {
+  return createHash("sha256").update(buffer).digest("hex");
+}
+
+function verifyWrittenFile(filePath: string, expectedContent: string) {
+  if (!existsSync(filePath)) return { ok: false, size: 0, sha256: "" };
+  const buffer = readFileSync(filePath);
+  const expected = Buffer.from(expectedContent, "utf-8");
+  const size = statSync(filePath).size;
+  const hash = sha256(buffer);
+  return {
+    ok: size > 0 && size === expected.length && hash === sha256(expected),
+    size,
+    sha256: hash,
+  };
+}
 
 // POST — save exported file to output/ directory and return download path
 export async function POST(request: Request) {
@@ -15,7 +33,11 @@ export async function POST(request: Request) {
     }
 
     const ext = format === "html" ? "html" : format === "txt" ? "txt" : "md";
-    const fullName = `${filename}.${ext}`;
+    const safeBaseName = filename.replace(/[\\/:*?"<>|]/g, "-").replace(/\.\./g, "").trim();
+    if (!safeBaseName) {
+      return NextResponse.json({ success: false, error: "filename is invalid" }, { status: 400 });
+    }
+    const fullName = `${safeBaseName}.${ext}`;
     const outputDir = resolve(process.cwd(), "output");
     if (!existsSync(outputDir)) mkdirSync(outputDir, { recursive: true });
 
@@ -24,14 +46,14 @@ export async function POST(request: Request) {
     writeFileSync(filePath, content, "utf-8");
 
     // Always generate a companion .html with proper markdown→HTML conversion
-    const htmlName = `${filename}.html`;
+    const htmlName = `${safeBaseName}.html`;
     const htmlPath = resolve(outputDir, htmlName);
     const htmlBody = mdToHtml(content);
     const htmlDoc = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>${escapeHtml(filename)}</title>
+<title>${escapeHtml(safeBaseName)}</title>
 <style>
   body { font-family: "Microsoft YaHei","PingFang SC",sans-serif; max-width:840px; margin:40px auto; padding:24px; color:#333; line-height:1.7; }
   h1 { font-size:1.5em; border-bottom:2px solid #2563eb; padding-bottom:8px; }
@@ -55,10 +77,29 @@ ${htmlBody}
 </html>`;
     writeFileSync(htmlPath, htmlDoc, "utf-8");
 
+    const fileVerification = verifyWrittenFile(filePath, content);
+    const htmlVerification = verifyWrittenFile(htmlPath, htmlDoc);
+    if (!fileVerification.ok || !htmlVerification.ok) {
+      return NextResponse.json({
+        success: false,
+        error: "导出文件写入后回读校验失败，已阻止成功提示",
+        data: { fileVerification, htmlVerification, readBackVerified: false },
+      }, { status: 500 });
+    }
+
     const downloadUrl = `/api/export-file?file=${encodeURIComponent(fullName)}&html=${encodeURIComponent(htmlName)}`;
     return NextResponse.json({
       success: true,
-      data: { filename: fullName, downloadUrl, htmlDownloadUrl: `/api/export-file?file=${encodeURIComponent(htmlName)}`, size: content.length },
+      data: {
+        filename: fullName,
+        downloadUrl,
+        htmlDownloadUrl: `/api/export-file?file=${encodeURIComponent(htmlName)}`,
+        size: fileVerification.size,
+        sha256: fileVerification.sha256,
+        htmlSize: htmlVerification.size,
+        htmlSha256: htmlVerification.sha256,
+        readBackVerified: true,
+      },
     });
   } catch (err) {
     return NextResponse.json({ success: false, error: String(err) }, { status: 500 });
@@ -82,9 +123,9 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: false, error: "file not found" }, { status: 404 });
     }
 
-    const { readFileSync } = await import("fs");
-    const content = readFileSync(filePath, "utf-8");
+    const buffer = readFileSync(filePath);
     const ext = safeName.split(".").pop() || "md";
+    const hash = sha256(buffer);
 
     const mime: Record<string, string> = {
       md: "text/markdown;charset=utf-8",
@@ -92,10 +133,12 @@ export async function GET(request: Request) {
       txt: "text/plain;charset=utf-8",
     };
 
-    return new NextResponse(content, {
+    return new NextResponse(new Uint8Array(buffer), {
       headers: {
         "Content-Type": mime[ext] || "application/octet-stream",
         "Content-Disposition": `attachment; filename="${safeName}"`,
+        "Content-Length": String(buffer.length),
+        "X-Content-SHA256": hash,
       },
     });
   } catch (err) {
