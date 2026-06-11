@@ -172,4 +172,20 @@ describe("agent run ledger routes", () => {
       inputSummary: "section=skills",
     }));
   });
+
+  it("cancels an active run through the owner-scoped route", async () => {
+    vi.resetModules();
+    mockAuth();
+    const ledger = mockLedger();
+    const route = await import("@/app/api/agent/runs/[id]/route");
+
+    const response = await route.DELETE(new Request("http://localhost/api/agent/runs/run-1", {
+      method: "DELETE",
+    }), { params: Promise.resolve({ id: "run-1" }) });
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(json.success).toBe(true);
+    expect(ledger.cancelAgentRun).toHaveBeenCalledWith("run-1", TEST_USER.userId);
+  });
 });

@@ -4,7 +4,7 @@ import { Suspense, useEffect, useRef, useState, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
-import { Menu, User, Bot } from "lucide-react";
+import { Menu, User, Bot, RotateCcw, XCircle } from "lucide-react";
 import { HandwritingTitle, WarmButton } from "@/components/design";
 import AgentChat from "@/components/agent/AgentChat";
 import type { EvalBlockProgress, CompletionInfo } from "@/components/agent/AgentChat";
@@ -30,10 +30,14 @@ import {
 import type { VerifiedActionResult } from "@/lib/agent/verified-action";
 import {
   appendAgentRunStepClient,
+  cancelAgentRunClient,
   createAgentRunClient,
+  getAgentRunClient,
   listActiveAgentRunsClient,
   updateAgentRunClient,
+  type ClientAgentRunDetail,
   type ClientAgentRunRecord,
+  type ClientAgentRunStepRecord,
 } from "@/lib/agent/run-ledger-client";
 import type { AgentRunStatus } from "@/lib/agent/run-ledger";
 import { triggerProfileUpdate } from "@/lib/profile-update";
@@ -181,6 +185,38 @@ function activeNoticeFromRun(run: ClientAgentRunRecord): ActiveRunNotice {
   };
 }
 
+function latestRunStep(steps: ClientAgentRunStepRecord[] | undefined): ClientAgentRunStepRecord | null {
+  return Array.isArray(steps) && steps.length > 0 ? steps[steps.length - 1] : null;
+}
+
+function activeNoticeFromRunDetail(detail: ClientAgentRunDetail): ActiveRunNotice {
+  const lastStep = latestRunStep(detail.steps);
+  return {
+    ...activeNoticeFromRun(detail.run),
+    phase: lastStep?.phase || undefined,
+    toolName: lastStep?.tool_name || undefined,
+    verifierSummary: lastStep?.verifier_json ? truncateLedgerText(lastStep.verifier_json, 140) : undefined,
+  };
+}
+
+function shortRunId(id: string): string {
+  return id.length <= 8 ? id : id.slice(0, 8);
+}
+
+function buildRunRecoveryMessage(detail: ClientAgentRunDetail): string {
+  const lastStep = latestRunStep(detail.steps);
+  const run = detail.run;
+  const stepText = lastStep
+    ? `最近一步：${lastStep.phase}${lastStep.tool_name ? ` / ${lastStep.tool_name}` : ""}（${lastStep.status || "unknown"}）`
+    : "还没有记录到具体执行步骤";
+  return [
+    `已恢复 Agent run #${shortRunId(run.id)} 的运行状态。`,
+    `任务：${run.task_type || "unknown"}，状态：${run.status}。`,
+    stepText,
+    "我不会自动重复执行高风险写入；你可以继续输入下一步需求，或取消这次运行。",
+  ].join("\n");
+}
+
 async function loadTaskBaseSnapshot(taskType: AgentTaskType): Promise<AgentTaskBaseSnapshot> {
   if (taskType !== "resume_edit") return {};
   try {
@@ -300,6 +336,7 @@ function AgentPageInner() {
   const [resultQuality, setResultQuality] = useState<string | null>(null);
   const [sessionLoadError, setSessionLoadError] = useState<string | null>(null);
   const [activeRunNotice, setActiveRunNotice] = useState<ActiveRunNotice | null>(null);
+  const [activeRunAction, setActiveRunAction] = useState<"resume" | "cancel" | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
   const streamContentRef = useRef("");
@@ -412,6 +449,64 @@ function AgentPageInner() {
       cancelled = true;
     };
   }, [mounted, currentSessionId]);
+
+  const appendAssistantStatusMessage = useCallback(async (content: string) => {
+    const message: AgentMessage = {
+      role: "assistant",
+      content,
+      timestamp: new Date().toISOString(),
+    };
+    const nextMessages = [...messages, message];
+    setMessages(nextMessages);
+    if (currentSessionId) {
+      await updateSession(currentSessionId, { messages: nextMessages }).catch(() => {});
+    }
+  }, [currentSessionId, messages]);
+
+  const handleResumeActiveRun = useCallback(async () => {
+    const runId = activeRunNotice?.id;
+    if (!runId || activeRunAction) return;
+    setActiveRunAction("resume");
+    try {
+      const detail = await getAgentRunClient(runId);
+      if (!detail) {
+        setActiveRunNotice(null);
+        await appendAssistantStatusMessage(`没有找到 Agent run #${shortRunId(runId)}，可能已经结束或被清理。`);
+        return;
+      }
+      setActiveRunNotice(activeNoticeFromRunDetail(detail));
+      await appendAssistantStatusMessage(buildRunRecoveryMessage(detail));
+    } finally {
+      setActiveRunAction(null);
+    }
+  }, [activeRunAction, activeRunNotice?.id, appendAssistantStatusMessage]);
+
+  const handleCancelActiveRun = useCallback(async () => {
+    const runId = activeRunNotice?.id;
+    if (!runId || activeRunAction) return;
+    setActiveRunAction("cancel");
+    try {
+      abortRef.current?.abort();
+      abortRef.current = null;
+      setStreaming(false);
+      setPhase(null);
+      setExecutingTool(undefined);
+      setThinkingContent("");
+      setActiveAgent(null);
+      const ok = await cancelAgentRunClient(runId);
+      if (ok) {
+        setActiveRunNotice((prev) => (prev?.id === runId ? { ...prev, status: "cancelled" } : prev));
+        await appendAssistantStatusMessage(`已取消 Agent run #${shortRunId(runId)}。这次任务不会再被标记为完成。`);
+        window.setTimeout(() => {
+          setActiveRunNotice((prev) => (prev?.id === runId ? null : prev));
+        }, 2000);
+      } else {
+        await appendAssistantStatusMessage(`取消 Agent run #${shortRunId(runId)} 失败，它可能已经结束。`);
+      }
+    } finally {
+      setActiveRunAction(null);
+    }
+  }, [activeRunAction, activeRunNotice?.id, appendAssistantStatusMessage]);
 
   const sendMessage = useCallback(
     async (content: string, images?: string[], options?: { hideUserMessage?: boolean }) => {
@@ -1612,12 +1707,36 @@ Rules:
 
         {activeRunNotice && (
           <div className="mt-3 flex flex-shrink-0 flex-wrap items-center gap-2 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-xs text-[var(--color-muted)]">
-            <span className="font-medium text-[var(--color-text)]">Agent run</span>
-            <span>{activeRunNotice.taskType}</span>
-            <span>status: {activeRunNotice.status}</span>
-            {activeRunNotice.phase && <span>phase: {activeRunNotice.phase}</span>}
-            {activeRunNotice.toolName && <span>tool: {activeRunNotice.toolName}</span>}
-            {activeRunNotice.verifierSummary && <span>verifier: {activeRunNotice.verifierSummary}</span>}
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+              <span className="font-medium text-[var(--color-text)]">Agent run</span>
+              <span>{activeRunNotice.taskType}</span>
+              <span>status: {activeRunNotice.status}</span>
+              {activeRunNotice.phase && <span>phase: {activeRunNotice.phase}</span>}
+              {activeRunNotice.toolName && <span>tool: {activeRunNotice.toolName}</span>}
+              {activeRunNotice.verifierSummary && <span className="max-w-full truncate">verifier: {activeRunNotice.verifierSummary}</span>}
+            </div>
+            <div className="ml-auto flex items-center gap-1">
+              <button
+                type="button"
+                onClick={handleResumeActiveRun}
+                disabled={activeRunAction !== null}
+                title="恢复运行状态"
+                className="inline-flex h-7 items-center gap-1 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-[var(--color-text)] transition-colors hover:bg-[var(--color-bg)] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <RotateCcw size={13} />
+                {activeRunAction === "resume" ? "恢复中" : "继续"}
+              </button>
+              <button
+                type="button"
+                onClick={handleCancelActiveRun}
+                disabled={activeRunAction !== null}
+                title="取消运行"
+                className="inline-flex h-7 items-center gap-1 rounded-[var(--radius-sm)] border border-red-200 bg-red-50 px-2 text-red-700 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-950/50"
+              >
+                <XCircle size={13} />
+                {activeRunAction === "cancel" ? "取消中" : "取消"}
+              </button>
+            </div>
           </div>
         )}
 

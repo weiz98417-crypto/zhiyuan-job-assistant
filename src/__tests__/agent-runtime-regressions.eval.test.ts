@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import fs from "fs";
+import path from "path";
 import {
   buildResumeEditProposalActionPlan,
   buildResumeSavePlan,
@@ -9,7 +11,11 @@ import {
   buildVerifiedActionSuccess,
   validateDocumentFieldContent,
 } from "@/lib/agent/verified-action";
-import { listActiveAgentRunsClient } from "@/lib/agent/run-ledger-client";
+import {
+  cancelAgentRunClient,
+  getAgentRunClient,
+  listActiveAgentRunsClient,
+} from "@/lib/agent/run-ledger-client";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -83,6 +89,72 @@ describe("agent runtime regression evals", () => {
       session_id: 42,
       status: "running",
     });
+  });
+
+  it("recovery: resume control can load active run details and latest step", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      expect(url).toBe("/api/agent/runs/run-refresh");
+      return new Response(JSON.stringify({
+        success: true,
+        data: {
+          run: {
+            id: "run-refresh",
+            user_id: "user-1",
+            session_id: 42,
+            task_type: "resume_edit",
+            agent_id: "resume",
+            status: "waiting_user",
+            created_at: "2026-06-10T00:00:00.000Z",
+            updated_at: "2026-06-10T00:01:00.000Z",
+          },
+          steps: [{
+            id: 2,
+            run_id: "run-refresh",
+            phase: "verifying",
+            tool_name: "save_resume_section",
+            status: "failed",
+            input_summary: "section=skills",
+            output_summary: "read-back mismatch",
+            verifier_json: { code: "read_back.mismatch" },
+            error_json: {},
+            created_at: "2026-06-10T00:01:00.000Z",
+          }],
+        },
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }));
+
+    const detail = await getAgentRunClient("run-refresh");
+
+    expect(detail?.run.status).toBe("waiting_user");
+    expect(detail?.steps.at(-1)).toMatchObject({
+      phase: "verifying",
+      tool_name: "save_resume_section",
+      status: "failed",
+    });
+  });
+
+  it("recovery: cancel control calls the owner-scoped cancel endpoint", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(url).toBe("/api/agent/runs/run-refresh");
+      expect(init?.method).toBe("DELETE");
+      return new Response(JSON.stringify({ success: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(cancelAgentRunClient("run-refresh")).resolves.toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("recovery: agent page renders resume and cancel controls for active durable runs", () => {
+    const page = fs.readFileSync(path.join(process.cwd(), "src", "app", "agent", "page.tsx"), "utf-8");
+
+    expect(page).toContain("handleResumeActiveRun");
+    expect(page).toContain("handleCancelActiveRun");
+    expect(page).toContain("getAgentRunClient");
+    expect(page).toContain("cancelAgentRunClient");
   });
 
   it("recovery: pending resume proposal survives refresh and routes approval by proposal id", () => {

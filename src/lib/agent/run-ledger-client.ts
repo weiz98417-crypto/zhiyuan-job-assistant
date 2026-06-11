@@ -27,6 +27,11 @@ export interface ClientAgentRunStepRecord {
   created_at: string;
 }
 
+export interface ClientAgentRunDetail {
+  run: ClientAgentRunRecord;
+  steps: ClientAgentRunStepRecord[];
+}
+
 interface JsonEnvelope<T> {
   success: boolean;
   enabled?: boolean;
@@ -88,6 +93,16 @@ export async function updateAgentRunClient(
     body: JSON.stringify({ status, ...patch }),
   });
   return json?.data || null;
+}
+
+export async function getAgentRunClient(runId: string | null | undefined): Promise<ClientAgentRunDetail | null> {
+  if (!runId) return null;
+  const json = await requestJson<ClientAgentRunDetail>(`/api/agent/runs/${encodeURIComponent(runId)}`);
+  if (!json?.data?.run) return null;
+  return {
+    run: json.data.run,
+    steps: Array.isArray(json.data.steps) ? json.data.steps : [],
+  };
 }
 
 export async function appendAgentRunStepClient(
