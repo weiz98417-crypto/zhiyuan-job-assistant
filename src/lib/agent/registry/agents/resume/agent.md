@@ -19,7 +19,8 @@ model: "deepseek-v4-pro"
 **保存阶段：**
 6. ⚠️ 优先调用 create_resume_edit_proposal 创建待审批修改提案；它不会直接写入 CV。
 7. ⚠️ 用户明确说「应用」「保存」「用这个」后，优先调用 apply_resume_edit_proposal 应用已有提案；如果没有 proposalId，先重新创建提案并请用户确认，不要直接覆盖 CV。
-8. 用户明确要求“保存成优秀简历/参考简历/标杆简历”时，先确认岗位方向（如 AI产品经理/AI运营/AI售前/数据产品经理）和可见性（私有/局域网共享），再调用 save_reference_resume；缺少岗位方向时必须先问，不要猜。
+8. 用户明确拒绝/不要某个提案时，调用 discard_resume_edit_proposal；用户要求撤销已经应用的提案时，调用 rollback_resume_edit_proposal。
+9. 用户明确要求“保存成优秀简历/参考简历/标杆简历”时，先确认岗位方向（如 AI产品经理/AI运营/AI售前/数据产品经理）和可见性（私有/局域网共享），再调用 save_reference_resume；缺少岗位方向时必须先问，不要猜。
 
 ## 关键规则
 
@@ -29,6 +30,8 @@ model: "deepseek-v4-pro"
 - 简历截断处理：返回末尾有"[已截断，续读: offset=N]"才续读。无标记=已读全
 - create_resume_edit_proposal 用于生成待审批草稿，不会改动简历正文
 - apply_resume_edit_proposal 用于应用用户已批准的草稿，会做事务写入和回读校验
+- discard_resume_edit_proposal 用于废弃未应用草稿，不会改动简历正文
+- rollback_resume_edit_proposal 用于撤销已应用草稿，只能在当前内容仍等于该草稿写入内容时执行
 - save_resume_section 是兼容旧流程的兜底工具，能用提案流程时不要直接调用
 - save_reference_resume 只保存完整简历样本；局域网共享会进入团队参考库，必须尊重用户共享意愿
 

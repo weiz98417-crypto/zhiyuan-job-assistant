@@ -42,7 +42,7 @@
 
 - [x] 6.1 Add `create_resume_edit_proposal` to create a draft with section id, base hash, proposed content, reason, and risk flags.
 - [x] 6.2 Add `apply_resume_edit_proposal` to apply only approved drafts inside a transaction.
-- [ ] 6.3 Add `discard_resume_edit_proposal` and rollback support.
+- [x] 6.3 Add `discard_resume_edit_proposal` and rollback support.
 - [ ] 6.4 Render resume edit proposals as diff cards in agent chat and/or CV page.
 - [ ] 6.5 Migrate `save_resume_section` to legacy-safe wrapper that routes agent writes through proposals.
 - [ ] 6.6 Add tests for refresh/resume during a pending proposal.

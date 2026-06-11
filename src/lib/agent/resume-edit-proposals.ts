@@ -1,7 +1,7 @@
 import { stableContentHash } from "@/lib/agent/verified-action";
 import type { ResumeSectionId } from "@/lib/agent/resume-save-guard";
 
-export type ResumeEditProposalStatus = "pending" | "applied" | "discarded" | "stale";
+export type ResumeEditProposalStatus = "pending" | "applied" | "discarded" | "stale" | "rolled_back";
 
 export interface ResumeEditProposalRecord {
   id: string;
@@ -56,9 +56,19 @@ export interface ResumeEditProposalApplyResult {
   appliedContent: string;
 }
 
+export interface ResumeEditProposalRollbackResult {
+  proposal: ResumeEditProposalRecord;
+  cvData: Record<string, unknown>;
+  sectionId: ResumeSectionId;
+  baseVersion: string;
+  rollbackHash: string;
+  restoredContent: string;
+  replacedContent: string;
+}
+
 export class ResumeEditProposalApplyError extends Error {
   constructor(
-    public readonly code: "proposal_not_found" | "proposal_not_pending" | "cv_missing" | "section_missing" | "base_version_conflict",
+    public readonly code: "proposal_not_found" | "proposal_not_pending" | "proposal_not_applied" | "cv_missing" | "section_missing" | "base_version_conflict" | "rollback_conflict",
     message: string,
   ) {
     super(message);
@@ -175,5 +185,49 @@ export function applyResumeEditProposalToCvData(
     appliedHash: stableContentHash(active),
     previousContent,
     appliedContent: proposal.proposed_content,
+  };
+}
+
+export function rollbackResumeEditProposalInCvData(
+  proposal: ResumeEditProposalRecord,
+  inputCvData: Record<string, unknown>,
+): ResumeEditProposalRollbackResult {
+  if (proposal.status !== "applied") {
+    throw new ResumeEditProposalApplyError("proposal_not_applied", "Resume edit proposal is not applied.");
+  }
+
+  const cvData = JSON.parse(JSON.stringify(inputCvData || {})) as Record<string, unknown>;
+  const activeVersion = typeof cvData.activeVersion === "string" ? cvData.activeVersion : "";
+  const versions = cvData.versions && typeof cvData.versions === "object" && !Array.isArray(cvData.versions)
+    ? cvData.versions as Record<string, CVVersion>
+    : {};
+  const active = activeVersion ? versions[activeVersion] : undefined;
+  if (!active?.sections || !Array.isArray(active.sections)) {
+    throw new ResumeEditProposalApplyError("cv_missing", "CV data is empty or malformed.");
+  }
+
+  if (proposal.base_version && proposal.base_version !== activeVersion) {
+    throw new ResumeEditProposalApplyError("base_version_conflict", "CV version changed after the proposal was applied.");
+  }
+
+  const target = active.sections.find((section) => section.id === proposal.section_id);
+  if (!target) {
+    throw new ResumeEditProposalApplyError("section_missing", `CV section not found: ${proposal.section_id}`);
+  }
+
+  const replacedContent = target.content || "";
+  if (replacedContent !== proposal.proposed_content) {
+    throw new ResumeEditProposalApplyError("rollback_conflict", "CV section changed after the proposal was applied; rollback would overwrite newer content.");
+  }
+
+  target.content = proposal.original_content;
+  return {
+    proposal,
+    cvData,
+    sectionId: proposal.section_id,
+    baseVersion: activeVersion,
+    rollbackHash: stableContentHash(active),
+    restoredContent: proposal.original_content,
+    replacedContent,
   };
 }

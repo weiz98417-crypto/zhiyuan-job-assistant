@@ -1123,7 +1123,7 @@ ${followupInstruction}`,
 
       yield { type: "tool_result", name: tc.name, result: formatted, success: toolResult.success, data: toolResult.data, uiPayload: toolResult.uiPayload, verifiedAction: toolResult.verifiedAction };
 
-      if ((tc.name === "apply_resume_edit_proposal" || tc.name === "save_resume_section") && toolResult.success) {
+      if ((tc.name === "apply_resume_edit_proposal" || tc.name === "discard_resume_edit_proposal" || tc.name === "rollback_resume_edit_proposal" || tc.name === "save_resume_section") && toolResult.success) {
         yield { type: "phase", phase: "responding" };
         yield { type: "text", content: formatted || "简历已保存。" };
         yield { type: "done" };

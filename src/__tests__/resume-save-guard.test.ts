@@ -8,7 +8,9 @@ import {
 import { saveResumeSection } from "@/lib/agent/tools/action/save-resume-section";
 import { createResumeEditProposal } from "@/lib/agent/tools/action/create-resume-edit-proposal";
 import { applyResumeEditProposal } from "@/lib/agent/tools/action/apply-resume-edit-proposal";
-import { applyResumeEditProposalToCvData, ResumeEditProposalApplyError, type ResumeEditProposalRecord } from "@/lib/agent/resume-edit-proposals";
+import { discardResumeEditProposal } from "@/lib/agent/tools/action/discard-resume-edit-proposal";
+import { rollbackResumeEditProposal } from "@/lib/agent/tools/action/rollback-resume-edit-proposal";
+import { applyResumeEditProposalToCvData, ResumeEditProposalApplyError, rollbackResumeEditProposalInCvData, type ResumeEditProposalRecord } from "@/lib/agent/resume-edit-proposals";
 import { stableContentHash } from "@/lib/agent/verified-action";
 
 afterEach(() => {
@@ -278,6 +280,106 @@ SQL / 数据分析
     expect(result.verifiedAction?.readBack).toMatchObject({ ok: true, code: "read_back.match" });
     expect(result.uiPayload).toMatchObject({ type: "resume_edit_proposal_applied", readBackVerified: true });
     expect(fetchMock).toHaveBeenCalledWith("/api/cv/edit-proposals/rep-apply-tool-1/apply", { method: "POST" });
+  });
+
+  it("rolls back an applied proposal only when current content still matches the proposal", () => {
+    const proposedContent = "Core skills\nAI product design\nPrompt Engineering\nRAG knowledge base";
+    const cvData = {
+      activeVersion: "v1",
+      versions: {
+        v1: {
+          sections: [
+            { id: "skills", title: "Skills", content: proposedContent },
+          ],
+        },
+      },
+    };
+    const proposal: ResumeEditProposalRecord = {
+      id: "rep-rollback-1",
+      user_id: "u1",
+      section_id: "skills",
+      base_version: "v1",
+      base_hash: "fnv1a32:base",
+      original_content: "Old skills list",
+      proposed_content: proposedContent,
+      proposed_hash: stableContentHash(proposedContent),
+      reason: "user approved draft",
+      risk_flags_json: "[]",
+      status: "applied",
+    };
+
+    const rollback = rollbackResumeEditProposalInCvData(proposal, cvData);
+    const active = rollback.cvData.versions as Record<string, { sections: Array<{ id: string; content: string }> }>;
+
+    expect(active.v1.sections[0].content).toBe("Old skills list");
+    expect(rollback.replacedContent).toBe(proposedContent);
+    expect(rollback.restoredContent).toBe("Old skills list");
+  });
+
+  it("blocks rollback when the section changed after proposal apply", () => {
+    const proposal: ResumeEditProposalRecord = {
+      id: "rep-rollback-conflict-1",
+      user_id: "u1",
+      section_id: "skills",
+      base_version: "v1",
+      base_hash: "fnv1a32:base",
+      original_content: "Old skills list",
+      proposed_content: "Proposal-applied skills",
+      proposed_hash: "fnv1a32:new",
+      reason: "user approved draft",
+      risk_flags_json: "[]",
+      status: "applied",
+    };
+    const cvData = {
+      activeVersion: "v1",
+      versions: {
+        v1: { sections: [{ id: "skills", title: "Skills", content: "User made newer manual edits" }] },
+      },
+    };
+
+    expect(() => rollbackResumeEditProposalInCvData(proposal, cvData)).toThrow(ResumeEditProposalApplyError);
+  });
+
+  it("discards a pending proposal through the tool with status read-back", async () => {
+    const data = {
+      proposal: { id: "rep-discard-tool-1", status: "discarded" },
+      readBackVerified: true,
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true, data }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await discardResumeEditProposal.handler({ proposalId: "rep-discard-tool-1" });
+
+    expect(result.success).toBe(true);
+    expect(result.verifiedAction?.success).toBe(true);
+    expect(result.verifiedAction?.readBack).toMatchObject({ ok: true, code: "read_back.match" });
+    expect(result.uiPayload).toMatchObject({ type: "resume_edit_proposal_discarded", readBackVerified: true });
+    expect(fetchMock).toHaveBeenCalledWith("/api/cv/edit-proposals/rep-discard-tool-1/discard", { method: "POST" });
+  });
+
+  it("rolls back a proposal through the tool only when server read-back verified", async () => {
+    const restoredContent = "Old skills list";
+    const data = {
+      proposal: { id: "rep-rollback-tool-1", status: "rolled_back" },
+      sectionId: "skills",
+      baseVersion: "v1",
+      rollbackHash: "fnv1a32:rollbackhash",
+      restoredContent,
+      replacedContent: "Core skills\nAI product design\nPrompt Engineering\nRAG knowledge base",
+      readBackVerified: true,
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true, data }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await rollbackResumeEditProposal.handler({ proposalId: "rep-rollback-tool-1" });
+
+    expect(result.success).toBe(true);
+    expect(result.verifiedAction?.success).toBe(true);
+    expect(result.verifiedAction?.readBack).toMatchObject({ ok: true, code: "read_back.match" });
+    expect(result.uiPayload).toMatchObject({ type: "resume_edit_proposal_rolled_back", readBackVerified: true });
+    expect(fetchMock).toHaveBeenCalledWith("/api/cv/edit-proposals/rep-rollback-tool-1/rollback", { method: "POST" });
   });
 
   it("blocks stale resume writes before PUT when base version or hash changed", async () => {

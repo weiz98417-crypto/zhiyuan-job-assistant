@@ -52,6 +52,16 @@ describe("agent action risk audit", () => {
       requiresVerifiedWrite: true,
       targets: expect.arrayContaining(["cv"]),
     });
+    expect(getActionToolRisk("discard_resume_edit_proposal")).toMatchObject({
+      risk: "high-risk-write",
+      requiresVerifiedWrite: true,
+      targets: expect.arrayContaining(["cv"]),
+    });
+    expect(getActionToolRisk("rollback_resume_edit_proposal")).toMatchObject({
+      risk: "high-risk-write",
+      requiresVerifiedWrite: true,
+      targets: expect.arrayContaining(["cv"]),
+    });
   });
 });
 

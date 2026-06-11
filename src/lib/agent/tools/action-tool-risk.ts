@@ -56,6 +56,13 @@ export const ACTION_TOOL_RISK_AUDIT: ActionToolRiskRecord[] = [
     requiresVerifiedWrite: true,
   },
   {
+    toolName: "discard_resume_edit_proposal",
+    risk: "high-risk-write",
+    targets: ["cv"],
+    summary: "Marks a pending resume edit proposal as discarded after user rejection without changing CV content.",
+    requiresVerifiedWrite: true,
+  },
+  {
     toolName: "download_report_pdf",
     risk: "low-risk-write",
     targets: ["file"],
@@ -152,6 +159,13 @@ export const ACTION_TOOL_RISK_AUDIT: ActionToolRiskRecord[] = [
     targets: ["session"],
     summary: "Prepares interview state for a session; should not overwrite JD/CV source context silently.",
     requiresVerifiedWrite: false,
+  },
+  {
+    toolName: "rollback_resume_edit_proposal",
+    risk: "high-risk-write",
+    targets: ["cv"],
+    summary: "Restores original resume section content for an applied proposal when rollback can be verified safely.",
+    requiresVerifiedWrite: true,
   },
   {
     toolName: "save_reference_resume",

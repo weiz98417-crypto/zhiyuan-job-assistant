@@ -12,9 +12,11 @@ import {
   buildResumeEditProposalRecord,
   parseCvDataJson,
   ResumeEditProposalApplyError,
+  rollbackResumeEditProposalInCvData,
   type ResumeEditProposalInput,
   type ResumeEditProposalApplyResult,
   type ResumeEditProposalRecord,
+  type ResumeEditProposalRollbackResult,
 } from "@/lib/agent/resume-edit-proposals";
 import type {
   AppRow,
@@ -131,6 +133,8 @@ export interface DataRepositories {
     get(id: string, userId: string): Promise<ResumeEditProposalRecord | undefined>;
     listPending(userId: string): Promise<ResumeEditProposalRecord[]>;
     apply(id: string, userId: string): Promise<ResumeEditProposalApplyResult>;
+    discard(id: string, userId: string): Promise<ResumeEditProposalRecord>;
+    rollback(id: string, userId: string): Promise<ResumeEditProposalRollbackResult>;
   };
   applications: {
     list(filters: { status?: string; company?: string; limit?: number; offset?: number }, userId: string): Promise<AppRow[]>;
@@ -594,6 +598,36 @@ function createSqliteResumeEditProposalRepository(): DataRepositories["resumeEdi
       });
       return tx();
     },
+    async discard(id, userId) {
+      const db = getDb();
+      const tx = db.transaction(() => {
+        const proposal = db.prepare("SELECT * FROM resume_edit_proposals WHERE id = ? AND user_id = ?").get(id, userId) as ResumeEditProposalRecord | undefined;
+        if (!proposal) throw new ResumeEditProposalApplyError("proposal_not_found", "Resume edit proposal was not found.");
+        if (proposal.status !== "pending") throw new ResumeEditProposalApplyError("proposal_not_pending", "Only pending resume edit proposals can be discarded.");
+        db.prepare("UPDATE resume_edit_proposals SET status = 'discarded', updated_at = datetime('now') WHERE id = ? AND user_id = ?").run(id, userId);
+        const updated = db.prepare("SELECT * FROM resume_edit_proposals WHERE id = ? AND user_id = ?").get(id, userId) as ResumeEditProposalRecord | undefined;
+        return updated || { ...proposal, status: "discarded" as const };
+      });
+      return tx();
+    },
+    async rollback(id, userId) {
+      const db = getDb();
+      const tx = db.transaction(() => {
+        const proposal = db.prepare("SELECT * FROM resume_edit_proposals WHERE id = ? AND user_id = ?").get(id, userId) as ResumeEditProposalRecord | undefined;
+        if (!proposal) throw new ResumeEditProposalApplyError("proposal_not_found", "Resume edit proposal was not found.");
+
+        const cvRow = db.prepare("SELECT data_json FROM cv_data WHERE user_id = ?").get(userId) as { data_json?: string } | undefined;
+        const rollback = rollbackResumeEditProposalInCvData(proposal, parseCvDataJson(cvRow?.data_json));
+
+        const result = db.prepare("UPDATE cv_data SET data_json = ?, updated_at = datetime('now') WHERE user_id = ?").run(JSON.stringify(rollback.cvData), userId);
+        if (result.changes === 0) throw new ResumeEditProposalApplyError("cv_missing", "CV data row was not found.");
+
+        db.prepare("UPDATE resume_edit_proposals SET status = 'rolled_back', updated_at = datetime('now') WHERE id = ? AND user_id = ?").run(id, userId);
+        const updated = db.prepare("SELECT * FROM resume_edit_proposals WHERE id = ? AND user_id = ?").get(id, userId) as ResumeEditProposalRecord | undefined;
+        return { ...rollback, proposal: updated || { ...proposal, status: "rolled_back" as const } };
+      });
+      return tx();
+    },
   };
 }
 
@@ -663,6 +697,62 @@ function createPostgresResumeEditProposalRepository(): DataRepositories["resumeE
           );
           await client.query("COMMIT");
           return { ...applied, proposal: normalizeRow(updateResult.rows[0]) as unknown as ResumeEditProposalRecord };
+        } catch (error) {
+          await client.query("ROLLBACK");
+          throw error;
+        }
+      });
+    },
+    async discard(id, userId) {
+      return withPostgresClient(async (client) => {
+        await client.query("BEGIN");
+        try {
+          const proposal = one<ResumeEditProposalRecord>(await client.query(
+            "SELECT * FROM resume_edit_proposals WHERE id = $1 AND user_id = $2 FOR UPDATE",
+            [id, userId],
+          ));
+          if (!proposal) throw new ResumeEditProposalApplyError("proposal_not_found", "Resume edit proposal was not found.");
+          if (proposal.status !== "pending") throw new ResumeEditProposalApplyError("proposal_not_pending", "Only pending resume edit proposals can be discarded.");
+          const result = await client.query(
+            "UPDATE resume_edit_proposals SET status = 'discarded', updated_at = now() WHERE id = $1 AND user_id = $2 RETURNING *",
+            [id, userId],
+          );
+          await client.query("COMMIT");
+          return normalizeRow(result.rows[0]) as unknown as ResumeEditProposalRecord;
+        } catch (error) {
+          await client.query("ROLLBACK");
+          throw error;
+        }
+      });
+    },
+    async rollback(id, userId) {
+      return withPostgresClient(async (client) => {
+        await client.query("BEGIN");
+        try {
+          const proposal = one<ResumeEditProposalRecord>(await client.query(
+            "SELECT * FROM resume_edit_proposals WHERE id = $1 AND user_id = $2 FOR UPDATE",
+            [id, userId],
+          ));
+          if (!proposal) throw new ResumeEditProposalApplyError("proposal_not_found", "Resume edit proposal was not found.");
+
+          const cvRow = one<{ data_json: string }>(await client.query(
+            "SELECT data_json FROM cv_data WHERE user_id = $1 FOR UPDATE",
+            [userId],
+          ));
+          const rollback = rollbackResumeEditProposalInCvData(proposal, parseCvDataJson(cvRow?.data_json));
+
+          const writeResult = await client.query(
+            "UPDATE cv_data SET data_json = $1::jsonb, updated_at = now() WHERE user_id = $2",
+            [JSON.stringify(rollback.cvData), userId],
+          );
+          if (!writeResult.rowCount) throw new ResumeEditProposalApplyError("cv_missing", "CV data row was not found.");
+
+          const updateResult = await client.query(
+            "UPDATE resume_edit_proposals SET status = 'rolled_back', updated_at = now() WHERE id = $1 AND user_id = $2 RETURNING *",
+            [id, userId],
+          );
+          await client.query("COMMIT");
+          return { ...rollback, proposal: normalizeRow(updateResult.rows[0]) as unknown as ResumeEditProposalRecord };
         } catch (error) {
           await client.query("ROLLBACK");
           throw error;
