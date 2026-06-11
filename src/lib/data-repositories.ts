@@ -8,8 +8,12 @@ import {
   type DatabaseDriver,
 } from "@/lib/postgres";
 import {
+  applyResumeEditProposalToCvData,
   buildResumeEditProposalRecord,
+  parseCvDataJson,
+  ResumeEditProposalApplyError,
   type ResumeEditProposalInput,
+  type ResumeEditProposalApplyResult,
   type ResumeEditProposalRecord,
 } from "@/lib/agent/resume-edit-proposals";
 import type {
@@ -126,6 +130,7 @@ export interface DataRepositories {
     create(input: ResumeEditProposalInput, userId: string): Promise<ResumeEditProposalRecord>;
     get(id: string, userId: string): Promise<ResumeEditProposalRecord | undefined>;
     listPending(userId: string): Promise<ResumeEditProposalRecord[]>;
+    apply(id: string, userId: string): Promise<ResumeEditProposalApplyResult>;
   };
   applications: {
     list(filters: { status?: string; company?: string; limit?: number; offset?: number }, userId: string): Promise<AppRow[]>;
@@ -571,6 +576,24 @@ function createSqliteResumeEditProposalRepository(): DataRepositories["resumeEdi
         ORDER BY updated_at DESC
       `).all(userId) as ResumeEditProposalRecord[];
     },
+    async apply(id, userId) {
+      const db = getDb();
+      const tx = db.transaction(() => {
+        const proposal = db.prepare("SELECT * FROM resume_edit_proposals WHERE id = ? AND user_id = ?").get(id, userId) as ResumeEditProposalRecord | undefined;
+        if (!proposal) throw new ResumeEditProposalApplyError("proposal_not_found", "Resume edit proposal was not found.");
+
+        const cvRow = db.prepare("SELECT data_json FROM cv_data WHERE user_id = ?").get(userId) as { data_json?: string } | undefined;
+        const applied = applyResumeEditProposalToCvData(proposal, parseCvDataJson(cvRow?.data_json));
+
+        const result = db.prepare("UPDATE cv_data SET data_json = ?, updated_at = datetime('now') WHERE user_id = ?").run(JSON.stringify(applied.cvData), userId);
+        if (result.changes === 0) throw new ResumeEditProposalApplyError("cv_missing", "CV data row was not found.");
+
+        db.prepare("UPDATE resume_edit_proposals SET status = 'applied', updated_at = datetime('now') WHERE id = ? AND user_id = ?").run(id, userId);
+        const updatedProposal = db.prepare("SELECT * FROM resume_edit_proposals WHERE id = ? AND user_id = ?").get(id, userId) as ResumeEditProposalRecord | undefined;
+        return { ...applied, proposal: updatedProposal || { ...proposal, status: "applied" as const } };
+      });
+      return tx();
+    },
   };
 }
 
@@ -611,6 +634,40 @@ function createPostgresResumeEditProposalRepository(): DataRepositories["resumeE
         WHERE user_id = $1 AND status = 'pending'
         ORDER BY updated_at DESC
       `, [userId])).rows));
+    },
+    async apply(id, userId) {
+      return withPostgresClient(async (client) => {
+        await client.query("BEGIN");
+        try {
+          const proposal = one<ResumeEditProposalRecord>(await client.query(
+            "SELECT * FROM resume_edit_proposals WHERE id = $1 AND user_id = $2 FOR UPDATE",
+            [id, userId],
+          ));
+          if (!proposal) throw new ResumeEditProposalApplyError("proposal_not_found", "Resume edit proposal was not found.");
+
+          const cvRow = one<{ data_json: string }>(await client.query(
+            "SELECT data_json FROM cv_data WHERE user_id = $1 FOR UPDATE",
+            [userId],
+          ));
+          const applied = applyResumeEditProposalToCvData(proposal, parseCvDataJson(cvRow?.data_json));
+
+          const writeResult = await client.query(
+            "UPDATE cv_data SET data_json = $1::jsonb, updated_at = now() WHERE user_id = $2",
+            [JSON.stringify(applied.cvData), userId],
+          );
+          if (!writeResult.rowCount) throw new ResumeEditProposalApplyError("cv_missing", "CV data row was not found.");
+
+          const updateResult = await client.query(
+            "UPDATE resume_edit_proposals SET status = 'applied', updated_at = now() WHERE id = $1 AND user_id = $2 RETURNING *",
+            [id, userId],
+          );
+          await client.query("COMMIT");
+          return { ...applied, proposal: normalizeRow(updateResult.rows[0]) as unknown as ResumeEditProposalRecord };
+        } catch (error) {
+          await client.query("ROLLBACK");
+          throw error;
+        }
+      });
     },
   };
 }

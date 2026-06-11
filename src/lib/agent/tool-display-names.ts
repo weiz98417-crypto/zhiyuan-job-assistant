@@ -42,6 +42,7 @@ export const TOOL_DISPLAY: Record<string, ToolDisplay> = {
   get_profile_insights: { label: "画像洞察",     emoji: "📊" },
   detect_skill_gaps:    { label: "技能缺口分析", emoji: "🔍" },
   create_resume_edit_proposal: { label: "创建简历修改提案", emoji: "📝" },
+  apply_resume_edit_proposal: { label: "应用简历修改提案", emoji: "💾" },
   save_resume_section:      { label: "保存到简历", emoji: "💾" },
   save_reference_resume:    { label: "保存优秀简历", emoji: "💾" },
   check_ats_compatibility:  { label: "ATS 兼容检查", emoji: "🤖" },

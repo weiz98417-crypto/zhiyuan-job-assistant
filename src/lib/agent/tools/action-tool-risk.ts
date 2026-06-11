@@ -28,6 +28,13 @@ export const ACTION_TOOL_RISK_AUDIT: ActionToolRiskRecord[] = [
     requiresVerifiedWrite: false,
   },
   {
+    toolName: "apply_resume_edit_proposal",
+    risk: "high-risk-write",
+    targets: ["cv"],
+    summary: "Applies an approved resume edit proposal into the canonical CV store inside a transaction.",
+    requiresVerifiedWrite: true,
+  },
+  {
     toolName: "check_health",
     risk: "read-only",
     targets: [],

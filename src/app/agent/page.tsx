@@ -941,7 +941,7 @@ Rules:
                   completedCriteria: Array.from(completedContractCriteria),
                 },
               });
-              if (event.name === "save_resume_section" && event.success) {
+              if ((event.name === "apply_resume_edit_proposal" || event.name === "save_resume_section") && event.success) {
                 resumeSectionSaveSucceeded = true;
               }
               const offerPayload = uiPayload;

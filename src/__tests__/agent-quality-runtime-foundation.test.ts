@@ -47,6 +47,11 @@ describe("agent action risk audit", () => {
       requiresVerifiedWrite: true,
       targets: expect.arrayContaining(["cv"]),
     });
+    expect(getActionToolRisk("apply_resume_edit_proposal")).toMatchObject({
+      risk: "high-risk-write",
+      requiresVerifiedWrite: true,
+      targets: expect.arrayContaining(["cv"]),
+    });
   });
 });
 
@@ -195,6 +200,33 @@ describe("agent run ledger and task contracts", () => {
     });
     const criteria = inferCompletedCriteriaFromToolResult(contract, {
       toolName: "save_resume_section",
+      toolSuccess: true,
+      verifiedAction,
+    });
+    const gate = evaluateTaskContractCompletion(contract, criteria);
+
+    expect(gate.canClaimSuccess).toBe(true);
+    expect(gate.unmetCriteria).toEqual([]);
+  });
+
+  it("allows final resume success through an applied proposal with read-back evidence", () => {
+    const contract = createAgentTaskContract({
+      taskType: "resume_edit",
+      target: "cv.skills",
+      baseHash: "hash:old",
+    });
+    const content = "AI product design\nPrompt Engineering\nRAG knowledge base";
+    const verifiedAction = buildVerifiedActionSuccess({
+      action: "apply_resume_edit_proposal",
+      targetType: "cv",
+      targetField: "skills",
+      data: { proposalId: "rep-1", readBackVerified: true },
+      expectedContent: content,
+      readBackContent: content,
+      checks: validateDocumentFieldContent(content).checks,
+    });
+    const criteria = inferCompletedCriteriaFromToolResult(contract, {
+      toolName: "apply_resume_edit_proposal",
       toolSuccess: true,
       verifiedAction,
     });

@@ -7,6 +7,8 @@ import {
 } from "@/lib/agent/resume-save-guard";
 import { saveResumeSection } from "@/lib/agent/tools/action/save-resume-section";
 import { createResumeEditProposal } from "@/lib/agent/tools/action/create-resume-edit-proposal";
+import { applyResumeEditProposal } from "@/lib/agent/tools/action/apply-resume-edit-proposal";
+import { applyResumeEditProposalToCvData, ResumeEditProposalApplyError, type ResumeEditProposalRecord } from "@/lib/agent/resume-edit-proposals";
 import { stableContentHash } from "@/lib/agent/verified-action";
 
 afterEach(() => {
@@ -188,6 +190,94 @@ SQL / 数据分析
       expect.objectContaining({ method: "POST" }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/cv/edit-proposals/rep-test-1", { cache: "no-store" });
+  });
+
+  it("applies a pending resume edit proposal to the matching CV snapshot", () => {
+    const cvData = {
+      activeVersion: "v1",
+      versions: {
+        v1: {
+          sections: [
+            { id: "skills", title: "Skills", content: "Old skills list" },
+          ],
+        },
+      },
+    };
+    const proposedContent = "Core skills\nAI product design\nPrompt Engineering\nRAG knowledge base";
+    const proposal: ResumeEditProposalRecord = {
+      id: "rep-apply-1",
+      user_id: "u1",
+      section_id: "skills",
+      base_version: "v1",
+      base_hash: stableContentHash(cvData.versions.v1),
+      original_content: "Old skills list",
+      proposed_content: proposedContent,
+      proposed_hash: stableContentHash(proposedContent),
+      reason: "user approved draft",
+      risk_flags_json: "[\"agent_generated\"]",
+      status: "pending",
+    };
+
+    const applied = applyResumeEditProposalToCvData(proposal, cvData);
+    const active = applied.cvData.versions as Record<string, { sections: Array<{ id: string; content: string }> }>;
+
+    expect(active.v1.sections[0].content).toBe(proposedContent);
+    expect(applied.previousContent).toBe("Old skills list");
+    expect(applied.appliedContent).toBe(proposedContent);
+    expect(cvData.versions.v1.sections[0].content).toBe("Old skills list");
+  });
+
+  it("blocks applying a stale resume edit proposal", () => {
+    const cvData = {
+      activeVersion: "v1",
+      versions: {
+        v1: {
+          sections: [
+            { id: "skills", title: "Skills", content: "User changed the skills list" },
+          ],
+        },
+      },
+    };
+    const proposal: ResumeEditProposalRecord = {
+      id: "rep-stale-1",
+      user_id: "u1",
+      section_id: "skills",
+      base_version: "v1",
+      base_hash: "fnv1a32:stale",
+      original_content: "Old skills list",
+      proposed_content: "Core skills\nAI product design\nPrompt Engineering\nRAG knowledge base",
+      proposed_hash: "fnv1a32:new",
+      reason: "user approved draft",
+      risk_flags_json: "[]",
+      status: "pending",
+    };
+
+    expect(() => applyResumeEditProposalToCvData(proposal, cvData)).toThrow(ResumeEditProposalApplyError);
+  });
+
+  it("applies a proposal through the tool only when server read-back verified", async () => {
+    const appliedContent = "Core skills\nAI product design\nPrompt Engineering\nRAG knowledge base";
+    const data = {
+      proposal: { id: "rep-apply-tool-1", status: "applied" },
+      sectionId: "skills",
+      baseVersion: "v1",
+      baseHash: "fnv1a32:basehash",
+      appliedHash: "fnv1a32:appliedhash",
+      previousContent: "Old skills list",
+      appliedContent,
+      readBackVerified: true,
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true, data }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await applyResumeEditProposal.handler({ proposalId: "rep-apply-tool-1" });
+
+    expect(result.success).toBe(true);
+    expect(result.verifiedAction?.success).toBe(true);
+    expect(result.verifiedAction?.readBack).toMatchObject({ ok: true, code: "read_back.match" });
+    expect(result.uiPayload).toMatchObject({ type: "resume_edit_proposal_applied", readBackVerified: true });
+    expect(fetchMock).toHaveBeenCalledWith("/api/cv/edit-proposals/rep-apply-tool-1/apply", { method: "POST" });
   });
 
   it("blocks stale resume writes before PUT when base version or hash changed", async () => {
