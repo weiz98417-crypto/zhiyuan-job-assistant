@@ -5,6 +5,13 @@ import path from "path";
 import { getToolsByCategory } from "@/lib/agent/tools";
 import { ACTION_TOOL_RISK_AUDIT, getActionToolRisk } from "@/lib/agent/tools/action-tool-risk";
 import {
+  getReadBackRequirementStatus,
+  hasReadBackVerificationEvidence,
+  requiresReadBackVerification,
+} from "@/lib/agent/tools/readback-verification";
+import { saveReferenceResume } from "@/lib/agent/tools/action/save-reference-resume";
+import { updateReportMetadata } from "@/lib/agent/tools/action/update-report-metadata";
+import {
   buildVerifiedActionSuccess,
   validateDocumentFieldContent,
 } from "@/lib/agent/verified-action";
@@ -193,6 +200,106 @@ describe("agent run ledger and task contracts", () => {
 
     expect(gate.canClaimSuccess).toBe(true);
     expect(gate.unmetCriteria).toEqual([]);
+  });
+
+  it("detects missing read-back evidence for high-risk action tools", () => {
+    expect(requiresReadBackVerification("save_resume_section")).toBe(true);
+    expect(requiresReadBackVerification("generate_interview_questions")).toBe(false);
+
+    expect(getReadBackRequirementStatus("save_resume_section", {
+      success: true,
+      data: { saved: true },
+    })).toMatchObject({
+      required: true,
+      satisfied: false,
+      deferred: false,
+    });
+
+    expect(hasReadBackVerificationEvidence({
+      data: { readBackVerified: true },
+    })).toBe(true);
+  });
+
+  it("satisfies the reference resume save contract only with read-back evidence", () => {
+    const contract = createAgentTaskContract({
+      taskType: "reference_resume_save",
+      target: "reference_resume:AI product manager",
+    });
+    const data = {
+      id: 7,
+      name: "AI PM reference resume",
+      roleCategory: "AI产品经理",
+      sections: [{ id: "projects", content: "project" }],
+      readBackVerified: true,
+    };
+    const criteria = inferCompletedCriteriaFromToolResult(contract, {
+      toolName: "save_reference_resume",
+      toolSuccess: true,
+      data,
+      uiPayload: data,
+      readBackVerified: true,
+    });
+    const gate = evaluateTaskContractCompletion(contract, criteria);
+
+    expect(gate.canClaimSuccess).toBe(true);
+    expect(gate.unmetCriteria).toEqual([]);
+  });
+
+  it("reads back a saved reference resume before reporting tool success", async () => {
+    const saved = {
+      id: 7,
+      name: "AI PM reference resume",
+      roleCategory: "AI产品经理",
+      visibility: "private",
+      sections: [{ id: "projects", content: "完整项目经历" }],
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true, data: saved }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true, data: saved }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await saveReferenceResume.handler({
+      resume_text: "个人概述\nAI产品经理\n项目经历\n完整项目经历",
+      role_category: "AI产品经理",
+      visibility: "private",
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.verifiedAction?.success).toBe(true);
+    expect(result.verifiedAction?.readBack).toMatchObject({ ok: true });
+    expect(result.uiPayload).toMatchObject({ readBackVerified: true });
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/cv/references/7", { cache: "no-store" });
+  });
+
+  it("reads back updated report metadata before reporting tool success", async () => {
+    const report = {
+      report_num: 5,
+      company: "NewCo",
+      role: "AI PM",
+      archetype: "AI产品经理",
+      legitimacy: "ok",
+      keywords_json: JSON.stringify(["AI", "PM"]),
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true, data: report }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true, data: report }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await updateReportMetadata.handler({
+      reportNum: 5,
+      company: "NewCo",
+      keywords: ["AI", "PM"],
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.verifiedAction?.success).toBe(true);
+    expect(result.verifiedAction?.readBack).toMatchObject({ ok: true });
+    expect(result.uiPayload).toMatchObject({ readBackVerified: true });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "http://localhost:3000/api/data/reports/5",
+      { cache: "no-store" },
+    );
   });
 
   it("captures resume base version and hash for durable edit contracts", () => {

@@ -76,6 +76,7 @@ import {
   type ReferenceResumeSaveSessionState,
 } from "@/lib/agent/reference-resume-save-flow";
 import { sanitizeUnsupportedResumeSaveClaim } from "@/lib/agent/resume-save-guard";
+import { getReadBackRequirementStatus } from "@/lib/agent/tools/readback-verification";
 import type { AgentMessage, AgentInteraction, ChatSession } from "@/types";
 
 
@@ -132,6 +133,10 @@ function summarizeLedgerParams(params: Record<string, unknown> | undefined): str
   return truncateLedgerText(safe);
 }
 
+function isReferenceResumeSaveIntent(content: string): boolean {
+  return /(保存|存|沉淀|加入|放到).{0,20}(优秀|参考|标杆|样例|范例).{0,20}(简历|履历|resume|cv)|(优秀|参考|标杆|样例|范例).{0,20}(简历|履历|resume|cv).{0,20}(保存|存|沉淀|加入|放到)/i.test(content);
+}
+
 function inferAgentTaskType(
   agentId: string,
   content: string,
@@ -143,6 +148,7 @@ function inferAgentTaskType(
   if (agentId === "offer" || documentType === "offer") return "offer_evaluation";
   if (agentId === "interview") return "interview_coaching";
   if (agentId === "profile") return "profile_update";
+  if (isReferenceResumeSaveIntent(content)) return "reference_resume_save";
   if (agentId === "resume" || documentType === "resume") {
     return /\b(pdf|download|export|markdown|md)\b/i.test(content) ? "file_export" : "resume_edit";
   }
@@ -884,6 +890,12 @@ Rules:
               const uiPayload = (event as { uiPayload?: Record<string, unknown> }).uiPayload;
               const verifiedAction = (event as { verifiedAction?: VerifiedActionResult }).verifiedAction;
               toolResultInfo = { name: event.name, result: event.result, success: event.success, data: event.data, uiPayload, verifiedAction };
+              const readBackRequirement = getReadBackRequirementStatus(event.name, {
+                success: event.success,
+                data: event.data,
+                uiPayload,
+                verifiedAction,
+              });
               if (activeTaskContract) {
                 addContractCriteria(inferCompletedCriteriaFromToolResult(activeTaskContract, {
                   toolName: event.name,
@@ -902,6 +914,7 @@ Rules:
                 verifier: {
                   success: event.success,
                   hasUiPayload: Boolean(uiPayload),
+                  readBackRequirement,
                   verifiedAction: verifiedAction
                     ? {
                         success: verifiedAction.success,

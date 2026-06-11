@@ -1,4 +1,9 @@
 import type { ToolDefinition, ToolResult } from "../types";
+import {
+  buildVerifiedActionFailure,
+  buildVerifiedActionSuccess,
+  type VerifiedActionCheck,
+} from "@/lib/agent/verified-action";
 
 interface UpdatedReport {
   report_num: number;
@@ -15,6 +20,17 @@ function stringParam(value: unknown): string | undefined {
 
 function apiPath(path: string): string {
   return typeof window === "undefined" ? `http://localhost:3000${path}` : path;
+}
+
+function parseKeywords(value: unknown): string[] {
+  if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string");
+  if (typeof value !== "string" || !value.trim()) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
 }
 
 async function resolveReportNum(value: unknown): Promise<number | null> {
@@ -88,13 +104,86 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
     }
 
     const report = json.data as UpdatedReport;
+    let readBackReport: UpdatedReport | null = null;
+    let readBackError = "";
+    try {
+      const verifyRes = await fetch(apiPath(`/api/data/reports/${reportNum}`), { cache: "no-store" });
+      const verifyJson = await verifyRes.json().catch(() => ({}));
+      if (verifyRes.ok && verifyJson.success && verifyJson.data) {
+        readBackReport = verifyJson.data as UpdatedReport;
+      } else {
+        readBackError = verifyJson.error || `Report #${reportNum} read-back failed`;
+      }
+    } catch (error) {
+      readBackError = error instanceof Error ? error.message : "Report metadata read-back failed";
+    }
+
+    const expectedProjection: Record<string, unknown> = { report_num: report.report_num };
+    const readBackProjection: Record<string, unknown> = { report_num: readBackReport?.report_num || 0 };
+    for (const key of ["company", "role", "archetype", "legitimacy"] as const) {
+      if (Object.prototype.hasOwnProperty.call(payload, key)) {
+        expectedProjection[key] = payload[key];
+        readBackProjection[key] = readBackReport?.[key] || "";
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, "keywords")) {
+      expectedProjection.keywords = payload.keywords;
+      readBackProjection.keywords = parseKeywords(readBackReport?.keywords_json);
+    }
+    const checks: VerifiedActionCheck[] = [
+      {
+        phase: "verifier",
+        ok: Boolean(readBackReport),
+        code: readBackReport ? "report.read_back_found" : "report.read_back_missing",
+        message: "Updated report can be read back after metadata write.",
+      },
+      {
+        phase: "verifier",
+        ok: Number(readBackProjection.report_num) === Number(reportNum),
+        code: Number(readBackProjection.report_num) === Number(reportNum) ? "report.id_match" : "report.id_mismatch",
+        message: "Read-back report number matches the updated report.",
+      },
+    ];
+    const verifiedAction = readBackReport
+      ? buildVerifiedActionSuccess({
+          action: "update_report_metadata",
+          targetType: "report",
+          targetId: reportNum,
+          data: report,
+          expectedContent: expectedProjection,
+          readBackContent: readBackProjection,
+          checks,
+        })
+      : buildVerifiedActionFailure({
+          action: "update_report_metadata",
+          targetType: "report",
+          error: readBackError || "Report metadata read-back failed",
+          checks,
+          data: report,
+        });
+    if (!verifiedAction.success) {
+      return {
+        success: false,
+        data: report,
+        error: `报告元数据写入后读回校验失败：${verifiedAction.error || readBackError || "read-back mismatch"}`,
+        errorCategory: "permanent",
+        verifiedAction,
+        uiPayload: {
+          type: "report_metadata_updated",
+          reportNum: report.report_num,
+          readBackVerified: false,
+          readBackError: verifiedAction.error || readBackError,
+        },
+      };
+    }
+    const verifiedReport = { ...report, readBackVerified: true };
     const changed = Object.entries(payload)
       .map(([key, value]) => `${key}=${Array.isArray(value) ? value.join(", ") : value}`)
       .join("；");
 
     return {
       success: true,
-      data: report,
+      data: verifiedReport,
       errorCategory: "ok",
       llmSummary: `已更新报告 #${report.report_num} 的保存信息：${changed}。这次只是修改已保存报告信息，没有重新评估或重新打分。`,
       uiPayload: {
@@ -102,7 +191,9 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
         reportNum: report.report_num,
         company: report.company,
         role: report.role,
+        readBackVerified: true,
       },
+      verifiedAction,
     };
   } catch (err) {
     return {

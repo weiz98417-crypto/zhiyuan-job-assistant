@@ -6,6 +6,7 @@ export type AgentTaskType =
   | "offer_evaluation"
   | "interview_coaching"
   | "profile_update"
+  | "reference_resume_save"
   | "file_export";
 
 export interface AgentTaskContract {
@@ -70,6 +71,12 @@ const DEFAULT_SUCCESS_CRITERIA: Record<AgentTaskType, string[]> = {
     "signal validator passes",
     "profile or memory write read-back verification passes",
   ],
+  reference_resume_save: [
+    "source resume content present",
+    "role category confirmed",
+    "reference resume persisted",
+    "reference resume read-back verification passes",
+  ],
   file_export: [
     "export generated",
     "file exists",
@@ -83,6 +90,7 @@ const DEFAULT_VALIDATORS: Record<AgentTaskType, string[]> = {
   offer_evaluation: ["source_content_present", "offer_modules_present", "read_back_match"],
   interview_coaching: ["context_binding", "single_question"],
   profile_update: ["signal_quality", "source_evidence", "read_back_match"],
+  reference_resume_save: ["source_resume_present", "role_category", "read_back_match"],
   file_export: ["file_exists", "file_size", "file_hash"],
 };
 
@@ -232,6 +240,21 @@ export function inferCompletedCriteriaFromToolResult(
     }
   }
 
+  if (contract.taskType === "reference_resume_save" && signals.toolName === "save_reference_resume") {
+    if (typeof data.id === "number" || typeof uiPayload.id === "number") {
+      completed.add("reference resume persisted");
+    }
+    if (hasNonEmptyString(data.roleCategory) || hasNonEmptyString(uiPayload.roleCategory)) {
+      completed.add("role category confirmed");
+    }
+    if (Array.isArray(data.sections) || Array.isArray(uiPayload.sections) || hasNonEmptyString(data.name) || hasNonEmptyString(uiPayload.name)) {
+      completed.add("source resume content present");
+    }
+    if (verifiedReadBack || signals.readBackVerified === true || uiPayload.readBackVerified === true || data.readBackVerified === true) {
+      completed.add("reference resume read-back verification passes");
+    }
+  }
+
   if (contract.taskType === "interview_coaching" && signals.toolName === "generate_interview_questions") {
     completed.add("one question generated");
   }
@@ -257,6 +280,9 @@ export function buildContractUnmetAssistantMessage(
   }
   if (contract.taskType === "jd_evaluation") {
     return `这次 JD 评估没有完成可靠落库校验：${unmet}。请重新发送 JD 文本/原图，或稍后重试，我不会把这次结果当作已完成报告。`;
+  }
+  if (contract.taskType === "reference_resume_save") {
+    return `这次优秀简历没有完成可靠读回校验：${unmet}。我不会把它当作已沉淀的长期记忆，请稍后重试或重新上传简历。`;
   }
   if (contract.taskType === "offer_evaluation") {
     return `这次 Offer 评估没有完成可靠落库校验：${unmet}。请重新发送 Offer 文本/截图，或稍后重试，我不会把这次结果当作已完成报告。`;

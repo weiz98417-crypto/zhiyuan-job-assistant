@@ -1,4 +1,9 @@
 import type { ToolDefinition, ToolResult } from "../types";
+import {
+  buildVerifiedActionFailure,
+  buildVerifiedActionSuccess,
+  type VerifiedActionCheck,
+} from "@/lib/agent/verified-action";
 
 interface SaveReferenceResumeParams {
   resume_text?: string;
@@ -69,9 +74,89 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
   }
 
   const data = payload.data || {};
+  let readBack: Record<string, unknown> | null = null;
+  let readBackError = "";
+  const referenceId = Number(data.id || data.referenceResumeId || 0);
+  if (referenceId > 0) {
+    try {
+      const verifyRes = await fetch(`/api/cv/references/${referenceId}`, { cache: "no-store" });
+      const verifyJson = await verifyRes.json().catch(() => ({}));
+      if (verifyRes.ok && verifyJson.success && verifyJson.data) {
+        readBack = verifyJson.data as Record<string, unknown>;
+      } else {
+        readBackError = verifyJson.error || `Reference resume #${referenceId} read-back failed`;
+      }
+    } catch (error) {
+      readBackError = error instanceof Error ? error.message : "Reference resume read-back failed";
+    }
+  } else {
+    readBackError = "Save API did not return a reference resume id";
+  }
+
+  const expectedProjection = {
+    id: referenceId,
+    roleCategory: String(data.roleCategory || roleCategory || ""),
+    name: String(data.name || input.name || ""),
+  };
+  const readBackProjection = {
+    id: Number(readBack?.id || 0),
+    roleCategory: String(readBack?.roleCategory || ""),
+    name: String(readBack?.name || ""),
+  };
+  const checks: VerifiedActionCheck[] = [
+    {
+      phase: "verifier",
+      ok: referenceId > 0,
+      code: referenceId > 0 ? "reference_resume.id_present" : "reference_resume.id_missing",
+      message: "Reference resume id is present after save.",
+    },
+    {
+      phase: "verifier",
+      ok: readBackProjection.id === referenceId,
+      code: readBackProjection.id === referenceId ? "reference_resume.read_back_id_match" : "reference_resume.read_back_id_mismatch",
+      message: "Read-back reference resume id matches the saved id.",
+    },
+    {
+      phase: "verifier",
+      ok: readBackProjection.roleCategory === expectedProjection.roleCategory,
+      code: readBackProjection.roleCategory === expectedProjection.roleCategory ? "reference_resume.role_match" : "reference_resume.role_mismatch",
+      message: "Read-back role category matches the requested category.",
+    },
+  ];
+  const verifiedAction = readBack
+    ? buildVerifiedActionSuccess({
+        action: "save_reference_resume",
+        targetType: "reference_resume",
+        targetId: referenceId,
+        data,
+        expectedContent: expectedProjection,
+        readBackContent: readBackProjection,
+        checks,
+      })
+    : buildVerifiedActionFailure({
+        action: "save_reference_resume",
+        targetType: "reference_resume",
+        error: readBackError || "Reference resume read-back failed",
+        checks,
+        data,
+      });
+
+  if (!verifiedAction.success) {
+    return {
+      success: false,
+      data,
+      error: `保存优秀简历后读回校验失败：${verifiedAction.error || readBackError || "read-back mismatch"}`,
+      errorCategory: "permanent",
+      verifiedAction,
+      uiPayload: { ...data, readBackVerified: false, readBackError: verifiedAction.error || readBackError },
+      rawData: data,
+    };
+  }
+
+  const verifiedData = { ...data, readBackVerified: true };
   return {
     success: true,
-    data,
+    data: verifiedData,
     llmSummary: [
       `优秀简历已保存：${data.name || input.name || "未命名"}`,
       `岗位方向：${data.roleCategory || roleCategory}`,
@@ -80,8 +165,9 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
       data.indexing ? `索引：${data.indexing.status} (${data.indexing.embedded || 0}/${data.indexing.chunks || 0})` : "",
       data.patternMemory ? `模式记忆：${data.patternMemory.status} (${data.patternMemory.persisted || 0}/${data.patternMemory.extracted || 0})` : "",
     ].filter(Boolean).join("\n"),
-    uiPayload: data,
-    rawData: data,
+    uiPayload: verifiedData,
+    rawData: verifiedData,
+    verifiedAction,
     errorCategory: "ok",
   };
 }
