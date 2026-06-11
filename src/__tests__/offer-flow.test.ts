@@ -108,12 +108,12 @@ describe("Offer Agent routing and tool contracts", () => {
       if (url.includes("/api/offers")) {
         return {
           ok: true,
-          json: async () => ({ success: true, data: { id: 3, created: true } }),
+          json: async () => ({ success: true, data: { id: 3, created: true, readBackVerified: true } }),
         };
       }
       return {
         ok: true,
-        json: async () => ({ success: true, data: { id: 11 } }),
+        json: async () => ({ success: true, data: { id: 11, readBackVerified: true, linkedOfferReadBackVerified: true } }),
       };
     }) as unknown as typeof fetch;
     vi.stubGlobal("fetch", fetchMock);
@@ -169,12 +169,12 @@ describe("Offer Agent routing and tool contracts", () => {
       if (url.includes("/api/offers")) {
         return {
           ok: true,
-          json: async () => ({ success: true, data: { id: 9, created: true } }),
+          json: async () => ({ success: true, data: { id: 9, created: true, readBackVerified: true } }),
         };
       }
       return {
         ok: true,
-        json: async () => ({ success: true, data: { id: 19 } }),
+        json: async () => ({ success: true, data: { id: 19, readBackVerified: true, linkedOfferReadBackVerified: true } }),
       };
     }) as unknown as typeof fetch;
     vi.stubGlobal("fetch", fetchMock);

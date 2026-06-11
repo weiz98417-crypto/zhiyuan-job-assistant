@@ -192,8 +192,8 @@ async function loadOfferById(offerId: number): Promise<OfferSnapshot | null> {
   });
 }
 
-async function saveOffer(snapshot: OfferSnapshot): Promise<number | null> {
-  if (snapshot.offerId) return snapshot.offerId;
+async function saveOffer(snapshot: OfferSnapshot): Promise<{ id: number; readBackVerified: boolean } | null> {
+  if (snapshot.offerId) return { id: snapshot.offerId, readBackVerified: true };
   if (!snapshot.company || !snapshot.role) return null;
 
   const res = await fetch(apiPath("/api/offers"), {
@@ -229,10 +229,11 @@ async function saveOffer(snapshot: OfferSnapshot): Promise<number | null> {
   });
   if (!res.ok) return null;
   const json = await res.json();
-  return json.success && json.data?.id ? Number(json.data.id) : null;
+  if (!json.success || !json.data?.id || json.data.readBackVerified !== true) return null;
+  return { id: Number(json.data.id), readBackVerified: true };
 }
 
-async function saveReport(report: OfferEvaluationReport): Promise<number | null> {
+async function saveReport(report: OfferEvaluationReport): Promise<{ id: number; readBackVerified: boolean } | null> {
   const res = await fetch(apiPath("/api/offer-reports"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -256,8 +257,11 @@ async function saveReport(report: OfferEvaluationReport): Promise<number | null>
       report_markdown: reportToMarkdown(report),
     }),
   });
-  const json = await res.json();
-  return json.success ? Number(json.data.id) : null;
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || !json.success || !json.data?.id || json.data.readBackVerified !== true || json.data.linkedOfferReadBackVerified !== true) {
+    return null;
+  }
+  return { id: Number(json.data.id), readBackVerified: true };
 }
 
 async function verifyOfferReportReadBack(reportId: number | null): Promise<{ ok: boolean; error?: string }> {
@@ -347,14 +351,44 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
     semanticTopK: 5,
   });
 
-  const savedOfferId = await saveOffer(snapshot);
-  if (savedOfferId && !snapshot.offerId) {
+  const savedOffer = await saveOffer(snapshot);
+  if (!savedOffer) {
+    return {
+      success: false,
+      data: null,
+      error: "Offer 保存后回读校验失败，已阻止成功提示",
+      errorCategory: "permanent",
+      llmSummary: "Offer 保存失败：系统未能确认 Offer 已正确落库，请稍后重试或联系管理员查看写入日志。",
+      uiPayload: { type: "offer_evaluation_error", phase: "offer_persistence", readBackVerified: false },
+    };
+  }
+
+  const savedOfferId = savedOffer.id;
+  if (!snapshot.offerId) {
     snapshot = { ...snapshot, offerId: savedOfferId };
   }
 
   const report = evaluateOfferSnapshot(snapshot);
-  const reportId = await saveReport(report);
+  const savedReport = await saveReport(report);
+  const reportId = savedReport?.id || null;
   const reportReadBack = await verifyOfferReportReadBack(reportId);
+  if (!savedReport || !reportReadBack.ok) {
+    return {
+      success: false,
+      data: null,
+      error: reportReadBack.error || "Offer 评估报告保存后回读校验失败，已阻止成功提示",
+      errorCategory: "permanent",
+      llmSummary: "Offer 评估报告保存失败：系统没有确认报告正确落库，因此不会向用户声明已完成。",
+      uiPayload: {
+        type: "offer_evaluation_error",
+        phase: "report_persistence",
+        offerId: savedOfferId,
+        reportId,
+        readBackVerified: false,
+        readBackError: reportReadBack.error || "",
+      },
+    };
+  }
   const withId = reportId ? { ...report, id: reportId } : report;
   const reportMarkdown = reportToMarkdown(report);
 

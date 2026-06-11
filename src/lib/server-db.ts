@@ -155,6 +155,7 @@ export function getDb(): Database.Database {
       'profiles', 'profile_signals', 'sessions', 'stories', 'cv_data',
       'applications', 'agent_preferences', 'session_memory',
       'optimization_preferences', 'resume_edit_proposals', 'reports', 'jds', 'reference_resumes',
+      'offers', 'offer_reports',
     ];
     for (const table of userTables) {
       const tCols = _db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
@@ -212,6 +213,7 @@ export function getDb(): Database.Database {
     for (const [name, sql] of offerMigrations) {
       if (!offerCols.some((c) => c.name === name)) _db.exec(sql);
     }
+    _db.exec("CREATE INDEX IF NOT EXISTS idx_offers_user ON offers(user_id, updated_at)");
 
     const offerReportCols = _db.prepare("PRAGMA table_info(offer_reports)").all() as { name: string }[];
     const offerReportMigrations = [
@@ -233,6 +235,7 @@ export function getDb(): Database.Database {
     for (const [name, sql] of offerReportMigrations) {
       if (!offerReportCols.some((c) => c.name === name)) _db.exec(sql);
     }
+    _db.exec("CREATE INDEX IF NOT EXISTS idx_offer_reports_user ON offer_reports(user_id, created_at)");
     _db.exec("CREATE INDEX IF NOT EXISTS idx_offer_reports_offer ON offer_reports(offer_id, created_at)");
   }
   return _db;

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { getDataRepositories } from "@/lib/data-repositories";
 import { evaluateOfferSnapshot } from "@/lib/offer-evaluation";
+import { offerLatestReportMatches, offerReportReadBackMatches } from "@/lib/offer-persistence-verifier";
 
 export async function POST(request: Request) {
   try {
@@ -37,7 +38,7 @@ export async function POST(request: Request) {
     const evaluated = snapshot?.company && snapshot?.role ? evaluateOfferSnapshot(snapshot) : null;
     const titleStr = title || (evaluated ? `${evaluated.company} Offer 评估报告` : "Offer report");
 
-    const id = await getDataRepositories().offerReports.insert({
+    const reportInput = {
       title: titleStr,
       report_type: report_type || (numOffers > 1 ? "comparison" : "single"),
       model_version: model_version || evaluated?.modelVersion || "",
@@ -56,9 +57,25 @@ export async function POST(request: Request) {
       offers_json: offersArr,
       report_markdown,
       num_offers: numOffers,
-    }, user.userId);
+    };
 
-    return NextResponse.json({ success: true, data: { id } }, { status: 201 });
+    const repos = getDataRepositories();
+    const id = await repos.offerReports.insert(reportInput, user.userId);
+    const readBack = await repos.offerReports.get(id, user.userId);
+    const readBackVerified = offerReportReadBackMatches(readBack, reportInput, id);
+    const linkedOfferReadBackVerified = reportInput.offer_id
+      ? offerLatestReportMatches(await repos.offers.get(Number(reportInput.offer_id), user.userId), id)
+      : true;
+
+    if (!readBackVerified || !linkedOfferReadBackVerified) {
+      return NextResponse.json({
+        success: false,
+        error: "Offer 评估报告持久化后回读校验失败，已阻止成功提示",
+        data: { id, readBackVerified, linkedOfferReadBackVerified },
+      }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true, data: { id, readBackVerified, linkedOfferReadBackVerified } }, { status: 201 });
   } catch (err) {
     if (err instanceof Error && err.message === "Not authenticated") {
       return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });

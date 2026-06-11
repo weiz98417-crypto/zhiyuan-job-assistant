@@ -51,10 +51,10 @@ describe("China offer evaluation model", () => {
         return okJson({ success: false });
       }
       if (url.includes("/api/offers")) {
-        return okJson({ success: true, data: { id: 41, created: true } });
+        return okJson({ success: true, data: { id: 41, created: true, readBackVerified: true } });
       }
       if (url.includes("/api/offer-reports")) {
-        return okJson({ success: true, data: { id: 42 } });
+        return okJson({ success: true, data: { id: 42, readBackVerified: true, linkedOfferReadBackVerified: true } });
       }
       return okJson({ success: true, data: {} });
     }) as unknown as typeof fetch);

@@ -207,6 +207,7 @@ CREATE TABLE IF NOT EXISTS cv_data (
 -- Offers (P2: offer comparison data)
 CREATE TABLE IF NOT EXISTS offers (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id TEXT REFERENCES users(id),
   company TEXT NOT NULL,
   role TEXT NOT NULL,
   monthly_salary REAL NOT NULL DEFAULT 0,
@@ -235,12 +236,13 @@ CREATE TABLE IF NOT EXISTS offers (
   latest_report_id INTEGER,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE(company, role)
+  UNIQUE(user_id, company, role)
 );
 
 -- Offer comparison reports (P2: persisted export snapshots)
 CREATE TABLE IF NOT EXISTS offer_reports (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id TEXT REFERENCES users(id),
   title TEXT NOT NULL DEFAULT 'Offer 对比报告',
   report_type TEXT NOT NULL DEFAULT 'comparison',
   model_version TEXT NOT NULL DEFAULT '',
@@ -261,6 +263,8 @@ CREATE TABLE IF NOT EXISTS offer_reports (
   num_offers INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE INDEX IF NOT EXISTS idx_offers_user ON offers(user_id, updated_at);
+CREATE INDEX IF NOT EXISTS idx_offer_reports_user ON offer_reports(user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_offer_reports_offer ON offer_reports(offer_id, created_at);
 
 -- STAR Stories (P2: interview story bank)

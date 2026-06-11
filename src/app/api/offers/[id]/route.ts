@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { getDataRepositories } from "@/lib/data-repositories";
+import { offerReadBackMatches } from "@/lib/offer-persistence-verifier";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -42,7 +43,15 @@ export async function PUT(request: Request, context: RouteContext) {
 
     const row = await getDataRepositories().offers.update(offerId, body, user.userId);
     if (!row) return NextResponse.json({ success: false, error: "offer not found" }, { status: 404 });
-    return NextResponse.json({ success: true, data: row });
+    const readBackVerified = offerReadBackMatches(row, body, offerId);
+    if (!readBackVerified) {
+      return NextResponse.json({
+        success: false,
+        error: "Offer 更新后回读校验失败，已阻止成功提示",
+        data: { id: offerId, readBackVerified: false },
+      }, { status: 500 });
+    }
+    return NextResponse.json({ success: true, data: { ...row, readBackVerified } });
   } catch (err) {
     if (err instanceof Error && err.message === "Not authenticated") {
       return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });

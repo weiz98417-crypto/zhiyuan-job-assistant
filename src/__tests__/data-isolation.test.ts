@@ -22,10 +22,13 @@ beforeAll(() => {
   const userTables = [
     'profiles', 'profile_signals', 'sessions', 'stories', 'cv_data',
     'applications', 'agent_preferences', 'session_memory',
-    'optimization_preferences',
+    'optimization_preferences', 'offers', 'offer_reports',
   ];
   for (const table of userTables) {
-    db.exec(`ALTER TABLE ${table} ADD COLUMN user_id TEXT REFERENCES users(id)`);
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+    if (!cols.some((c) => c.name === 'user_id')) {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN user_id TEXT REFERENCES users(id)`);
+    }
   }
 });
 
@@ -40,6 +43,7 @@ beforeEach(() => {
   db.exec('DELETE FROM session_memory');
   db.exec('DELETE FROM optimization_preferences');
   db.exec('DELETE FROM profile_signals');
+  db.exec('DELETE FROM offer_reports');
   db.exec('DELETE FROM offers');
   db.exec('DELETE FROM users');
 
@@ -101,13 +105,21 @@ describe('Data Isolation — Profiles', () => {
   });
 });
 
-describe('Data Isolation — Public Data (Offers)', () => {
-  it('offers are visible to all users (no user_id filter)', () => {
+describe('Data Isolation — Offers', () => {
+  it('user A cannot see user B offers', () => {
     db.prepare(
-      'INSERT INTO offers (company, role, monthly_salary, months_per_year, housing_fund_rate, probation_months, benefits_json) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).run('PublicCo', 'Dev', 30000, 12, 7, 3, '{}');
+      'INSERT INTO offers (user_id, company, role, monthly_salary, months_per_year, housing_fund_rate, probation_months, benefits_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(userA, 'OfferCoA', 'Dev', 30000, 12, 7, 3, '{}');
+    db.prepare(
+      'INSERT INTO offers (user_id, company, role, monthly_salary, months_per_year, housing_fund_rate, probation_months, benefits_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(userB, 'OfferCoB', 'Dev', 31000, 12, 7, 3, '{}');
 
-    const allOffers = db.prepare('SELECT * FROM offers').all();
-    expect(allOffers.length).toBe(1);
+    const aOffers = db.prepare('SELECT * FROM offers WHERE user_id = ?').all(userA) as any[];
+    const bOffers = db.prepare('SELECT * FROM offers WHERE user_id = ?').all(userB) as any[];
+
+    expect(aOffers.length).toBe(1);
+    expect(aOffers[0].company).toBe('OfferCoA');
+    expect(bOffers.length).toBe(1);
+    expect(bOffers[0].company).toBe('OfferCoB');
   });
 });
