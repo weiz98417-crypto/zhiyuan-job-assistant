@@ -376,6 +376,141 @@ function ToolResultCard({
   );
 }
 
+function textValue(value: unknown): string {
+  return typeof value === "string" ? value : value === undefined || value === null ? "" : String(value);
+}
+
+function ResumeEditProposalCard({
+  payload,
+  success,
+  onSend,
+}: {
+  payload: Record<string, unknown>;
+  success: boolean;
+  onSend: (content: string) => Promise<void>;
+}) {
+  const [submitting, setSubmitting] = useState<string | null>(null);
+  const proposal = typeof payload.proposal === "object" && payload.proposal !== null
+    ? payload.proposal as Record<string, unknown>
+    : payload;
+  const type = textValue(payload.type);
+  const id = textValue(proposal.id || payload.id);
+  const sectionId = textValue(payload.sectionId || proposal.sectionId || payload.sectionId);
+  const status = textValue(proposal.status || payload.status || (type.endsWith("applied") ? "applied" : "pending"));
+  const reason = textValue(payload.reason || proposal.reason);
+  const originalContent = textValue(payload.originalContent || proposal.originalContent || payload.previousContent || payload.restoredContent);
+  const proposedContent = textValue(payload.proposedContent || proposal.proposedContent || payload.appliedContent || payload.replacedContent);
+  const restoredContent = textValue(payload.restoredContent);
+  const readBackVerified = payload.readBackVerified === true;
+  const isPending = status === "pending" && type === "resume_edit_proposal";
+  const isApplied = status === "applied" || type === "resume_edit_proposal_applied";
+  const isDiscarded = status === "discarded" || type === "resume_edit_proposal_discarded";
+  const isRolledBack = status === "rolled_back" || type === "resume_edit_proposal_rolled_back";
+  const title = isRolledBack ? "简历修改已回滚" : isDiscarded ? "简历修改提案已废弃" : isApplied ? "简历修改已应用" : "简历修改提案";
+  const statusLabel = isRolledBack ? "已回滚" : isDiscarded ? "已废弃" : isApplied ? "已应用" : success ? "待确认" : "失败";
+
+  const sendAction = async (action: "apply" | "discard" | "rollback") => {
+    if (!id || submitting) return;
+    setSubmitting(action);
+    const text = action === "apply"
+      ? `应用简历修改提案 ${id}`
+      : action === "discard"
+        ? `废弃简历修改提案 ${id}`
+        : `回滚简历修改提案 ${id}`;
+    try {
+      await onSend(text);
+    } finally {
+      setSubmitting(null);
+    }
+  };
+
+  return (
+    <div className="max-w-[94%] min-w-0">
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-divider)] bg-[var(--color-surface)]"
+      >
+        <div className="flex flex-wrap items-center gap-2 border-b border-[var(--color-divider)] bg-[var(--color-bg)] px-3 py-2">
+          {success ? <FileText size={14} className="text-[var(--color-primary)]" /> : <X size={14} className="text-red-500" />}
+          <span className="text-xs font-medium text-[var(--color-text)]">{title}</span>
+          {sectionId && <span className="rounded-[var(--radius-sm)] bg-[var(--color-surface)] px-2 py-0.5 text-[10px] text-[var(--color-muted)]">{sectionId}</span>}
+          <span className={`ml-auto text-xs ${success ? "text-emerald-600" : "text-red-500"}`}>{statusLabel}</span>
+        </div>
+        <div className="space-y-3 px-3 py-3">
+          {id && <div className="text-[11px] text-[var(--color-muted)] break-all">提案 ID: {id}</div>}
+          {reason && <div className="text-xs text-[var(--color-muted)] break-words">{reason}</div>}
+
+          {isDiscarded ? (
+            <div className="rounded-[var(--radius-sm)] border border-[var(--color-divider)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-text)]">
+              这个提案已经废弃，CV 正文没有改动。
+            </div>
+          ) : isRolledBack ? (
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="min-w-0 rounded-[var(--radius-sm)] border border-red-100 bg-red-50/60 px-3 py-2">
+                <div className="mb-1 text-[11px] font-medium text-red-700">已撤销内容</div>
+                <div className="max-h-56 overflow-y-auto whitespace-pre-wrap break-words text-xs text-[var(--color-text)]">{proposedContent || "无"}</div>
+              </div>
+              <div className="min-w-0 rounded-[var(--radius-sm)] border border-emerald-100 bg-emerald-50/60 px-3 py-2">
+                <div className="mb-1 text-[11px] font-medium text-emerald-700">已恢复内容</div>
+                <div className="max-h-56 overflow-y-auto whitespace-pre-wrap break-words text-xs text-[var(--color-text)]">{restoredContent || originalContent || "无"}</div>
+              </div>
+            </div>
+          ) : (
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="min-w-0 rounded-[var(--radius-sm)] border border-[var(--color-divider)] bg-[var(--color-bg)] px-3 py-2">
+                <div className="mb-1 text-[11px] font-medium text-[var(--color-muted)]">当前内容</div>
+                <div className="max-h-64 overflow-y-auto whitespace-pre-wrap break-words text-xs text-[var(--color-text)]">{originalContent || "无"}</div>
+              </div>
+              <div className="min-w-0 rounded-[var(--radius-sm)] border border-emerald-100 bg-emerald-50/60 px-3 py-2">
+                <div className="mb-1 text-[11px] font-medium text-emerald-700">建议修改</div>
+                <div className="max-h-64 overflow-y-auto whitespace-pre-wrap break-words text-xs text-[var(--color-text)]">{proposedContent || "无"}</div>
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-2">
+            {readBackVerified && <span className="inline-flex items-center gap-1 text-[11px] text-emerald-600"><CheckCircle size={12} />已回读校验</span>}
+            {isPending && (
+              <>
+                <button
+                  type="button"
+                  disabled={!id || submitting !== null}
+                  onClick={() => sendAction("apply")}
+                  className="inline-flex items-center gap-1.5 rounded-[var(--radius-sm)] bg-[var(--color-primary)] px-3 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+                >
+                  {submitting === "apply" ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                  应用
+                </button>
+                <button
+                  type="button"
+                  disabled={!id || submitting !== null}
+                  onClick={() => sendAction("discard")}
+                  className="inline-flex items-center gap-1.5 rounded-[var(--radius-sm)] border border-[var(--color-divider)] px-3 py-1.5 text-xs font-medium text-[var(--color-text)] transition-colors hover:bg-[var(--color-bg)] disabled:opacity-50"
+                >
+                  {submitting === "discard" ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                  废弃
+                </button>
+              </>
+            )}
+            {isApplied && (
+              <button
+                type="button"
+                disabled={!id || submitting !== null}
+                onClick={() => sendAction("rollback")}
+                className="inline-flex items-center gap-1.5 rounded-[var(--radius-sm)] border border-[var(--color-divider)] px-3 py-1.5 text-xs font-medium text-[var(--color-text)] transition-colors hover:bg-[var(--color-bg)] disabled:opacity-50"
+              >
+                {submitting === "rollback" ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+                回滚
+              </button>
+            )}
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
 const INTERVIEW_CATEGORY_LABEL: Record<string, string> = {
   behavioral: "行为面试",
   technical: "技术专业",
@@ -995,6 +1130,7 @@ function MessageBubble({
   thinkingContent,
   activeAgentId,
   startTime,
+  onSend,
 }: {
   msg: AgentMessage;
   isStreaming: boolean;
@@ -1004,6 +1140,7 @@ function MessageBubble({
   thinkingContent?: string;
   activeAgentId?: string;
   startTime?: number;
+  onSend: (content: string) => Promise<void>;
 }) {
   const isUser = msg.role === "user";
   const imageAttachments = Array.isArray(msg.images)
@@ -1079,6 +1216,15 @@ function MessageBubble({
 
     if (uiPayload?.type === "interview_questions") {
       return <InterviewQuestionCard payload={uiPayload} />;
+    }
+
+    if (
+      uiPayload?.type === "resume_edit_proposal" ||
+      uiPayload?.type === "resume_edit_proposal_applied" ||
+      uiPayload?.type === "resume_edit_proposal_discarded" ||
+      uiPayload?.type === "resume_edit_proposal_rolled_back"
+    ) {
+      return <ResumeEditProposalCard payload={uiPayload} success={toolSuccess} onSend={onSend} />;
     }
 
     // Report blocks: uiPayload or legacy text
@@ -1474,6 +1620,7 @@ export default function AgentChat({
                 thinkingContent={isLastAssistant ? thinkingContent : undefined}
                 activeAgentId={isLastAssistant ? activeAgentId : undefined}
                 startTime={isLastAssistant ? startTime : undefined}
+                onSend={onSend}
               />
             </div>
           );
