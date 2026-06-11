@@ -260,6 +260,19 @@ async function saveReport(report: OfferEvaluationReport): Promise<number | null>
   return json.success ? Number(json.data.id) : null;
 }
 
+async function verifyOfferReportReadBack(reportId: number | null): Promise<{ ok: boolean; error?: string }> {
+  if (!reportId) return { ok: false, error: "reportId missing" };
+  try {
+    const res = await fetch(apiPath(`/api/offer-reports/${reportId}`), { cache: "no-store" });
+    const json = await res.json().catch(() => ({}));
+    const row = (json.data || {}) as Record<string, unknown>;
+    const ok = res.ok && json.success === true && Number(row.id) === Number(reportId);
+    return ok ? { ok } : { ok: false, error: json.error || `offer report #${reportId} read-back did not match` };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "offer report read-back failed" };
+  }
+}
+
 async function handler(params: Record<string, unknown>): Promise<ToolResult> {
   const offerId = numberParam(params.offerId, 0);
   let offerText = String(params.offerText || "");
@@ -341,6 +354,7 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
 
   const report = evaluateOfferSnapshot(snapshot);
   const reportId = await saveReport(report);
+  const reportReadBack = await verifyOfferReportReadBack(reportId);
   const withId = reportId ? { ...report, id: reportId } : report;
   const reportMarkdown = reportToMarkdown(report);
 
@@ -387,6 +401,8 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
       role: report.role,
       overallScore: report.overallScore,
       verdict: report.verdict,
+      readBackVerified: reportReadBack.ok,
+      readBackError: reportReadBack.error || "",
       redFlags: report.redFlags.slice(0, 5),
       missingInfo: report.missingInfo.slice(0, 5),
       memoryContext: memoryContext ? {

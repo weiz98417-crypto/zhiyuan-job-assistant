@@ -28,7 +28,7 @@
 - [x] 4.1 Define task contract schema for `resume_edit`, `jd_evaluation`, `offer_evaluation`, `interview_coaching`, `profile_update`, and `file_export`.
 - [x] 4.2 Build contract creation before high-risk tool execution.
 - [x] 4.3 Store base version/hash and success criteria in the run ledger.
-- [ ] 4.4 Prevent final success messages when the contract has unmet criteria.
+- [x] 4.4 Prevent final success messages when the contract has unmet criteria.
 
 ## 5. Verified Write Tool Protocol
 

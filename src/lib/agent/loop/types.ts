@@ -1,5 +1,7 @@
 /* ── Agent Loop Types ── */
 
+import type { VerifiedActionResult } from "@/lib/agent/verified-action";
+
 export interface LoopConfig {
   maxIterations: number;
   toolWhitelist?: string[];
@@ -29,7 +31,7 @@ export type SSEEvent =
   | { type: "phase"; phase: AgentPhase }
   | { type: "thinking_content"; content: string }
   | { type: "tool_call"; name: string; params: Record<string, unknown> }
-  | { type: "tool_result"; name: string; result: string; success: boolean; data?: unknown; uiPayload?: Record<string, unknown> }
+  | { type: "tool_result"; name: string; result: string; success: boolean; data?: unknown; uiPayload?: Record<string, unknown>; verifiedAction?: VerifiedActionResult }
   | { type: "tool_error"; name: string; error: string; recoverable: boolean }
   | { type: "result_quality"; quality: ResultQuality }
   | { type: "text"; content: string }
@@ -47,7 +49,7 @@ export type SSEEvent =
   | { type: "search_result"; count: number; summary: string }
   | { type: "error"; block?: string; message: string }
   // Persist notification
-  | { type: "persist_done"; reportNum: number; company: string; role: string; score: number };
+  | { type: "persist_done"; reportNum: number; company: string; role: string; score: number; readBackVerified?: boolean; readBackError?: string };
 
 export interface LoopContext {
   systemPrompt: string;

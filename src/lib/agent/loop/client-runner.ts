@@ -745,7 +745,7 @@ export async function* agentLoopClient(
         const toolResult = parallelResults[i];
         const formatted = formatToolResult(toolResult, tc.name);
 
-        yield { type: "tool_result", name: tc.name, result: formatted, success: toolResult.success, data: toolResult.data, uiPayload: (toolResult as ToolResult).uiPayload };
+        yield { type: "tool_result", name: tc.name, result: formatted, success: toolResult.success, data: toolResult.data, uiPayload: (toolResult as ToolResult).uiPayload, verifiedAction: (toolResult as ToolResult).verifiedAction };
         if (!toolResult.success) yield { type: "tool_error", name: tc.name, error: toolResult.error || "未知错误", recoverable: toolResult.recoverable !== false };
 
         const category = resolveErrorCategory(toolResult);
@@ -842,7 +842,7 @@ export async function* agentLoopClient(
         if (policyResult) {
           toolResult = policyResult;
           formatted = formatToolResult(toolResult, tc.name);
-          yield { type: "tool_result", name: tc.name, result: formatted, success: false, data: toolResult.data, uiPayload: toolResult.uiPayload };
+          yield { type: "tool_result", name: tc.name, result: formatted, success: false, data: toolResult.data, uiPayload: toolResult.uiPayload, verifiedAction: toolResult.verifiedAction };
           yield { type: "tool_error", name: tc.name, error: toolResult.error || "工具调用被策略拦截", recoverable: false };
           ctx.push({ role: "user", content: `[TOOL_BLOCKED tool=${tc.name}] ${toolResult.llmSummary || toolResult.error || "工具调用被策略拦截"}\n\n请不要改用其它大工具重试。请基于已有本地上下文回答；缺少必要信息时只向用户索要那一项。` });
           forceTextOnly = true;
@@ -980,12 +980,39 @@ export async function* agentLoopClient(
                   } catch (e) { console.warn("[loop] dexie JD save failed:", e); }
                 }
 
+                let reportReadBackVerified = false;
+                let reportReadBackError = "";
+                if (reportNum > 0) {
+                  try {
+                    const verifyRes = await fetch(`/api/data/reports/${reportNum}`, { cache: "no-store" });
+                    const verifyJson = await verifyRes.json().catch(() => ({}));
+                    const row = (verifyJson.data || {}) as Record<string, unknown>;
+                    reportReadBackVerified =
+                      verifyRes.ok &&
+                      verifyJson.success === true &&
+                      Number(row.report_num) === Number(reportNum);
+                    if (!reportReadBackVerified) {
+                      reportReadBackError = verifyJson.error || `report #${reportNum} read-back did not match`;
+                    }
+                  } catch (error) {
+                    reportReadBackError = error instanceof Error ? error.message : "report read-back failed";
+                  }
+                } else {
+                  reportReadBackError = "persist API did not return reportNum";
+                }
+                (d as Record<string, unknown>).reportReadBackVerified = reportReadBackVerified;
+                if (reportReadBackError) {
+                  (d as Record<string, unknown>).reportReadBackError = reportReadBackError;
+                }
+
                 yield {
                   type: "persist_done",
                   reportNum: reportNum,
                   company: d.company as string,
                   role: d.role as string,
                   score: (d.overallScore as number) || 0,
+                  readBackVerified: reportReadBackVerified,
+                  readBackError: reportReadBackError || undefined,
                 };
               }
             } catch (err) {
@@ -996,7 +1023,7 @@ export async function* agentLoopClient(
           }
 
           formatted = formatToolResult({ success: true, data: finalData, errorCategory: "ok" as const }, tc.name);
-          yield { type: "tool_result", name: tc.name, result: formatted, success: true, data: finalData, uiPayload: toolResult.uiPayload };
+          yield { type: "tool_result", name: tc.name, result: formatted, success: true, data: finalData, uiPayload: toolResult.uiPayload, verifiedAction: toolResult.verifiedAction };
 
           if (tc.name === "evaluate_jd_full") {
             const summary = formatJDEvaluationSummary(finalData);
@@ -1049,7 +1076,7 @@ ${followupInstruction}`,
         formatted = formatToolResult(toolResult, tc.name);
       }
 
-      yield { type: "tool_result", name: tc.name, result: formatted, success: toolResult.success, data: toolResult.data, uiPayload: toolResult.uiPayload };
+      yield { type: "tool_result", name: tc.name, result: formatted, success: toolResult.success, data: toolResult.data, uiPayload: toolResult.uiPayload, verifiedAction: toolResult.verifiedAction };
 
       if (tc.name === "save_resume_section" && toolResult.success) {
         yield { type: "phase", phase: "responding" };

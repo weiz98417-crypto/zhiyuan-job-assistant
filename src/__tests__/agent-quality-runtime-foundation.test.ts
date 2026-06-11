@@ -12,6 +12,8 @@ import {
   canClaimTaskSuccess,
   createAgentTaskContract,
   createResumeBaseSnapshot,
+  evaluateTaskContractCompletion,
+  inferCompletedCriteriaFromToolResult,
   unmetSuccessCriteria,
 } from "@/lib/agent/task-contract";
 
@@ -136,6 +138,61 @@ describe("agent run ledger and task contracts", () => {
     expect(canClaimTaskSuccess(contract, ["draft generated"])).toBe(false);
     expect(unmetSuccessCriteria(contract, ["draft generated"])).toContain("user approved draft");
     expect(canClaimTaskSuccess(contract, contract.successCriteria)).toBe(true);
+  });
+
+  it("prevents final success when a JD report was generated but not read back", () => {
+    const contract = createAgentTaskContract({
+      taskType: "jd_evaluation",
+      target: "jd:agent",
+    });
+    const blocks = Object.fromEntries(
+      ["a", "b", "c", "d", "e", "f", "g"].map((key) => [key, { content: `${key} block`, score: 3 }]),
+    );
+    const criteria = inferCompletedCriteriaFromToolResult(contract, {
+      toolName: "evaluate_jd_full",
+      toolSuccess: true,
+      data: {
+        jdText: "This is a sufficiently long JD text for extraction and evaluation.",
+        blocks,
+        reportNum: 12,
+      },
+      readBackVerified: false,
+    });
+    const gate = evaluateTaskContractCompletion(contract, criteria);
+
+    expect(gate.canClaimSuccess).toBe(false);
+    expect(gate.completedCriteria).toEqual(
+      expect.arrayContaining(["source content extracted or fetched", "A-G evaluation generated", "report persisted"]),
+    );
+    expect(gate.unmetCriteria).toContain("saved report read-back verification passes");
+    expect(gate.safeMessage).not.toMatch(/已保存|成功/);
+  });
+
+  it("allows final success only when verified write evidence satisfies the resume contract", () => {
+    const contract = createAgentTaskContract({
+      taskType: "resume_edit",
+      target: "cv.skills",
+      baseHash: "hash:old",
+    });
+    const content = "AI product design\nPrompt Engineering\nRAG knowledge base";
+    const verifiedAction = buildVerifiedActionSuccess({
+      action: "save_resume_section",
+      targetType: "cv",
+      targetField: "skills",
+      data: { saved: true },
+      expectedContent: content,
+      readBackContent: content,
+      checks: validateDocumentFieldContent(content).checks,
+    });
+    const criteria = inferCompletedCriteriaFromToolResult(contract, {
+      toolName: "save_resume_section",
+      toolSuccess: true,
+      verifiedAction,
+    });
+    const gate = evaluateTaskContractCompletion(contract, criteria);
+
+    expect(gate.canClaimSuccess).toBe(true);
+    expect(gate.unmetCriteria).toEqual([]);
   });
 
   it("captures resume base version and hash for durable edit contracts", () => {

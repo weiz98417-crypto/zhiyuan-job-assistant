@@ -18,7 +18,16 @@ import { agentLoopClient } from "@/lib/agent/loop/client-runner";
 import { inferPreferredDocumentTypeFromText, type ImageDocumentType, type ImageIntakeResult } from "@/lib/agent/image-intake";
 import { buildImageIntakeStatusText, buildImageIntakeToolSummary, routeImageIntake } from "@/lib/agent/image-intake-router";
 import type { AgentDefinition } from "@/lib/agent/registry/types";
-import { createAgentTaskContract, createResumeBaseSnapshot, type AgentTaskBaseSnapshot, type AgentTaskType } from "@/lib/agent/task-contract";
+import {
+  createAgentTaskContract,
+  createResumeBaseSnapshot,
+  evaluateTaskContractCompletion,
+  inferCompletedCriteriaFromToolResult,
+  type AgentTaskBaseSnapshot,
+  type AgentTaskContract,
+  type AgentTaskType,
+} from "@/lib/agent/task-contract";
+import type { VerifiedActionResult } from "@/lib/agent/verified-action";
 import {
   appendAgentRunStepClient,
   createAgentRunClient,
@@ -86,6 +95,15 @@ type ActiveRunNotice = {
   toolName?: string;
   verifierSummary?: string;
   updatedAt?: string;
+};
+
+type LastToolResultInfo = {
+  name: string;
+  result: string;
+  success: boolean;
+  data?: unknown;
+  uiPayload?: Record<string, unknown>;
+  verifiedAction?: VerifiedActionResult;
 };
 
 function waitForStatusPaint(ms = CONTEXT_COMPRESSION_STATUS_MS): Promise<void> {
@@ -734,6 +752,17 @@ Rules:
 
         setActiveAgent(agent);
 
+        let activeTaskContract: AgentTaskContract | null = null;
+        const completedContractCriteria = new Set<string>();
+        const addContractCriteria = (criteria: string[]) => {
+          if (!activeTaskContract) return;
+          for (const criterion of criteria) {
+            if (activeTaskContract.successCriteria.includes(criterion)) {
+              completedContractCriteria.add(criterion);
+            }
+          }
+        };
+
         const taskType = inferAgentTaskType(agent.id, content, imageIntake, preferredDocumentType);
         if (taskType) {
           try {
@@ -744,6 +773,10 @@ Rules:
               requiresUserApproval: taskType === "resume_edit",
               ...baseSnapshot,
             });
+            activeTaskContract = contract;
+            if (taskType === "interview_coaching" && interviewState?.planSnapshot) {
+              completedContractCriteria.add("JD/resume context bound");
+            }
             const createdRun = await createAgentRunClient({
               sessionId: currentSessionId,
               taskType,
@@ -804,7 +837,7 @@ Rules:
           }
         };
 
-        let toolResultInfo: { name: string; result: string; success: boolean; data?: unknown; uiPayload?: Record<string, unknown> } | null = null;
+        let toolResultInfo: LastToolResultInfo | null = null;
         let assistantText = "";
         let nextOfferState = agentState?.offer;
         let resumeSectionSaveSucceeded = false;
@@ -847,19 +880,57 @@ Rules:
                 inputSummary: summarizeLedgerParams(event.params),
               });
               break;
-            case "tool_result":
-              toolResultInfo = { name: event.name, result: event.result, success: event.success, data: event.data, uiPayload: (event as { uiPayload?: Record<string, unknown> }).uiPayload };
+            case "tool_result": {
+              const uiPayload = (event as { uiPayload?: Record<string, unknown> }).uiPayload;
+              const verifiedAction = (event as { verifiedAction?: VerifiedActionResult }).verifiedAction;
+              toolResultInfo = { name: event.name, result: event.result, success: event.success, data: event.data, uiPayload, verifiedAction };
+              if (activeTaskContract) {
+                addContractCriteria(inferCompletedCriteriaFromToolResult(activeTaskContract, {
+                  toolName: event.name,
+                  toolSuccess: event.success,
+                  data: event.data,
+                  uiPayload,
+                  verifiedAction,
+                  readBackVerified: uiPayload?.readBackVerified === true,
+                }));
+              }
               recordRunStep({
                 phase: "verifying",
                 toolName: event.name,
                 status: event.success ? "succeeded" : "failed",
                 outputSummary: truncateLedgerText(event.result),
-                verifier: { success: event.success, hasUiPayload: Boolean((event as { uiPayload?: Record<string, unknown> }).uiPayload) },
+                verifier: {
+                  success: event.success,
+                  hasUiPayload: Boolean(uiPayload),
+                  verifiedAction: verifiedAction
+                    ? {
+                        success: verifiedAction.success,
+                        action: verifiedAction.action,
+                        readBack: verifiedAction.readBack,
+                        verifier: verifiedAction.verifier,
+                        evidence: {
+                          targetType: verifiedAction.evidence?.targetType,
+                          targetId: verifiedAction.evidence?.targetId,
+                          targetField: verifiedAction.evidence?.targetField,
+                          expectedHash: verifiedAction.evidence?.expectedHash,
+                          readBackHash: verifiedAction.evidence?.readBackHash,
+                          versionId: verifiedAction.evidence?.versionId,
+                          validators: verifiedAction.evidence?.validators?.map((check) => ({
+                            phase: check.phase,
+                            ok: check.ok,
+                            code: check.code,
+                            message: check.message,
+                          })),
+                        },
+                      }
+                    : undefined,
+                  completedCriteria: Array.from(completedContractCriteria),
+                },
               });
               if (event.name === "save_resume_section" && event.success) {
                 resumeSectionSaveSucceeded = true;
               }
-              const offerPayload = (event as { uiPayload?: Record<string, unknown> }).uiPayload;
+              const offerPayload = uiPayload;
               if (offerPayload?.type === "offer_evaluation" || offerPayload?.type === "offer_report") {
                 nextOfferState = {
                   activeOfferId: Number(offerPayload.offerId || offerPayload.activeOfferId || 0) || nextOfferState?.activeOfferId,
@@ -940,6 +1011,7 @@ Rules:
                 return copy;
               });
               break;
+            }
             case "tool_error":
               console.warn(`[agent] tool error: ${event.name} -> ${event.error}`);
               recordRunStep({
@@ -990,16 +1062,58 @@ Rules:
                 role: event.role,
                 score: event.score,
               });
+              if (activeTaskContract?.taskType === "jd_evaluation") {
+                addContractCriteria(["report persisted"]);
+                if (event.readBackVerified) {
+                  addContractCriteria(["saved report read-back verification passes"]);
+                }
+                recordRunStep({
+                  phase: "verifying",
+                  toolName: "evaluate_jd_full",
+                  status: event.readBackVerified ? "succeeded" : "failed",
+                  verifier: {
+                    reportNum: event.reportNum,
+                    readBackVerified: event.readBackVerified === true,
+                    readBackError: event.readBackError || "",
+                    completedCriteria: Array.from(completedContractCriteria),
+                  },
+                });
+              }
               break;
             case "done": break;
           }
         }
 
         // ── Finalize ──
-        const finalAssistantContent = sanitizeUnsupportedResumeSaveClaim(
+        if (activeTaskContract?.taskType === "interview_coaching" && assistantText.trim()) {
+          if (interviewState?.planSnapshot) addContractCriteria(["JD/resume context bound"]);
+          addContractCriteria(["one question generated", "session state updated without losing context"]);
+        }
+        const contractGateResult = activeTaskContract && toolResultInfo && toolResultInfo.success !== false
+          ? evaluateTaskContractCompletion(activeTaskContract, Array.from(completedContractCriteria))
+          : null;
+        const contractGateFailed = Boolean(contractGateResult && !contractGateResult.canClaimSuccess);
+        if (contractGateFailed && activeTaskContract && contractGateResult) {
+          recordRunStep({
+            phase: "verifying",
+            status: "failed",
+            verifier: {
+              contract: activeTaskContract,
+              completedCriteria: contractGateResult.completedCriteria,
+              unmetCriteria: contractGateResult.unmetCriteria,
+            },
+            error: {
+              message: `Task contract unmet: ${contractGateResult.unmetCriteria.join(", ")}`,
+            },
+          });
+        }
+        let finalAssistantContent = sanitizeUnsupportedResumeSaveClaim(
           assistantText || "操作完成。",
-          resumeSectionSaveSucceeded,
+          resumeSectionSaveSucceeded && !contractGateFailed,
         );
+        if (contractGateFailed && contractGateResult?.safeMessage) {
+          finalAssistantContent = contractGateResult.safeMessage;
+        }
         streamContentRef.current = finalAssistantContent;
         setStreamText(finalAssistantContent);
         setPhase(null);
@@ -1126,14 +1240,29 @@ Rules:
           if (!hideUserMessage) {
             try { persistMessages([...updated, finalAssistant]); } catch { /* ok */ }
           }
-          const finalRunStatus: AgentRunStatus = toolResultInfo && !toolResultInfo.success ? "failed" : "succeeded";
+          const finalRunStatus: AgentRunStatus =
+            toolResultInfo && !toolResultInfo.success
+              ? "failed"
+              : contractGateFailed
+                ? "failed"
+                : "succeeded";
           await updateRunStatus(finalRunStatus, {
             result: {
               assistantLength: finalAssistantContent.length,
               lastTool: toolResultInfo
                 ? { name: toolResultInfo.name, success: toolResultInfo.success }
                 : null,
+              contract: contractGateResult
+                ? {
+                    canClaimSuccess: contractGateResult.canClaimSuccess,
+                    completedCriteria: contractGateResult.completedCriteria,
+                    unmetCriteria: contractGateResult.unmetCriteria,
+                  }
+                : null,
             },
+            error: contractGateFailed && contractGateResult
+              ? { message: `Task contract unmet: ${contractGateResult.unmetCriteria.join(", ")}` }
+              : undefined,
           });
         } else {
           await updateRunStatus("failed", {
