@@ -15,6 +15,7 @@ import {
   type PendingReferenceResumeSaveAction,
 } from "@/lib/agent/reference-resume-save-flow";
 import { buildResumeSavePlan } from "@/lib/agent/resume-save-guard";
+import type { AgentTaskContract } from "@/lib/agent/task-contract";
 
 export type { SSEEvent };
 
@@ -26,6 +27,7 @@ interface AgentLoopRuntimeContext {
   interviewState?: InterviewSessionState;
   interviewRebindAction?: InterviewRebindAction;
   pendingReferenceResumeSave?: PendingReferenceResumeSaveAction;
+  taskContract?: AgentTaskContract | null;
 }
 
 /* ── Result quality check ── */
@@ -73,6 +75,16 @@ function resolveErrorCategory(result: ToolResult): ErrorCategory {
   if (result.errorCategory) return result.errorCategory;
   // Backward compat: old tools without errorCategory — success=ok, failure=permanent
   return result.success ? "ok" : "permanent";
+}
+
+function injectTaskContractForWriteTool(
+  toolName: string,
+  params: Record<string, unknown>,
+  contract?: AgentTaskContract | null,
+): void {
+  if (toolName !== "save_resume_section" || contract?.taskType !== "resume_edit") return;
+  if (contract.baseHash && typeof params.baseHash !== "string") params.baseHash = contract.baseHash;
+  if (contract.baseVersion && typeof params.baseVersion !== "string") params.baseVersion = contract.baseVersion;
 }
 
 export const AGENT_LOOP_MAX_MESSAGES = 30;
@@ -725,6 +737,7 @@ export async function* agentLoopClient(
       const parallelParams = toolCalls.map(tc => {
         const params = JSON.parse(tc.arguments) as Record<string, unknown>;
         injectLatestImagesForImageTool(tc.name, params, ctx);
+        injectTaskContractForWriteTool(tc.name, params, runtimeContext?.taskContract);
         return { tc, params };
       });
       for (const { tc, params } of parallelParams) yield { type: "tool_call", name: tc.name, params };
@@ -800,6 +813,7 @@ export async function* agentLoopClient(
         if (inferredCompany) params.target_company = inferredCompany;
       }
       injectLatestImagesForImageTool(tc.name, params, ctx);
+      injectTaskContractForWriteTool(tc.name, params, runtimeContext?.taskContract);
       if (tc.name === "decode_black_market_terms") {
         const hasDecodeText = [params.text, params.phrase, params.jd_text]
           .some((value) => typeof value === "string" && value.trim());

@@ -35,7 +35,7 @@
 - [x] 5.1 Define shared `VerifiedActionResult` with `precheck`, `mutation`, `readBack`, `verifier`, `rollback`, and `evidence`.
 - [x] 5.2 Add deterministic validators for document fields: min length, placeholder text, code fences, markdown control text, truncated output, and target-section mismatch.
 - [x] 5.3 Require read-back verification for every high-risk action tool.
-- [ ] 5.4 Add optimistic concurrency checks using base hash or version id.
+- [x] 5.4 Add optimistic concurrency checks using base hash or version id.
 - [ ] 5.5 Prevent tools from returning `success: true` unless read-back verification passes.
 
 ## 6. Resume Draft Approval Flow

@@ -3,6 +3,7 @@ import { validateResumeSectionContent, type ResumeSectionId } from "@/lib/agent/
 import {
   buildVerifiedActionFailure,
   buildVerifiedActionSuccess,
+  stableContentHash,
   validateDocumentFieldContent,
 } from "@/lib/agent/verified-action";
 
@@ -17,6 +18,8 @@ const SECTION_MAP: Record<string, string> = {
 async function handler(params: Record<string, unknown>): Promise<ToolResult> {
   const section = (params.section as string) || "experience";
   const newContent = (params.content as string) || "";
+  const expectedBaseHash = typeof params.baseHash === "string" ? params.baseHash : "";
+  const expectedBaseVersion = typeof params.baseVersion === "string" ? params.baseVersion : "";
 
   if (!newContent.trim()) {
     return { success: false, data: null, error: "新内容不能为空", recoverable: false, retryHint: "请提供要保存的完整板块内容" };
@@ -62,11 +65,53 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
     return { success: false, data: null, error: "CV 数据为空，请先在 CV 页面创建简历", recoverable: false, retryHint: "请引导用户到 CV 页面 (/cv) 填写基本信息" };
   }
 
-  // 3. Update the section in memory
+  // 3. Verify base snapshot before mutating the in-memory CV.
+  const currentActiveVersion = (cvData as Record<string, unknown>).activeVersion as string;
   const version = (cvData as Record<string, unknown>).versions as Record<string, { sections?: Array<{ id: string; title: string; content: string }> }>;
-  const active = version[(cvData as Record<string, unknown>).activeVersion as string];
+  const active = version[currentActiveVersion];
   if (!active?.sections) {
     return { success: false, data: null, error: "CV 版本数据异常", recoverable: false, retryHint: "请联系用户检查 CV 数据结构" };
+  }
+  const currentBaseHash = stableContentHash(active);
+  const baseVersionConflict = Boolean(expectedBaseVersion && expectedBaseVersion !== currentActiveVersion);
+  const baseHashConflict = Boolean(expectedBaseHash && expectedBaseHash !== currentBaseHash);
+  if (baseVersionConflict || baseHashConflict) {
+    const error = "简历已经发生变化，已阻止用旧上下文覆盖当前版本。请重新读取简历、重新生成差异，并请用户确认后再保存。";
+    return {
+      success: false,
+      data: {
+        sectionId,
+        saved: false,
+        expectedBaseVersion,
+        currentBaseVersion: currentActiveVersion,
+        expectedBaseHash,
+        currentBaseHash,
+      },
+      error,
+      errorCategory: "need_user_input",
+      recoverable: false,
+      retryHint: "请重新读取最新简历内容后再生成新的修改方案。",
+      verifiedAction: buildVerifiedActionFailure({
+        action: "save_resume_section",
+        targetType: "cv",
+        targetField: sectionId,
+        baseHash: currentBaseHash,
+        versionId: currentActiveVersion,
+        precheck: {
+          phase: "precheck",
+          ok: false,
+          code: "base_version.conflict",
+          message: `Expected ${expectedBaseVersion || expectedBaseHash || "unknown base"} but current CV is ${currentActiveVersion}/${currentBaseHash}.`,
+        },
+        verifier: {
+          phase: "verifier",
+          ok: false,
+          code: "base_version_conflict",
+          message: error,
+        },
+        error,
+      }),
+    };
   }
 
   let found = false;
@@ -135,6 +180,8 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
     action: "save_resume_section",
     targetType: "cv",
     targetField: sectionId,
+    baseHash: currentBaseHash,
+    versionId: currentActiveVersion,
     data: { sectionId, saved: true },
     expectedContent: newContent,
     readBackContent,
@@ -160,7 +207,13 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
 
   return {
     success: true,
-    data: { sectionId, sectionLabel: sectionLabels[sectionId] || sectionId, saved: true },
+    data: {
+      sectionId,
+      sectionLabel: sectionLabels[sectionId] || sectionId,
+      saved: true,
+      baseHash: currentBaseHash,
+      versionId: currentActiveVersion,
+    },
     verifiedAction,
   };
 }
@@ -177,6 +230,8 @@ export const saveResumeSection: ToolDefinition = {
   parameters: {
     section: { type: "string", required: true, description: "板块名称：工作经历/项目经验/技能/个人概述/教育背景" },
     content: { type: "string", required: true, description: "要保存的完整板块内容" },
+    baseHash: { type: "string", required: false, description: "Agent run 开始时读取到的 CV 基线哈希，用于防止并发覆盖。" },
+    baseVersion: { type: "string", required: false, description: "Agent run 开始时读取到的 CV 版本 id，用于防止并发覆盖。" },
   },
   category: "action",
   handler,

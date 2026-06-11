@@ -6,6 +6,7 @@ import {
   validateResumeSectionContent,
 } from "@/lib/agent/resume-save-guard";
 import { saveResumeSection } from "@/lib/agent/tools/action/save-resume-section";
+import { stableContentHash } from "@/lib/agent/verified-action";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -148,5 +149,43 @@ SQL / 数据分析
       ok: true,
       code: "read_back.match",
     });
+  });
+
+  it("blocks stale resume writes before PUT when base version or hash changed", async () => {
+    const currentCv = {
+      activeVersion: "v2",
+      versions: {
+        v2: {
+          sections: [
+            { id: "skills", title: "技能", content: "当前技能清单" },
+          ],
+        },
+      },
+    };
+    const nextContent = "核心能力\nAI产品全链路设计\nPrompt Engineering\nRAG知识库构建";
+    const currentHash = stableContentHash(currentCv.versions.v2);
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true, data: currentCv }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await saveResumeSection.handler({
+      section: "技能",
+      content: nextContent,
+      baseVersion: "v1",
+      baseHash: "fnv1a32:00000000",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.errorCategory).toBe("need_user_input");
+    expect(result.error).toContain("简历已经发生变化");
+    expect(result.verifiedAction?.success).toBe(false);
+    expect(result.verifiedAction?.verifier.code).toBe("base_version_conflict");
+    expect(result.verifiedAction?.evidence).toMatchObject({
+      targetField: "skills",
+      versionId: "v2",
+      baseHash: currentHash,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

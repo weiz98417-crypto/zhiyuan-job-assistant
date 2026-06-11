@@ -150,6 +150,10 @@ export function validateDocumentFieldContent(
 export function buildVerifiedActionFailure<TData = unknown>(input: {
   action: string;
   targetType: string;
+  targetId?: string | number;
+  targetField?: string;
+  baseHash?: string;
+  versionId?: string | number;
   risk?: "low" | "high" | "destructive";
   precheck?: VerifiedActionCheck;
   verifier?: VerifiedActionCheck;
@@ -178,6 +182,10 @@ export function buildVerifiedActionFailure<TData = unknown>(input: {
     verifier,
     evidence: {
       targetType: input.targetType,
+      targetId: input.targetId,
+      targetField: input.targetField,
+      baseHash: input.baseHash,
+      versionId: input.versionId,
       validators: input.checks || [precheck, verifier],
     },
     error: input.error,
@@ -189,6 +197,7 @@ export function buildVerifiedActionSuccess<TData = unknown>(input: {
   targetType: string;
   targetId?: string | number;
   targetField?: string;
+  baseHash?: string;
   risk?: "low" | "high" | "destructive";
   data: TData;
   expectedContent?: unknown;
@@ -237,6 +246,7 @@ export function buildVerifiedActionSuccess<TData = unknown>(input: {
       targetType: input.targetType,
       targetId: input.targetId,
       targetField: input.targetField,
+      baseHash: input.baseHash,
       expectedHash,
       readBackHash,
       versionId: input.versionId,

@@ -864,6 +864,7 @@ Rules:
             interviewState,
             interviewRebindAction: rebindResolution?.action,
             pendingReferenceResumeSave: pendingReferenceResumeSaveForRun,
+            taskContract: activeTaskContract,
           },
         )) {
           if (firstEvent) { setStartTime(Date.now()); firstEvent = false; }
