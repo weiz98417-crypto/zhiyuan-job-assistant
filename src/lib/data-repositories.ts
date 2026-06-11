@@ -17,6 +17,7 @@ import {
   type ResumeEditProposalApplyResult,
   type ResumeEditProposalRecord,
   type ResumeEditProposalRollbackResult,
+  type ResumeEditProposalStatus,
 } from "@/lib/agent/resume-edit-proposals";
 import type {
   AppRow,
@@ -132,6 +133,7 @@ export interface DataRepositories {
     create(input: ResumeEditProposalInput, userId: string): Promise<ResumeEditProposalRecord>;
     get(id: string, userId: string): Promise<ResumeEditProposalRecord | undefined>;
     listPending(userId: string): Promise<ResumeEditProposalRecord[]>;
+    listByStatus(userId: string, status: ResumeEditProposalStatus, limit?: number): Promise<ResumeEditProposalRecord[]>;
     apply(id: string, userId: string): Promise<ResumeEditProposalApplyResult>;
     discard(id: string, userId: string): Promise<ResumeEditProposalRecord>;
     rollback(id: string, userId: string): Promise<ResumeEditProposalRollbackResult>;
@@ -580,6 +582,15 @@ function createSqliteResumeEditProposalRepository(): DataRepositories["resumeEdi
         ORDER BY updated_at DESC
       `).all(userId) as ResumeEditProposalRecord[];
     },
+    async listByStatus(userId, status, limit = 20) {
+      const safeLimit = Math.max(1, Math.min(50, Math.floor(limit)));
+      return getDb().prepare(`
+        SELECT * FROM resume_edit_proposals
+        WHERE user_id = ? AND status = ?
+        ORDER BY updated_at DESC
+        LIMIT ?
+      `).all(userId, status, safeLimit) as ResumeEditProposalRecord[];
+    },
     async apply(id, userId) {
       const db = getDb();
       const tx = db.transaction(() => {
@@ -668,6 +679,15 @@ function createPostgresResumeEditProposalRepository(): DataRepositories["resumeE
         WHERE user_id = $1 AND status = 'pending'
         ORDER BY updated_at DESC
       `, [userId])).rows));
+    },
+    async listByStatus(userId, status, limit = 20) {
+      const safeLimit = Math.max(1, Math.min(50, Math.floor(limit)));
+      return withPostgresClient(async (client) => rows<ResumeEditProposalRecord>((await client.query(`
+        SELECT * FROM resume_edit_proposals
+        WHERE user_id = $1 AND status = $2
+        ORDER BY updated_at DESC
+        LIMIT $3
+      `, [userId, status, safeLimit])).rows));
     },
     async apply(id, userId) {
       return withPostgresClient(async (client) => {

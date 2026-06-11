@@ -2,10 +2,12 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { getDataRepositories } from "@/lib/data-repositories";
 import { resumeEditProposalToDTO } from "@/lib/agent/resume-edit-proposals";
+import type { ResumeEditProposalStatus } from "@/lib/agent/resume-edit-proposals";
 import { validateResumeSectionContent, type ResumeSectionId } from "@/lib/agent/resume-save-guard";
 import { stableContentHash } from "@/lib/agent/verified-action";
 
 const SECTION_IDS = new Set(["summary", "experience", "projects", "education", "skills"]);
+const PROPOSAL_STATUSES = new Set<ResumeEditProposalStatus>(["pending", "applied", "discarded", "stale", "rolled_back"]);
 
 type CVSection = { id: string; title?: string; content?: string };
 type CVVersion = { sections?: CVSection[] };
@@ -23,10 +25,20 @@ function getActiveVersion(cvData: Record<string, unknown>): { activeVersion: str
   return activeVersion && active?.sections ? { activeVersion, active } : null;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const user = await getCurrentUser();
-    const rows = await getDataRepositories().resumeEditProposals.listPending(user.userId);
+    const url = new URL(request.url);
+    const rawStatus = url.searchParams.get("status");
+    const status = (rawStatus || "pending") as ResumeEditProposalStatus;
+    if (!PROPOSAL_STATUSES.has(status)) {
+      return NextResponse.json({ success: false, error: "Invalid proposal status" }, { status: 400 });
+    }
+    const rawLimit = Number(url.searchParams.get("limit") || 20);
+    const limit = Number.isFinite(rawLimit) ? rawLimit : 20;
+    const rows = status === "pending" && !rawStatus
+      ? await getDataRepositories().resumeEditProposals.listPending(user.userId)
+      : await getDataRepositories().resumeEditProposals.listByStatus(user.userId, status, limit);
     return NextResponse.json({ success: true, data: rows.map(resumeEditProposalToDTO) });
   } catch (err) {
     if (err instanceof Error && err.message === "Not authenticated") {

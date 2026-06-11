@@ -157,6 +157,15 @@ describe("agent runtime regression evals", () => {
     expect(page).toContain("cancelAgentRunClient");
   });
 
+  it("recovery: agent page keeps a rollback affordance for the latest applied resume edit", () => {
+    const page = fs.readFileSync(path.join(process.cwd(), "src", "app", "agent", "page.tsx"), "utf-8");
+
+    expect(page).toContain("latestRollbackProposal");
+    expect(page).toContain("handleRollbackLatestProposal");
+    expect(page).toContain("status=applied&limit=1");
+    expect(page).toContain("撤销最近一次已应用的简历修改");
+  });
+
   it("recovery: pending resume proposal survives refresh and routes approval by proposal id", () => {
     const messages = [
       {

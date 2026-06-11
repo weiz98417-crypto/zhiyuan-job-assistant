@@ -80,6 +80,7 @@ import {
   type ReferenceResumeSaveSessionState,
 } from "@/lib/agent/reference-resume-save-flow";
 import { sanitizeUnsupportedResumeSaveClaim } from "@/lib/agent/resume-save-guard";
+import type { ResumeEditProposalDTO } from "@/lib/agent/resume-edit-proposals";
 import { getReadBackRequirementStatus } from "@/lib/agent/tools/readback-verification";
 import type { AgentMessage, AgentInteraction, ChatSession } from "@/types";
 
@@ -337,6 +338,8 @@ function AgentPageInner() {
   const [sessionLoadError, setSessionLoadError] = useState<string | null>(null);
   const [activeRunNotice, setActiveRunNotice] = useState<ActiveRunNotice | null>(null);
   const [activeRunAction, setActiveRunAction] = useState<"resume" | "cancel" | null>(null);
+  const [latestRollbackProposal, setLatestRollbackProposal] = useState<ResumeEditProposalDTO | null>(null);
+  const [rollbackAction, setRollbackAction] = useState<"rollback" | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
   const streamContentRef = useRef("");
@@ -463,6 +466,22 @@ function AgentPageInner() {
     }
   }, [currentSessionId, messages]);
 
+  const refreshLatestRollbackProposal = useCallback(async () => {
+    try {
+      const res = await fetch("/api/cv/edit-proposals?status=applied&limit=1", { cache: "no-store" });
+      const json = await res.json().catch(() => ({}));
+      const data = Array.isArray(json.data) ? json.data as ResumeEditProposalDTO[] : [];
+      setLatestRollbackProposal(res.ok && json.success ? data[0] || null : null);
+    } catch {
+      setLatestRollbackProposal(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!mounted || !currentSessionId) return;
+    refreshLatestRollbackProposal().catch(() => {});
+  }, [mounted, currentSessionId, refreshLatestRollbackProposal]);
+
   const handleResumeActiveRun = useCallback(async () => {
     const runId = activeRunNotice?.id;
     if (!runId || activeRunAction) return;
@@ -480,6 +499,27 @@ function AgentPageInner() {
       setActiveRunAction(null);
     }
   }, [activeRunAction, activeRunNotice?.id, appendAssistantStatusMessage]);
+
+  const handleRollbackLatestProposal = useCallback(async () => {
+    const proposal = latestRollbackProposal;
+    if (!proposal?.id || rollbackAction) return;
+    setRollbackAction("rollback");
+    try {
+      const res = await fetch(`/api/cv/edit-proposals/${encodeURIComponent(proposal.id)}/rollback`, { method: "POST" });
+      const json = await res.json().catch(() => ({}));
+      const readBackVerified = json.data?.readBackVerified === true;
+      if (res.ok && json.success && readBackVerified) {
+        setLatestRollbackProposal(null);
+        await appendAssistantStatusMessage(`已撤销最近一次简历修改（${proposal.sectionId}），并完成回读校验。`);
+        triggerProfileUpdate({ force: true }).catch(() => {});
+      } else {
+        await appendAssistantStatusMessage(`撤销最近一次简历修改失败：${json.error || `HTTP ${res.status}`}`);
+        await refreshLatestRollbackProposal();
+      }
+    } finally {
+      setRollbackAction(null);
+    }
+  }, [appendAssistantStatusMessage, latestRollbackProposal, refreshLatestRollbackProposal, rollbackAction]);
 
   const handleCancelActiveRun = useCallback(async () => {
     const runId = activeRunNotice?.id;
@@ -942,6 +982,8 @@ Rules:
         let assistantText = "";
         let nextOfferState = agentState?.offer;
         let resumeSectionSaveSucceeded = false;
+        let resumeEditAppliedSucceeded = false;
+        let resumeEditRolledBackSucceeded = false;
 
         const msgList = updated.map((m, index) => ({
           role: m.role,
@@ -1038,6 +1080,12 @@ Rules:
               });
               if ((event.name === "apply_resume_edit_proposal" || event.name === "save_resume_section") && event.success) {
                 resumeSectionSaveSucceeded = true;
+              }
+              if (event.name === "apply_resume_edit_proposal" && event.success) {
+                resumeEditAppliedSucceeded = true;
+              }
+              if (event.name === "rollback_resume_edit_proposal" && event.success) {
+                resumeEditRolledBackSucceeded = true;
               }
               const offerPayload = uiPayload;
               if (offerPayload?.type === "offer_evaluation" || offerPayload?.type === "offer_report") {
@@ -1344,6 +1392,12 @@ Rules:
 
           // Auto-trigger profile update after each completed agent exchange
           triggerProfileUpdate({ force: true }).catch(() => {});
+          if (resumeEditAppliedSucceeded) {
+            await refreshLatestRollbackProposal();
+          }
+          if (resumeEditRolledBackSucceeded) {
+            setLatestRollbackProposal(null);
+          }
 
           // Best-effort legacy persist
           if (!hideUserMessage) {
@@ -1405,7 +1459,7 @@ Rules:
         abortRef.current = null;
       }
     },
-    [messages, currentSessionId, makeSessionTitle, renameSessionFromFirstUserMessage, generateMemoryDigestWithStatus],
+    [messages, currentSessionId, makeSessionTitle, renameSessionFromFirstUserMessage, generateMemoryDigestWithStatus, refreshLatestRollbackProposal],
   );
 
   useEffect(() => {
@@ -1737,6 +1791,26 @@ Rules:
                 {activeRunAction === "cancel" ? "取消中" : "取消"}
               </button>
             </div>
+          </div>
+        )}
+
+        {latestRollbackProposal && (
+          <div className="mt-2 flex flex-shrink-0 flex-wrap items-center gap-2 rounded-[var(--radius-sm)] border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+            <div className="min-w-0 flex-1">
+              <span className="font-medium">最近简历修改可撤销</span>
+              <span className="ml-2">section: {latestRollbackProposal.sectionId}</span>
+              {latestRollbackProposal.updatedAt && <span className="ml-2">updated: {latestRollbackProposal.updatedAt}</span>}
+            </div>
+            <button
+              type="button"
+              onClick={handleRollbackLatestProposal}
+              disabled={streaming || rollbackAction !== null}
+              title="撤销最近一次已应用的简历修改"
+              className="inline-flex h-7 items-center gap-1 rounded-[var(--radius-sm)] border border-amber-300 bg-white px-2 text-amber-900 transition-colors hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-100 dark:hover:bg-amber-900/40"
+            >
+              <RotateCcw size={13} />
+              {rollbackAction === "rollback" ? "撤销中" : "撤销"}
+            </button>
           </div>
         )}
 
