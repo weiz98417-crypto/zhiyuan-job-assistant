@@ -114,33 +114,24 @@ SQL / 数据分析
     expect(sanitizeUnsupportedResumeSaveClaim(text, true)).toBe(text);
   });
 
-  it("requires canonical read-back verification before reporting a section save", async () => {
-    const oldCv = {
-      activeVersion: "v1",
-      versions: {
-        v1: {
-          sections: [
-            { id: "skills", title: "技能", content: "旧技能清单" },
-          ],
-        },
-      },
-    };
+  it("routes legacy section saves through a read-back verified proposal", async () => {
     const nextContent = "核心能力\nAI产品全链路设计\nPrompt Engineering\nRAG知识库构建";
-    const newCv = {
-      activeVersion: "v1",
-      versions: {
-        v1: {
-          sections: [
-            { id: "skills", title: "技能", content: nextContent },
-          ],
-        },
-      },
+    const proposal = {
+      id: "rep-legacy-save-1",
+      sectionId: "skills",
+      baseVersion: "v1",
+      baseHash: "fnv1a32:basehash",
+      originalContent: "旧技能清单",
+      proposedContent: nextContent,
+      proposedHash: stableContentHash(nextContent),
+      reason: "legacy_save_resume_section",
+      riskFlags: ["legacy_save_resume_section", "agent_generated"],
+      status: "pending",
     };
 
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true, data: oldCv }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true, data: newCv }) });
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true, data: proposal }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true, data: proposal }) });
     vi.stubGlobal("fetch", fetchMock);
 
     const result = await saveResumeSection.handler({
@@ -154,6 +145,14 @@ SQL / 数据分析
       ok: true,
       code: "read_back.match",
     });
+    expect(result.data).toMatchObject({ saved: false, proposalCreated: true, readBackVerified: true });
+    expect(result.uiPayload).toMatchObject({ type: "resume_edit_proposal", status: "pending" });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/cv/edit-proposals",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/cv/edit-proposals/rep-legacy-save-1", { cache: "no-store" });
   });
 
   it("creates a read-back verified resume edit proposal instead of writing CV directly", async () => {
@@ -382,7 +381,7 @@ SQL / 数据分析
     expect(fetchMock).toHaveBeenCalledWith("/api/cv/edit-proposals/rep-rollback-tool-1/rollback", { method: "POST" });
   });
 
-  it("blocks stale resume writes before PUT when base version or hash changed", async () => {
+  it("blocks stale legacy save proposals when base version or hash changed", async () => {
     const currentCv = {
       activeVersion: "v2",
       versions: {
@@ -397,7 +396,21 @@ SQL / 数据分析
     const currentHash = stableContentHash(currentCv.versions.v2);
 
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true, data: currentCv }) });
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 409,
+        json: async () => ({
+          success: false,
+          error: "简历已经发生变化，已阻止用旧上下文创建修改提案。请重新读取简历后再生成方案。",
+          code: "base_version_conflict",
+          data: {
+            expectedBaseVersion: "v1",
+            currentBaseVersion: "v2",
+            expectedBaseHash: "fnv1a32:00000000",
+            currentBaseHash: currentHash,
+          },
+        }),
+      });
     vi.stubGlobal("fetch", fetchMock);
 
     const result = await saveResumeSection.handler({
@@ -418,5 +431,9 @@ SQL / 数据分析
       baseHash: currentHash,
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/cv/edit-proposals",
+      expect.objectContaining({ method: "POST" }),
+    );
   });
 });

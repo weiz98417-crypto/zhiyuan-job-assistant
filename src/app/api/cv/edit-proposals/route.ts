@@ -44,6 +44,8 @@ export async function POST(request: Request) {
     const proposedContent = String(body.proposedContent || body.content || "");
     const reason = String(body.reason || "").slice(0, 1200);
     const riskFlags = parseRiskFlags(body.riskFlags);
+    const expectedBaseHash = typeof body.baseHash === "string" ? body.baseHash : typeof body.expectedBaseHash === "string" ? body.expectedBaseHash : "";
+    const expectedBaseVersion = typeof body.baseVersion === "string" ? body.baseVersion : typeof body.expectedBaseVersion === "string" ? body.expectedBaseVersion : "";
 
     if (!SECTION_IDS.has(sectionId)) {
       return NextResponse.json({ success: false, error: "无效的简历板块" }, { status: 400 });
@@ -66,10 +68,27 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: `找不到板块: ${sectionId}` }, { status: 400 });
     }
 
+    const currentBaseHash = stableContentHash(activeVersion.active);
+    const baseVersionConflict = Boolean(expectedBaseVersion && expectedBaseVersion !== activeVersion.activeVersion);
+    const baseHashConflict = Boolean(expectedBaseHash && expectedBaseHash !== currentBaseHash);
+    if (baseVersionConflict || baseHashConflict) {
+      return NextResponse.json({
+        success: false,
+        error: "简历已经发生变化，已阻止用旧上下文创建修改提案。请重新读取简历后再生成方案。",
+        code: "base_version_conflict",
+        data: {
+          expectedBaseVersion,
+          currentBaseVersion: activeVersion.activeVersion,
+          expectedBaseHash,
+          currentBaseHash,
+        },
+      }, { status: 409 });
+    }
+
     const row = await getDataRepositories().resumeEditProposals.create({
       sectionId,
       baseVersion: activeVersion.activeVersion,
-      baseHash: stableContentHash(activeVersion.active),
+      baseHash: currentBaseHash,
       originalContent: section.content || "",
       proposedContent,
       reason,

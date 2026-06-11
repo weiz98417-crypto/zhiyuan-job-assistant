@@ -192,7 +192,7 @@ describe("agent run ledger and task contracts", () => {
     expect(gate.safeMessage).not.toMatch(/已保存|成功/);
   });
 
-  it("allows final success only when verified write evidence satisfies the resume contract", () => {
+  it("does not treat a legacy save proposal as final resume success", () => {
     const contract = createAgentTaskContract({
       taskType: "resume_edit",
       target: "cv.skills",
@@ -203,7 +203,7 @@ describe("agent run ledger and task contracts", () => {
       action: "save_resume_section",
       targetType: "cv",
       targetField: "skills",
-      data: { saved: true },
+      data: { saved: false, proposalCreated: true },
       expectedContent: content,
       readBackContent: content,
       checks: validateDocumentFieldContent(content).checks,
@@ -215,8 +215,10 @@ describe("agent run ledger and task contracts", () => {
     });
     const gate = evaluateTaskContractCompletion(contract, criteria);
 
-    expect(gate.canClaimSuccess).toBe(true);
-    expect(gate.unmetCriteria).toEqual([]);
+    expect(gate.canClaimSuccess).toBe(false);
+    expect(gate.completedCriteria).toEqual(expect.arrayContaining(["draft generated", "content validator passes", "version snapshot created"]));
+    expect(gate.unmetCriteria).toContain("user approved draft");
+    expect(gate.unmetCriteria).toContain("target section read-back hash matches applied content");
   });
 
   it("allows final resume success through an applied proposal with read-back evidence", () => {

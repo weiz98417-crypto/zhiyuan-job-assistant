@@ -195,10 +195,10 @@ export function inferCompletedCriteriaFromToolResult(
     if (signals.toolName === "optimize_resume_section" || signals.toolName === "create_resume_edit_proposal" || signals.toolName === "apply_resume_edit_proposal" || signals.toolName === "save_resume_section") {
       completed.add("draft generated");
     }
-    if (signals.toolName === "apply_resume_edit_proposal" || signals.toolName === "save_resume_section") {
+    if (signals.toolName === "apply_resume_edit_proposal") {
       completed.add("user approved draft");
     }
-    if (verifiedReadBack) {
+    if (verifiedReadBack && signals.toolName === "apply_resume_edit_proposal") {
       completed.add("target section read-back hash matches applied content");
     }
     if (validatorsPassed(signals.verifiedAction)) {

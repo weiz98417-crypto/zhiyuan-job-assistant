@@ -178,7 +178,7 @@ export const ACTION_TOOL_RISK_AUDIT: ActionToolRiskRecord[] = [
     toolName: "save_resume_section",
     risk: "high-risk-write",
     targets: ["cv"],
-    summary: "Writes a resume section into the canonical CV store.",
+    summary: "Legacy-safe wrapper that creates a verified pending resume edit proposal instead of directly overwriting CV content.",
     requiresVerifiedWrite: true,
   },
   {
