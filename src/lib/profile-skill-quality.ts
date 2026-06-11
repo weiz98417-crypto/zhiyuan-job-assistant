@@ -222,6 +222,64 @@ const EVIDENCE_OWNER_PATTERNS = [
 const SELF_EVIDENCE_PATTERN =
   /(我|本人|我的|自己|曾经|曾|在.*项目|项目中|实习|工作中|负责|主导|参与|搭建|构建|设计|开发|落地|使用|熟悉|掌握|做过|负责过|主导过|参与过|简历)/;
 
+const DEALBREAKER_DIRECT_TERMS = new Set([
+  "996",
+  "007",
+  "大小周",
+  "外包",
+  "驻场",
+  "派遣",
+  "加班",
+  "双休",
+  "单休",
+  "社保",
+  "五险一金",
+  "公积金",
+  "年假",
+  "远程",
+  "在家办公",
+  "补充医疗",
+  "体检",
+  "期权",
+  "股票",
+  "13薪",
+  "14薪",
+  "15薪",
+  "16薪",
+  "outsourcing",
+  "contractor",
+  "staffing",
+  "vendor",
+  "onsite",
+  "remote",
+  "relocation",
+]);
+
+const DEALBREAKER_NOISE_TERMS = new Set([
+  "去寻",
+  "先解",
+  "野蛮",
+  "拒绝",
+  "不去",
+  "不要",
+  "不考虑",
+  "不接受",
+  "此Offer",
+  "此 Offer",
+]);
+
+const DEALBREAKER_ACTION_NOISE_PATTERNS = [
+  /拒绝此\s*Offer/i,
+  /接受此\s*Offer/i,
+  /点击|按钮|重新|上传|截图|识别|调用|工具|返回错误|拉取失败/,
+];
+
+const DEALBREAKER_PREFIX_PATTERN =
+  /(?:不接受|不考虑|排斥|拒绝|不去|不要|坚决不|绝对不|必须|一定|得有|要有|需要|要求|只要)/;
+
+const DEALBREAKER_CAREER_KEYWORDS =
+  /(996|007|大小周|外包|驻场|派遣|加班|双休|单休|社保|五险|公积金|薪资|工资|降薪|年假|调休|远程|办公|通勤|城市|地点|出差|试用|合同|背调|裁员|公司|岗位|行业|职级|歧视|学历|年龄|绩效|KPI|OKR|画饼|PUA|违法|拖欠|报销|管理混乱|野蛮管理|outsourcing|contractor|staffing|vendor|onsite|remote|relocation|commute|salary|benefit)/i;
+
 function cleanText(value: string): string {
   return value
     .replace(/\s+/g, " ")
@@ -347,6 +405,55 @@ export function shouldCaptureProfileRawContext(content: string): boolean {
   return true;
 }
 
+function cleanDealBreakerText(value: string): string {
+  return cleanText(value)
+    .replace(/[()[\]{}<>]/g, "")
+    .replace(/[👉👈✅❌]/g, "")
+    .replace(/\s*[,，、]\s*/g, "、")
+    .replace(/^[。；;:：、\s]+|[。；;:：、\s]+$/g, "")
+    .trim();
+}
+
+export function normalizeDealBreaker(value: unknown, evidence: unknown = value): string | null {
+  const raw = typeof value === "string" ? cleanDealBreakerText(value) : "";
+  const evidenceText = typeof evidence === "string" ? cleanDealBreakerText(evidence) : raw;
+  const compactValue = raw.replace(/\s+/g, "");
+
+  if (!raw || raw.length < 2 || raw.length > 60) return null;
+  if (looksLikeProfileNoise(raw)) return null;
+  if (DEALBREAKER_NOISE_TERMS.has(raw) || DEALBREAKER_NOISE_TERMS.has(compactValue)) return null;
+  if (DEALBREAKER_ACTION_NOISE_PATTERNS.some((pattern) => pattern.test(raw) || pattern.test(evidenceText))) {
+    return null;
+  }
+  if (/^[去先此那这请帮看发传点开关解][\u4e00-\u9fff]$/.test(raw)) return null;
+
+  const direct = DEALBREAKER_DIRECT_TERMS.has(raw) || DEALBREAKER_DIRECT_TERMS.has(compactValue);
+  const hasCareerKeyword = DEALBREAKER_CAREER_KEYWORDS.test(raw);
+  const hasExplicitConstraint = DEALBREAKER_PREFIX_PATTERN.test(raw) || DEALBREAKER_PREFIX_PATTERN.test(evidenceText);
+
+  if (/^[\u4e00-\u9fff]{2}$/.test(raw) && !direct) return null;
+  if (!direct && !hasCareerKeyword) return null;
+  if (!direct && !hasExplicitConstraint && raw.length < 4) return null;
+
+  return raw;
+}
+
+export function sanitizeDealBreakers(values: unknown[]): string[] {
+  const unique = new Set<string>();
+  for (const value of values) {
+    const normalized = normalizeDealBreaker(value);
+    if (normalized) unique.add(normalized);
+  }
+
+  const sorted = Array.from(unique).sort((a, b) => b.length - a.length);
+  const result: string[] = [];
+  for (const value of sorted) {
+    if (result.some((existing) => existing.includes(value))) continue;
+    result.push(value);
+  }
+  return result;
+}
+
 export function normalizeProfileSignalForStorage(input: ProfileSignalStorageInput): ProfileSignalStorageDecision {
   const signalType = cleanText(input.signal_type || "");
   const source = input.source || "auto_scan";
@@ -453,8 +560,8 @@ export function normalizeProfileSignalForStorage(input: ProfileSignalStorageInpu
   }
 
   if (signalType === "dealbreaker") {
-    const value = stringValue(content.value);
-    if (value.length < 2 || value.length > 60 || looksLikeProfileNoise(value)) {
+    const value = normalizeDealBreaker(content.value, evidence || content.value);
+    if (!value) {
       return { accepted: false, rejectedReason: "invalid_constraint" };
     }
     const status = defaultStatus({ explicitStatus, sourceType, confidence: rawConfidence });

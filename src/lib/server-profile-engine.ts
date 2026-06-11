@@ -4,6 +4,7 @@ import fs from "fs";
 import path from "path";
 import {
   normalizeSkillClaim,
+  sanitizeDealBreakers,
   sanitizeProfileSkills,
   sanitizeSkillClaims,
   skillFromClaim,
@@ -122,7 +123,7 @@ async function extractSignals(userId: string): Promise<SignalSummary> {
   return {
     rolePreferences,
     skillClaims,
-    dealBreakers,
+    dealBreakers: sanitizeDealBreakers(dealBreakers),
     companyPrefs,
     salaryExpectations: salaryMin > 0 || salaryMax > 0 ? { min: salaryMin, max: salaryMax } : null,
     rawContexts,

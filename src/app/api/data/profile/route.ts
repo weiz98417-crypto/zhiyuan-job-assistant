@@ -1,8 +1,19 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { getDataRepositories } from "@/lib/data-repositories";
+import { sanitizeDealBreakers } from "@/lib/profile-skill-quality";
 import fs from "fs";
 import path from "path";
+
+function sanitizeGoals(goals: Record<string, unknown>): Record<string, unknown> {
+  const next = { ...goals };
+  if (Array.isArray(next.dealBreakers)) {
+    const cleaned = sanitizeDealBreakers(next.dealBreakers);
+    if (cleaned.length > 0) next.dealBreakers = cleaned;
+    else delete next.dealBreakers;
+  }
+  return next;
+}
 
 function extractGoalsFromProfileYml(): Record<string, unknown> | null {
   try {
@@ -41,7 +52,7 @@ export async function GET() {
       success: true,
       data: profile ? {
         data: JSON.parse(profile.data_json || "{}"),
-        goals: JSON.parse(profile.goals_json || "{}"),
+        goals: sanitizeGoals(JSON.parse(profile.goals_json || "{}")),
         history: JSON.parse(profile.history_json || "[]"),
         lastUpdated: profile.last_updated,
       } : null,
@@ -65,7 +76,7 @@ export async function PUT(request: Request) {
     const currentHistory = existing ? JSON.parse(existing.history_json || "[]") : [];
 
     const mergedData = body.data ? { ...currentData, ...body.data } : currentData;
-    const mergedGoals = body.goals ? { ...currentGoals, ...body.goals } : currentGoals;
+    const mergedGoals = sanitizeGoals(body.goals ? { ...currentGoals, ...body.goals } : currentGoals);
     const mergedHistory = body.history ? body.history : currentHistory;
 
     await repos.profiles.upsert(user.userId, JSON.stringify(mergedData), JSON.stringify(mergedHistory), JSON.stringify(mergedGoals));
@@ -93,7 +104,7 @@ export async function PATCH(request: Request) {
     if (body.goals) {
       const currentGoals = existing ? JSON.parse(existing.goals_json || "{}") : {};
       const goalsWithSource = { ...body.goals, ...(body.source ? { source: body.source } : {}), ...(body.lockedFields ? { _lockedFields: body.lockedFields } : {}) };
-      const mergedGoals = { ...currentGoals, ...goalsWithSource };
+      const mergedGoals = sanitizeGoals({ ...currentGoals, ...goalsWithSource });
       await repos.profiles.upsert(user.userId, existing ? existing.data_json : "{}", existing ? existing.history_json : "[]", JSON.stringify(mergedGoals));
     }
 
@@ -101,7 +112,7 @@ export async function PATCH(request: Request) {
       const currentData = existing ? JSON.parse(existing.data_json || "{}") : {};
       const dataWithSource = { ...body.data, ...(body.source ? { source: body.source } : {}) };
       const mergedData = { ...currentData, ...dataWithSource };
-      const currentGoals = existing ? JSON.parse(existing.goals_json || "{}") : {};
+      const currentGoals = sanitizeGoals(existing ? JSON.parse(existing.goals_json || "{}") : {});
       const currentHistory = existing ? JSON.parse(existing.history_json || "[]") : [];
       await repos.profiles.upsert(user.userId, JSON.stringify(mergedData), JSON.stringify(currentHistory), JSON.stringify(currentGoals));
     }

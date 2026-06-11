@@ -7,6 +7,7 @@
 
 import {
   looksLikeProfileNoise,
+  normalizeDealBreaker,
   normalizeSkillClaim,
   shouldCaptureProfileRawContext,
 } from "@/lib/profile-skill-quality";
@@ -109,11 +110,12 @@ export function scanMessage(content: string, sessionId: string): ExtractedSignal
     pattern.lastIndex = 0;
     let m: RegExpExecArray | null;
     while ((m = pattern.exec(text)) !== null) {
-      const value = (m[1] || m[0]).trim();
-      if (value.length >= 2 && value.length <= 40) {
+      const evidence = m[0].trim();
+      const value = normalizeDealBreaker(m[1] || m[0], evidence);
+      if (value) {
         signals.push({
           signal_type: "dealbreaker",
-          content_json: { value, evidence: m[0].trim(), confidence: 0.8 },
+          content_json: { value, evidence, confidence: 0.8 },
           session_id: sessionId,
         });
       }

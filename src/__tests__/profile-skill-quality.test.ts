@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  normalizeDealBreaker,
   normalizeProfileSignalForStorage,
   normalizeSkillClaim,
   PROFILE_SIGNAL_CATEGORIES,
   PROFILE_SIGNAL_SOURCE_WEIGHTS,
+  sanitizeDealBreakers,
   sanitizeProfileSkills,
   sanitizeSkillClaims,
 } from "@/lib/profile-skill-quality";
+import { scanMessage } from "@/lib/agent/signal-extractor";
 import { buildFallbackProfile } from "@/lib/profile-mining";
 
 describe("profile skill quality gate", () => {
@@ -118,6 +121,54 @@ describe("profile skill quality gate", () => {
       status: "confirmed",
       sourceType: "resume",
     });
+  });
+
+  it("rejects polluted dealbreaker fragments from chat actions", () => {
+    const fragments = [
+      { value: "去寻", evidence: "拒绝此 Offer ] 👈 (去寻" },
+      { value: "先解", evidence: "不要先解" },
+      { value: "野蛮", evidence: "拒绝野蛮" },
+      { value: "此 Offer", evidence: "拒绝此 Offer" },
+    ];
+
+    for (const fragment of fragments) {
+      expect(normalizeDealBreaker(fragment.value, fragment.evidence)).toBeNull();
+      expect(normalizeProfileSignalForStorage({
+        source: "auto_scan",
+        signal_type: "dealbreaker",
+        content_json: { value: fragment.value, evidence: fragment.evidence, confidence: 0.8 },
+      })).toMatchObject({
+        accepted: false,
+        rejectedReason: "invalid_constraint",
+      });
+    }
+
+    expect(scanMessage("不要先解，先问清楚再做", "s1").some((s) => s.signal_type === "dealbreaker")).toBe(false);
+    expect(scanMessage("拒绝此 Offer ] 👈 (去寻", "s1").some((s) => s.signal_type === "dealbreaker")).toBe(false);
+  });
+
+  it("keeps real career constraints as dealbreakers", () => {
+    expect(normalizeDealBreaker("996", "不接受 996")).toBe("996");
+    expect(normalizeDealBreaker("外包公司", "不考虑外包公司")).toBe("外包公司");
+    expect(normalizeDealBreaker("双休", "必须双休")).toBe("双休");
+    expect(normalizeDealBreaker("outsourcing", "不考虑 outsourcing")).toBe("outsourcing");
+
+    const decision = normalizeProfileSignalForStorage({
+      source: "auto_scan",
+      signal_type: "dealbreaker",
+      content_json: { value: "外包公司", evidence: "我不考虑外包公司", confidence: 0.8 },
+    });
+    expect(decision.accepted).toBe(true);
+    expect(decision.signal?.content_json).toMatchObject({
+      value: "外包公司",
+      status: "candidate",
+      sourceType: "ordinary_chat",
+    });
+
+    expect(sanitizeDealBreakers(["去寻", "996", "不接受 996", "野蛮", "外包公司"])).toEqual([
+      "不接受 996",
+      "外包公司",
+    ]);
   });
 
   it("keeps confirmed user edits ahead of model-inferred duplicates", () => {

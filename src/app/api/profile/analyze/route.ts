@@ -2,6 +2,7 @@ import { checkApiKey } from "@/lib/stream-utils";
 import { runProfileEngine } from "@/lib/server-profile-engine";
 import { getCurrentUser } from "@/lib/auth";
 import { getDataRepositories } from "@/lib/data-repositories";
+import { sanitizeDealBreakers } from "@/lib/profile-skill-quality";
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 
@@ -55,30 +56,20 @@ export async function POST(request: Request) {
           return raw.replace(/[，,。.！!、\s]+$/g, "").replace(/^[，,。.！!、\s]+/g, "").trim();
         } catch { return ""; }
       })
-      .filter((v): v is string => v.length >= 2 && v.length <= 30);
-
-    // Dedup: remove entries that are wholly contained in another entry
-    const sorted = [...new Set(rawBreakers)].sort((a, b) => a.length - b.length);
-    const signalBreakers: string[] = [];
-    for (const v of sorted) {
-      if (!signalBreakers.some((existing) => existing.includes(v))) {
-        signalBreakers.push(v);
-      }
-    }
+      .filter(Boolean);
 
     const goalsToStore = { ...(existingGoals && Object.keys(existingGoals).length > 0 ? existingGoals : {}) };
+    const existingBreakers: string[] = Array.isArray(goalsToStore.dealBreakers) ? goalsToStore.dealBreakers : [];
+    const signalBreakers = sanitizeDealBreakers(rawBreakers);
+    const finalBreakers = sanitizeDealBreakers([...existingBreakers, ...signalBreakers]);
     if (signalBreakers.length > 0) {
-      const existingBreakers: string[] = Array.isArray(goalsToStore.dealBreakers) ? goalsToStore.dealBreakers : [];
-      const merged = [...new Set([...existingBreakers, ...signalBreakers])];
-      // Final pass: remove substrings again
-      const sorted2 = merged.sort((a, b) => a.length - b.length);
-      const final: string[] = [];
-      for (const v of sorted2) {
-        if (!final.some((e) => e.includes(v))) {
-          final.push(v);
-        }
+      (goalsToStore as Record<string, unknown>).dealBreakers = finalBreakers;
+    } else if (existingBreakers.length > 0) {
+      if (finalBreakers.length > 0) {
+        (goalsToStore as Record<string, unknown>).dealBreakers = finalBreakers;
+      } else {
+        delete (goalsToStore as Record<string, unknown>).dealBreakers;
       }
-      (goalsToStore as Record<string, unknown>).dealBreakers = final;
     }
 
     // Merge: engine history + existing history, engine data, existing goals
