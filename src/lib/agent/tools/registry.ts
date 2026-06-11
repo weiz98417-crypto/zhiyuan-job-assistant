@@ -1,4 +1,5 @@
 import type { ToolDefinition, ToolResult } from "./types";
+import { enforceReadBackSuccessGate } from "./readback-verification";
 
 export class ToolRegistry {
   private tools = new Map<string, ToolDefinition>();
@@ -77,7 +78,8 @@ export class ToolRegistry {
     const tool = this.tools.get(name);
     if (!tool) return { success: false, data: null, error: `工具 ${name} 不存在`, errorCategory: "permanent" };
     try {
-      return await tool.handler(params);
+      const result = await tool.handler(params);
+      return enforceReadBackSuccessGate(name, result);
     } catch (err) {
       return { success: false, data: null, error: err instanceof Error ? err.message : "Tool execution error" };
     }

@@ -31,7 +31,6 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
   // Read CV from localStorage (cache) or SQLite (canonical)
   let fullCV: Record<string, string> = {};
   let sectionContent = "";
-  let fromLocalStorage = false;
   const raw = localStorage.getItem("zhiyuan-cv");
   if (raw) {
     try {
@@ -42,7 +41,6 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
           fullCV[s.id] = s.content || "";
           if (s.id === sectionId) sectionContent = s.content || "";
         }
-        fromLocalStorage = true;
       }
     } catch { /* ignore */ }
   }
@@ -66,12 +64,6 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
         }
       }
     } catch { /* ignore */ }
-  }
-
-  // If data came from localStorage, sync to SQLite so save_resume_section finds it
-  if (fromLocalStorage && sectionContent) {
-    fetch("/api/cv/data", { method: "PUT", headers: { "Content-Type": "application/json" }, body: raw! })
-      .catch(() => { /* non-blocking — localStorage still has the data */ });
   }
 
   if (!sectionContent || sectionContent.trim().length < 20) {

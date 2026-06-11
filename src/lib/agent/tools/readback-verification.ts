@@ -1,5 +1,6 @@
 import { getActionToolRisk } from "@/lib/agent/tools/action-tool-risk";
 import type { ToolResult } from "@/lib/agent/tools/types";
+import { buildVerifiedActionFailure } from "@/lib/agent/verified-action";
 
 export interface ReadBackRequirementStatus {
   required: boolean;
@@ -55,5 +56,43 @@ export function getReadBackRequirementStatus(toolName: string, result: ToolResul
     satisfied,
     deferred: false,
     reason: satisfied ? undefined : "High-risk tool returned success without read-back verification evidence.",
+  };
+}
+
+export function enforceReadBackSuccessGate(toolName: string, result: ToolResult): ToolResult {
+  if (!result.success) return result;
+
+  const status = getReadBackRequirementStatus(toolName, result);
+  if (!status.required || status.satisfied || status.deferred) return result;
+
+  const risk = getActionToolRisk(toolName);
+  const message = status.reason || "High-risk tool success requires read-back verification evidence.";
+  const uiPayload = isRecord(result.uiPayload) ? result.uiPayload : {};
+
+  return {
+    ...result,
+    success: false,
+    error: result.error || message,
+    errorCategory: "permanent",
+    recoverable: false,
+    llmSummary: `工具 ${toolName} 的成功结果已被运行时拦截：${message}`,
+    uiPayload: {
+      ...uiPayload,
+      readBackVerified: false,
+      readBackError: message,
+      gatedByReadBack: true,
+    },
+    rawData: result.rawData ?? result.data,
+    verifiedAction: result.verifiedAction ?? buildVerifiedActionFailure({
+      action: toolName,
+      targetType: risk?.targets[0] || "unknown",
+      error: message,
+      verifier: {
+        phase: "verifier",
+        ok: false,
+        code: "read_back.required_missing",
+        message,
+      },
+    }),
   };
 }

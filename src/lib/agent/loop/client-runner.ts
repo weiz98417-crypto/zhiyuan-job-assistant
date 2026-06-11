@@ -16,6 +16,7 @@ import {
 } from "@/lib/agent/reference-resume-save-flow";
 import { buildResumeSavePlan } from "@/lib/agent/resume-save-guard";
 import type { AgentTaskContract } from "@/lib/agent/task-contract";
+import { requiresReadBackVerification } from "@/lib/agent/tools/readback-verification";
 
 export type { SSEEvent };
 
@@ -793,8 +794,10 @@ export async function* agentLoopClient(
           }
         }
         intermediateSteps.push({ tool: tc.name, params: paramsKey, category, summary: toolResult.success ? formatted.slice(0, 100) : (toolResult.error || "失败").slice(0, 100) });
-        recentCalls.push({ name: tc.name, params: paramsKey, result: formatted });
-        if (recentCalls.length > 5) recentCalls.shift();
+        if (!requiresReadBackVerification(tc.name)) {
+          recentCalls.push({ name: tc.name, params: paramsKey, result: formatted });
+          if (recentCalls.length > 5) recentCalls.shift();
+        }
         state.contextSize = estimateTokens(ctx);
       }
       // Push summary after parallel batch
@@ -824,7 +827,9 @@ export async function* agentLoopClient(
       }
 
       const paramsKey = JSON.stringify(params);
-      const recent = recentCalls.find((c) => c.name === tc.name && c.params === paramsKey);
+      const recent = requiresReadBackVerification(tc.name)
+        ? undefined
+        : recentCalls.find((c) => c.name === tc.name && c.params === paramsKey);
       let toolResult: ToolResult;
       let formatted: string;
       if (recent) {
@@ -1036,6 +1041,24 @@ export async function* agentLoopClient(
             console.warn("[loop] persist skipped: missing company or role");
           }
 
+          if (requiresReadBackVerification(tc.name) && finalData.reportReadBackVerified !== true) {
+            const readBackError = String(finalData.reportReadBackError || "High-risk streaming tool completed without read-back verification evidence.");
+            formatted = `评估未完成可靠落库校验: ${readBackError}`;
+            yield {
+              type: "tool_result",
+              name: tc.name,
+              result: formatted,
+              success: false,
+              data: finalData,
+              uiPayload: { readBackVerified: false, readBackError, gatedByReadBack: true },
+            };
+            yield { type: "tool_error", name: tc.name, error: readBackError, recoverable: false };
+            yield { type: "phase", phase: "responding" };
+            yield { type: "text", content: `${formatted}\n\n我已经阻止把这次结果当成已完成报告。请稍后重试，或把 JD 文本直接粘贴后重新评估。` };
+            yield { type: "done" };
+            return;
+          }
+
           formatted = formatToolResult({ success: true, data: finalData, errorCategory: "ok" as const }, tc.name);
           yield { type: "tool_result", name: tc.name, result: formatted, success: true, data: finalData, uiPayload: toolResult.uiPayload, verifiedAction: toolResult.verifiedAction };
 
@@ -1081,8 +1104,10 @@ ${followupInstruction}`,
           }
           state.contextSize = estimateTokens(ctx);
           state.consecutiveFailures = 0;
-          recentCalls.push({ name: tc.name, params: paramsKey, result: formatted });
-          if (recentCalls.length > 5) recentCalls.shift();
+          if (!requiresReadBackVerification(tc.name)) {
+            recentCalls.push({ name: tc.name, params: paramsKey, result: formatted });
+            if (recentCalls.length > 5) recentCalls.shift();
+          }
           continue; // Skip the normal post-tool logic below
         }
 
@@ -1139,8 +1164,10 @@ ${followupInstruction}`,
       }
 
       // Only cache successful / non-degraded results
-      recentCalls.push({ name: tc.name, params: paramsKey, result: formatted });
-      if (recentCalls.length > 5) recentCalls.shift();
+      if (!requiresReadBackVerification(tc.name)) {
+        recentCalls.push({ name: tc.name, params: paramsKey, result: formatted });
+        if (recentCalls.length > 5) recentCalls.shift();
+      }
 
       if (action.autoRetry) {
         autoRetryCount++;

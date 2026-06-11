@@ -5,6 +5,7 @@ import path from "path";
 import { getToolsByCategory } from "@/lib/agent/tools";
 import { ACTION_TOOL_RISK_AUDIT, getActionToolRisk } from "@/lib/agent/tools/action-tool-risk";
 import {
+  enforceReadBackSuccessGate,
   getReadBackRequirementStatus,
   hasReadBackVerificationEvidence,
   requiresReadBackVerification,
@@ -218,6 +219,45 @@ describe("agent run ledger and task contracts", () => {
     expect(hasReadBackVerificationEvidence({
       data: { readBackVerified: true },
     })).toBe(true);
+  });
+
+  it("forces high-risk write tools to fail when success lacks read-back evidence", () => {
+    const gated = enforceReadBackSuccessGate("save_resume_section", {
+      success: true,
+      data: { sectionId: "skills", saved: true },
+      errorCategory: "ok",
+    });
+
+    expect(gated.success).toBe(false);
+    expect(gated.errorCategory).toBe("permanent");
+    expect(gated.uiPayload).toMatchObject({
+      readBackVerified: false,
+      gatedByReadBack: true,
+    });
+    expect(gated.verifiedAction?.success).toBe(false);
+    expect(gated.verifiedAction?.verifier.code).toBe("read_back.required_missing");
+  });
+
+  it("allows high-risk write success when verified read-back evidence is present", () => {
+    const content = "SQL / RAG / Prompt Engineering";
+    const verifiedAction = buildVerifiedActionSuccess({
+      action: "save_resume_section",
+      targetType: "cv",
+      targetField: "skills",
+      data: { saved: true },
+      expectedContent: content,
+      readBackContent: content,
+      checks: validateDocumentFieldContent(content).checks,
+    });
+    const passed = enforceReadBackSuccessGate("save_resume_section", {
+      success: true,
+      data: { sectionId: "skills", saved: true },
+      errorCategory: "ok",
+      verifiedAction,
+    });
+
+    expect(passed.success).toBe(true);
+    expect(passed.verifiedAction?.readBack?.ok).toBe(true);
   });
 
   it("satisfies the reference resume save contract only with read-back evidence", () => {

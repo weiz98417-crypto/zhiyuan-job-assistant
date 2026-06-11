@@ -16,6 +16,7 @@ import { enforceToolPolicy, inferCompanyFromMessages, isToolAllowedInMode } from
 import { ZHIPU_API_URL, ZHIPU_FALLBACK_MODEL } from "@/lib/zhipu";
 import type { InterviewSessionState } from "@/types";
 import type { InterviewRebindAction } from "@/lib/agent/interview-rebind-policy";
+import { requiresReadBackVerification } from "@/lib/agent/tools/readback-verification";
 
 /* ── Context cap (per-tool) ── */
 const DEFAULT_TOOL_CTX_CAP = 800;
@@ -317,7 +318,9 @@ export async function* agentLoopServer(opts: {
       }
 
       const paramsKey = JSON.stringify(params);
-      const recent = recentCalls.find((c) => c.name === tc.name && c.params === paramsKey);
+      const recent = requiresReadBackVerification(tc.name)
+        ? undefined
+        : recentCalls.find((c) => c.name === tc.name && c.params === paramsKey);
       let toolResult: ToolResult;
       let formatted: string;
 
@@ -390,8 +393,10 @@ export async function* agentLoopServer(opts: {
       }
 
       // Only cache successful / non-degraded results
-      recentCalls.push({ name: tc.name, params: paramsKey, result: formatted });
-      if (recentCalls.length > 5) recentCalls.shift();
+      if (!requiresReadBackVerification(tc.name)) {
+        recentCalls.push({ name: tc.name, params: paramsKey, result: formatted });
+        if (recentCalls.length > 5) recentCalls.shift();
+      }
 
       if (action.autoRetry) {
         autoRetryCount++;
