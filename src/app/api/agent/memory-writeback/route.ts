@@ -49,7 +49,7 @@ export async function POST(request: Request) {
       metadata: body.metadata || {},
     });
 
-    return NextResponse.json({ success: true, data: { itemId, evidenceId, status: "candidate" } });
+    return NextResponse.json({ success: true, data: { itemId, evidenceId, status: "candidate", readBackVerified: true } });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     if (message === "Not authenticated" || message === "Invalid or expired token") {

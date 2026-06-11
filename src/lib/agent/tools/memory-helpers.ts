@@ -6,6 +6,14 @@ function apiPath(path: string): string {
   return typeof window === "undefined" ? `http://localhost:3000${path}` : path;
 }
 
+export interface AgentMemoryWriteResult {
+  success: boolean;
+  skipped?: boolean;
+  readBackVerified?: boolean;
+  data?: Record<string, unknown>;
+  error?: string;
+}
+
 export async function fetchAgentMemoryContext(input: {
   task: AgentMemoryTask | string;
   agentId?: string;
@@ -34,15 +42,23 @@ export async function indexAgentMemorySource(input: {
   text: string;
   title?: string;
   metadata?: Record<string, unknown>;
-}): Promise<void> {
+}): Promise<AgentMemoryWriteResult> {
   try {
-    await fetch(apiPath("/api/agent/memory-index"), {
+    const res = await fetch(apiPath("/api/agent/memory-index"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(input),
     });
+    const json = await res.json().catch(() => ({}));
+    return {
+      success: res.ok && json.success === true,
+      skipped: json.skipped === true,
+      readBackVerified: json.data?.readBackVerified === true,
+      data: json.data,
+      error: json.error,
+    };
   } catch {
-    /* best effort */
+    return { success: false, error: "memory index request failed" };
   }
 }
 
@@ -56,14 +72,22 @@ export async function writeCandidateAgentMemory(input: {
   importance?: number;
   extractionMethod?: string;
   metadata?: Record<string, unknown>;
-}): Promise<void> {
+}): Promise<AgentMemoryWriteResult> {
   try {
-    await fetch(apiPath("/api/agent/memory-writeback"), {
+    const res = await fetch(apiPath("/api/agent/memory-writeback"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(input),
     });
+    const json = await res.json().catch(() => ({}));
+    return {
+      success: res.ok && json.success === true,
+      skipped: json.skipped === true,
+      readBackVerified: json.data?.readBackVerified === true,
+      data: json.data,
+      error: json.error,
+    };
   } catch {
-    /* best effort */
+    return { success: false, error: "memory writeback request failed" };
   }
 }

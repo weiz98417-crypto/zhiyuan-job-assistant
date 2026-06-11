@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { getDataRepositories } from "@/lib/data-repositories";
 import { normalizeProfileSignalForStorage } from "@/lib/profile-skill-quality";
+import { profileSignalReadBackMatches } from "@/lib/profile-signal-persistence-verifier";
 
 export async function POST(request: Request) {
   try {
@@ -42,11 +43,27 @@ export async function POST(request: Request) {
       }];
     });
 
+    let ids: number[] = [];
+    let readBackVerified = true;
     if (signals.length > 0) {
-      await getDataRepositories().signals.insertMany(signals, user.userId);
+      const repos = getDataRepositories();
+      ids = await repos.signals.insertMany(signals, user.userId);
+      const rows = await Promise.all(ids.map((id) => repos.signals.get(id, user.userId)));
+      readBackVerified = ids.length === signals.length && rows.every((row, index) => profileSignalReadBackMatches(row, signals[index], ids[index]));
+      if (!readBackVerified) {
+        return NextResponse.json({
+          success: false,
+          error: "批量画像信号写入后回读校验失败，已阻止成功提示",
+          count: signals.length,
+          ids,
+          readBackVerified: false,
+          rejectedCount: rejected.length,
+          rejected,
+        }, { status: 500 });
+      }
     }
 
-    return NextResponse.json({ success: true, count: signals.length, rejectedCount: rejected.length, rejected });
+    return NextResponse.json({ success: true, count: signals.length, ids, readBackVerified, rejectedCount: rejected.length, rejected });
   } catch (err: unknown) {
     if (err instanceof Error && err.message === "Not authenticated") {
       return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });

@@ -161,8 +161,8 @@ export interface DataRepositories {
     deleteSignals(userId: string): Promise<number>;
   };
   signals: {
-    insert(signal: Pick<SignalRow, "source" | "signal_type" | "content_json" | "session_id">, userId: string): Promise<void>;
-    insertMany(signals: Pick<SignalRow, "source" | "signal_type" | "content_json" | "session_id">[], userId: string): Promise<void>;
+    insert(signal: Pick<SignalRow, "source" | "signal_type" | "content_json" | "session_id">, userId: string): Promise<number>;
+    insertMany(signals: Pick<SignalRow, "source" | "signal_type" | "content_json" | "session_id">[], userId: string): Promise<number[]>;
     query(query: SignalQuery, userId: string): Promise<SignalRow[]>;
     get(id: number, userId: string): Promise<SignalRow | undefined>;
     update(id: number, signal: Partial<Pick<SignalRow, "source" | "signal_type" | "content_json" | "session_id">>, userId: string): Promise<boolean>;
@@ -1022,17 +1022,23 @@ function createPostgresProfileRepository(): DataRepositories["profiles"] {
 function createSqliteSignalRepository(): DataRepositories["signals"] {
   return {
     async insert(signal, userId) {
-      getDb().prepare(`
+      const result = getDb().prepare(`
         INSERT INTO profile_signals (user_id, source, signal_type, content_json, session_id)
         VALUES (@user_id, @source, @signal_type, @content_json, @session_id)
       `).run({ user_id: userId, source: signal.source, signal_type: signal.signal_type, content_json: signal.content_json, session_id: signal.session_id || null });
+      return Number(result.lastInsertRowid);
     },
     async insertMany(signals, userId) {
       const stmt = getDb().prepare("INSERT INTO profile_signals (user_id, source, signal_type, content_json, session_id) VALUES (@user_id, @source, @signal_type, @content_json, @session_id)");
+      const ids: number[] = [];
       const tx = getDb().transaction(() => {
-        for (const signal of signals) stmt.run({ user_id: userId, ...signal, session_id: signal.session_id || null });
+        for (const signal of signals) {
+          const result = stmt.run({ user_id: userId, ...signal, session_id: signal.session_id || null });
+          ids.push(Number(result.lastInsertRowid));
+        }
       });
       tx();
+      return ids;
     },
     async query(query, userId) {
       const conditions = ["user_id = @user_id"];
@@ -1066,14 +1072,22 @@ function createSqliteSignalRepository(): DataRepositories["signals"] {
 function createPostgresSignalRepository(): DataRepositories["signals"] {
   return {
     async insert(signal, userId) {
-      await withPostgresClient((client) => client.query("INSERT INTO profile_signals (user_id, source, signal_type, content_json, session_id) VALUES ($1,$2,$3,$4::jsonb,$5)", [userId, signal.source, signal.signal_type, signal.content_json, signal.session_id || null]));
+      return withPostgresClient(async (client) => {
+        const result = await client.query("INSERT INTO profile_signals (user_id, source, signal_type, content_json, session_id) VALUES ($1,$2,$3,$4::jsonb,$5) RETURNING id", [userId, signal.source, signal.signal_type, signal.content_json, signal.session_id || null]);
+        return Number(result.rows[0].id);
+      });
     },
     async insertMany(signals, userId) {
-      await withPostgresClient(async (client) => {
+      return withPostgresClient(async (client) => {
         await client.query("BEGIN");
+        const ids: number[] = [];
         try {
-          for (const signal of signals) await client.query("INSERT INTO profile_signals (user_id, source, signal_type, content_json, session_id) VALUES ($1,$2,$3,$4::jsonb,$5)", [userId, signal.source, signal.signal_type, signal.content_json, signal.session_id || null]);
+          for (const signal of signals) {
+            const result = await client.query("INSERT INTO profile_signals (user_id, source, signal_type, content_json, session_id) VALUES ($1,$2,$3,$4::jsonb,$5) RETURNING id", [userId, signal.source, signal.signal_type, signal.content_json, signal.session_id || null]);
+            ids.push(Number(result.rows[0].id));
+          }
           await client.query("COMMIT");
+          return ids;
         } catch (error) { await client.query("ROLLBACK"); throw error; }
       });
     },

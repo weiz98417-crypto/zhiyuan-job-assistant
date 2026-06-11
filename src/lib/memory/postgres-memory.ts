@@ -1,3 +1,4 @@
+import type { PoolClient } from "pg";
 import { withPostgresClient } from "../postgres";
 import {
   buildMemoryRetrievalQuery,
@@ -64,6 +65,13 @@ export interface MemoryItemRecord {
 
 export async function createMemoryItem(input: MemoryItemInput): Promise<number> {
   return withPostgresClient(async (client) => {
+    const expected = {
+      status: input.status || "candidate",
+      confidence: clamp01(input.confidence ?? 0.5),
+      importance: clamp01(input.importance ?? 0.5),
+      sourceCount: Math.max(0, Math.floor(input.sourceCount ?? 0)),
+      metadata: input.metadata || {},
+    };
     const result = await client.query(`
       INSERT INTO memory_items (
         user_id, memory_type, canonical_text, status, confidence, importance, source_count, metadata_json
@@ -74,18 +82,33 @@ export async function createMemoryItem(input: MemoryItemInput): Promise<number> 
       input.userId,
       input.memoryType,
       input.canonicalText,
-      input.status || "candidate",
-      clamp01(input.confidence ?? 0.5),
-      clamp01(input.importance ?? 0.5),
-      Math.max(0, Math.floor(input.sourceCount ?? 0)),
-      JSON.stringify(input.metadata || {}),
+      expected.status,
+      expected.confidence,
+      expected.importance,
+      expected.sourceCount,
+      JSON.stringify(expected.metadata),
     ]);
-    return Number(result.rows[0].id);
+    const id = Number(result.rows[0].id);
+    const readBack = (await client.query(`
+      SELECT id, user_id, memory_type, canonical_text, status, confidence, importance, source_count, metadata_json
+      FROM memory_items
+      WHERE id=$1 AND user_id=$2
+    `, [id, input.userId])).rows[0] as Record<string, unknown> | undefined;
+    if (!memoryItemReadBackMatches(readBack, input, expected, id)) {
+      throw new Error("memory item read-back verification failed");
+    }
+    return id;
   });
 }
 
 export async function addMemoryEvidence(input: MemoryEvidenceInput): Promise<number> {
   return withPostgresClient(async (client) => {
+    const expected = {
+      sourceId: String(input.sourceId),
+      extractionMethod: input.extractionMethod || "unknown",
+      confidence: clamp01(input.confidence ?? 0.5),
+      metadata: input.metadata || {},
+    };
     const result = await client.query(`
       INSERT INTO memory_evidence (
         user_id, memory_item_id, source_type, source_id, quote, extraction_method, confidence, metadata_json
@@ -96,13 +119,22 @@ export async function addMemoryEvidence(input: MemoryEvidenceInput): Promise<num
       input.userId,
       input.memoryItemId,
       input.sourceType,
-      String(input.sourceId),
+      expected.sourceId,
       input.quote,
-      input.extractionMethod || "unknown",
-      clamp01(input.confidence ?? 0.5),
-      JSON.stringify(input.metadata || {}),
+      expected.extractionMethod,
+      expected.confidence,
+      JSON.stringify(expected.metadata),
     ]);
-    return Number(result.rows[0].id);
+    const id = Number(result.rows[0].id);
+    const readBack = (await client.query(`
+      SELECT id, user_id, memory_item_id, source_type, source_id, quote, extraction_method, confidence, metadata_json
+      FROM memory_evidence
+      WHERE id=$1 AND user_id=$2
+    `, [id, input.userId])).rows[0] as Record<string, unknown> | undefined;
+    if (!memoryEvidenceReadBackMatches(readBack, input, expected, id)) {
+      throw new Error("memory evidence read-back verification failed");
+    }
+    return id;
   });
 }
 
@@ -191,6 +223,8 @@ export async function upsertEmbeddedMemoryChunks(chunks: EmbeddedMemoryChunk[]):
         ]);
         count += 1;
       }
+      const readBackVerified = await memoryChunksReadBackMatch(client, chunks);
+      if (!readBackVerified) throw new Error("memory chunks read-back verification failed");
       await client.query("COMMIT");
       return count;
     } catch (error) {
@@ -253,6 +287,101 @@ async function embedQuery(query: string, provider?: EmbeddingProvider): Promise<
   const activeProvider = provider || createEmbeddingProvider();
   const [embedding] = await activeProvider.embed([trimmed]);
   return embedding;
+}
+
+function sortJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortJson);
+  if (!value || typeof value !== "object") return value;
+  return Object.keys(value as Record<string, unknown>)
+    .sort()
+    .reduce<Record<string, unknown>>((next, key) => {
+      next[key] = sortJson((value as Record<string, unknown>)[key]);
+      return next;
+    }, {});
+}
+
+function canonicalJson(value: unknown, fallback: unknown): string {
+  let parsed = value;
+  if (parsed === undefined || parsed === null || parsed === "") parsed = fallback;
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      parsed = fallback;
+    }
+  }
+  return JSON.stringify(sortJson(parsed));
+}
+
+function numberValue(value: unknown, fallback = 0): number {
+  const n = Number(value ?? fallback);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function memoryItemReadBackMatches(
+  row: Record<string, unknown> | undefined,
+  input: MemoryItemInput,
+  expected: { status: MemoryItemStatus; confidence: number; importance: number; sourceCount: number; metadata: Record<string, unknown> },
+  expectedId: number,
+): boolean {
+  return !!row &&
+    Number(row.id) === Number(expectedId) &&
+    String(row.user_id || "") === input.userId &&
+    String(row.memory_type || "") === input.memoryType &&
+    String(row.canonical_text || "") === input.canonicalText &&
+    String(row.status || "") === expected.status &&
+    numberValue(row.confidence) === expected.confidence &&
+    numberValue(row.importance) === expected.importance &&
+    numberValue(row.source_count) === expected.sourceCount &&
+    canonicalJson(row.metadata_json, {}) === canonicalJson(expected.metadata, {});
+}
+
+function memoryEvidenceReadBackMatches(
+  row: Record<string, unknown> | undefined,
+  input: MemoryEvidenceInput,
+  expected: { sourceId: string; extractionMethod: string; confidence: number; metadata: Record<string, unknown> },
+  expectedId: number,
+): boolean {
+  return !!row &&
+    Number(row.id) === Number(expectedId) &&
+    String(row.user_id || "") === input.userId &&
+    Number(row.memory_item_id) === Number(input.memoryItemId) &&
+    String(row.source_type || "") === input.sourceType &&
+    String(row.source_id || "") === expected.sourceId &&
+    String(row.quote || "") === input.quote &&
+    String(row.extraction_method || "") === expected.extractionMethod &&
+    numberValue(row.confidence) === expected.confidence &&
+    canonicalJson(row.metadata_json, {}) === canonicalJson(expected.metadata, {});
+}
+
+async function memoryChunksReadBackMatch(client: PoolClient, chunks: EmbeddedMemoryChunk[]): Promise<boolean> {
+  const groups = new Map<string, EmbeddedMemoryChunk[]>();
+  for (const chunk of chunks) {
+    const key = [
+      chunk.chunk.userId,
+      chunk.chunk.sourceType,
+      chunk.chunk.sourceId,
+    ].join("\u001f");
+    groups.set(key, [...(groups.get(key) || []), chunk]);
+  }
+
+  for (const group of groups.values()) {
+    const first = group[0].chunk;
+    const rows = (await client.query(`
+      SELECT chunk_index, content_hash, embedding_status, retry_count
+      FROM memory_chunks
+      WHERE user_id=$1 AND source_type=$2 AND source_id=$3
+    `, [first.userId, first.sourceType, first.sourceId])).rows as Array<Record<string, unknown>>;
+    const byIndex = new Map(rows.map((row) => [Number(row.chunk_index), row]));
+    for (const item of group) {
+      const row = byIndex.get(item.chunk.chunkIndex);
+      if (!row) return false;
+      if (String(row.content_hash || "") !== item.chunk.contentHash) return false;
+      if (String(row.embedding_status || "") !== item.embeddingStatus) return false;
+      if (numberValue(row.retry_count) !== item.retryCount) return false;
+    }
+  }
+  return true;
 }
 
 function clamp01(value: number): number {

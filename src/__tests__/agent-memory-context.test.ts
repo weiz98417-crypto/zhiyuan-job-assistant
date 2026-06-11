@@ -276,8 +276,35 @@ describe("agent memory isolation and writeback", () => {
     );
 
     expect(writebackRoute).toContain('status: "candidate"');
+    expect(writebackRoute).toContain("readBackVerified: true");
     expect(interviewRoute).toContain('status: "candidate"');
     expect(writebackRoute).not.toContain('status: "active"');
+  });
+
+  it("memory persistence routes and repositories fail closed on read-back mismatch", () => {
+    const memoryIndexRoute = fs.readFileSync(
+      path.join(process.cwd(), "src", "app", "api", "agent", "memory-index", "route.ts"),
+      "utf-8",
+    );
+    const memoryWritebackRoute = fs.readFileSync(
+      path.join(process.cwd(), "src", "app", "api", "agent", "memory-writeback", "route.ts"),
+      "utf-8",
+    );
+    const postgresMemory = fs.readFileSync(
+      path.join(process.cwd(), "src", "lib", "memory", "postgres-memory.ts"),
+      "utf-8",
+    );
+    const feedbackPromotion = fs.readFileSync(
+      path.join(process.cwd(), "src", "lib", "memory", "feedback-promotion.ts"),
+      "utf-8",
+    );
+
+    expect(memoryIndexRoute).toContain("readBackVerified: true");
+    expect(memoryWritebackRoute).toContain("readBackVerified: true");
+    expect(postgresMemory).toContain("memory item read-back verification failed");
+    expect(postgresMemory).toContain("memory evidence read-back verification failed");
+    expect(postgresMemory).toContain("memory chunks read-back verification failed");
+    expect(feedbackPromotion).toContain("memory promotion read-back verification failed");
   });
 });
 

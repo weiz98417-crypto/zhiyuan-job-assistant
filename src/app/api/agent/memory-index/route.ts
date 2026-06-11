@@ -42,7 +42,7 @@ export async function POST(request: Request) {
 
     const embedded = chunks.filter((chunk) => chunk.embeddingStatus === "embedded").length;
     const failed = chunks.filter((chunk) => chunk.embeddingStatus === "failed").length;
-    return NextResponse.json({ success: true, data: { chunks: chunks.length, embedded, failed } });
+    return NextResponse.json({ success: true, data: { chunks: chunks.length, embedded, failed, readBackVerified: true } });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     if (message === "Not authenticated" || message === "Invalid or expired token") {

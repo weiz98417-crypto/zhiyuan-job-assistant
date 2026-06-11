@@ -6,6 +6,7 @@ import {
   normalizeSkillClaim,
   skillFromClaim,
 } from "@/lib/profile-skill-quality";
+import { profileContainsSkill, profileSignalReadBackMatches } from "@/lib/profile-signal-persistence-verifier";
 import type { ProfileSkill } from "@/types";
 
 function parseContent(value: unknown): Record<string, unknown> {
@@ -20,14 +21,14 @@ function contentStatus(content: Record<string, unknown>): string {
   return typeof content.status === "string" ? content.status : "legacy";
 }
 
-async function upsertConfirmedSkill(userId: string, content: Record<string, unknown>) {
+async function upsertConfirmedSkill(userId: string, content: Record<string, unknown>): Promise<{ skillName: string; readBackVerified: boolean } | null> {
   const normalized = normalizeSkillClaim({
     skill: typeof content.skill === "string" ? content.skill : "",
     evidence: typeof content.evidence === "string" ? content.evidence : "",
     confidence: typeof content.confidence === "number" ? content.confidence : 0.9,
     source: "manual",
   }, "manual");
-  if (!normalized) return;
+  if (!normalized) return null;
 
   const repos = getDataRepositories();
   const existing = await repos.profiles.get(userId);
@@ -59,6 +60,8 @@ async function upsertConfirmedSkill(userId: string, content: Record<string, unkn
     JSON.stringify(history),
     JSON.stringify(goals),
   );
+  const readBack = await repos.profiles.get(userId);
+  return { skillName: nextSkill.name, readBackVerified: profileContainsSkill(readBack, nextSkill.name) };
 }
 
 export async function GET(request: Request) {
@@ -113,14 +116,25 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: decision.rejectedReason || "信号质量不达标" }, { status: 422 });
     }
 
-    await getDataRepositories().signals.insert({
+    const repos = getDataRepositories();
+    const signalInput = {
       source: decision.signal.source,
       signal_type: decision.signal.signal_type,
       content_json: JSON.stringify(decision.signal.content_json || {}),
-      session_id: decision.signal.session_id,
-    }, user.userId);
+      session_id: decision.signal.session_id || undefined,
+    };
+    const id = await repos.signals.insert(signalInput, user.userId);
+    const readBack = await repos.signals.get(id, user.userId);
+    const readBackVerified = profileSignalReadBackMatches(readBack, signalInput, id);
+    if (!readBackVerified) {
+      return NextResponse.json({
+        success: false,
+        error: "画像信号写入后回读校验失败，已阻止成功提示",
+        data: { id, readBackVerified: false },
+      }, { status: 500 });
+    }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, data: { id, readBackVerified } });
   } catch (err: unknown) {
     if (err instanceof Error && err.message === "Not authenticated") {
       return NextResponse.json({ success: false, error: "未登录" }, { status: 401 });
@@ -185,18 +199,47 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ success: false, error: decision.rejectedReason || "信号质量不达标" }, { status: 422 });
     }
 
-    await repos.signals.update(id, {
+    const signalInput = {
       source: decision.signal.source,
       signal_type: decision.signal.signal_type,
       content_json: JSON.stringify(decision.signal.content_json),
-      session_id: decision.signal.session_id,
-    }, user.userId);
-
-    if (body.action === "confirm" && existing.signal_type === "skill_claim") {
-      await upsertConfirmedSkill(user.userId, decision.signal.content_json);
+      session_id: decision.signal.session_id || undefined,
+    };
+    const updated = await repos.signals.update(id, signalInput, user.userId);
+    if (!updated) {
+      return NextResponse.json({ success: false, error: "画像信号更新失败，已阻止成功提示", data: { id, readBackVerified: false } }, { status: 500 });
+    }
+    const readBack = await repos.signals.get(id, user.userId);
+    const readBackVerified = profileSignalReadBackMatches(readBack, signalInput, id);
+    if (!readBackVerified) {
+      return NextResponse.json({
+        success: false,
+        error: "画像信号更新后回读校验失败，已阻止成功提示",
+        data: { id, readBackVerified: false },
+      }, { status: 500 });
     }
 
-    return NextResponse.json({ success: true, data: { id, content_json: decision.signal.content_json } });
+    let profileSkillReadBack: { skillName: string; readBackVerified: boolean } | null = null;
+    if (body.action === "confirm" && existing.signal_type === "skill_claim") {
+      profileSkillReadBack = await upsertConfirmedSkill(user.userId, decision.signal.content_json);
+      if (profileSkillReadBack && !profileSkillReadBack.readBackVerified) {
+        return NextResponse.json({
+          success: false,
+          error: "画像技能晋升后回读校验失败，已阻止成功提示",
+          data: { id, readBackVerified, profileSkillReadBackVerified: false },
+        }, { status: 500 });
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        id,
+        content_json: decision.signal.content_json,
+        readBackVerified,
+        profileSkillReadBackVerified: profileSkillReadBack?.readBackVerified ?? null,
+      },
+    });
   } catch (err: unknown) {
     if (err instanceof Error && err.message === "Not authenticated") {
       return NextResponse.json({ success: false, error: "未登录" }, { status: 401 });

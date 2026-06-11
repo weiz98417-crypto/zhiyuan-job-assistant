@@ -411,12 +411,13 @@ async function recordPatternMemoryFeedback(input: RecordOptimizationMemoryFeedba
 
       await client.query("BEGIN");
       try {
-        await client.query(`
+        const evidenceInsert = await client.query(`
           INSERT INTO memory_evidence (
             user_id, memory_item_id, source_type, source_id, quote,
             extraction_method, confidence, metadata_json
           )
           VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)
+          RETURNING id
         `, [
           input.userId,
           id,
@@ -427,6 +428,7 @@ async function recordPatternMemoryFeedback(input: RecordOptimizationMemoryFeedba
           POSITIVE_ACTIONS.has(input.action) ? 0.8 : 0.65,
           JSON.stringify(input.metadata),
         ]);
+        const evidenceId = Number(evidenceInsert.rows[0]?.id || 0);
 
         if (statusChanged) {
           await client.query(`
@@ -463,6 +465,33 @@ async function recordPatternMemoryFeedback(input: RecordOptimizationMemoryFeedba
           JSON.stringify(nextMetadata),
           id,
         ]);
+
+        const verified = await client.query(`
+          SELECT status
+          FROM memory_items
+          WHERE id=$1 AND user_id=$2
+        `, [id, input.userId]);
+        const evidenceVerified = await client.query(`
+          SELECT id
+          FROM memory_evidence
+          WHERE id=$1 AND user_id=$2 AND memory_item_id=$3
+        `, [evidenceId, input.userId, id]);
+        const transitionVerified = statusChanged
+          ? await client.query(`
+              SELECT id
+              FROM memory_status_transitions
+              WHERE memory_item_id=$1 AND user_id=$2 AND previous_status=$3 AND next_status=$4
+              ORDER BY id DESC
+              LIMIT 1
+            `, [id, input.userId, previousStatus, nextStatus])
+          : { rowCount: 1 };
+        if (
+          String(verified.rows[0]?.status || "") !== nextStatus ||
+          !evidenceVerified.rowCount ||
+          !transitionVerified.rowCount
+        ) {
+          throw new Error("memory promotion read-back verification failed");
+        }
         await client.query("COMMIT");
       } catch (error) {
         await client.query("ROLLBACK");

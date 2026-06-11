@@ -52,7 +52,7 @@
 - [x] 7.1 Apply verified-write protocol to JD creation/update from OCR and evaluation.
 - [x] 7.2 Apply verified-write protocol to JD evaluation report persistence.
 - [x] 7.3 Apply verified-write protocol to offer evaluation and offer report persistence.
-- [ ] 7.4 Apply verified-write protocol to profile signal promotion and memory persistence.
+- [x] 7.4 Apply verified-write protocol to profile signal promotion and memory persistence.
 - [ ] 7.5 Apply file existence/size/hash verification to exports and PDF downloads.
 
 ## 8. Self-Healing Policy Engine
