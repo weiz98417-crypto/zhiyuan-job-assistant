@@ -10,6 +10,13 @@ export interface ResumeSavePlan {
   reason: "direct-pasted-revision" | "recent-optimization-result" | "recent-assistant-proposal";
 }
 
+export type ResumeEditProposalAction = "apply" | "discard" | "rollback";
+
+export interface ResumeEditProposalActionPlan {
+  action: ResumeEditProposalAction;
+  proposalId: string;
+}
+
 export interface ResumeSectionValidation {
   valid: boolean;
   reason?: string;
@@ -18,6 +25,11 @@ export interface ResumeSectionValidation {
 const SAVE_INTENT_RE = /(应用|保存|写入|确认|采用|用这个|就这个|直接改|帮我改|替我改|改了|没改|没有保存|没保存|落到简历|同步到简历)/i;
 const REFERENCE_RESUME_RE = /(优秀|参考|标杆|样例|范例).{0,12}(简历|CV|履历)|(简历|CV|履历).{0,12}(优秀|参考|标杆|样例|范例)/i;
 const SAVE_CLAIM_RE = /(已|已经|成功).{0,8}(保存|写入|更新|同步).{0,12}(简历|CV|技能|技能清单|板块)|已更新「.+」板块到 CV/i;
+const PROPOSAL_ID_RE = /\brep[_-][A-Za-z0-9._-]+\b/g;
+const PROPOSAL_CONTEXT_RE = /(简历修改提案|修改提案|提案|proposal|rep[_-][A-Za-z0-9._-]+)/i;
+const PROPOSAL_APPLY_RE = /(应用|保存|写入|确认|采用|用这个|就这个|同意)/i;
+const PROPOSAL_DISCARD_RE = /(废弃|丢弃|拒绝|不要|不用|取消|算了)/i;
+const PROPOSAL_ROLLBACK_RE = /(回滚|撤销|还原|恢复|退回)/i;
 
 const SECTION_HINTS: Array<[ResumeSectionId, RegExp]> = [
   ["skills", /(技能清单|专业技能|技能|核心能力|技术工具|领域理解|skills?)/i],
@@ -179,6 +191,37 @@ export function buildResumeSavePlan(messages: ResumeSaveGuardMessage[], toolWhit
   }
 
   return null;
+}
+
+function latestProposalIdFromMessages(messages: ResumeSaveGuardMessage[]): string {
+  for (const message of recentMessages(messages).reverse()) {
+    const matches = Array.from((message.content || "").matchAll(PROPOSAL_ID_RE));
+    if (matches.length > 0) return matches[matches.length - 1][0];
+  }
+  return "";
+}
+
+export function buildResumeEditProposalActionPlan(messages: ResumeSaveGuardMessage[]): ResumeEditProposalActionPlan | null {
+  const latestUser = [...messages].reverse().find((message) => message.role === "user" && message.content.trim());
+  const userText = latestUser?.content || "";
+  if (!userText) return null;
+
+  const explicitId = Array.from(userText.matchAll(PROPOSAL_ID_RE)).at(-1)?.[0] || "";
+  const hasProposalContext = PROPOSAL_CONTEXT_RE.test(userText) || Boolean(explicitId) || recentMessages(messages).some((message) => PROPOSAL_CONTEXT_RE.test(message.content || ""));
+  if (!hasProposalContext) return null;
+
+  const action: ResumeEditProposalAction | null = PROPOSAL_ROLLBACK_RE.test(userText)
+    ? "rollback"
+    : PROPOSAL_DISCARD_RE.test(userText)
+      ? "discard"
+      : PROPOSAL_APPLY_RE.test(userText)
+        ? "apply"
+        : null;
+  if (!action) return null;
+
+  const proposalId = explicitId || latestProposalIdFromMessages(messages.filter((message) => message !== latestUser));
+  if (!proposalId) return null;
+  return { action, proposalId };
 }
 
 export function claimsResumeSaved(text: string): boolean {

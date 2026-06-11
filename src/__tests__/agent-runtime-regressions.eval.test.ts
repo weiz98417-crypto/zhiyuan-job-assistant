@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  buildResumeEditProposalActionPlan,
   buildResumeSavePlan,
   sanitizeUnsupportedResumeSaveClaim,
   validateResumeSectionContent,
@@ -81,6 +82,43 @@ describe("agent runtime regression evals", () => {
       id: "run-refresh",
       session_id: 42,
       status: "running",
+    });
+  });
+
+  it("recovery: pending resume proposal survives refresh and routes approval by proposal id", () => {
+    const messages = [
+      {
+        role: "tool",
+        content: "已创建简历修改提案 rep_123e4567-e89b-12d3-a456-426614174000（skills），请先确认差异，确认后才会写入 CV。",
+      },
+      {
+        role: "user",
+        content: "应用这个提案",
+      },
+    ];
+
+    expect(buildResumeEditProposalActionPlan(messages)).toEqual({
+      action: "apply",
+      proposalId: "rep_123e4567-e89b-12d3-a456-426614174000",
+    });
+    expect(buildResumeSavePlan(messages)).toBeNull();
+  });
+
+  it("recovery: pending resume proposal can be discarded after refresh", () => {
+    const messages = [
+      {
+        role: "tool",
+        content: "已创建简历修改提案 rep_refresh_pending_1（projects），请先确认差异，确认后才会写入 CV。",
+      },
+      {
+        role: "user",
+        content: "不要了，废弃这个简历修改提案",
+      },
+    ];
+
+    expect(buildResumeEditProposalActionPlan(messages)).toEqual({
+      action: "discard",
+      proposalId: "rep_refresh_pending_1",
     });
   });
 });

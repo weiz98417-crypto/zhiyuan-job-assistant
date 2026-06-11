@@ -14,7 +14,7 @@ import {
   completePendingReferenceResumeSave,
   type PendingReferenceResumeSaveAction,
 } from "@/lib/agent/reference-resume-save-flow";
-import { buildResumeSavePlan } from "@/lib/agent/resume-save-guard";
+import { buildResumeEditProposalActionPlan, buildResumeSavePlan } from "@/lib/agent/resume-save-guard";
 import type { AgentTaskContract } from "@/lib/agent/task-contract";
 import { requiresReadBackVerification } from "@/lib/agent/tools/readback-verification";
 
@@ -577,6 +577,25 @@ export async function* agentLoopClient(
           name: "save_reference_resume",
           arguments: JSON.stringify(completion),
         };
+      }
+    }
+
+    if (firstIteration && !forcedToolCall) {
+      const proposalActionPlan = buildResumeEditProposalActionPlan(ctx);
+      if (proposalActionPlan) {
+        const toolName =
+          proposalActionPlan.action === "rollback"
+            ? "rollback_resume_edit_proposal"
+            : proposalActionPlan.action === "discard"
+              ? "discard_resume_edit_proposal"
+              : "apply_resume_edit_proposal";
+        if (isToolAllowedInMode(toolName, toolWhitelist)) {
+          forcedToolCall = {
+            id: `forced-${toolName}-${Date.now()}`,
+            name: toolName,
+            arguments: JSON.stringify({ proposalId: proposalActionPlan.proposalId }),
+          };
+        }
       }
     }
 

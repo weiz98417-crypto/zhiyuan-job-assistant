@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  buildResumeEditProposalActionPlan,
   buildResumeSavePlan,
   claimsResumeSaved,
   sanitizeUnsupportedResumeSaveClaim,
@@ -83,6 +84,18 @@ SQL / 数据分析
     ]);
 
     expect(plan).toBeNull();
+  });
+
+  it("builds proposal action plans from refreshed chat history", () => {
+    expect(buildResumeEditProposalActionPlan([
+      { role: "tool", content: "已创建简历修改提案 rep_refresh_1（skills），请先确认差异，确认后才会写入 CV。" },
+      { role: "user", content: "确认，应用这个提案" },
+    ])).toEqual({ action: "apply", proposalId: "rep_refresh_1" });
+
+    expect(buildResumeEditProposalActionPlan([
+      { role: "tool", content: "已应用简历修改提案 rep_refresh_2（skills），并完成回读校验。" },
+      { role: "user", content: "回滚这个提案" },
+    ])).toEqual({ action: "rollback", proposalId: "rep_refresh_2" });
   });
 
   it("rejects placeholder edit instructions instead of treating them as project content", async () => {

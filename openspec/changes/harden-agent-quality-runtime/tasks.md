@@ -45,7 +45,7 @@
 - [x] 6.3 Add `discard_resume_edit_proposal` and rollback support.
 - [x] 6.4 Render resume edit proposals as diff cards in agent chat and/or CV page.
 - [x] 6.5 Migrate `save_resume_section` to legacy-safe wrapper that routes agent writes through proposals.
-- [ ] 6.6 Add tests for refresh/resume during a pending proposal.
+- [x] 6.6 Add tests for refresh/resume during a pending proposal.
 
 ## 7. Extend Verified Writes
 
