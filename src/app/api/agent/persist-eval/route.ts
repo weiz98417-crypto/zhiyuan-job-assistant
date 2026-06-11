@@ -4,7 +4,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { getDataRepositories } from "@/lib/data-repositories";
 import { getDatabaseDriver, isPostgresConfigured } from "@/lib/postgres";
 import { createMemoryItem, addMemoryEvidence, indexMemorySourceBestEffort } from "@/lib/memory/postgres-memory";
-import type { AppRow, ReportRow } from "@/lib/server-db";
+import type { AppRow, JDRow, ReportRow } from "@/lib/server-db";
 
 function hashSource(text?: string): string {
   const normalized = (text || "").replace(/\s+/g, " ").trim();
@@ -17,6 +17,26 @@ function isRecentDuplicate(createdAt?: unknown): boolean {
   const created = new Date(createdAt.replace(" ", "T") + "Z").getTime();
   if (!Number.isFinite(created)) return false;
   return Date.now() - created < 15 * 60 * 1000;
+}
+
+function jdReadBackMatches(row: JDRow | undefined, expected: {
+  company: string;
+  role: string;
+  body: string;
+  keywords_json: string;
+  report_id: number;
+}): boolean {
+  if (!row) return false;
+  const normalizeKeywords = (value?: string) => {
+    try { return JSON.stringify(JSON.parse(value || "[]")); } catch { return value || "[]"; }
+  };
+  return (
+    row.company === expected.company &&
+    row.role === expected.role &&
+    row.body === expected.body &&
+    normalizeKeywords(row.keywords_json) === normalizeKeywords(expected.keywords_json) &&
+    Number(row.report_id || 0) === Number(expected.report_id || 0)
+  );
 }
 
 export async function POST(request: Request) {
@@ -90,9 +110,10 @@ export async function POST(request: Request) {
 
     // 4. Save JD to JD library
     let jdId: number | null = null;
+    let jdReadBackVerified = true;
     if (jdText && jdText.trim().length >= 50) {
       try {
-        jdId = await repos.jds.insert({
+        const jdRow = {
           company,
           role,
           source_type: "agent",
@@ -100,9 +121,27 @@ export async function POST(request: Request) {
           body: jdText,
           keywords_json: keywords ? JSON.stringify(keywords) : "[]",
           report_id: reportNum,
-        }, user.userId);
+        };
+        jdId = await repos.jds.insert(jdRow, user.userId);
+        const readBack = await repos.jds.get(jdId, user.userId);
+        jdReadBackVerified = jdReadBackMatches(readBack, jdRow);
+        if (!jdReadBackVerified) {
+          return NextResponse.json({
+            success: false,
+            error: "JD 持久化后回读校验失败，已阻止成功提示",
+            reportNum,
+            jdId,
+            jdReadBackVerified: false,
+          }, { status: 500 });
+        }
       } catch (e) {
         console.warn("[persist-eval] JD save failed:", e);
+        return NextResponse.json({
+          success: false,
+          error: `JD 持久化失败: ${e instanceof Error ? e.message : "unknown"}`,
+          reportNum,
+          jdReadBackVerified: false,
+        }, { status: 500 });
       }
     }
 
@@ -156,7 +195,7 @@ export async function POST(request: Request) {
       }
     }
 
-    return NextResponse.json({ success: true, reportNum });
+    return NextResponse.json({ success: true, reportNum, jdId, jdReadBackVerified });
   } catch (err) {
     if (err instanceof Error && (err.message === "Not authenticated" || err.message === "Invalid or expired token")) {
       return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });

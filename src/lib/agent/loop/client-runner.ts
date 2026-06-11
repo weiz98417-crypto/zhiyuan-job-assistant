@@ -980,6 +980,8 @@ export async function* agentLoopClient(
                 const d = finalData;
                 const reportNum = persistJson.reportNum || 0;
                 (d as Record<string, unknown>).reportNum = reportNum;
+                (d as Record<string, unknown>).jdId = persistJson.jdId || null;
+                (d as Record<string, unknown>).jdReadBackVerified = persistJson.jdReadBackVerified !== false;
                 const blocks = (d.blocks || {}) as Record<string, { content: string; score: number }>;
                 const today = new Date().toISOString().split("T")[0];
                 try {

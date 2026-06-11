@@ -18,7 +18,7 @@ export async function createJD(data: CreateJDDTO): Promise<number> {
     body: JSON.stringify(data),
   });
   const json = await res.json().catch(() => ({}));
-  if (!res.ok || !json.success || typeof json.id !== "number") {
+  if (!res.ok || !json.success || typeof json.id !== "number" || json.jdReadBackVerified === false) {
     throw new Error(typeof json.error === "string" ? json.error : "Failed to create JD record");
   }
   await db.jds.put({ ...data, id: json.id, createdAt: new Date() }).catch(() => {});
@@ -26,6 +26,15 @@ export async function createJD(data: CreateJDDTO): Promise<number> {
 }
 
 export async function updateJD(id: number, data: Partial<CreateJDDTO>): Promise<void> {
+  const res = await fetch("/api/data/jds", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id, ...data }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || !json.success || json.jdReadBackVerified === false) {
+    throw new Error(typeof json.error === "string" ? json.error : "Failed to update JD record");
+  }
   await db.jds.update(id, data);
 }
 

@@ -82,6 +82,51 @@ async function postSave(route: DiscoveryJdRoute, jobId: number, body: Record<str
 }
 
 describe("Discovery save-from-JD API", () => {
+  it("verifies read-back after direct JD create and update", async () => {
+    const { db, dataJdsRoute } = await loadRouteHarness();
+    const jdBody = "岗位职责：负责 AI 产品规划、需求分析、Agent 场景落地、数据指标建设和跨团队项目推进。任职要求：熟悉 LLM 应用和产品交付。";
+
+    const createResponse = await dataJdsRoute.POST(new Request("http://localhost/api/data/jds", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        company: "深圳验证科技",
+        role: "AI 产品经理",
+        sourceType: "ocr",
+        body: jdBody,
+        keywords: ["AI产品", "Agent"],
+      }),
+    }));
+    const createJson = await createResponse.json();
+
+    expect(createResponse.status).toBe(200);
+    expect(createJson.success).toBe(true);
+    expect(createJson.jdReadBackVerified).toBe(true);
+    expect(createJson.id).toBeGreaterThan(0);
+
+    const updateResponse = await dataJdsRoute.PATCH(new Request("http://localhost/api/data/jds", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: createJson.id,
+        company: "深圳验证科技",
+        role: "高级 AI 产品经理",
+        body: `${jdBody}\n加分项：有 RAG、评测体系或多智能体经验。`,
+        keywords: ["AI产品", "Agent", "RAG"],
+      }),
+    }));
+    const updateJson = await updateResponse.json();
+
+    expect(updateResponse.status).toBe(200);
+    expect(updateJson.success).toBe(true);
+    expect(updateJson.jdReadBackVerified).toBe(true);
+    expect(updateJson.data.role).toBe("高级 AI 产品经理");
+
+    const jd = db.prepare("SELECT * FROM jds WHERE id = ?").get(createJson.id) as { role: string; body: string } | undefined;
+    expect(jd?.role).toBe("高级 AI 产品经理");
+    expect(jd?.body).toContain("多智能体经验");
+  });
+
   it("creates a discovery-sourced JD and marks the scan job saved", async () => {
     const { db, route, dataJdsRoute } = await loadRouteHarness();
     const jobId = insertScanJob(db);

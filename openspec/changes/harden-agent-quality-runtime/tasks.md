@@ -49,7 +49,7 @@
 
 ## 7. Extend Verified Writes
 
-- [ ] 7.1 Apply verified-write protocol to JD creation/update from OCR and evaluation.
+- [x] 7.1 Apply verified-write protocol to JD creation/update from OCR and evaluation.
 - [ ] 7.2 Apply verified-write protocol to JD evaluation report persistence.
 - [ ] 7.3 Apply verified-write protocol to offer evaluation and offer report persistence.
 - [ ] 7.4 Apply verified-write protocol to profile signal promotion and memory persistence.
