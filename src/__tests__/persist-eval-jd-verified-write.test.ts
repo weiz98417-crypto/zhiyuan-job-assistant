@@ -76,7 +76,16 @@ describe("persist-eval JD verified write", () => {
     expect(json.success).toBe(true);
     expect(json.reportNum).toBe(1);
     expect(json.jdId).toBeGreaterThan(0);
+    expect(json.reportReadBackVerified).toBe(true);
     expect(json.jdReadBackVerified).toBe(true);
+
+    const report = db.prepare("SELECT * FROM reports WHERE report_num = ?").get(json.reportNum) as { company: string; role: string; overall_score: number; blocks_json: string } | undefined;
+    expect(report).toMatchObject({
+      company: "深圳评估科技",
+      role: "AI 产品经理",
+      overall_score: 3.7,
+    });
+    expect(report?.blocks_json).toContain("匹配 AI 产品方向");
 
     const jd = db.prepare("SELECT * FROM jds WHERE id = ?").get(json.jdId) as { company: string; role: string; body: string; report_id: number } | undefined;
     expect(jd).toMatchObject({

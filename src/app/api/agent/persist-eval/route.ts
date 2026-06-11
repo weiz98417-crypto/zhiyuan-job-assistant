@@ -39,6 +39,26 @@ function jdReadBackMatches(row: JDRow | undefined, expected: {
   );
 }
 
+function normalizedJson(value?: string): string {
+  try { return JSON.stringify(JSON.parse(value || "{}")); } catch { return value || ""; }
+}
+
+function reportReadBackMatches(row: ReportRow | undefined, expected: ReportRow): boolean {
+  if (!row) return false;
+  return (
+    Number(row.report_num) === Number(expected.report_num) &&
+    row.date === expected.date &&
+    row.company === expected.company &&
+    row.role === expected.role &&
+    (row.archetype || "") === (expected.archetype || "") &&
+    Number(row.overall_score || 0) === Number(expected.overall_score || 0) &&
+    (row.legitimacy || "") === (expected.legitimacy || "") &&
+    normalizedJson(row.blocks_json) === normalizedJson(expected.blocks_json) &&
+    normalizedJson(row.keywords_json).replace("{}", "[]") === normalizedJson(expected.keywords_json).replace("{}", "[]") &&
+    (row.source_hash || "") === (expected.source_hash || "")
+  );
+}
+
 export async function POST(request: Request) {
   try {
     const user = await getCurrentUser();
@@ -107,6 +127,16 @@ export async function POST(request: Request) {
       source_hash: sourceHash,
     };
     await repos.reports.upsert(reportRow, user.userId);
+    const reportReadBack = await repos.reports.get(reportNum, user.userId);
+    const reportReadBackVerified = reportReadBackMatches(reportReadBack, reportRow);
+    if (!reportReadBackVerified) {
+      return NextResponse.json({
+        success: false,
+        error: "评估报告持久化后回读校验失败，已阻止成功提示",
+        reportNum,
+        reportReadBackVerified: false,
+      }, { status: 500 });
+    }
 
     // 4. Save JD to JD library
     let jdId: number | null = null;
@@ -195,7 +225,7 @@ export async function POST(request: Request) {
       }
     }
 
-    return NextResponse.json({ success: true, reportNum, jdId, jdReadBackVerified });
+    return NextResponse.json({ success: true, reportNum, jdId, reportReadBackVerified, jdReadBackVerified });
   } catch (err) {
     if (err instanceof Error && (err.message === "Not authenticated" || err.message === "Invalid or expired token")) {
       return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
