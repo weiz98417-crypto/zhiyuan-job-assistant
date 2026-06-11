@@ -6,6 +6,7 @@ import {
   validateResumeSectionContent,
 } from "@/lib/agent/resume-save-guard";
 import { saveResumeSection } from "@/lib/agent/tools/action/save-resume-section";
+import { createResumeEditProposal } from "@/lib/agent/tools/action/create-resume-edit-proposal";
 import { stableContentHash } from "@/lib/agent/verified-action";
 
 afterEach(() => {
@@ -149,6 +150,44 @@ SQL / 数据分析
       ok: true,
       code: "read_back.match",
     });
+  });
+
+  it("creates a read-back verified resume edit proposal instead of writing CV directly", async () => {
+    const proposedContent = "核心能力\nAI产品全链路设计\nPrompt Engineering\nRAG知识库构建";
+    const proposal = {
+      id: "rep-test-1",
+      sectionId: "skills",
+      baseVersion: "v1",
+      baseHash: "fnv1a32:basehash",
+      originalContent: "旧技能清单",
+      proposedContent,
+      proposedHash: stableContentHash(proposedContent),
+      reason: "recent-optimization-result",
+      riskFlags: ["agent_generated"],
+      status: "pending",
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true, data: proposal }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true, data: proposal }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await createResumeEditProposal.handler({
+      section: "技能",
+      proposedContent,
+      reason: "recent-optimization-result",
+      riskFlags: ["agent_generated"],
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.verifiedAction?.success).toBe(true);
+    expect(result.verifiedAction?.readBack).toMatchObject({ ok: true, code: "read_back.match" });
+    expect(result.uiPayload).toMatchObject({ type: "resume_edit_proposal", readBackVerified: true, status: "pending" });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/cv/edit-proposals",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/cv/edit-proposals/rep-test-1", { cache: "no-store" });
   });
 
   it("blocks stale resume writes before PUT when base version or hash changed", async () => {

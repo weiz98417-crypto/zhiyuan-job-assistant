@@ -7,6 +7,11 @@ import {
   withPostgresClient,
   type DatabaseDriver,
 } from "@/lib/postgres";
+import {
+  buildResumeEditProposalRecord,
+  type ResumeEditProposalInput,
+  type ResumeEditProposalRecord,
+} from "@/lib/agent/resume-edit-proposals";
 import type {
   AppRow,
   JDRow,
@@ -32,6 +37,7 @@ const JSON_COLUMNS = new Set([
   "sections_json",
   "tags",
   "industry_tags",
+  "risk_flags_json",
   "metadata_json",
   "messages_json",
   "interview_state_json",
@@ -61,6 +67,7 @@ const USER_PRIVATE_TABLES = [
   "agent_preferences",
   "session_memory",
   "optimization_preferences",
+  "resume_edit_proposals",
   "reports",
   "jds",
   "offers",
@@ -114,6 +121,11 @@ export interface DataRepositories {
   cv: {
     get(userId: string): Promise<{ data_json: string } | undefined>;
     upsert(userId: string, data: unknown): Promise<void>;
+  };
+  resumeEditProposals: {
+    create(input: ResumeEditProposalInput, userId: string): Promise<ResumeEditProposalRecord>;
+    get(id: string, userId: string): Promise<ResumeEditProposalRecord | undefined>;
+    listPending(userId: string): Promise<ResumeEditProposalRecord[]>;
   };
   applications: {
     list(filters: { status?: string; company?: string; limit?: number; offset?: number }, userId: string): Promise<AppRow[]>;
@@ -298,6 +310,7 @@ function createSqliteRepositories(): DataRepositories {
         else getDb().prepare("INSERT INTO cv_data (user_id, data_json, updated_at) VALUES (?, ?, datetime('now'))").run(userId, dataJson);
       },
     },
+    resumeEditProposals: createSqliteResumeEditProposalRepository(),
     applications: {
       async list(filters, userId) {
         let sql = "SELECT * FROM applications WHERE user_id = ?";
@@ -419,6 +432,7 @@ function createPostgresRepositories(): DataRepositories {
     },
     users: createPostgresUserRepository(),
     cv: createPostgresCvRepository(),
+    resumeEditProposals: createPostgresResumeEditProposalRepository(),
     applications: createPostgresApplicationRepository(),
     reports: createPostgresReportRepository(),
     jds: createPostgresJdRepository(),
@@ -528,6 +542,75 @@ function createPostgresCvRepository(): DataRepositories["cv"] {
         VALUES ($1, $2::jsonb, now())
         ON CONFLICT (user_id) DO UPDATE SET data_json = EXCLUDED.data_json, updated_at = now()
       `, [userId, JSON.stringify(data || {})]));
+    },
+  };
+}
+
+function createSqliteResumeEditProposalRepository(): DataRepositories["resumeEditProposals"] {
+  return {
+    async create(input, userId) {
+      const row = buildResumeEditProposalRecord(input);
+      getDb().prepare(`
+        INSERT INTO resume_edit_proposals (
+          id, user_id, section_id, base_version, base_hash, original_content,
+          proposed_content, proposed_hash, reason, risk_flags_json, status, updated_at
+        ) VALUES (
+          @id, @user_id, @section_id, @base_version, @base_hash, @original_content,
+          @proposed_content, @proposed_hash, @reason, @risk_flags_json, @status, datetime('now')
+        )
+      `).run({ ...row, user_id: userId });
+      return (await this.get(row.id, userId)) || { ...row, user_id: userId };
+    },
+    async get(id, userId) {
+      return getDb().prepare("SELECT * FROM resume_edit_proposals WHERE id = ? AND user_id = ?").get(id, userId) as ResumeEditProposalRecord | undefined;
+    },
+    async listPending(userId) {
+      return getDb().prepare(`
+        SELECT * FROM resume_edit_proposals
+        WHERE user_id = ? AND status = 'pending'
+        ORDER BY updated_at DESC
+      `).all(userId) as ResumeEditProposalRecord[];
+    },
+  };
+}
+
+function createPostgresResumeEditProposalRepository(): DataRepositories["resumeEditProposals"] {
+  return {
+    async create(input, userId) {
+      const row = buildResumeEditProposalRecord(input);
+      const result = await withPostgresClient((client) => client.query(`
+        INSERT INTO resume_edit_proposals (
+          id, user_id, section_id, base_version, base_hash, original_content,
+          proposed_content, proposed_hash, reason, risk_flags_json, status, updated_at
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,now())
+        RETURNING *
+      `, [
+        row.id,
+        userId,
+        row.section_id,
+        row.base_version,
+        row.base_hash,
+        row.original_content,
+        row.proposed_content,
+        row.proposed_hash,
+        row.reason,
+        row.risk_flags_json,
+        row.status,
+      ]));
+      return normalizeRow(result.rows[0]) as unknown as ResumeEditProposalRecord;
+    },
+    async get(id, userId) {
+      return withPostgresClient(async (client) => one<ResumeEditProposalRecord>(await client.query(
+        "SELECT * FROM resume_edit_proposals WHERE id = $1 AND user_id = $2",
+        [id, userId],
+      )));
+    },
+    async listPending(userId) {
+      return withPostgresClient(async (client) => rows<ResumeEditProposalRecord>((await client.query(`
+        SELECT * FROM resume_edit_proposals
+        WHERE user_id = $1 AND status = 'pending'
+        ORDER BY updated_at DESC
+      `, [userId])).rows));
     },
   };
 }

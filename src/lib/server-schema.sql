@@ -149,6 +149,25 @@ CREATE TABLE IF NOT EXISTS optimization_preferences (
 
 CREATE INDEX IF NOT EXISTS idx_opt_prefs_created ON optimization_preferences(created_at);
 
+-- Resume edit proposals: durable draft approval queue for agent-generated CV edits
+CREATE TABLE IF NOT EXISTS resume_edit_proposals (
+  id TEXT PRIMARY KEY,
+  user_id TEXT REFERENCES users(id),
+  section_id TEXT NOT NULL,
+  base_version TEXT NOT NULL DEFAULT '',
+  base_hash TEXT NOT NULL DEFAULT '',
+  original_content TEXT NOT NULL DEFAULT '',
+  proposed_content TEXT NOT NULL DEFAULT '',
+  proposed_hash TEXT NOT NULL DEFAULT '',
+  reason TEXT NOT NULL DEFAULT '',
+  risk_flags_json TEXT NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_resume_edit_proposals_user_status ON resume_edit_proposals(user_id, status, updated_at);
+
 -- News Cache for homepage industry/company news feed
 CREATE TABLE IF NOT EXISTS news_cache (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

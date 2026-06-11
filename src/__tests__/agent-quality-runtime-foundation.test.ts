@@ -131,6 +131,7 @@ describe("agent run ledger and task contracts", () => {
 
     expect(schema).toContain("CREATE TABLE IF NOT EXISTS agent_runs");
     expect(schema).toContain("CREATE TABLE IF NOT EXISTS agent_run_steps");
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS resume_edit_proposals");
     expect(schema).toContain("idx_agent_runs_user_status");
   });
 

@@ -8,7 +8,7 @@ import type { AgentDefinition, AgentPromptContext } from "@/lib/agent/registry/t
 import { injectRoleWritingGuide } from "@/lib/agent/knowledge/role-writing-guides";
 
 // ── Resume-specific tools ──
-const RESUME_TOOL_NAMES = ["read_file", "import_resume", "generate_cv", "evaluate_jd", "export_file", "get_reference_detail", "optimize_resume_section", "save_resume_section", "save_reference_resume", "check_ats_compatibility"];
+const RESUME_TOOL_NAMES = ["read_file", "import_resume", "generate_cv", "evaluate_jd", "export_file", "get_reference_detail", "optimize_resume_section", "create_resume_edit_proposal", "save_resume_section", "save_reference_resume", "check_ats_compatibility"];
 
 // ── Extract targetRoles from careerDNA text ──
 

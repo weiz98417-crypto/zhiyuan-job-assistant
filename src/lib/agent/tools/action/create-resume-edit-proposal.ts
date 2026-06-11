@@ -1,0 +1,164 @@
+import type { ToolDefinition, ToolResult } from "../types";
+import { validateResumeSectionContent, type ResumeSectionId } from "@/lib/agent/resume-save-guard";
+import {
+  buildVerifiedActionFailure,
+  buildVerifiedActionSuccess,
+  stableContentHash,
+  validateDocumentFieldContent,
+} from "@/lib/agent/verified-action";
+
+const SECTION_MAP: Record<string, ResumeSectionId> = {
+  "个人概述": "summary", "概述": "summary", summary: "summary",
+  "工作经历": "experience", "经历": "experience", experience: "experience",
+  "项目经验": "projects", "项目": "projects", projects: "projects",
+  "教育背景": "education", "教育": "education", education: "education",
+  "技能": "skills", skills: "skills",
+};
+
+function resolveSection(value: unknown): ResumeSectionId {
+  const text = String(value || "experience");
+  return SECTION_MAP[text] || "experience";
+}
+
+function riskFlagsFromParams(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+async function handler(params: Record<string, unknown>): Promise<ToolResult> {
+  const sectionId = resolveSection(params.section || params.sectionId);
+  const proposedContent = String(params.proposedContent || params.content || "");
+  const reason = String(params.reason || "").slice(0, 1200);
+  const riskFlags = riskFlagsFromParams(params.riskFlags);
+
+  const validation = validateResumeSectionContent(sectionId, proposedContent);
+  if (!validation.valid) {
+    const error = validation.reason || "提案内容未通过校验";
+    return {
+      success: false,
+      data: null,
+      error,
+      errorCategory: "need_user_input",
+      verifiedAction: buildVerifiedActionFailure({
+        action: "create_resume_edit_proposal",
+        targetType: "cv",
+        targetField: sectionId,
+        error,
+      }),
+    };
+  }
+
+  const res = await fetch("/api/cv/edit-proposals", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sectionId, proposedContent, reason, riskFlags }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || !json.success || !json.data?.id) {
+    const error = json.error || `创建简历修改提案失败: HTTP ${res.status}`;
+    return {
+      success: false,
+      data: null,
+      error,
+      errorCategory: res.status >= 500 ? "transient" : "need_user_input",
+      verifiedAction: buildVerifiedActionFailure({
+        action: "create_resume_edit_proposal",
+        targetType: "cv",
+        targetField: sectionId,
+        error,
+      }),
+    };
+  }
+
+  const proposal = json.data as Record<string, unknown>;
+  let readBack: Record<string, unknown> | null = null;
+  let readBackError = "";
+  try {
+    const verifyRes = await fetch(`/api/cv/edit-proposals/${proposal.id}`, { cache: "no-store" });
+    const verifyJson = await verifyRes.json().catch(() => ({}));
+    if (verifyRes.ok && verifyJson.success && verifyJson.data?.id === proposal.id) {
+      readBack = verifyJson.data as Record<string, unknown>;
+    } else {
+      readBackError = verifyJson.error || "proposal read-back failed";
+    }
+  } catch (error) {
+    readBackError = error instanceof Error ? error.message : "proposal read-back failed";
+  }
+
+  const documentValidation = validateDocumentFieldContent(proposedContent, {
+    minCompactLength: 1,
+    targetLabel: sectionId,
+  });
+  const readBackContent = typeof readBack?.proposedContent === "string" ? readBack.proposedContent : "";
+  const verifiedAction = readBack
+    ? buildVerifiedActionSuccess({
+        action: "create_resume_edit_proposal",
+        targetType: "cv",
+        targetId: String(proposal.id),
+        targetField: sectionId,
+        baseHash: String(proposal.baseHash || ""),
+        versionId: String(proposal.baseVersion || ""),
+        data: proposal,
+        expectedContent: proposedContent,
+        readBackContent,
+        checks: [
+          ...documentValidation.checks,
+          {
+            phase: "readBack" as const,
+            ok: readBack.id === proposal.id,
+            code: readBack.id === proposal.id ? "proposal.id_match" : "proposal.id_mismatch",
+            message: "Proposal id read-back matches created id.",
+          },
+        ],
+      })
+    : buildVerifiedActionFailure({
+        action: "create_resume_edit_proposal",
+        targetType: "cv",
+        targetId: String(proposal.id || ""),
+        targetField: sectionId,
+        baseHash: String(proposal.baseHash || ""),
+        versionId: String(proposal.baseVersion || ""),
+        error: readBackError || "proposal read-back failed",
+      });
+
+  if (!verifiedAction.success) {
+    return {
+      success: false,
+      data: proposal,
+      error: `简历修改提案创建后读回校验失败：${verifiedAction.error || readBackError}`,
+      errorCategory: "permanent",
+      verifiedAction,
+      uiPayload: { ...proposal, readBackVerified: false, readBackError: verifiedAction.error || readBackError },
+    };
+  }
+
+  const data = { ...proposal, readBackVerified: true, proposedHash: proposal.proposedHash || stableContentHash(proposedContent) };
+  return {
+    success: true,
+    data,
+    errorCategory: "ok",
+    llmSummary: `已创建简历修改提案 ${proposal.id}，板块 ${sectionId}，等待用户审批后才会写入 CV。`,
+    uiPayload: { type: "resume_edit_proposal", ...data },
+    rawData: data,
+    verifiedAction,
+  };
+}
+
+function formatResult(result: ToolResult): string {
+  if (!result.success) return `创建简历修改提案失败: ${result.error}`;
+  const d = result.data as { id?: string; sectionId?: string };
+  return `已创建简历修改提案 ${d.id || ""}（${d.sectionId || "unknown"}），等待用户确认后再应用。`;
+}
+
+export const createResumeEditProposal: ToolDefinition = {
+  name: "create_resume_edit_proposal",
+  description: "创建简历修改提案，只保存为待审批草稿，不直接写入 CV。用于用户确认前的安全简历改写流程。",
+  parameters: {
+    section: { type: "string", required: true, description: "板块名称：工作经历/项目经验/技能/个人概述/教育背景" },
+    proposedContent: { type: "string", required: true, description: "提案中的完整板块新内容" },
+    reason: { type: "string", required: false, description: "为什么建议这样修改，简短说明" },
+    riskFlags: { type: "array", required: false, description: "风险标记，如 content_rewrite、large_change、jd_tailored" },
+  },
+  category: "action",
+  handler,
+  formatResult,
+};

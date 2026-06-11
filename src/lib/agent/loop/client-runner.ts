@@ -583,12 +583,18 @@ export async function* agentLoopClient(
     if (firstIteration && !forcedToolCall) {
       const resumeSavePlan = buildResumeSavePlan(ctx, toolWhitelist);
       if (resumeSavePlan) {
+        const proposalToolName = isToolAllowedInMode("create_resume_edit_proposal", toolWhitelist)
+          ? "create_resume_edit_proposal"
+          : "save_resume_section";
         forcedToolCall = {
-          id: `forced-save-resume-section-${Date.now()}`,
-          name: "save_resume_section",
+          id: `forced-${proposalToolName}-${Date.now()}`,
+          name: proposalToolName,
           arguments: JSON.stringify({
             section: resumeSavePlan.section,
             content: resumeSavePlan.content,
+            proposedContent: resumeSavePlan.content,
+            reason: resumeSavePlan.reason,
+            riskFlags: ["agent_generated", resumeSavePlan.reason],
           }),
         };
       }

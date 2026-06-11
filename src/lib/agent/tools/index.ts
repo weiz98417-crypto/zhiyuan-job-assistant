@@ -34,6 +34,7 @@ import { generateOfferNegotiationStrategy } from "./action/generate-offer-negoti
 import { generateOfferHRQuestionList } from "./action/generate-offer-hr-question-list";
 import { startInterviewSession } from "./action/start-interview-session";
 import { optimizeResumeSection } from "./action/optimize-resume-section";
+import { createResumeEditProposal } from "./action/create-resume-edit-proposal";
 import { saveResumeSection } from "./action/save-resume-section";
 import { saveReferenceResume } from "./action/save-reference-resume";
 import { getReferenceDetail } from "./query/get-reference-detail";
@@ -91,6 +92,7 @@ registry.register(generateOfferNegotiationStrategy);
 registry.register(generateOfferHRQuestionList);
 registry.register(startInterviewSession);
 registry.register(optimizeResumeSection);
+registry.register(createResumeEditProposal);
 registry.register(saveResumeSection);
 registry.register(saveReferenceResume);
 registry.register(downloadReportPDF);

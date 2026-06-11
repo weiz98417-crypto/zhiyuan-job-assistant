@@ -42,6 +42,13 @@ export const ACTION_TOOL_RISK_AUDIT: ActionToolRiskRecord[] = [
     requiresVerifiedWrite: false,
   },
   {
+    toolName: "create_resume_edit_proposal",
+    risk: "high-risk-write",
+    targets: ["cv"],
+    summary: "Persists a pending resume edit proposal; it does not mutate the canonical CV until approved.",
+    requiresVerifiedWrite: true,
+  },
+  {
     toolName: "download_report_pdf",
     risk: "low-risk-write",
     targets: ["file"],

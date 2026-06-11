@@ -154,7 +154,7 @@ export function getDb(): Database.Database {
     const userTables = [
       'profiles', 'profile_signals', 'sessions', 'stories', 'cv_data',
       'applications', 'agent_preferences', 'session_memory',
-      'optimization_preferences', 'reports', 'jds', 'reference_resumes',
+      'optimization_preferences', 'resume_edit_proposals', 'reports', 'jds', 'reference_resumes',
     ];
     for (const table of userTables) {
       const tCols = _db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];

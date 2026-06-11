@@ -192,7 +192,7 @@ export function inferCompletedCriteriaFromToolResult(
   const verifiedReadBack = hasVerifiedReadBack(signals.verifiedAction);
 
   if (contract.taskType === "resume_edit") {
-    if (signals.toolName === "optimize_resume_section" || signals.toolName === "save_resume_section") {
+    if (signals.toolName === "optimize_resume_section" || signals.toolName === "create_resume_edit_proposal" || signals.toolName === "save_resume_section") {
       completed.add("draft generated");
     }
     if (signals.toolName === "save_resume_section") {
@@ -206,6 +206,7 @@ export function inferCompletedCriteriaFromToolResult(
     }
     if (
       signals.verifiedAction?.evidence?.versionId !== undefined ||
+      signals.toolName === "create_resume_edit_proposal" ||
       (verifiedReadBack && signals.verifiedAction?.evidence?.readBackHash)
     ) {
       completed.add("version snapshot created");
