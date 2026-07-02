@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Target, Star, History, Compass, MapPin, Pencil, Lock, Download,
   RefreshCw, Trash2, Check, AlertTriangle, TrendingUp, Shield,
@@ -83,10 +83,12 @@ export default function ProfilePage() {
   const [companySignals, setCompanySignals] = useState<CompanySignal[]>([]);
   const [pendingSkillCandidates, setPendingSkillCandidates] = useState<SkillCandidateSignal[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const profileDraftOpenRef = useRef(false);
 
   const { isLocked } = useLockedFields(profile);
 
-  const fetchProfile = useCallback(async () => {
+  const fetchProfile = useCallback(async (options?: { force?: boolean }) => {
+    if (profileDraftOpenRef.current && !options?.force) return;
     try {
       setLoadError(null);
       const res = await fetch("/api/data/profile", { cache: "no-store" });
@@ -125,6 +127,14 @@ export default function ProfilePage() {
       }
     } catch { /* ignore */ }
   }, []);
+
+  useEffect(() => {
+    profileDraftOpenRef.current = goalsOpen || skillsOpen || historyOpen;
+  }, [goalsOpen, skillsOpen, historyOpen]);
+
+  const refreshProfileAfterSave = useCallback(() => {
+    void fetchProfile({ force: true });
+  }, [fetchProfile]);
 
   useEffect(() => {
     fetchProfile();
@@ -724,8 +734,8 @@ export default function ProfilePage() {
       </div>
 
       {/* ── Dialogs ── */}
-      <EditGoalsDialog open={goalsOpen} goals={profile.goals} isLocked={goalsLocked} onClose={() => setGoalsOpen(false)} onSaved={fetchProfile} />
-      <EditSkillsDialog open={skillsOpen} skills={skills} onClose={() => setSkillsOpen(false)} onSaved={fetchProfile} />
+      <EditGoalsDialog open={goalsOpen} goals={profile.goals} isLocked={goalsLocked} onClose={() => setGoalsOpen(false)} onSaved={refreshProfileAfterSave} />
+      <EditSkillsDialog open={skillsOpen} skills={skills} onClose={() => setSkillsOpen(false)} onSaved={refreshProfileAfterSave} />
       <HistoryDetailDialog open={historyOpen} entry={selectedHistory?.entry || null} entryIndex={selectedHistory?.index || 0} onClose={() => setHistoryOpen(false)} onRestore={handleRestoreHistory} />
 
       {/* ── Toast ── */}

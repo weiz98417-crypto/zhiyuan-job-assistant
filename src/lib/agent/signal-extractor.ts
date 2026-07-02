@@ -16,7 +16,13 @@ export interface ExtractedSignal {
   signal_type: "skill_claim" | "role_preference" | "dealbreaker" | "company_pref" | "salary_expectation" | "raw_context";
   content_json: Record<string, unknown>;
   session_id: string;
+  source?: string;
 }
+
+const EXPLICIT_USER_SKILL_PATTERNS = [
+  /(?:^|[。！？；;，,\s])(?:我|本人|自己)(?:很|非常|比较|挺)?(?:精通|熟练掌握|熟练使用|擅长|掌握|会|能够使用|做过|用过)\s*([A-Za-z][A-Za-z0-9.+#/-]{1,24})/gi,
+  /(?:^|[。！？；;，,\s])([A-Za-z][A-Za-z0-9.+#/-]{1,24})\s*(?:我|本人|自己)(?:很|非常|比较|挺)?(?:精通|熟练掌握|熟练使用|擅长|掌握|会)/gi,
+];
 
 const SKILL_PATTERNS = [
   /(?:我熟悉|我做过|我会|我掌握|我擅长|我负责过|我参与过|我主导过|具备|拥有|熟练使用|落地过|搭建过|建设过|优化过)(?:[\s\S]{0,12}?)([\u4e00-\u9fffA-Za-z0-9.+#/-]{2,24})/g,
@@ -29,6 +35,7 @@ const ROLE_PATTERNS = [
 ];
 
 const DEALBREAKER_PATTERNS = [
+  /(?:^|[。！？；;，,\s])(?:我|本人|自己)?(?:不接受|不能接受|不考虑|不要|拒绝|排斥|坚决不去)\s*([A-Za-z0-9.+#/-]{2,24}|996|007)/gi,
   /(?:不接受|不考虑|排斥|拒绝|不去|不要|坚决不|绝对不)(?:[\s\S]{0,30}?)([\u4e00-\u9fff\d，,、。；;\s]{2,40})/g,
   /(996|007|大小周|外包|驻场|派遣)\S*/g,
   /(?:必须|一定|得有|要有|需要|要求|只要)(?:[\s\S]{0,15}?)(带薪休假|双休|五险一金|公积金|年假|弹性工作|远程|在家办公|补充医疗|体检|期权|股票|13薪|14薪|15薪|16薪)/g,
@@ -60,11 +67,41 @@ function hasUserOwnership(text: string): boolean {
   return /(我|本人|我的|自己|简历|实习|项目中|工作中|曾|负责|主导|参与|搭建|开发|设计|落地|优化|使用|熟悉|掌握|做过)/.test(text);
 }
 
+function isExplicitUserDealBreakerEvidence(text: string): boolean {
+  return /(?:我|本人|自己)?.{0,4}(?:不接受|不能接受|不考虑|不要|拒绝|排斥|坚决不去)/.test(text);
+}
+
 export function scanMessage(content: string, sessionId: string): ExtractedSignal[] {
   const signals: ExtractedSignal[] = [];
   const text = compact(content);
 
   if (!text || looksLikeProfileNoise(text)) return signals;
+
+  for (const pattern of EXPLICIT_USER_SKILL_PATTERNS) {
+    pattern.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = pattern.exec(text)) !== null) {
+      const evidence = m[0].trim();
+      const normalized = normalizeSkillClaim({
+        skill: m[1],
+        evidence,
+        confidence: 0.92,
+        source: "manual",
+      });
+      if (!normalized) continue;
+      signals.push({
+        source: "user_confirmed",
+        signal_type: "skill_claim",
+        content_json: {
+          skill: normalized.skill,
+          evidence: normalized.evidence,
+          confidence: normalized.confidence,
+          status: "confirmed",
+        },
+        session_id: sessionId,
+      });
+    }
+  }
 
   for (const pattern of SKILL_PATTERNS) {
     pattern.lastIndex = 0;
@@ -113,9 +150,11 @@ export function scanMessage(content: string, sessionId: string): ExtractedSignal
       const evidence = m[0].trim();
       const value = normalizeDealBreaker(m[1] || m[0], evidence);
       if (value) {
+        const explicit = isExplicitUserDealBreakerEvidence(evidence);
         signals.push({
+          source: explicit ? "user_confirmed" : undefined,
           signal_type: "dealbreaker",
-          content_json: { value, evidence, confidence: 0.8 },
+          content_json: { value, evidence, confidence: explicit ? 0.92 : 0.8, status: explicit ? "confirmed" : undefined },
           session_id: sessionId,
         });
       }

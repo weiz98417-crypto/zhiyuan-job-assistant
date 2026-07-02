@@ -11,6 +11,7 @@ import {
 } from "@/lib/profile-skill-quality";
 import { scanMessage } from "@/lib/agent/signal-extractor";
 import { buildFallbackProfile } from "@/lib/profile-mining";
+import { buildCareerPositioningFallback } from "@/lib/agent/career-positioning-result";
 
 describe("profile skill quality gate", () => {
   it("rejects JD fragments, interview prompts, generic words, and chat filler", () => {
@@ -231,6 +232,54 @@ describe("profile skill quality gate", () => {
       proficiency: 65,
       source: "manual",
     });
+  });
+
+  it("captures explicit React skill and 996 constraint as confirmed user facts", () => {
+    const signals = scanMessage("我精通 React。我不接受 996", "s-react-996");
+    const skill = signals.find((signal) => signal.signal_type === "skill_claim" && signal.content_json.skill === "React");
+    const constraint = signals.find((signal) => signal.signal_type === "dealbreaker" && signal.content_json.value === "996" && signal.source === "user_confirmed");
+
+    expect(skill).toMatchObject({
+      source: "user_confirmed",
+      content_json: {
+        skill: "React",
+        status: "confirmed",
+      },
+      session_id: "s-react-996",
+    });
+    expect(constraint).toMatchObject({
+      source: "user_confirmed",
+      content_json: {
+        value: "996",
+        status: "confirmed",
+      },
+    });
+
+    const storedSkill = normalizeProfileSignalForStorage(skill!);
+    expect(storedSkill.accepted).toBe(true);
+    expect(storedSkill.signal?.content_json).toMatchObject({
+      skill: "React",
+      status: "confirmed",
+      sourceType: "manual",
+    });
+  });
+
+  it("forces self-positioning to close into a React frontend positioning card", () => {
+    const result = buildCareerPositioningFallback({
+      assistantText: "你偏哪边？",
+      messages: [
+        { role: "user", content: "帮我做自我定位" },
+        { role: "assistant", content: "你想往哪个方向走？" },
+        { role: "user", content: "我之前一直做前端，也想继续找技术岗" },
+        { role: "assistant", content: "可以再说说你的硬技能吗？" },
+        { role: "user", content: "我精通 React。我不接受 996" },
+      ],
+    });
+
+    expect(result).toContain("React 前端工程师");
+    expect(result).toContain("不接受 996");
+    expect(result).toContain("确认");
+    expect(result).toContain("求职画像");
   });
 });
 

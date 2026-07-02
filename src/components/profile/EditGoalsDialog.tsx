@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { X, Plus, Trash2, Lock, Unlock } from "lucide-react";
 import type { ZhiyuanProfileGoals } from "@/types";
 
@@ -24,14 +24,20 @@ export default function EditGoalsDialog({ open, goals, isLocked, onClose, onSave
   const [dealBreakers, setDealBreakers] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const initializedOpenRef = useRef(false);
 
   useEffect(() => {
-    if (open && goals) {
+    if (!open) {
+      initializedOpenRef.current = false;
+      return;
+    }
+    if (goals && !initializedOpenRef.current) {
       setRoles(goals.targetRoles?.length ? goals.targetRoles.map((r) => ({ role: r.role, level: r.level || "" })) : [{ role: "", level: "" }]);
       setSalaryMin(goals.salaryRange?.min || 0);
       setSalaryMax(goals.salaryRange?.max || 0);
       setDealBreakers(goals.dealBreakers || []);
       setError("");
+      initializedOpenRef.current = true;
     }
   }, [open, goals]);
 
