@@ -361,10 +361,9 @@ async function listVectorGovernanceData(): Promise<{
           ) AS evidence
         FROM memory_items mi
         LEFT JOIN memory_evidence me ON me.memory_item_id = mi.id
-        WHERE mi.status IN ('candidate', 'active', 'rejected', 'archived')
+        WHERE mi.status = 'candidate'
         GROUP BY mi.id
         ORDER BY
-          CASE mi.status WHEN 'candidate' THEN 0 WHEN 'active' THEN 1 WHEN 'rejected' THEN 2 ELSE 3 END,
           mi.importance DESC,
           mi.confidence DESC,
           mi.updated_at DESC

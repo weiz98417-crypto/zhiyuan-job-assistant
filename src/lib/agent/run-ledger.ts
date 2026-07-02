@@ -7,6 +7,8 @@ export type AgentRunStatus =
   | "waiting_user"
   | "verifying"
   | "repairing"
+  | "recovered"
+  | "needs_engineering"
   | "succeeded"
   | "failed"
   | "rolled_back"
@@ -63,6 +65,7 @@ export interface AppendAgentRunStepInput {
 }
 
 const ACTIVE_STATUSES: AgentRunStatus[] = ["planned", "running", "waiting_user", "verifying", "repairing"];
+const TERMINAL_STATUSES: AgentRunStatus[] = ["succeeded", "failed", "rolled_back", "cancelled", "recovered", "needs_engineering"];
 
 export function isAgentRunLedgerAvailable(): boolean {
   return getDatabaseDriver() === "postgres" && isPostgresConfigured();
@@ -94,7 +97,7 @@ export async function updateAgentRunStatus(
   patch: { result?: unknown; error?: unknown } = {},
 ): Promise<AgentRunRecord | null> {
   assertLedgerAvailable();
-  return withPostgresClient(async (client) => {
+  const run = await withPostgresClient(async (client) => {
     const result = await client.query(`
       UPDATE agent_runs
       SET status = $2,
@@ -111,6 +114,10 @@ export async function updateAgentRunStatus(
     ]);
     return result.rows[0] ? normalizeRun(result.rows[0]) : null;
   });
+  if (run && TERMINAL_STATUSES.includes(status)) {
+    scheduleAgentRunReview(run.id);
+  }
+  return run;
 }
 
 export async function appendAgentRunStep(input: AppendAgentRunStepInput): Promise<AgentRunStepRecord> {
@@ -161,11 +168,13 @@ export async function listActiveAgentRuns(userId: string, sessionId?: number): P
 
 export async function cancelAgentRun(runId: string, userId: string): Promise<boolean> {
   assertLedgerAvailable();
-  return withPostgresClient(async (client) => Boolean((await client.query(`
+  const ok = await withPostgresClient(async (client) => Boolean((await client.query(`
     UPDATE agent_runs
     SET status = 'cancelled', updated_at = now()
     WHERE id = $1 AND user_id = $2 AND status = ANY($3)
   `, [runId, userId, ACTIVE_STATUSES])).rowCount));
+  if (ok) scheduleAgentRunReview(runId);
+  return ok;
 }
 
 export async function listAgentRunSteps(runId: string): Promise<AgentRunStepRecord[]> {
@@ -176,17 +185,26 @@ export async function listAgentRunSteps(runId: string): Promise<AgentRunStepReco
   });
 }
 
-export async function listRecentFailedAgentRuns(limit = 50): Promise<AgentRunDebugRecord[]> {
+export async function listRecentAgentRuns(
+  limit = 50,
+  statuses?: AgentRunStatus[],
+): Promise<AgentRunDebugRecord[]> {
   assertLedgerAvailable();
   const safeLimit = Math.max(1, Math.min(100, Math.floor(limit)));
   return withPostgresClient(async (client) => {
+    const params: unknown[] = [safeLimit];
+    let where = "";
+    if (statuses?.length) {
+      params.unshift(statuses);
+      where = "WHERE status = ANY($1)";
+    }
     const runResult = await client.query(`
       SELECT *
       FROM agent_runs
-      WHERE status = ANY($1)
+      ${where}
       ORDER BY updated_at DESC
-      LIMIT $2
-    `, [["failed", "rolled_back"], safeLimit]);
+      LIMIT $${params.length}
+    `, params);
     const runs = runResult.rows.map(normalizeRun);
     if (runs.length === 0) return [];
 
@@ -209,6 +227,10 @@ export async function listRecentFailedAgentRuns(limit = 50): Promise<AgentRunDeb
       recent_steps: stepsByRun.get(run.id) || [],
     }));
   });
+}
+
+export async function listRecentFailedAgentRuns(limit = 50): Promise<AgentRunDebugRecord[]> {
+  return listRecentAgentRuns(limit, ["failed", "rolled_back"]);
 }
 
 function assertLedgerAvailable(): void {
@@ -255,4 +277,12 @@ function normalizeStep(row: Record<string, unknown>): AgentRunStepRecord {
 function toIso(value: unknown): string {
   if (value instanceof Date) return value.toISOString();
   return value ? String(value) : "";
+}
+
+function scheduleAgentRunReview(runId: string): void {
+  void import("@/lib/agent/run-review")
+    .then((module) => module.triggerAgentRunReview(runId))
+    .catch((err) => {
+      console.error("[agent-run-ledger/review-trigger]", err);
+    });
 }

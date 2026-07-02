@@ -56,10 +56,17 @@ describe("memory governance admin boundaries", () => {
   it("renders admin governance queues and safe actions", () => {
     const page = source("src/app/admin/memory/page.tsx");
     const shell = source("src/components/shell/AppShell.tsx");
+    const route = source("src/app/api/admin/memory/route.ts");
+    const governance = source("src/lib/memory/governance.ts");
 
     expect(shell).toContain("/admin/memory");
     expect(shell).toContain("记忆治理");
     expect(page).toContain("/api/admin/memory");
+    expect(page).toContain("useToast");
+    expect(page).toContain("actionSuccessMessage");
+    expect(page).toContain("payload.data?.updated === false");
+    expect(page).toContain('showToast(actionSuccessMessage(action))');
+    expect(page).toContain('showToast(message, "error")');
     expect(page).toContain("团队共享待审核");
     expect(page).toContain("Embedding 健康队列");
     expect(page).toContain("候选记忆模式");
@@ -72,7 +79,16 @@ describe("memory governance admin boundaries", () => {
     expect(page).toContain("delete_reference");
     expect(page).toContain("approve_memory");
     expect(page).toContain("reject_memory");
+    expect(page).toContain('busy={busyId === `memory:${item.id}:approve_memory`}');
+    expect(page).toContain('busy={busyId === `memory:${item.id}:reject_memory`}');
     expect(page).toContain("disable_memory");
+    expect(route).toContain("Memory item not found or not updated");
+    expect(route).toContain("nextStatus");
+    expect(route).toContain('nextStatus: "active"');
+    expect(route).toContain('nextStatus: "rejected"');
+    expect(route).toContain("{ status: 404 }");
+    expect(governance).toContain("WHERE mi.status = 'candidate'");
+    expect(governance).not.toContain("WHERE mi.status IN ('candidate', 'active', 'rejected', 'archived')");
   });
 
   it("degrades vector governance gracefully on SQLite and hides raw internals from users", () => {

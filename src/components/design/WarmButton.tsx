@@ -3,14 +3,11 @@
 import { motion, type HTMLMotionProps } from "framer-motion";
 import type { ReactNode } from "react";
 
-interface WarmButtonProps {
+interface WarmButtonProps extends Omit<HTMLMotionProps<"button">, "children"> {
   variant?: "primary" | "soft" | "ghost";
   size?: "sm" | "md" | "lg";
   children: ReactNode;
   className?: string;
-  disabled?: boolean;
-  onClick?: () => void;
-  type?: "button" | "submit" | "reset";
 }
 
 export default function WarmButton({
@@ -21,6 +18,7 @@ export default function WarmButton({
   disabled = false,
   onClick,
   type = "button",
+  ...buttonProps
 }: WarmButtonProps) {
   const base =
     "inline-flex items-center justify-center font-[family-name:var(--font-body)] font-medium transition-colors duration-[var(--duration-fast)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-primary)] disabled:opacity-40 disabled:cursor-not-allowed";
@@ -46,6 +44,7 @@ export default function WarmButton({
       disabled={disabled}
       onClick={onClick}
       type={type}
+      {...buttonProps}
     >
       {children}
     </motion.button>

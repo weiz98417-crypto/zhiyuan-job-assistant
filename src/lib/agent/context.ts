@@ -41,6 +41,29 @@ export interface AssembleOptions {
   userId?: string;
 }
 
+const SERVER_DEFAULT_PREFERENCES: AgentPreferenceModel = {
+  rolePreferences: {},
+  companyPreferences: {
+    liked: [],
+    disliked: [],
+    preferredSize: null,
+    preferredIndustry: [],
+  },
+  salarySensitivity: {
+    minAcceptable: 0,
+    preferred: 0,
+    flexibility: "unknown",
+    learnedFrom: [],
+  },
+  behaviorPatterns: {
+    evaluateToApplyDays: 0,
+    preferredInterviewPrepHours: 0,
+    activeHours: [],
+    decisionStyle: "cautious",
+  },
+  lastUpdated: new Date().toISOString(),
+};
+
 /* ── Pipeline summary ── */
 
 async function buildPipelineSummary(userId?: string): Promise<PipelineSummary> {
@@ -80,9 +103,9 @@ async function assembleDynamicData(maxApps = 5, userId?: string): Promise<AgentD
   const [profile, recentInteractions, pendingDecisions, preferences, pipelineSummary, rawApps] =
     await Promise.all([
       userId && repos ? loadServerProfile(userId) : loadProfile(),
-      getRecentInteractions(5),
-      getPendingDecisions(),
-      loadPreferences(),
+      userId ? Promise.resolve([]) : getRecentInteractions(5),
+      userId ? Promise.resolve([]) : getPendingDecisions(),
+      userId ? Promise.resolve({ ...SERVER_DEFAULT_PREFERENCES }) : loadPreferences(),
       buildPipelineSummary(userId),
       userId && repos
         ? repos.applications.list({ limit: maxApps }, userId).then((rows) => rows.map(appRowToApplication))

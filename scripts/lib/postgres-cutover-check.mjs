@@ -172,6 +172,7 @@ export async function runPostgresCutoverCheck(options = {}) {
         sqliteDb,
         pgClient: client,
         defaultOwner: defaultOwner || null,
+        mode: "cutover",
       });
       migrationVerificationText = formatVerificationReport(migrationVerification);
     } finally {
@@ -192,7 +193,11 @@ export async function runPostgresCutoverCheck(options = {}) {
     {
       name: "migration_hash_checks",
       ok: migrationVerification ? migrationVerification.ok : false,
-      message: migrationVerification ? (migrationVerification.ok ? "migration verification passed" : "migration verification failed") : "migration verification skipped",
+      message: migrationVerification
+        ? (migrationVerification.ok
+            ? "SQLite archive rows are present in Postgres; target drift is allowed after cutover"
+            : "SQLite archive row presence verification failed")
+        : "migration verification skipped",
     },
   ];
 

@@ -1,6 +1,26 @@
 # 18 — 服务端 Agent ReAct Loop
 
-> 所属阶段：Phase 3 · 2026-05-10 实施 · 核心改造 ~400 行
+所属阶段：Phase 3 · 持续演进
+
+服务端 Agent Loop 最初解决的是“API key 不应暴露在前端”和“工具执行应该放在服务端”的问题。当前它已经演进为“任务契约 + 工具治理 + 读回校验 + 运行复盘”的闭环：Loop 不只负责调模型和工具，还要判断一次高风险任务是否真的完成。
+
+当前真实行为：
+
+- `DEFAULT_LOOP_CONFIG.maxIterations = 5`，不是无限循环。
+- 高风险任务会生成 `AgentTaskContract`，包含任务类型、目标、成功条件、校验器和路由治理信息。
+- 工具调用前会经过 `enforceToolGovernance()`，任务类型、Agent 白名单、读回要求不匹配时会被拦截。
+- 写入类工具必须通过 `read-back verification`，例如报告保存后读 `/api/data/reports/{reportNum}`，简历修改后比对 hash，优秀简历保存后读回角色方向和内容摘要。
+- 图片上传会在 loop 前先走 `image-intake`；如果图片识别失败或文本/图片冲突，不应让聊天模型绕过识别直接回答。
+- 当前 LAN 的 Postgres 环境会创建 `agent_runs` 和 `agent_run_steps`，终态 run 会触发 `agent_run_reviews` 和 `agent_eval_candidates`。
+- 自动自愈目前是“有限修复”：可重试、可降级、可阻止错误成功态、可沉淀 eval 候选；不会自动改代码、自动加测试或自动部署。
+
+当前可视化入口：
+
+- Agent Chat：活动 run 状态条、图片识别工具卡、上下文压缩状态、工具卡片。
+- `/admin/agent-runs`：运行台账与 step 调试。
+- `/admin/agent-reviews`：复盘治理与 Eval 候选队列。
+
+更完整的当前边界见 [22-当前系统状态与治理闭环](./22-当前系统状态与治理闭环.md)。
 
 ---
 
@@ -14,7 +34,7 @@ Phase 2 的 Agent 系统存在一个架构性缺陷：**大模型 API Key 裸露
 | 网络跳数翻倍 | 浏览器 → Next.js → DeepSeek → Next.js → 浏览器；工具调用同理 |
 | 纯文本工具调用 | 前端发 fetch 执行工具，没有服务端上下文（文件系统、环境变量） |
 
-**目标**：把整个 Agent ReAct Loop 搬到服务端，前端只消费 SSE 事件流。评估类工具完成后由服务端接口写入 SQLite，前端统计和列表通过数据 API 读取服务端事实源。
+**目标**：把整个 Agent ReAct Loop 放在服务端执行，前端只消费 SSE 事件流。评估类工具完成后由服务端接口写入 repository 数据层；当前 LAN 写入 PostgreSQL，SQLite 仅作为 fallback/archive。
 
 ```
 Before (client-runner):                  After (server-runner):
@@ -563,7 +583,7 @@ if (recent) {
   ├─ 1. orchestrator.orchestrate(userMessage, ctx)
   │     ├─ classifyIntent → 确定子 Agent（通用/评估/简历/面试/画像）
   │     ├─ getCareerDNASummary → 求职 DNA 摘要
-  │     ├─ getCVSummary → localStorage 简历内容
+  │     ├─ getCVSummary → repository-backed CV 数据（localStorage 仅作缓存）
   │     ├─ getKnowledgeForAgent → Agent 专属知识库
   │     ├─ getClaudeAgentActivity → Claude Agent 最近活动
   │     ├─ buildContext(sessionId, messages)

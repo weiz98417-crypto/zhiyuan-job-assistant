@@ -7,7 +7,8 @@
 - At least one chat/evaluation model key, normally `DEEPSEEK_API_KEY`.
 - `ZHIPU_API_KEY` for screenshot OCR/vision.
 - A 32+ character `JWT_SECRET` for login sessions.
-- Optional: PostgreSQL with pgvector for the new memory/database path.
+- PostgreSQL with pgvector for the current LAN runtime and long-term memory path.
+- SQLite is still available as a local fallback/archive path.
 
 ## Local Setup
 
@@ -77,6 +78,51 @@ The image intake flow classifies image content before routing:
 | Mismatch | Example: JD request + offer image | Ask clarification. |
 | Unrelated | Any | Explain image content and ask for job-search intent. |
 
+## Resume PDF And DOCX Extraction With MinerU
+
+Resume file import no longer uses DashScope `qwen-long` for PDF/DOC/DOCX extraction. The runtime path is:
+
+```text
+text PDF -> local pdf-parse text extraction -> DeepSeek section classification
+scanned/empty/garbled PDF -> MinerU pipeline -> DeepSeek section classification
+DOCX -> mammoth text extraction -> MinerU only if empty/garbled -> DeepSeek section classification
+legacy DOC -> clear conversion-required error unless a local converter is configured
+images -> existing Zhipu vision path
+```
+
+Install MinerU locally under the project copy the user placed at `C:\Users\Admin\Documents\求职\zhiyuan-job-assistant-master\MinerU-master`:
+
+```powershell
+cd C:\Users\Admin\Documents\求职\zhiyuan-job-assistant-master\MinerU-master
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -U pip
+.\.venv\Scripts\pip.exe install -e ".[all]"
+.\.venv\Scripts\mineru-models-download.exe -s huggingface -m pipeline
+```
+
+Only the MinerU `pipeline` models are required for this project path:
+
+```text
+models/Layout/PP-DocLayoutV2
+models/MFR/unimernet_hf_small_2503
+models/OCR/paddleocr_torch
+models/TabRec/SlanetPlus/slanet-plus.onnx
+models/TabRec/UnetStructure/unet.onnx
+models/TabCls/paddle_table_cls/PP-LCNet_x1_0_table_cls.onnx
+models/MFR/pp_formulanet_plus_m
+```
+
+Set these variables in `.env.local`:
+
+```powershell
+MINERU_EXECUTABLE=C:\Users\Admin\Documents\求职\zhiyuan-job-assistant-master\MinerU-master\.venv\Scripts\mineru.exe
+MINERU_MODEL_SOURCE=local
+MINERU_TOOLS_CONFIG_JSON=C:\Users\Admin\mineru.json
+MINERU_EXTRACTION_TIMEOUT_MS=180000
+```
+
+`MINERU_TOOLS_CONFIG_JSON` points to the config written by the MinerU model download command. If MinerU is missing or too slow, CV import returns structured error codes such as `mineru_not_configured`, `mineru_timeout`, `document_text_empty`, `document_text_garbled`, or `doc_conversion_unavailable`; it does not silently fall back to qwen-long.
+
 ## Excellent Resume Memory
 
 Users can say things like "把这份简历保存成优秀简历". If the role is missing, the agent asks which role category to use. If the user says "保存成 AI 产品经理优秀简历", it can save directly with that explicit role.
@@ -90,16 +136,16 @@ Team sharing has an approval gate:
 
 ## PostgreSQL And pgvector
 
-SQLite is the default:
+The current LAN deployment uses PostgreSQL/pgvector:
 
 ```bash
-DB_DRIVER=sqlite
+DB_DRIVER=postgres
+DATABASE_URL=postgresql://user:password@localhost:5432/zhiyuan
 ```
 
 Prepare PostgreSQL:
 
 ```bash
-DATABASE_URL=postgresql://user:password@localhost:5432/zhiyuan
 POSTGRES_SCHEMA_PATH=src/lib/postgres-schema.sql
 npm run check:postgres
 ```
@@ -112,11 +158,18 @@ npm run migrate:postgres -- --apply --default-owner admin --report reports/postg
 npm run check:postgres-migration -- --default-owner admin --report reports/postgres-migration-verify.md
 ```
 
-Switch only after verification passes:
+After migration and verification, confirm cutover:
 
 ```bash
 DB_DRIVER=postgres
 DATABASE_URL=postgresql://user:password@localhost:5432/zhiyuan
+npm run check:postgres-cutover
+```
+
+For lightweight local fallback only, use:
+
+```bash
+DB_DRIVER=sqlite
 ```
 
 See [POSTGRES_MIGRATION.md](POSTGRES_MIGRATION.md) for backup, rollback, and excluded-table details.

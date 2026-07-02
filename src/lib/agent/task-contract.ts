@@ -1,6 +1,8 @@
 import { stableContentHash, type VerifiedActionResult } from "@/lib/agent/verified-action";
 
 export type AgentTaskType =
+  | "career_positioning_guidance"
+  | "resume_query"
   | "resume_edit"
   | "jd_evaluation"
   | "offer_evaluation"
@@ -17,6 +19,19 @@ export interface AgentTaskContract {
   baseHash?: string;
   successCriteria: string[];
   validators: string[];
+  routing?: {
+    contractPolicy?: string | null;
+    memoryTask?: string | null;
+    allowedTools?: string[];
+    requiresClarification?: boolean;
+    clarificationQuestion?: string;
+    blockedReason?: string;
+    auditSummary?: string;
+    activeTaskId?: string;
+    activeTaskType?: string;
+    activeTaskPhase?: string;
+    routeLocked?: boolean;
+  };
   createdAt: string;
 }
 
@@ -42,6 +57,14 @@ export interface TaskContractGateResult {
 }
 
 const DEFAULT_SUCCESS_CRITERIA: Record<AgentTaskType, string[]> = {
+  career_positioning_guidance: [
+    "guidance framework loaded",
+    "next question or guidance response generated",
+  ],
+  resume_query: [
+    "resume context read",
+    "answer generated",
+  ],
   resume_edit: [
     "draft generated",
     "user approved draft",
@@ -86,6 +109,8 @@ const DEFAULT_SUCCESS_CRITERIA: Record<AgentTaskType, string[]> = {
 };
 
 const DEFAULT_VALIDATORS: Record<AgentTaskType, string[]> = {
+  career_positioning_guidance: ["guidance_response"],
+  resume_query: ["read_only_resume_response"],
   resume_edit: ["base_hash", "document_field", "read_back_match", "no_placeholder_content"],
   jd_evaluation: ["source_content_present", "report_blocks_present", "read_back_match"],
   offer_evaluation: ["source_content_present", "offer_modules_present", "read_back_match"],
@@ -103,6 +128,7 @@ export function createAgentTaskContract(input: {
   baseHash?: string;
   successCriteria?: string[];
   validators?: string[];
+  routing?: AgentTaskContract["routing"];
 }): AgentTaskContract {
   return {
     taskType: input.taskType,
@@ -112,6 +138,7 @@ export function createAgentTaskContract(input: {
     baseHash: input.baseHash,
     successCriteria: input.successCriteria || DEFAULT_SUCCESS_CRITERIA[input.taskType],
     validators: input.validators || DEFAULT_VALIDATORS[input.taskType],
+    routing: input.routing,
     createdAt: new Date().toISOString(),
   };
 }
@@ -215,6 +242,23 @@ export function inferCompletedCriteriaFromToolResult(
     }
   }
 
+  if (contract.taskType === "career_positioning_guidance") {
+    if (signals.toolName === "self_positioning" || signals.toolName === "get_profile" || signals.toolName === "get_profile_insights") {
+      completed.add("guidance framework loaded");
+    }
+  }
+
+  if (contract.taskType === "resume_query") {
+    if (
+      signals.toolName === "read_file" ||
+      signals.toolName === "check_ats_compatibility" ||
+      signals.toolName === "detect_skill_gaps" ||
+      signals.toolName === "get_reference_detail"
+    ) {
+      completed.add("resume context read");
+    }
+  }
+
   if (contract.taskType === "jd_evaluation" && signals.toolName === "evaluate_jd_full") {
     if (hasNonEmptyString(data.jdText, 30) || hasReportBlocks(data)) {
       completed.add("source content extracted or fetched");
@@ -283,6 +327,12 @@ export function buildContractUnmetAssistantMessage(
   const unmet = unmetCriteria.slice(0, 3).join("、");
   if (contract.taskType === "resume_edit") {
     return `这次我没有把修改结果写入简历，因为运行时校验还没全部通过：${unmet}。我已经阻止了“已保存”的成功提示，避免把不完整或未验证的内容写进简历。`;
+  }
+  if (contract.taskType === "career_positioning_guidance") {
+    return `这次自我定位引导还没有完成可验证的对话推进：${unmet}。我不会把它当成画像写入任务；请继续回答当前引导问题，或重新说“帮我做自我定位”。`;
+  }
+  if (contract.taskType === "resume_query") {
+    return `这次我没有可靠读取到当前简历上下文：${unmet}。我不会把只读查询当成简历修改，也不会要求你确认草稿或写入简历。请重试“读取我的简历”。`;
   }
   if (contract.taskType === "jd_evaluation") {
     return `这次 JD 评估没有完成可靠落库校验：${unmet}。请重新发送 JD 文本/原图，或稍后重试，我不会把这次结果当作已完成报告。`;

@@ -1684,6 +1684,8 @@ export default function AgentChat({
                 <button
                   onClick={() => removeImage(item.id)}
                   className="absolute -top-1 -right-1 p-0.5 rounded-full bg-red-500 text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                  aria-label={`移除附件 ${i + 1}`}
+                  title={`移除附件 ${i + 1}`}
                 >
                   <X size={10} />
                 </button>
@@ -1737,6 +1739,8 @@ export default function AgentChat({
             size="md"
             onClick={streaming ? onStop : handleSend}
             disabled={streaming ? !onStop : (!input.trim() && images.length === 0)}
+            aria-label={streaming ? "停止回复" : "发送消息"}
+            title={streaming ? "停止回复" : "发送消息"}
           >
             {streaming ? (
               <Square size={16} />

@@ -14,6 +14,7 @@ interface CanvasModule {
 
 interface CropSpec {
   label: string;
+  kind?: "full" | "tall_slice" | "thumbnail_crop";
   x: number;
   y: number;
   w: number;
@@ -22,10 +23,11 @@ interface CropSpec {
 
 export interface ImageCandidate {
   label: string;
+  kind?: "full" | "tall_slice" | "thumbnail_crop";
   dataUri: string;
 }
 
-const MAX_CANDIDATES = 4;
+const MAX_CANDIDATES = 6;
 const MAX_EDGE = 2400;
 const MIN_UPSCALE_EDGE = 1600;
 
@@ -52,12 +54,11 @@ export function normalizeImageDataUri(dataUri: string): ImageCandidate | null {
   if (!buffer) return null;
   const mime = detectMime(buffer);
   if (!mime) return null;
-  return { label: "原图", dataUri: `data:${mime};base64,${buffer.toString("base64")}` };
+  return { label: "原图", kind: "full", dataUri: `data:${mime};base64,${buffer.toString("base64")}` };
 }
 
 async function loadCanvas(): Promise<CanvasModule> {
-  const dynamicImport = new Function("specifier", "return import(specifier)") as (specifier: string) => Promise<CanvasModule>;
-  return dynamicImport("@napi-rs/canvas");
+  return import("@napi-rs/canvas") as Promise<CanvasModule>;
 }
 
 function clampCrop(spec: CropSpec, width: number, height: number): CropSpec | null {
@@ -87,13 +88,25 @@ export async function buildOCRImageCandidates(dataUri: string): Promise<ImageCan
   const img = await canvasModule.loadImage(source);
   const width = img.width;
   const height = img.height;
-  const specs: CropSpec[] = [{ label: "整图规范化", x: 0, y: 0, w: width, h: height }];
+  const isTallImage = height / Math.max(width, 1) >= 2.2;
+  const specs: CropSpec[] = [];
+
+  if (isTallImage) {
+    specs.push(
+      { label: "长图上半段", kind: "tall_slice", x: 0, y: 0, w: width, h: height * 0.46 },
+      { label: "长图中段", kind: "tall_slice", x: 0, y: height * 0.27, w: width, h: height * 0.46 },
+      { label: "长图下半段", kind: "tall_slice", x: 0, y: height * 0.54, w: width, h: height * 0.46 },
+      { label: "长图正文中下段", kind: "tall_slice", x: 0, y: height * 0.40, w: width, h: height * 0.55 },
+    );
+  }
+
+  specs.push({ label: "整图规范化", kind: "full", x: 0, y: 0, w: width, h: height });
 
   if (width / height >= 1.4) {
     specs.push(
-      { label: "右上缩略图裁剪", x: width * 0.68, y: 0, w: width * 0.31, h: height * 0.62 },
-      { label: "右上紧裁剪", x: width * 0.78, y: 0, w: width * 0.21, h: height * 0.58 },
-      { label: "右侧区域裁剪", x: width * 0.55, y: 0, w: width * 0.44, h: height * 0.74 },
+      { label: "右上缩略图裁剪", kind: "thumbnail_crop", x: width * 0.68, y: 0, w: width * 0.31, h: height * 0.62 },
+      { label: "右上紧裁剪", kind: "thumbnail_crop", x: width * 0.78, y: 0, w: width * 0.21, h: height * 0.58 },
+      { label: "右侧区域裁剪", kind: "thumbnail_crop", x: width * 0.55, y: 0, w: width * 0.44, h: height * 0.74 },
     );
   }
 
@@ -117,7 +130,7 @@ export async function buildOCRImageCandidates(dataUri: string): Promise<ImageCan
     ctx.imageSmoothingEnabled = raw.label === "整图规范化";
     ctx.imageSmoothingQuality = "high";
     ctx.drawImage(img, spec.x, spec.y, spec.w, spec.h, 0, 0, outW, outH);
-    candidates.push({ label: spec.label, dataUri: canvas.toDataURL("image/jpeg", 0.9) });
+    candidates.push({ label: spec.label, kind: spec.kind, dataUri: canvas.toDataURL("image/jpeg", 0.9) });
   }
 
   return candidates.length ? candidates : [normalized];

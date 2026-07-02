@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { getDataRepositories } from "@/lib/data-repositories";
-import { isGarbledText } from "@/lib/agent/loop/text-quality";
+import {
+  DocumentExtractionError,
+  extractResumeDocument,
+  type DocumentExtractionDiagnostics,
+} from "@/lib/server/document-extraction";
 import {
   buildReferenceResumeRawText,
   indexReferenceResumeBestEffort,
@@ -14,7 +18,6 @@ import {
 import { stableHash } from "@/lib/memory/vector-memory";
 import { persistExcellentResumePatternsBestEffort } from "@/lib/excellent-resume-patterns";
 import { ZHIPU_API_URL, ZHIPU_VISION_MODEL } from "@/lib/zhipu";
-import mammoth from "mammoth";
 
 const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
 const MODEL = "deepseek-v4-flash";
@@ -147,42 +150,6 @@ async function ocrWithZhipu(base64DataUri: string): Promise<string> {
   return text;
 }
 
-const DASHSCOPE_BASE = "https://dashscope.aliyuncs.com/compatible-mode/v1";
-
-async function extractViaQwenLong(buffer: Buffer, filename: string): Promise<string> {
-  const apiKey = process.env.DASHSCOPE_API_KEY;
-  if (!apiKey) throw new Error("未配置 DASHSCOPE_API_KEY，文件解析需要阿里云百炼 API");
-
-  const form = new FormData();
-  form.append("file", new Blob([new Uint8Array(buffer)]), filename);
-  form.append("purpose", "file-extract");
-  const upRes = await fetch(`${DASHSCOPE_BASE}/files`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}` },
-    body: form,
-    signal: AbortSignal.timeout(30000),
-  });
-  if (!upRes.ok) throw new Error(`文件上传失败: ${upRes.status}`);
-  const { id: fileId } = await upRes.json() as { id: string };
-
-  const chatRes = await fetch(`${DASHSCOPE_BASE}/chat/completions`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model: "qwen-long",
-      messages: [
-        { role: "system", content: `fileid://${fileId}` },
-        { role: "user", content: "请提取这份PDF文档中的完整文字内容。保留所有量化数据、专业术语。不要总结、不要改写。" },
-      ],
-      max_tokens: 8000,
-    }),
-    signal: AbortSignal.timeout(60000),
-  });
-  if (!chatRes.ok) throw new Error(`Qwen-Long 调用失败: ${chatRes.status}`);
-  const data = await chatRes.json() as { choices?: { message?: { content?: string } }[] };
-  return data.choices?.[0]?.message?.content || "";
-}
-
 function getFileExtension(filename: string): string {
   return filename.split(".").pop()?.toLowerCase() || "";
 }
@@ -200,6 +167,7 @@ export async function POST(request: Request) {
     let requestedNotes = "";
     let requestedTags: string[] = [];
     let saveAsExcellent = false;
+    let extractionDiagnostics: DocumentExtractionDiagnostics | undefined;
 
     if (contentType.includes("multipart/form-data")) {
       const formData = await request.formData();
@@ -216,45 +184,10 @@ export async function POST(request: Request) {
         return NextResponse.json({ success: false, error: "文件大小不能超过 10MB" }, { status: 400 });
       }
 
-      if (ext === "txt" || ext === "md") {
-        rawText = new TextDecoder().decode(fileBuffer);
-      } else if (ext === "docx") {
-        try {
-          const result = await mammoth.extractRawText({ buffer: fileBuffer });
-          rawText = result.value;
-          if (!rawText.trim()) {
-            return NextResponse.json({ success: false, error: "Word 文档中未提取到文本内容" }, { status: 400 });
-          }
-          if (isGarbledText(rawText)) {
-            console.log("[import-reference] mammoth output appears garbled, falling back to Qwen-Long");
-            try {
-              const fallbackText = await extractViaQwenLong(fileBuffer, file.name);
-              if (fallbackText.trim()) {
-                rawText = fallbackText;
-              }
-            } catch (fallbackErr) {
-              console.error("[import-reference] Qwen-Long fallback also failed:", fallbackErr);
-            }
-            if (isGarbledText(rawText) || !rawText.trim()) {
-              return NextResponse.json({
-                success: false,
-                error: "文档编码不兼容，无法提取文本。请尝试：1)将文档另存为 UTF-8 编码的 .txt 文件后重新上传 2)直接粘贴简历文本内容 3)发送截图",
-              }, { status: 400 });
-            }
-          }
-        } catch {
-          return NextResponse.json({ success: false, error: "Word 文档解析失败，请确认文件格式为 .docx" }, { status: 400 });
-        }
-      } else if (ext === "doc") {
-        rawText = await extractViaQwenLong(fileBuffer, file.name);
-        if (!rawText.trim()) {
-          return NextResponse.json({ success: false, error: ".doc 中未提取到文本内容" }, { status: 400 });
-        }
-      } else if (ext === "pdf") {
-        rawText = await extractViaQwenLong(fileBuffer, file.name);
-        if (!rawText.trim()) {
-          return NextResponse.json({ success: false, error: "PDF 中未提取到文本内容" }, { status: 400 });
-        }
+      if (["txt", "md", "docx", "doc", "pdf"].includes(ext)) {
+        const extraction = await extractResumeDocument({ buffer: fileBuffer, filename: file.name, ext });
+        rawText = extraction.text;
+        extractionDiagnostics = extraction.diagnostics;
       } else if (["png", "jpg", "jpeg", "webp"].includes(ext)) {
         const mimeType = ext === "jpg" ? "image/jpeg" : `image/${ext}`;
         const base64 = fileBuffer.toString("base64");
@@ -400,6 +333,7 @@ export async function POST(request: Request) {
         requestedVisibility: requestedVisibilityNormalized,
         roleCategory,
         qualityScore,
+        extraction: extractionDiagnostics,
       }),
       approved_by: approvedBy,
       approved_at: approvedAt,
@@ -438,6 +372,7 @@ export async function POST(request: Request) {
         status,
         qualityScore,
         anonymized: actualVisibility !== "private",
+        extraction: extractionDiagnostics,
         indexing,
         patternMemory,
       },
@@ -445,6 +380,17 @@ export async function POST(request: Request) {
   } catch (error: unknown) {
     if (error instanceof Error && error.message === "Not authenticated") {
       return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+    }
+    if (error instanceof DocumentExtractionError) {
+      return NextResponse.json(
+        {
+          success: false,
+          code: error.code,
+          error: error.userMessage,
+          diagnostics: error.diagnostics,
+        },
+        { status: error.status },
+      );
     }
     const message = error instanceof Error ? error.message : "未知错误";
     console.error("Import reference resume error:", message);

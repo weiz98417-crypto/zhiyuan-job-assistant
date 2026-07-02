@@ -1,5 +1,9 @@
 # 17 — Agent 工具生态
 
+`src/lib/agent/tools/index.ts` 当前实际注册 48 个工具：15 query、26 action、2 interview、5 MCP shim。所有工具都需要在 `tool-governance.ts` 中声明治理元数据，高风险写入工具还必须提供读回校验证据。
+
+---
+
 ## 1. 整体架构概览
 
 Agent 工具系统是"真 Agent"的核心执行层，所有工具遵循统一的注册-执行-格式化范式。
@@ -18,7 +22,7 @@ Agent 工具系统是"真 Agent"的核心执行层，所有工具遵循统一的
      ┌────────▼────────┐   ┌────────▼────────┐   ┌────────▼────────┐
      │   Query Tools    │   │   Action Tools   │   │    MCP Shims    │
      │   (只读，不修改)  │   │  (修改数据/触发流)│   │ (代理到外部服务)  │
-      │      15 个       │   │      21 个       │   │      5 个       │
+     │      15 个       │   │      26 个       │   │      5 个       │
      └─────────────────┘   └─────────────────┘   └─────────────────┘
               │                      │                      │
               └──────────────────────┼──────────────────────┘
@@ -29,7 +33,7 @@ Agent 工具系统是"真 Agent"的核心执行层，所有工具遵循统一的
                           │       2 个            │
                           └─────────────────────┘
 
-共 43 个工具，覆盖查询、动作、面试、MCP 四大类别。
+共 48 个工具，覆盖查询、动作、面试、MCP 四大类别。
 ```
 
 ### 1.1 核心类型定义
@@ -107,7 +111,7 @@ clearActiveAgentTools()     → 清除白名单 (允许所有工具)
 
 ```
 启动阶段:
-  index.ts 导入所有工具 → registry.register(...) × 38
+  index.ts 导入所有工具 → registry.register(...) × 48
   populateAgentTools(agents) → 将 toolNames 解析为 tools 数组
 
 运行时:
@@ -132,13 +136,13 @@ Agent 工具生态的设计遵循一个看似朴素但极为强大的原则—�
 
 这种设计背后的深层逻辑是**组合优于配置**。工具本身不是"API 端点加了一层聊天包装"——而是可以被 LLM 编排的基础原语。一个复杂的求职评估任务可能涉及 5 个工具的链式调用：先 `fetch_jd_content` 抓取 JD 文本，再 `analyze_jd_risks` 扫描风险信号，然后 `evaluate_jd_full` 执行 7 维评估，如果用户对简历不放心，还可能调用 `check_ats_compatibility` 做格式检查。每一个工具独立可测试、独立可迭代，新增一个能力就是新增一个文件——定义 handler、写 formatResult、export 注册——不需要改动任何编排代码。
 
-工具的 **action/query 二分法**直接借鉴了 **CQRS（命令查询职责分离）** 模式。Query 工具（15 个）是纯读操作：不写入任何数据，不产生副作用，即使被 LLM 反复调用也不会造成数据污染。Action 工具（21 个）是写操作：会修改 SQLite、localStorage、触发网络请求或推进 SOP 状态机。这种分类不仅是文档层面的标注——ToolRegistry 的执行层可以利用这个分类做差异化处理：比如在测试环境中 stub 所有 Action 工具但让 Query 工具真实执行，从而安全地验证 Agent 的推理逻辑。
+工具的 **action/query 二分法**直接借鉴了 **CQRS（命令查询职责分离）** 模式。Query 工具（15 个）是纯读操作：不写入任何数据，不产生副作用，即使被 LLM 反复调用也不会造成数据污染。Action 工具（26 个）会修改数据库、创建草稿、触发导出、推进 SOP 或执行评估持久化，因此必须结合工具治理和读回校验使用。这种分类不仅是文档层面的标注——ToolRegistry 的执行层可以利用这个分类做差异化处理：比如在测试环境中 stub 所有 Action 工具但让 Query 工具真实执行，从而安全地验证 Agent 的推理逻辑。
 
 新工具的注册流程也体现了极简设计原则。一个 `ToolDefinition` 只需要四个要素：name（唯一标识）、handler（执行逻辑）、formatResult（格式化输出给 LLM）、category（query/action）。没有复杂的配置文件，没有 XML 描述符，没有注解——就是一个 TypeScript 对象。`populateAgentTools()` 函数自动将工具按白名单注入到各个子 Agent，新工具被注册后 30 秒内就能在全系统中生效。这种轻量级的设计意味着扩展成本极低，鼓励"先做出来试试"的快速迭代节奏。
 
 ---
 
-## 2. 工具全景列表 (43 个)
+## 2. 工具全景列表 (48 个)
 
 ### 2.1 Query 工具 (15 个 — 只读查询)
 
@@ -160,38 +164,43 @@ Agent 工具生态的设计遵循一个看似朴素但极为强大的原则—�
 | 14 | `check_ats_compatibility` | ATS 兼容检查 | 检查简历的 ATS 兼容性（联系方式/量化密度/关键词/格式） | `cv_text*` |
 | 15 | `read_offer_report` | 读取 Offer 报告 | 读取已保存的 Offer 对比/评估报告 | `id*` |
 
-### 2.2 Action 工具 (21 个 — 触发副作用 / 流式输出)
+### 2.2 Action 工具 (26 个 — 触发副作用 / 流式输出)
 
 | # | 工具名 | 中文名 | 描述 | 关键参数 |
 |---|--------|--------|------|----------|
-| 12 | `evaluate_jd` | 评估 JD | 7 维评估 JD，支持文本/URL/截图输入 | `jdText?`, `jdUrl?`, `images?`, `language?` |
-| 13 | `evaluate_offer` | 评估 Offer | 评估录取 offer（薪资/福利/成长性维度分析） | `offerText*`, `language?` |
-| 14 | `generate_cv` | 生成简历 | 根据 JD 和用户画像生成定制化简历 | `jdText*`, `language?`, `targetRole?` |
-| 15 | `scan_portals` | 扫描招聘网站 | 扫描招聘网站，搜索新发布职位 | `query?`, `company?`, `days?` |
-| 16 | `check_health` | 健康检查 | 检查 Pipeline 健康状态（堆积/停滞风险） | `pipeline*`, `thresholds?` |
-| 17 | `fetch_jd_content` | 获取 JD 内容 | 通过 URL 抓取 JD 完整文本内容 | `url*` |
-| 18 | `export_file` | 导出文件 | 导出内容为文件并触发浏览器下载（md/html/txt） | `content*`, `filename*`, `format?` |
-| 19 | `import_resume` | 导入简历 | 导入简历文本并解析为结构化栏位 | `text*` |
-| 20 | `mine_profile` | 挖掘画像 | 启动/推进求职画像挖掘 SOP 流程（5 阶段对话） | `action*` (start/answer/complete/reset), `answer?` |
-| 21 | `evaluate_jd_full` | JD 完整评估 | 风险信号检测 + 7 维评分 + 报告 + 写入数据库（一键评估管道） | `jd_text?`, `jd_url?` |
-| 22 | `analyze_jd_risks` | JD 风险扫描 | 快速扫描 JD 文本的风险信号（黑话/骗术/用工形式） | `jd_text*` |
-| 23 | `self_positioning` | 自我定位引导 | 启动 4 阶段职业方向探索（兴趣→能力→限幅→收敛） | 无参数 |
-| 24 | `prepare_interview_full` | 面试全案准备 | 生成完整面试方案（技术/行为/HR/群面/薪资/反问/STAR） | `company?`, `role?` |
-| 25 | `compare_offers_deep` | Offer 深度对比 | 从 6 维度对比多个 offer，给出加权推荐和谈判策略 | `offers*` (数组) |
-| 26 | `generate_offer_negotiation_strategy` | 生成 Offer 谈判策略 | 基于 Offer 生成谈判重点、话术和让步边界 | `offerText*` |
-| 27 | `generate_offer_hr_question_list` | 生成 HR 问题清单 | 生成入职、薪资、合同、风险相关的 HR 问题列表 | `offerText*` |
-| 28 | `start_interview_session` | 启动模拟面试 | 启动交互式模拟面试会话 | `company*`, `role*` |
-| 29 | `optimize_resume_section` | 简历优化 | 优化简历板块（full/polish/expand/quantify 四种操作） | `section?`, `instruction?`, `operation?`, `effort?` |
-| 30 | `save_resume_section` | 保存到简历 | 用户确认后将优化方案写入简历（SQLite + localStorage） | `section*`, `content*` |
-| 31 | `download_report_pdf` | 导出报告 PDF | 获取评估报告数据，构建 HTML 页面并打开浏览器打印对话框 | `reportNum*` |
-| 32 | `update_report_metadata` | 更新报告信息 | 补充或修正已保存报告的公司、岗位、标题、关键词、风险备注 | `reportNum*`, `company?`, `role?`, `title?`, `keywords?`, `notes?` |
+| 1 | `evaluate_jd` | 评估 JD | Legacy JD 分析工具，不作为完整持久化报告的首选路径 | `jdText?`, `jdUrl?`, `images?`, `language?` |
+| 2 | `evaluate_offer` | 评估 Offer | 评估单个 Offer 并保存结构化报告，需读回校验 | `offerText?`, `images?`, `offerId?` |
+| 3 | `generate_cv` | 生成简历 | 根据 JD 和用户画像生成定制化简历 | `jdText*`, `language?`, `targetRole?` |
+| 4 | `scan_portals` | 扫描招聘网站 | 扫描招聘网站，搜索新发布职位 | `query?`, `company?`, `days?` |
+| 5 | `check_health` | 健康检查 | 检查 Pipeline 或系统健康状态 | `pipeline?`, `thresholds?` |
+| 6 | `fetch_jd_content` | 获取 JD 内容 | 通过 URL 抓取 JD 完整文本内容 | `url*` |
+| 7 | `export_file` | 导出文件 | 导出内容为文件并验证文件存在、大小和 hash | `content*`, `filename*`, `format?` |
+| 8 | `import_resume` | 导入简历 | 导入简历文本并解析为结构化栏位 | `text*` |
+| 9 | `mine_profile` | 挖掘画像 | 启动/推进求职画像挖掘 SOP 流程 | `action*`, `answer?` |
+| 10 | `evaluate_jd_full` | JD 完整评估 | OCR/抓取/风险扫描 + A-G 评估 + 报告/JD 持久化 + 读回校验 | `jd_text?`, `jd_url?`, `images?` |
+| 11 | `analyze_jd_risks` | JD 风险扫描 | 快速扫描 JD 文本的风险信号 | `jd_text*` |
+| 12 | `self_positioning` | 自我定位引导 | 启动 4 阶段职业方向探索 | 无参数 |
+| 13 | `prepare_interview_full` | 面试全案准备 | 生成完整面试准备方案 | `company?`, `role?` |
+| 14 | `compare_offers_deep` | Offer 深度对比 | 对比 2 个或更多 Offer，单个 Offer 不应调用 | `offers*` |
+| 15 | `generate_offer_negotiation_strategy` | 生成 Offer 谈判策略 | 基于 Offer 报告生成谈判策略 | `offerText?`, `reportId?` |
+| 16 | `generate_offer_hr_question_list` | 生成 HR 问题清单 | 生成入职、薪资、合同、风险相关问题 | `offerText?`, `reportId?` |
+| 17 | `start_interview_session` | 启动模拟面试 | 启动交互式模拟面试会话 | `company*`, `role*` |
+| 18 | `optimize_resume_section` | 简历优化 | 生成某个简历板块的优化草稿 | `section?`, `instruction?`, `operation?`, `effort?` |
+| 19 | `create_resume_edit_proposal` | 创建简历修改草稿 | 创建待确认草稿并读回验证 proposal | `sectionId*`, `proposedContent*` |
+| 20 | `apply_resume_edit_proposal` | 应用简历修改 | 用户确认后应用草稿，校验目标内容 hash | `proposalId*` |
+| 21 | `discard_resume_edit_proposal` | 放弃简历草稿 | 丢弃 pending proposal 并读回状态 | `proposalId*` |
+| 22 | `rollback_resume_edit_proposal` | 回滚简历修改 | 将已应用修改回滚到上一版本并读回验证 | `proposalId*` |
+| 23 | `save_resume_section` | 保存到简历 | 兼容旧路径：保存某个简历模块，需读回验证 | `section*`, `content*` |
+| 24 | `save_reference_resume` | 保存优秀简历 | 保存优秀/参考简历，必须确认岗位方向，支持 private/team | `resumeText*`, `role_category*`, `visibility?` |
+| 25 | `download_report_pdf` | 导出报告 PDF | 生成报告 PDF 并验证导出结果 | `reportNum*` |
+| 26 | `update_report_metadata` | 更新报告信息 | 补充或修正已保存报告的公司、岗位、标题、关键词、风险备注 | `reportNum*`, `company?`, `role?`, `title?`, `keywords?`, `notes?` |
 
 ### 2.3 Interview 工具 (2 个)
 
 | # | 工具名 | 中文名 | 描述 | 关键参数 |
 |---|--------|--------|------|----------|
-| 29 | `generate_interview_questions` | 生成面试题 | 根据 JD/简历/模式生成 8-12 道面试题（行为/技术/案例/文化 四类） | `jdText?`, `cvText?`, `company?`, `role?`, `mode?`, `count?` |
-| 30 | `score_interview_answer` | 评分面试回答 | 对面试回答进行四维度评分（结构/具体度/亮点/时间）含逐段反馈 | `question*`, `answer*`, `mode?`, `context?` |
+| 1 | `generate_interview_questions` | 生成面试题 | 根据 JD/简历/模式生成面试题，模拟面试时必须一次只推进一题 | `jdText?`, `cvText?`, `company?`, `role?`, `mode?`, `count?` |
+| 2 | `score_interview_answer` | 评分面试回答 | 对面试回答进行四维度评分（结构/具体度/亮点/时间）含逐段反馈 | `question*`, `answer*`, `mode?`, `context?` |
 
 **评分维度**（`score_interview_answer` 输出结构）：
 - `structure` — 结构完整度（STAR 法则覆盖度）
@@ -213,11 +222,11 @@ Agent 工具生态的设计遵循一个看似朴素但极为强大的原则—�
 
 | # | 工具名 | 中文名 | 描述 | 后端来源 | 关键参数 |
 |---|--------|--------|------|----------|----------|
-| 31 | `web_search` | 网络搜索 | AI 知识库 + 维基百科并行搜索，覆盖公司信息、薪资行情、政策法规 | `/api/agent/search` + Wikipedia API | `query*` |
-| 32 | `get_weather` | 天气查询 | 查询城市天气（wttr.in，无需 API key），用于面试出行准备 | wttr.in | `city*` |
-| 33 | `search_place` | 地点搜索 | 搜索地点/公司地址位置信息 | DuckDuckGo API | `keyword*`, `city?` |
-| 34 | `get_directions` | 路线规划 | 查询通勤/出行路线，支持驾车/公交/步行三种方式 | DuckDuckGo API | `origin*`, `destination*`, `mode?` |
-| 35 | `search_jobs` | 搜索职位 | 搜索职位信息（Boss 直聘/拉勾/猎聘等平台聚合） | DuckDuckGo API | `keyword*`, `city?` |
+| 1 | `web_search` | 网络搜索 | AI 知识库 + 维基百科并行搜索，覆盖公司信息、薪资行情、政策法规 | `/api/agent/search` + Wikipedia API | `query*` |
+| 2 | `get_weather` | 天气查询 | 查询城市天气（wttr.in，无需 API key），用于面试出行准备 | wttr.in | `city*` |
+| 3 | `search_place` | 地点搜索 | 搜索地点/公司地址位置信息 | DuckDuckGo API | `keyword*`, `city?` |
+| 4 | `get_directions` | 路线规划 | 查询通勤/出行路线，支持驾车/公交/步行三种方式 | DuckDuckGo API | `origin*`, `destination*`, `mode?` |
+| 5 | `search_jobs` | 搜索职位 | 搜索职位信息（Boss 直聘/拉勾/猎聘等平台聚合） | DuckDuckGo API | `keyword*`, `city?` |
 
 ---
 
@@ -326,11 +335,12 @@ populateAgentTools(agents)
 
 | Agent | 工具数量 | 白名单 |
 |-------|---------|--------|
-| **general** (通用助手) | 43 (全部) | `toolNames: []` — 空数组 = 全部工具 |
+| **general** (通用助手) | 48 (全部) | `toolNames: []` — 空数组 = 全部工具 |
 | **evaluate** (JD 评估) | 11 | `evaluate_jd_full`, `get_recent_jd_context`, `read_file`, `get_profile`, `fetch_jd_content`, `analyze_jd_risks`, `decode_black_market_terms`, `get_report_detail`, `update_report_metadata`, `export_file`, `download_report_pdf` |
-| **interview** (面试教练) | 4 | `generate_interview_questions`, `score_interview_answer`, `start_interview_session`, `prepare_interview_full` |
+| **interview** (面试教练) | 4+上下文工具 | `generate_interview_questions`, `score_interview_answer`, `start_interview_session`, `prepare_interview_full`，并在上下文读取场景使用 `read_file`, `get_recent_jd_context`, `search_applications`, `get_report_detail` |
 | **profile** (求职画像) | 7 | `get_profile`, `get_recommendations`, `get_profile_insights`, `self_positioning`, `check_pipeline_health`, `get_recent_activity`, `mine_profile` |
-| **resume** (简历优化) | 9 | `read_file`, `import_resume`, `generate_cv`, `evaluate_jd`, `export_file`, `get_reference_detail`, `optimize_resume_section`, `save_resume_section`, `check_ats_compatibility` |
+| **resume** (简历优化) | 14 | `read_file`, `import_resume`, `generate_cv`, `evaluate_jd`, `export_file`, `get_reference_detail`, `optimize_resume_section`, `create_resume_edit_proposal`, `apply_resume_edit_proposal`, `discard_resume_edit_proposal`, `rollback_resume_edit_proposal`, `save_resume_section`, `save_reference_resume`, `check_ats_compatibility` |
+| **offer** (Offer 顾问) | 8 | `evaluate_offer`, `read_offer_report`, `generate_offer_negotiation_strategy`, `generate_offer_hr_question_list`, `compare_offers_deep`, `web_search`, `export_file`, `download_report_pdf` |
 
 ### 4.3 白名单强制执行
 
@@ -420,11 +430,11 @@ handler(params):
   → catch → { success: false, error: "..." }
 ```
 
-**模式 B — 浏览器本地型**
+**模式 B — 浏览器缓存 + 服务端同步型**
 ```
 handler(params):
   → 创建 Blob → URL.createObjectURL → <a>.click() (export_file)
-  → localStorage 读写 + SQLite API 同步 (optimize/save_resume_section)
+  → localStorage/Dexie 作为缓存，主写入通过 repository API，并由读回校验确认
 ```
 
 **模式 C — SOP 状态机型**
@@ -433,7 +443,7 @@ handler(params):
   action = params.action
   ├─ "start" → initSOP() → 返回阶段引导语
   ├─ "answer" → advanceStage() → 推进 SOP  → 返回下一阶段
-  ├─ "complete" → 写入 SQLite → clearSOP()
+  ├─ "complete" → 写入 repository-backed profile/memory 状态 → clearSOP()
   └─ "reset" → clearSOP()
 ```
 
@@ -579,7 +589,7 @@ getToolDisplay(toolName):
 1. **统一的 ToolDefinition 接口** — 所有工具从注册、执行到格式化走同一管道，新增工具只需实现该接口
 2. **白名单隔离** — 每个 Agent 只能调用授权的工具子集，防止越权操作（如面试 Agent 不能写简历）
 3. **错误自愈** — `recoverable` + `retryHint` 让 LLM 能自行判断是否重试以及如何修正参数
-4. **SOP 状态机** — `mine_profile` 用 action-based 状态机管理多轮对话流程，状态持久化在内存
+4. **SOP 状态机** — `mine_profile` 和引导类任务用 action-based 状态机管理多轮流程，过程状态进入会话上下文，结构化结果写入 repository-backed profile/memory 表
 5. **MCP shim 模式** — 前端工具代理到外部服务，预留 `/api/agent/mcp/call` 桥梁供后续接入真正 MCP Server
 6. **展示层解耦** — `tool-display-names.ts` 将工具名映射为中文标签 + emoji，UI 层不硬编码
 7. **格式化独立** — 每个工具自带 `formatResult`，将结构化数据转换为 LLM 友好文本，输出质量由工具自身保证

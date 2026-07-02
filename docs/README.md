@@ -7,6 +7,8 @@ Start here when you need to understand, run, or change Zhiyuan.
 | Document | Use it for |
 | --- | --- |
 | [../README.md](../README.md) | Product overview, quick start, and high-level capabilities. |
+| [PRD.md](PRD.md) | Detailed product requirements, module map, Agent governance, eval gates, and loop engineering goals. |
+| [course-system/README.md](course-system/README.md) | Full course system built from the project: requirements, POC, multi-agent architecture, evals, page collaboration, auth, privacy, and safety. |
 | [SETUP.md](SETUP.md) | Local setup, LAN testing, auth, OCR, PostgreSQL, and embeddings. |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Runtime architecture, Agent loop, data layer, image intake, and memory. |
 | [SCRIPTS.md](SCRIPTS.md) | npm scripts and operational commands. |

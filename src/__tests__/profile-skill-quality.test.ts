@@ -23,10 +23,58 @@ describe("profile skill quality gate", () => {
       "技术",
       "请描述整体流程",
       "入职后如果产品研发团队让你做一个数据",
+      "协调能力",
+      "理解主数据",
+      "对接后端开发团队",
+      "UAT组织",
+      "协助创意团队",
+      "复杂系统",
+      "带你直接进入",
+      "优秀的游戏审美或策划经验",
+      "灵性",
+      "主流的大模型框架和技术",
+      "良好的编程能力和逻辑思维能力",
+      "至少一种编程语言",
+      "API",
     ];
 
     for (const phrase of rejected) {
       expect(normalizeSkillClaim({ skill: phrase, evidence: phrase, confidence: 0.9 })).toBeNull();
+    }
+  });
+
+  it("rejects low-value extracted profile signal examples before storage", () => {
+    const invalidSignals = [
+      "过至少1个数据经营或BI类项目",
+      "其中至少2年产品",
+      "协调能力",
+      "理解主数据",
+      "对接后端开发团队",
+      "UAT组织",
+      "协助创意团队",
+      "复杂系统",
+      "业务",
+      "技术",
+      "的技术方案",
+      "优先邀你下午茶",
+      "带你直接进入",
+      "优秀的游戏审美或策划经验",
+      "灵性",
+      "API",
+    ];
+
+    for (const skill of invalidSignals) {
+      expect(normalizeProfileSignalForStorage({
+        source: "auto_scan",
+        signal_type: "skill_claim",
+        content_json: {
+          skill,
+          evidence: skill,
+          confidence: 0.88,
+        },
+      })).toMatchObject({
+        accepted: false,
+      });
     }
   });
 

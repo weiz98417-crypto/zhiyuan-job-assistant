@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>筝筝纸鸢 · 项目简介</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --blue-50: #eff6ff;
+    --blue-100: #dbeafe;
+    --blue-200: #bfdbfe;
+    --blue-400: #60a5fa;
+    --blue-500: #3b82f6;
+    --blue-600: #2563eb;
+    --blue-700: #1d4ed8;
+    --gray-50: #f9fafb;
+    --gray-100: #f3f4f6;
+    --gray-200: #e5e7eb;
+    --gray-300: #d1d5db;
+    --gray-400: #9ca3af;
+    --gray-500: #6b7280;
+    --gray-600: #4b5563;
+    --gray-700: #374151;
+    --gray-800: #1f2937;
+    --gray-900: #111827;
+    --green-50: #f0fdf4;
+    --green-500: #22c55e;
+    --green-600: #16a34a;
+    --amber-50: #fffbeb;
+    --amber-500: #f59e0b;
+    --amber-600: #d97706;
+    --red-50: #fef2f2;
+    --red-500: #ef4444;
+    --red-600: #dc2626;
+    --purple-50: #faf5ff;
+    --purple-500: #a855f7;
+    --pink-50: #fdf2f8;
+    --pink-500: #ec4899;
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    --font-mono: "SF Mono", "Cascadia Code", "Fira Code", "Consolas", monospace;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background: linear-gradient(160deg, #fff7ed 0%, #fef3c7 28%, #dbeafe 62%, #eef2ff 100%);
+    color: var(--gray-800);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 40px 20px;
+  }
+
+  .card {
+    max-width: 1000px;
+    width: 100%;
+    background: #fff;
+    border-radius: 18px;
+    box-shadow: 0 4px 24px rgba(0,0,0,.06), 0 1px 4px rgba(0,0,0,.04);
+    overflow: hidden;
+    margin: 0 auto;
+  }
+
+  .card-header {
+    background: linear-gradient(135deg, #7c2d12 0%, #d97706 42%, #2563eb 100%);
+    padding: 40px 48px;
+    color: #fff;
+  }
+  .card-header .tag {
+    display: inline-block;
+    padding: 4px 14px;
+    border-radius: 14px;
+    background: rgba(255,255,255,.2);
+    backdrop-filter: blur(6px);
+    font-size: 12px; font-weight: 600;
+    letter-spacing: .04em;
+    margin-bottom: 16px;
+  }
+  .card-header h1 {
+    font-size: 32px; font-weight: 800;
+    letter-spacing: -.01em;
+    margin-bottom: 8px;
+  }
+  .card-header .subtitle {
+    font-size: 14px; opacity: .9;
+    line-height: 1.7;
+    max-width: 720px;
+  }
+
+  .card-body { padding: 40px 48px; }
+  .section { margin-bottom: 36px; }
+  .section:last-child { margin-bottom: 0; }
+  .section-head {
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 16px;
+  }
+  .section-icon {
+    width: 38px; height: 38px;
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 17px; flex-shrink: 0;
+  }
+  .section-head h2 {
+    font-size: 18px; font-weight: 750; color: var(--gray-900);
+  }
+  .divider {
+    border: none; border-top: 1px solid var(--gray-200);
+    margin: 32px 0;
+  }
+
+  .intro-text {
+    font-size: 14px; color: var(--gray-600); line-height: 1.85;
+    margin-bottom: 18px;
+  }
+  .intro-text strong { color: var(--amber-600); }
+  .intro-highlights {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+  }
+  .intro-highlight {
+    background: #fff7ed;
+    border-radius: 10px;
+    padding: 16px;
+    text-align: center;
+  }
+  .intro-highlight .val {
+    font-size: 22px; font-weight: 800; color: var(--amber-600);
+    letter-spacing: -.01em;
+  }
+  .intro-highlight .label {
+    font-size: 12px; color: var(--gray-500); margin-top: 2px;
+  }
+
+  .arch-flow {
+    background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+    border: 1px solid var(--gray-200);
+    border-radius: 14px;
+    padding: 32px 24px 24px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+  }
+  .arch-row {
+    display: flex;
+    align-items: stretch;
+    justify-content: center;
+    gap: 0;
+    width: 100%;
+  }
+  .arch-node, .arch-node-main {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    text-align: center;
+    transition: transform .15s, box-shadow .15s;
+  }
+  .arch-node { border-radius: 10px; padding: 10px 14px; }
+  .arch-node-main { border-radius: 12px; padding: 14px 28px; }
+  .arch-node:hover, .arch-node-main:hover { transform: translateY(-1px); }
+
+  .arch-node.source {
+    background: #fff; border: 1.5px dashed var(--gray-300);
+    min-width: 220px;
+  }
+  .arch-node.source .name { font-size: 13px; font-weight: 700; color: var(--gray-700); }
+  .arch-node.source .sub  { font-size: 11px; color: var(--gray-400); margin-top: 1px; }
+
+  .arch-node-main.gateway {
+    background: linear-gradient(135deg, #92400e, #d97706);
+    color: #fff; box-shadow: 0 2px 12px rgba(217,119,6,.22);
+    min-width: 380px;
+  }
+  .arch-node-main.gateway .name { font-size: 14px; font-weight: 750; }
+  .arch-node-main.gateway .sub  { font-size: 11px; opacity: .84; margin-top: 3px; line-height: 1.5; }
+
+  .arch-node-main.orchestrator {
+    background: linear-gradient(135deg, #1d4ed8, #3b82f6);
+    color: #fff; box-shadow: 0 2px 12px rgba(37,99,235,.2);
+    min-width: 420px;
+  }
+  .arch-node-main.orchestrator .name { font-size: 14px; font-weight: 750; }
+  .arch-node-main.orchestrator .sub  { font-size: 11px; opacity: .84; margin-top: 3px; line-height: 1.5; }
+
+  .arch-node.agent {
+    background: #fff;
+    border: 1.5px solid var(--amber-500);
+    box-shadow: 0 1px 4px rgba(245,158,11,.12);
+    min-width: 90px; flex: 1; max-width: 120px;
+  }
+  .arch-node.agent .name { font-size: 12px; font-weight: 750; color: var(--amber-600); }
+  .arch-node.agent .sub  { font-size: 10px; color: var(--gray-400); margin-top: 2px; }
+
+  .arch-node.phase {
+    background: #fff;
+    border: 1.5px solid var(--green-500);
+    box-shadow: 0 1px 4px rgba(34,197,94,.1);
+    min-width: 100px; flex: 1; max-width: 145px;
+    padding: 12px 10px;
+  }
+  .arch-node.phase .name { font-size: 11px; font-weight: 750; color: var(--green-600); line-height: 1.3; }
+  .arch-node.phase .sub  { font-size: 10px; color: var(--gray-400); margin-top: 3px; line-height: 1.4; }
+
+  .arch-bar.tools {
+    background: #faf5ff; border: 1px solid #e9d5ff;
+    border-radius: 10px; padding: 10px 20px;
+    display: flex; gap: 16px; align-items: center;
+  }
+  .arch-bar.tools .label { font-size: 11px; font-weight: 700; color: #7c3aed; margin-right: 4px; }
+  .arch-bar.tools .item { font-size: 11px; color: var(--gray-600); }
+
+  .arch-bar.storage {
+    background: #fdf2f8; border: 1px solid #fbcfe8;
+    border-radius: 10px; padding: 10px 20px;
+    display: flex; gap: 16px; align-items: center;
+  }
+  .arch-bar.storage .label { font-size: 11px; font-weight: 700; color: #db2777; margin-right: 4px; }
+  .arch-bar.storage .item { font-size: 11px; color: var(--gray-600); }
+
+  .arch-connector {
+    display: flex; flex-direction: column;
+    align-items: center; padding: 6px 0;
+  }
+  .arch-connector .line { width: 2px; height: 16px; background: var(--gray-300); border-radius: 1px; }
+  .arch-connector .arrow {
+    width: 0; height: 0;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-top: 7px solid var(--gray-300);
+  }
+  .arch-connector .dot  {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--gray-300);
+  }
+  .arch-row-gap { height: 4px; }
+
+  .tech-categories { display: grid; gap: 16px; }
+  .tech-cat-title {
+    font-size: 12px; font-weight: 700; color: var(--gray-400);
+    text-transform: uppercase; letter-spacing: .06em;
+    margin-bottom: 8px;
+  }
+  .tech-tags { display: flex; flex-wrap: wrap; gap: 8px; }
+  .tech-tag {
+    padding: 6px 14px;
+    border-radius: 16px;
+    font-size: 13px; font-weight: 600;
+    background: var(--gray-50);
+    border: 1px solid var(--gray-200);
+    color: var(--gray-700);
+    transition: border-color .15s;
+  }
+  .tech-tag:hover { border-color: var(--amber-500); }
+
+  .learn-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+  .learn-item {
+    padding: 14px 16px;
+    border-radius: 10px;
+    background: var(--gray-50);
+    border-left: 3px solid var(--amber-500);
+  }
+  .learn-item h4 {
+    font-size: 13px; font-weight: 700; color: var(--gray-800);
+    margin-bottom: 4px;
+  }
+  .learn-item p {
+    font-size: 12px; color: var(--gray-500); line-height: 1.6;
+  }
+
+  .include-blocks { display: grid; gap: 12px; }
+  .include-block {
+    background: var(--gray-50);
+    border-radius: 10px;
+    padding: 16px 20px;
+  }
+  .include-block-head {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 8px;
+  }
+  .include-block-count {
+    width: 30px; height: 30px; border-radius: 7px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 800; flex-shrink: 0;
+  }
+  .include-block h4 { font-size: 14px; font-weight: 700; color: var(--gray-800); }
+  .include-block .detail {
+    font-size: 12px; color: var(--gray-500); line-height: 1.65;
+    margin-left: 40px;
+  }
+  .include-block .detail code {
+    font-family: var(--font-mono);
+    background: var(--gray-200);
+    padding: 1px 6px; border-radius: 3px;
+    font-size: 11px; color: var(--gray-700);
+  }
+
+  @media (max-width: 700px) {
+    body { padding: 24px 12px; }
+    .card-header { padding: 28px 24px; }
+    .card-body { padding: 24px; }
+    .card-header h1 { font-size: 28px; }
+    .intro-highlights { grid-template-columns: repeat(2, 1fr); }
+    .learn-grid { grid-template-columns: 1fr; }
+    .arch-node-main.gateway,
+    .arch-node-main.orchestrator { min-width: auto; width: 100%; }
+    .arch-node.agent { min-width: 60px; padding: 8px 6px; }
+    .arch-node.agent .name { font-size: 10px; }
+    .arch-node.phase { min-width: 60px; padding: 8px 6px; }
+    .arch-bar.tools, .arch-bar.storage { flex-wrap: wrap; gap: 8px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="card">
+
+  <div class="card-header">
+    <div class="tag">AI Job Search · Multi-Agent · China-Native</div>
+    <h1>筝筝纸鸢</h1>
+    <p class="subtitle">面向中国求职市场的 AI 驱动求职管理系统。它把职位评估、简历优化、面试准备、投递追踪、Offer 对比和长期求职画像整合成一个可持续使用的个人工作台，让求职从焦虑海投变成有节奏、有判断、有记忆的职业决策流程。</p>
+  </div>
+
+  <div class="card-body">
+
+    <div class="section">
+      <div class="section-head">
+        <div class="section-icon" style="background:var(--blue-50);color:var(--blue-600);">&#9679;</div>
+        <h2>项目简介</h2>
+      </div>
+      <p class="intro-text">
+        <strong>纸鸢求职</strong> 是一个围绕“求职决策”打造的企业级 AI 实战项目。它把 JD 评估、简历优化、面试准备、投递追踪和 Offer 决策串成一条完整业务链路，帮助用户从大量岗位信息中快速判断机会质量、识别潜在风险，并把每一次分析结果沉淀为可复用的求职资产。
+      </p>
+      <p class="intro-text">
+        当用户粘贴一段 JD、上传招聘截图，或直接询问<strong>「这个岗位值不值得投？」</strong>，系统会自动完成岗位解析、硬性要求拆解、薪资福利提取、风险信号识别和个人匹配判断，输出结构化 A-G 评估报告。报告会继续驱动后续动作：匹配度高的岗位进入简历定向优化，面试阶段自动生成针对性问题，收到 Offer 后继续完成税前税后、五险一金、试用期、成长空间和谈判策略分析。
+      </p>
+      <p class="intro-text">
+        项目核心价值在于，它完整呈现了大模型应用从“单次问答”升级为“业务执行系统”的落地路径：<strong>Agent Orchestrator</strong> 负责任务分发，评估、简历、面试、画像、Offer 等专项 Agent 分工协作，44 个工具完成分析、生成、保存、导出和检索，数据层与长期记忆持续沉淀业务结果。这套模式不仅适用于求职，也可以迁移到招聘、销售、咨询、培训、客户成功和企业知识库等高价值服务场景。
+      </p>
+      <div class="intro-highlights">
+        <div class="intro-highlight">
+          <div class="val">11</div>
+          <div class="label">核心业务页面</div>
+        </div>
+        <div class="intro-highlight">
+          <div class="val">44</div>
+          <div class="label">Agent 工具</div>
+        </div>
+        <div class="intro-highlight">
+          <div class="val">98</div>
+          <div class="label">API Route 文件</div>
+        </div>
+        <div class="intro-highlight">
+          <div class="val">35</div>
+          <div class="label">测试文件</div>
+        </div>
+      </div>
+    </div>
+
+    <hr class="divider">
+
+    <div class="section">
+      <div class="section-head">
+        <div class="section-icon" style="background:var(--amber-50);color:var(--amber-600);">&equiv;</div>
+        <h2>系统架构</h2>
+      </div>
+      <div class="arch-flow">
+
+        <div class="arch-node source">
+          <span class="name">求职者输入</span>
+          <span class="sub">JD 文本 / URL / 截图 / 简历 / Offer / 对话</span>
+        </div>
+
+        <div class="arch-connector"><div class="dot"></div><div class="line"></div><div class="arrow"></div></div>
+
+        <div class="arch-node-main gateway">
+          <span class="name">Next.js App Router + API Gateway</span>
+          <span class="sub">页面交互 &nbsp;·&nbsp; SSE 流式响应 &nbsp;·&nbsp; OCR/图片入口 &nbsp;·&nbsp; 用户认证 &nbsp;·&nbsp; 数据路由</span>
+        </div>
+
+        <div class="arch-connector"><div class="dot"></div><div class="line"></div><div class="arrow"></div></div>
+
+        <div class="arch-node-main orchestrator">
+          <span class="name">Agent Orchestrator 主控编排</span>
+          <span class="sub">意图识别 &nbsp;·&nbsp; Sub-Agent 选择 &nbsp;·&nbsp; 工具策略 &nbsp;·&nbsp; 上下文构建 &nbsp;·&nbsp; 结果写回</span>
+        </div>
+
+        <div class="arch-connector"><div class="dot"></div><div class="line"></div><div class="arrow"></div></div>
+
+        <div class="arch-row" style="gap:8px">
+          <div class="arch-node agent">
+            <span class="name">Evaluate</span>
+            <span class="sub">JD 评估</span>
+          </div>
+          <div class="arch-node agent">
+            <span class="name">Resume</span>
+            <span class="sub">简历优化</span>
+          </div>
+          <div class="arch-node agent">
+            <span class="name">Interview</span>
+            <span class="sub">面试教练</span>
+          </div>
+          <div class="arch-node agent">
+            <span class="name">Offer</span>
+            <span class="sub">薪酬对比</span>
+          </div>
+        </div>
+
+        <div class="arch-row-gap"></div>
+
+        <div class="arch-row" style="gap:8px">
+          <div class="arch-node agent">
+            <span class="name">Profile</span>
+            <span class="sub">求职画像</span>
+          </div>
+          <div class="arch-node agent">
+            <span class="name">General</span>
+            <span class="sub">通用问答</span>
+          </div>
+          <div class="arch-node agent">
+            <span class="name">Discovery</span>
+            <span class="sub">职位发现</span>
+          </div>
+          <div class="arch-node agent">
+            <span class="name">Tracker</span>
+            <span class="sub">投递状态</span>
+          </div>
+        </div>
+
+        <div class="arch-connector"><div class="dot"></div><div class="line"></div><div class="arrow"></div></div>
+
+        <div class="arch-row" style="gap:8px">
+          <div class="arch-node phase">
+            <span class="name">JD Evaluation</span>
+            <span class="sub">A-G 报告<br>风险词识别</span>
+          </div>
+          <div class="arch-node phase">
+            <span class="name">CV Judge</span>
+            <span class="sub">四维模型<br>8 套岗位模板</span>
+          </div>
+          <div class="arch-node phase">
+            <span class="name">Memory</span>
+            <span class="sub">参考简历<br>反馈晋升机制</span>
+          </div>
+          <div class="arch-node phase">
+            <span class="name">Governance</span>
+            <span class="sub">用户隔离<br>工具策略防护</span>
+          </div>
+        </div>
+
+        <div class="arch-connector"><div class="dot"></div><div class="line"></div><div class="arrow"></div></div>
+
+        <div class="arch-bar tools">
+          <span class="label">工具层</span>
+          <span class="item">evaluate_jd_full</span>
+          <span style="color:var(--gray-300)">·</span>
+          <span class="item">optimize_resume_section</span>
+          <span style="color:var(--gray-300)">·</span>
+          <span class="item">prepare_interview_full</span>
+          <span style="color:var(--gray-300)">·</span>
+          <span class="item">compare_offers_deep</span>
+          <span style="color:var(--gray-300)">·</span>
+          <span class="item">scan_portals</span>
+        </div>
+
+        <div class="arch-connector"><div class="dot"></div><div class="line"></div><div class="arrow"></div></div>
+
+        <div class="arch-bar storage">
+          <span class="label">存储层</span>
+          <span class="item">SQLite 默认本地持久化</span>
+          <span style="color:var(--gray-300)">·</span>
+          <span class="item">PostgreSQL + pgvector 可选长期记忆</span>
+        </div>
+
+      </div>
+    </div>
+
+    <hr class="divider">
+
+    <div class="section">
+      <div class="section-head">
+        <div class="section-icon" style="background:var(--amber-50);color:var(--amber-600);">&lt;/&gt;</div>
+        <h2>技术栈</h2>
+      </div>
+      <div class="tech-categories">
+        <div class="tech-cat">
+          <div class="tech-cat-title">前端 &amp; 应用框架</div>
+          <div class="tech-tags">
+            <span class="tech-tag">Next.js 16</span>
+            <span class="tech-tag">React 19</span>
+            <span class="tech-tag">TypeScript 5</span>
+            <span class="tech-tag">Tailwind CSS 4</span>
+            <span class="tech-tag">Framer Motion</span>
+          </div>
+        </div>
+        <div class="tech-cat">
+          <div class="tech-cat-title">AI &amp; Agent</div>
+          <div class="tech-tags">
+            <span class="tech-tag">DeepSeek</span>
+            <span class="tech-tag">Zhipu GLM Vision</span>
+            <span class="tech-tag">Agent Loop</span>
+            <span class="tech-tag">Tool Registry</span>
+            <span class="tech-tag">SSE Streaming</span>
+          </div>
+        </div>
+        <div class="tech-cat">
+          <div class="tech-cat-title">数据 &amp; 记忆</div>
+          <div class="tech-tags">
+            <span class="tech-tag">SQLite</span>
+            <span class="tech-tag">better-sqlite3</span>
+            <span class="tech-tag">PostgreSQL</span>
+            <span class="tech-tag">pgvector</span>
+            <span class="tech-tag">Dexie</span>
+          </div>
+        </div>
+        <div class="tech-cat">
+          <div class="tech-cat-title">文档 &amp; 自动化</div>
+          <div class="tech-tags">
+            <span class="tech-tag">Playwright</span>
+            <span class="tech-tag">Puppeteer</span>
+            <span class="tech-tag">Mammoth</span>
+            <span class="tech-tag">pdf-parse</span>
+            <span class="tech-tag">Cheerio</span>
+          </div>
+        </div>
+        <div class="tech-cat">
+          <div class="tech-cat-title">测试 &amp; 工程化</div>
+          <div class="tech-tags">
+            <span class="tech-tag">Vitest</span>
+            <span class="tech-tag">ESLint 9</span>
+            <span class="tech-tag">OpenSpec</span>
+            <span class="tech-tag">Migration Scripts</span>
+            <span class="tech-tag">Memory Evals</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <hr class="divider">
+
+    <div class="section">
+      <div class="section-head">
+        <div class="section-icon" style="background:var(--green-50);color:var(--green-600);">&#9830;</div>
+        <h2>学习收获</h2>
+      </div>
+      <div class="learn-grid">
+        <div class="learn-item">
+          <h4>AI 产品闭环设计</h4>
+          <p>把求职链路拆成职位发现、JD 评估、简历优化、投递追踪、面试准备、Offer 对比、复盘分析七个连续环节，让 AI 输出直接进入用户下一步行动。</p>
+        </div>
+        <div class="learn-item">
+          <h4>多 Agent 路由与工具编排</h4>
+          <p>通过 Orchestrator 识别意图并调度 Evaluate、Resume、Interview、Profile、Offer 等专项 Agent，每个 Agent 拥有独立工具白名单和上下文边界。</p>
+        </div>
+        <div class="learn-item">
+          <h4>简历优化 Judge 引擎</h4>
+          <p>实现 Operation、Effort、JD、Reference 四维优先级模型，支持 4 类操作、5 档改写强度、XX 占位符机制和 8 套岗位写作模板。</p>
+        </div>
+        <div class="learn-item">
+          <h4>中国求职语境建模</h4>
+          <p>围绕五险一金、税前税后、试用期、外包风险、加班暗语、国企/外企/创业公司差异等本土信息，建立更贴近真实决策的评估逻辑。</p>
+        </div>
+        <div class="learn-item">
+          <h4>长期记忆与参考简历检索</h4>
+          <p>将优秀参考简历切块、向量化、按角色和任务检索，并通过 accept/reject 反馈促进或降级记忆模式，做到学习风格而不直接复制原文。</p>
+        </div>
+        <div class="learn-item">
+          <h4>图像入口与边界治理</h4>
+          <p>上传截图先进入 image-intake 分类与 OCR/视觉抽取，区分 JD、Offer、简历和无关图片，避免普通聊天模型随意解释关键求职材料。</p>
+        </div>
+        <div class="learn-item">
+          <h4>服务端数据层演进</h4>
+          <p>从本地 SQLite 过渡到可选 PostgreSQL，抽象 data-repositories 作为统一访问层，同时保留本地优先、用户数据可控的产品原则。</p>
+        </div>
+        <div class="learn-item">
+          <h4>可验证的 Agent 质量体系</h4>
+          <p>围绕 JD 路由、面试会话绑定、记忆评测、简历保存、防泄露策略、报告摘要等高风险链路建立测试，减少 Agent 随机性带来的产品回归。</p>
+        </div>
+      </div>
+    </div>
+
+    <hr class="divider">
+
+    <div class="section">
+      <div class="section-head">
+        <div class="section-icon" style="background:var(--pink-50);color:var(--pink-500);">&#9636;</div>
+        <h2>项目包含</h2>
+      </div>
+      <div class="include-blocks">
+
+        <div class="include-block">
+          <div class="include-block-head">
+            <span class="include-block-count" style="background:var(--blue-50);color:var(--blue-600);">11</span>
+            <h4>交互式求职工作台页面</h4>
+          </div>
+          <div class="detail">
+            Agent 对话、简历管理、JD 评估、投递追踪、面试准备、Offer 对比、职位发现、求职画像、数据分析、个人设置、探索对话，覆盖求职从定位到复盘的完整流程
+          </div>
+        </div>
+
+        <div class="include-block">
+          <div class="include-block-head">
+            <span class="include-block-count" style="background:var(--amber-50);color:var(--amber-600);">44</span>
+            <h4>Agent 工具注册体系</h4>
+          </div>
+          <div class="detail">
+            查询类工具（读取画像、报告、推荐、Pipeline、技能缺口、ATS 检查）+ 行动类工具（评估 JD、优化简历、生成 CV、导入简历、准备面试、Offer 比较、导出 PDF）+ MCP 工具（Web 搜索、地点、路线、职位搜索）
+          </div>
+        </div>
+
+        <div class="include-block">
+          <div class="include-block-head">
+            <span class="include-block-count" style="background:var(--green-50);color:var(--green-600);">4D</span>
+            <h4>AI 简历优化评判引擎</h4>
+          </div>
+          <div class="detail">
+            <code>Operation</code> 操作类型、<code>Effort</code> 执行深度、<code>JD</code> 内容滤网、<code>Reference</code> 风格范本协同决策；支持全面优化、STAR 重组、量化增强、关键词注入和追问式优化
+          </div>
+        </div>
+
+        <div class="include-block">
+          <div class="include-block-head">
+            <span class="include-block-count" style="background:var(--red-50);color:var(--red-600);">98</span>
+            <h4>服务端 API Route 文件</h4>
+          </div>
+          <div class="detail">
+            覆盖 Agent Chat、图片 intake、JD/Offer 评估、CV 导入与优化、报告持久化、职位扫描、用户认证、画像信号、管理员记忆治理、PDF 导出和数据同步等服务端能力
+          </div>
+        </div>
+
+        <div class="include-block">
+          <div class="include-block-head">
+            <span class="include-block-count" style="background:var(--purple-50);color:var(--purple-500);">8</span>
+            <h4>岗位写作模板与本土知识库</h4>
+          </div>
+          <div class="detail">
+            AI 产品经理、产品经理、后端工程师、前端工程师、数据/AI 工程师、测试工程师、设计师、运营/市场八类简历表达模型；附带薪资基准、JD 信号词、面试风格和岗位写作指南
+          </div>
+        </div>
+
+        <div class="include-block">
+          <div class="include-block-head">
+            <span class="include-block-count" style="background:var(--pink-50);color:var(--pink-500);">2</span>
+            <h4>SQLite / PostgreSQL 双数据层</h4>
+          </div>
+          <div class="detail">
+            默认使用 <code>better-sqlite3</code> 保持本地优先与快速启动；可通过 <code>DB_DRIVER=postgres</code> 切换到 PostgreSQL，并接入 pgvector 承载参考简历、反馈模式和长期记忆检索
+          </div>
+        </div>
+
+        <div class="include-block">
+          <div class="include-block-head">
+            <span class="include-block-count" style="background:var(--blue-50);color:var(--blue-600);">5</span>
+            <h4>专项 Agent 与会话边界</h4>
+          </div>
+          <div class="detail">
+            Resume、Evaluate、Interview、Profile、General 等专项 Agent 独立提示词与工具集合；面试教练通过会话快照绑定 JD/简历上下文，Offer Agent 对新增事实触发 stale report 保护
+          </div>
+        </div>
+
+        <div class="include-block">
+          <div class="include-block-head">
+            <span class="include-block-count" style="background:var(--amber-50);color:var(--amber-600);">35</span>
+            <h4>自动化测试与质量防线</h4>
+          </div>
+          <div class="detail">
+            Vitest 覆盖 Agent 路由、JD 图像识别、面试状态绑定、简历保存保护、向量记忆、Postgres 迁移、Offer 评估、管理员用户、数据隔离、报告摘要和 UI 状态等关键链路
+          </div>
+        </div>
+
+        <div class="include-block">
+          <div class="include-block-head">
+            <span class="include-block-count" style="background:var(--green-50);color:var(--green-600);">1</span>
+            <h4>从开源 CLI 到产品化 Web App 的完整改造</h4>
+          </div>
+          <div class="detail">
+            在 career-ops 的理念和管道基础上，扩展为可登录、可持久化、可视化、可多用户隔离、可长期记忆的 AI 求职助手；从一次性命令行工具升级为每日可用的求职操作系统
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+</div>
+
+</body>
+</html>

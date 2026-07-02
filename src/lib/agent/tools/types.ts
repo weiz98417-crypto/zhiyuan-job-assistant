@@ -1,5 +1,6 @@
 import type { AgentToolParam } from "@/types";
 import type { VerifiedActionResult } from "@/lib/agent/verified-action";
+import type { ToolGovernance } from "@/lib/agent/tool-governance";
 
 export interface ToolParameter {
   type: "string" | "number" | "boolean" | "object" | "array";
@@ -80,6 +81,8 @@ export interface ToolDefinition<TParams = Record<string, unknown>> {
   buildLLMSummary?: (result: ToolResult) => string;
   /** Max chars of llmSummary to feed into LLM context. Default 800 for search, 4000 for document tools. */
   toolCtxCap?: number;
+  /** Centralized runtime governance metadata. Legacy tools may receive this from the governance registry. */
+  governance?: ToolGovernance;
 }
 
 // Re-export AgentToolParam for convenience (maps to ToolParameter)

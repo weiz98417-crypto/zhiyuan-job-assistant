@@ -22,6 +22,7 @@
     "liveness": "node check-liveness.mjs",
     "check:postgres": "node scripts/check-postgres.mjs",
     "check:postgres-cutover": "node scripts/check-postgres-cutover.mjs",
+    "check:jd-eval-partials": "node scripts/check-jd-eval-partials.mjs",
     "backup:postgres": "node scripts/backup-postgres.mjs",
     "restore:postgres": "node scripts/restore-postgres.mjs",
     "migrate:postgres": "node scripts/migrate-sqlite-to-postgres.mjs",

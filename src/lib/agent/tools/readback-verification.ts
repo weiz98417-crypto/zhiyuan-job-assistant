@@ -1,6 +1,7 @@
 import { getActionToolRisk } from "@/lib/agent/tools/action-tool-risk";
 import type { ToolResult } from "@/lib/agent/tools/types";
 import { buildVerifiedActionFailure } from "@/lib/agent/verified-action";
+import { getToolGovernance } from "@/lib/agent/tool-governance";
 
 export interface ReadBackRequirementStatus {
   required: boolean;
@@ -25,7 +26,9 @@ function hasBooleanReadBackFlag(value: unknown): boolean {
 
 export function requiresReadBackVerification(toolName: string): boolean {
   const risk = getActionToolRisk(toolName);
+  const governance = getToolGovernance(toolName);
   return Boolean(
+    governance?.requiresReadBack ||
     risk?.requiresVerifiedWrite &&
     (risk.risk === "high-risk-write" || risk.risk === "destructive-write"),
   );
@@ -66,6 +69,7 @@ export function enforceReadBackSuccessGate(toolName: string, result: ToolResult)
   if (!status.required || status.satisfied || status.deferred) return result;
 
   const risk = getActionToolRisk(toolName);
+  const governance = getToolGovernance(toolName);
   const message = status.reason || "High-risk tool success requires read-back verification evidence.";
   const uiPayload = isRecord(result.uiPayload) ? result.uiPayload : {};
 
@@ -85,7 +89,7 @@ export function enforceReadBackSuccessGate(toolName: string, result: ToolResult)
     rawData: result.rawData ?? result.data,
     verifiedAction: result.verifiedAction ?? buildVerifiedActionFailure({
       action: toolName,
-      targetType: risk?.targets[0] || "unknown",
+      targetType: risk?.targets[0] || governance?.documentTypes?.[0] || "unknown",
       error: message,
       verifier: {
         phase: "verifier",

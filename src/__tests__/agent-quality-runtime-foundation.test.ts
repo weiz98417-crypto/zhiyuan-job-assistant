@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import Database from "better-sqlite3";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -26,6 +27,7 @@ import {
 } from "@/lib/agent/task-contract";
 
 import { scanRuntimeSqliteImports } from "../../scripts/lib/postgres-cutover-check.mjs";
+import { formatVerificationReport, verifyMigration } from "../../scripts/lib/sqlite-postgres-migration.mjs";
 
 const cleanupPaths: string[] = [];
 
@@ -140,14 +142,90 @@ describe("postgres cutover scan", () => {
   });
 });
 
+describe("postgres cutover archive verification", () => {
+  it("keeps migration verification strict but allows target drift in cutover mode", async () => {
+    const sqliteDb = new Database(":memory:");
+    sqliteDb.exec(`
+      CREATE TABLE profiles (
+        id INTEGER PRIMARY KEY,
+        user_id TEXT,
+        data_json TEXT,
+        goals_json TEXT,
+        history_json TEXT
+      );
+      INSERT INTO profiles (id, user_id, data_json, goals_json, history_json)
+      VALUES (1, 'user-1', '{"headline":"old"}', '{}', '[]');
+    `);
+
+    const pgClient = {
+      query: vi.fn(async (sql: string, params: unknown[] = []) => {
+        if (sql.includes("information_schema.columns")) {
+          return {
+            rows: ["id", "user_id", "data_json", "goals_json", "history_json"].map((column_name) => ({ column_name })),
+            rowCount: 5,
+          };
+        }
+        if (sql.includes("SELECT user_id, COUNT(*) AS count FROM \"profiles\"")) {
+          return { rows: [{ user_id: "user-1", count: 2 }], rowCount: 1 };
+        }
+        if (sql.includes("SELECT COUNT(*) AS count FROM \"profiles\"")) {
+          return { rows: [{ count: 2 }], rowCount: 1 };
+        }
+        if (sql.includes("SELECT 1 FROM \"profiles\" WHERE \"id\" = $1")) {
+          return { rows: [{ "?column?": 1 }], rowCount: 1 };
+        }
+        if (sql.includes("SELECT \"data_json\", \"goals_json\", \"history_json\" FROM \"profiles\"")) {
+          return {
+            rows: [{
+              data_json: { headline: "new" },
+              goals_json: {},
+              history_json: [],
+            }],
+            rowCount: 1,
+          };
+        }
+        return { rows: [], rowCount: 0 };
+      }),
+    };
+
+    try {
+      const strict = await verifyMigration({ sqliteDb, pgClient, sampleSize: 1 });
+      expect(strict.ok).toBe(false);
+      expect(strict.errors).toEqual(expect.arrayContaining([
+        "profiles.data_json sample 1: JSON mismatch",
+        "profiles: per-user counts mismatch",
+      ]));
+
+      const cutover = await verifyMigration({ sqliteDb, pgClient, sampleSize: 1, mode: "cutover" });
+      expect(cutover.ok).toBe(true);
+      expect(cutover.errors).toEqual([]);
+      expect(cutover.warnings).toEqual(expect.arrayContaining([
+        expect.stringContaining("accepted as post-cutover target drift"),
+      ]));
+
+      const formatted = formatVerificationReport(cutover);
+      expect(formatted).toContain("Mode: cutover");
+      expect(formatted).toContain("profiles.data_json 1: drift");
+      expect(formatted).toContain("[target>=source]");
+    } finally {
+      sqliteDb.close();
+    }
+  });
+});
+
 describe("agent run ledger and task contracts", () => {
   it("defines durable Postgres tables for agent runs and steps", () => {
     const schema = fs.readFileSync(path.join(process.cwd(), "src", "lib", "postgres-schema.sql"), "utf-8");
 
     expect(schema).toContain("CREATE TABLE IF NOT EXISTS agent_runs");
     expect(schema).toContain("CREATE TABLE IF NOT EXISTS agent_run_steps");
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS agent_run_reviews");
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS agent_eval_candidates");
     expect(schema).toContain("CREATE TABLE IF NOT EXISTS resume_edit_proposals");
     expect(schema).toContain("idx_agent_runs_user_status");
+    expect(schema).toContain("agent_run_reviews_verdict_check");
+    expect(schema).toContain("agent_eval_candidates_status_check");
+    expect(schema).toContain("idx_agent_eval_candidates_dedupe");
   });
 
   it("requires task criteria before an agent can claim durable success", () => {
@@ -162,6 +240,29 @@ describe("agent run ledger and task contracts", () => {
     expect(canClaimTaskSuccess(contract, ["draft generated"])).toBe(false);
     expect(unmetSuccessCriteria(contract, ["draft generated"])).toContain("user approved draft");
     expect(canClaimTaskSuccess(contract, contract.successCriteria)).toBe(true);
+  });
+
+  it("treats current resume lookup as read-only instead of a resume write", () => {
+    const contract = createAgentTaskContract({
+      taskType: "resume_query",
+      target: "我的简历",
+    });
+    const criteria = [
+      ...inferCompletedCriteriaFromToolResult(contract, {
+        toolName: "read_file",
+        toolSuccess: true,
+        data: { content: "个人概述\n5年C端产品经验" },
+      }),
+      "answer generated",
+    ];
+    const gate = evaluateTaskContractCompletion(contract, criteria);
+
+    expect(contract.requiresUserApproval).toBe(false);
+    expect(contract.successCriteria).toEqual(["resume context read", "answer generated"]);
+    expect(gate.canClaimSuccess).toBe(true);
+    expect(gate.safeMessage).toBeUndefined();
+    expect(gate.unmetCriteria).not.toContain("user approved draft");
+    expect(gate.unmetCriteria).not.toContain("target section read-back hash matches applied content");
   });
 
   it("prevents final success when a JD report was generated but not read back", () => {

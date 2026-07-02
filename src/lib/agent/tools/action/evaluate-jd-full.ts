@@ -99,6 +99,10 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
   let targetCompany = target_company || "";
   let imagesForStream = Array.isArray(images) ? images : [];
 
+  if (jdText.trim()) {
+    imagesForStream = [];
+  }
+
   if (!jdText.trim() && imagesForStream.length > 0) {
     const extracted = await extractJDFromImages(imagesForStream);
     if (extracted.jdText.trim()) {

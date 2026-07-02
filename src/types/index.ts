@@ -858,6 +858,27 @@ export interface ChatSession {
 
 export interface AgentSessionState {
   offer?: OfferAgentSessionState;
+  guidedSession?: {
+    taskId: string;
+    taskType: import("@/lib/agent/task-contract").AgentTaskType;
+    agentId: string;
+    status: "active" | "waiting_user" | "waiting_tool" | "completed" | "cancelled" | "failed";
+    phase?: string;
+    expectedInput?: string;
+    allowedNextIntents?: import("@/lib/agent/task-contract").AgentTaskType[];
+    allowedTools?: string[];
+    startedAt: string;
+    lastUpdatedAt: string;
+    exitConditions?: string[];
+    summary?: string;
+    source?: "agent_state" | "interview_state" | "reference_resume_save" | "image_clarification";
+    documentType?: string;
+    imageRoute?: string;
+    imageQuality?: string;
+    imageConfidence?: number;
+    sourceText?: string;
+    sourceTextLength?: number;
+  };
   [key: string]: unknown;
 }
 

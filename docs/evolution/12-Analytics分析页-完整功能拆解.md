@@ -1,6 +1,6 @@
 # 12 -- Analytics 分析页完整功能拆解
 
-> 页面: `src/app/analytics/page.tsx` (约 566 行) | 核心算法: `lib/analytics.ts` | API: `/api/analytics/*` x 2 | 数据: SQLite (via API)
+> 页面: `src/app/analytics/page.tsx` (约 566 行) | 核心算法: `lib/analytics.ts` | API: `/api/analytics/*` x 2 | 数据: repository-backed；当前 LAN 为 PostgreSQL
 
 ---
 
@@ -8,15 +8,15 @@
 
 | # | 功能 | 实现 | 数据源 |
 |---|------|------|--------|
-| 1 | 漏斗图 | `computeFunnel()` | SQLite applications 表 + 状态归一化 |
-| 2 | 分数分布 | 前端分组统计 | SQLite |
-| 3 | 周趋势图 | `generateWeeklyData()` | SQLite + Date.now() |
-| 4 | 跟进分析 | `analyzeFollowUps()` + `computeUrgency()` | SQLite + 日期计算 |
-| 5 | 转化率指标 | 阶段间除法 | SQLite |
+| 1 | 漏斗图 | `computeFunnel()` | applications 表 + 状态归一化 |
+| 2 | 分数分布 | 前端分组统计 | reports/applications |
+| 3 | 周趋势图 | `generateWeeklyData()` | repository 数据 + Date.now() |
+| 4 | 跟进分析 | `analyzeFollowUps()` + `computeUrgency()` | repository 数据 + 日期计算 |
+| 5 | 转化率指标 | 阶段间除法 | repository 数据 |
 | 6 | 时间区间切换 | `timeRange: "4w"/"8w"/"all"` | 前端状态 |
 | 7 | AI 洞察 | DeepSeek 生成建议 | 触发条件：数据 > 5 条 + 手动 |
-| 8 | Pipeline 健康检查 | `/api/analytics/health-check` + `check_pipeline_health` 工具 | DeepSeek 分析 SQLite 数据 |
-| 9 | 周报生成 | `/api/analytics/weekly-report` | DeepSeek + SQLite 聚合 |
+| 8 | Pipeline 健康检查 | `/api/analytics/health-check` + `check_pipeline_health` 工具 | DeepSeek 分析 repository 数据 |
+| 9 | 周报生成 | `/api/analytics/weekly-report` | DeepSeek + repository 聚合 |
 
 ---
 
@@ -24,8 +24,8 @@
 
 ```
 Analytics 页面
-├─ 数据加载: 优先通过 API 读取 SQLite，Dexie 作为本地 fallback
-│   └─ 唯一数据源: SQLite (server-db.ts/API routes 写入)
+├─ 数据加载: 优先通过 API 读取 repository，Dexie 作为本地 fallback
+│   └─ 当前 LAN 权威源: PostgreSQL；SQLite 仅 fallback/archive
 ├─ 指标计算: 纯前端 (lib/analytics.ts)
 │   ├─ computeFunnel()     -- 漏斗分析
 │   ├─ analyzeFollowUps()  -- 跟进建议
@@ -73,7 +73,7 @@ export function computeFunnel(statuses: string[], stageOrder = FUNNEL_STAGES): F
 
 ### 2. 分数分布
 
-前端纯计算，按分数区间分组（数据来自 SQLite reports 表）：
+前端纯计算，按分数区间分组（数据来自 reports 表）：
 
 | 区间 | 含义 |
 |------|------|
@@ -136,7 +136,7 @@ function computeUrgency(status, daysSinceApp, daysSinceLastFollowup, followupCou
 
 ### 5. 转化率指标
 
-两个基础指标（数据来自 SQLite）：
+两个基础指标（数据来自 repository API）：
 - 评估 → 投递转化率 = applied / evaluated
 - 投递 → 面试转化率 = interview / applied
 
@@ -168,7 +168,7 @@ const [timeRange, setTimeRange] = useState<"4w" | "8w" | "all">("8w");
 **API 端点**: `POST /api/analytics/health-check`
 
 两种调用路径：
-- **Agent 对话中**: 通过 `check_pipeline_health` 工具 → 读取 SQLite applications 表 → 返回 overdue 列表 + 健康度
+- **Agent 对话中**: 通过 `check_pipeline_health` 工具 → 读取 applications 表 → 返回 overdue 列表 + 健康度
 - **Analytics 页面**: 通过 `/api/analytics/health-check` API → DeepSeek 深度分析
 
 **API 输入**：

@@ -91,6 +91,16 @@ function hasNestedThumbnailSignal(intake?: ImageIntakeResult | null): boolean {
   return (hasChatSurface && hasThumbnailSurface) || unreadableNestedPreview;
 }
 
+function hasOcrTimeoutSignal(intake?: ImageIntakeResult | null): boolean {
+  if (!intake) return false;
+  const text = [
+    intake.reason,
+    ...(intake.errors || []),
+    ...(intake.perImage || []).map((item) => item.reason || ""),
+  ].filter(Boolean).join("\n");
+  return /timeout|timed out|aborted|operation was aborted|超时|ocr_timeout/i.test(text);
+}
+
 function makeClarifyQuestion(documentType: ImageDocumentType, matchedIntent: ImageDocumentType | "general" | "unknown"): string {
   if (documentType === "resume") {
     return "我识别到这像是简历截图。我会先提取并预览内容，等你确认后再保存到简历里。";
@@ -122,6 +132,18 @@ export function routeImageIntake(
   const hasUsefulExtraction = extractedText.length >= 24 || hasStructuredData(intake);
   const weak = shouldRetry(intake);
   const pureImage = matchedIntent === "unknown";
+
+  if (hasOcrTimeoutSignal(intake)) {
+    return {
+      route: "retry_image",
+      reason: "OCR 服务处理这张图片时超时，不代表图片不清晰",
+      retryHint: "请稍后直接重试一次；系统会优先尝试长截图分段识别。若连续超时，再考虑粘贴 JD 文本或链接。",
+      documentType,
+      confidence,
+      quality,
+      matchedIntent,
+    };
+  }
 
   if (hasNestedThumbnailSignal(intake)) {
     return {

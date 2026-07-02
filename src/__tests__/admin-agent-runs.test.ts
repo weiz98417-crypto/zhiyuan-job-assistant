@@ -15,7 +15,7 @@ function mockAuth(role: "admin" | "member" = "admin") {
 }
 
 function mockRunLedger() {
-  const listRecentFailedAgentRuns = vi.fn(async () => [{
+  const failedRun = {
     id: "run-failed",
     user_id: "user-1",
     session_id: 42,
@@ -27,6 +27,13 @@ function mockRunLedger() {
       target: "skills section",
       successCriteria: ["read-back verification passes"],
       validators: ["read_back_match"],
+      routing: {
+        activeTaskId: "career_positioning_guidance-123456",
+        activeTaskType: "career_positioning_guidance",
+        activeTaskPhase: "deep_dive",
+        routeLocked: true,
+        auditSummary: "guided:career_positioning_guidance:locked",
+      },
     },
     result_json: { note: "Successfully saved to user@example.com" },
     error_json: { message: "phone 13800138000 failed" },
@@ -44,12 +51,29 @@ function mockRunLedger() {
       error_json: { detail: "13800138000" },
       created_at: "2026-06-10T00:01:00.000Z",
     }],
-  }]);
+  };
+  const successRun = {
+    ...failedRun,
+    id: "run-success",
+    status: "succeeded",
+    error_json: {},
+    recent_steps: [{
+      ...failedRun.recent_steps[0],
+      id: 8,
+      run_id: "run-success",
+      status: "succeeded",
+      output_summary: "read-back verified",
+      error_json: {},
+    }],
+  };
+  const listRecentAgentRuns = vi.fn(async () => [successRun, failedRun]);
+  const listRecentFailedAgentRuns = vi.fn(async () => [failedRun]);
   vi.doMock("@/lib/agent/run-ledger", () => ({
     isAgentRunLedgerAvailable: () => true,
+    listRecentAgentRuns,
     listRecentFailedAgentRuns,
   }));
-  return { listRecentFailedAgentRuns };
+  return { listRecentAgentRuns, listRecentFailedAgentRuns };
 }
 
 afterEach(() => {
@@ -60,7 +84,7 @@ afterEach(() => {
 });
 
 describe("admin agent run debug route", () => {
-  it("returns redacted failed run summaries for admins", async () => {
+  it("returns redacted recent run summaries and Chinese monitor stats for admins", async () => {
     vi.resetModules();
     mockAuth("admin");
     const ledger = mockRunLedger();
@@ -72,20 +96,52 @@ describe("admin agent run debug route", () => {
 
     expect(response.status).toBe(200);
     expect(json.success).toBe(true);
-    expect(json.data[0]).toMatchObject({
+    expect(json.summary).toMatchObject({
+      totalRuns: 2,
+      failedRuns: 1,
+      succeededRuns: 1,
+      failedSteps: 1,
+    });
+    expect(json.data).toHaveLength(2);
+    expect(json.data[1]).toMatchObject({
       id: "run-failed",
       taskType: "resume_edit",
+      contract: {
+        routing: expect.objectContaining({
+          activeTaskType: "career_positioning_guidance",
+          activeTaskPhase: "deep_dive",
+          routeLocked: true,
+        }),
+      },
       recentSteps: [expect.objectContaining({
         toolName: "save_resume_section",
         status: "failed",
       })],
     });
-    expect(ledger.listRecentFailedAgentRuns).toHaveBeenCalledWith(10);
+    expect(ledger.listRecentAgentRuns).toHaveBeenCalledWith(10, undefined);
+    expect(ledger.listRecentFailedAgentRuns).not.toHaveBeenCalled();
     expect(serialized).not.toContain("data:image/png;base64");
     expect(serialized).not.toContain("user@example.com");
     expect(serialized).not.toContain("13800138000");
     expect(serialized).toContain("[email]");
     expect(serialized).toContain("[phone]");
+  });
+
+  it("keeps the failure filter available for investigation", async () => {
+    vi.resetModules();
+    mockAuth("admin");
+    const ledger = mockRunLedger();
+    const route = await import("@/app/api/admin/agent-runs/route");
+
+    const response = await route.GET(new Request("http://localhost/api/admin/agent-runs?limit=10&status=failed") as never);
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(json.success).toBe(true);
+    expect(json.summary.failedRuns).toBe(1);
+    expect(json.data).toHaveLength(1);
+    expect(ledger.listRecentFailedAgentRuns).toHaveBeenCalledWith(10);
+    expect(ledger.listRecentAgentRuns).not.toHaveBeenCalled();
   });
 
   it("rejects non-admin users", async () => {

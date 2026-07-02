@@ -20,6 +20,7 @@ import {
   Shield,
   TrendingUp,
   Database,
+  ClipboardCheck,
 } from "lucide-react";
 import NavItem from "./NavItem";
 import { useTheme } from "@/components/providers/ThemeProvider";
@@ -153,7 +154,11 @@ export default function AppShell({ children }: { children: ReactNode }) {
                 <div className="mt-1 space-y-0.5">
                   <a href="/admin/agent-runs" className="flex items-center gap-2 px-2 py-1.5 rounded-[var(--radius-sm)] text-xs font-medium text-[var(--color-primary)] hover:bg-[var(--color-primary-muted)] transition-colors duration-[var(--duration-fast)] no-underline">
                     <Bot size={14} />
-                    Agent Run Debug
+                    Agent 运行监控
+                  </a>
+                  <a href="/admin/agent-reviews" className="flex items-center gap-2 px-2 py-1.5 rounded-[var(--radius-sm)] text-xs font-medium text-[var(--color-primary)] hover:bg-[var(--color-primary-muted)] transition-colors duration-[var(--duration-fast)] no-underline">
+                    <ClipboardCheck size={14} />
+                    Agent 复盘治理
                   </a>
                   <a href="/admin/users" className="flex items-center gap-2 px-2 py-1.5 rounded-[var(--radius-sm)] text-xs font-medium text-[var(--color-primary)] hover:bg-[var(--color-primary-muted)] transition-colors duration-[var(--duration-fast)] no-underline">
                     <Shield size={14} />

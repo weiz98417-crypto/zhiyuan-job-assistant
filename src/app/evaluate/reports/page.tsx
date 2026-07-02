@@ -12,6 +12,7 @@ import {
   Filter,
   ArrowUpDown,
   Download,
+  CheckCircle,
 } from "lucide-react";
 import { WarmButton, PaperCard, ScoreBadge } from "@/components/design";
 import { StaggerList, StaggerItem } from "@/components/design/PageTransition";
@@ -19,7 +20,7 @@ import ReportBlocks from "@/components/ReportBlocks";
 import db from "@/lib/db";
 import { clearJDReportId } from "@/lib/jd-storage";
 import { normalizeReportBlocks, normalizeReportScores, parseJsonValue } from "@/lib/report-normalize";
-import type { EvaluationReport } from "@/types";
+import type { Application, EvaluationReport } from "@/types";
 
 type SortMode = "date-desc" | "date-asc" | "score-desc" | "score-asc";
 
@@ -61,6 +62,7 @@ export default function ReportsPage() {
   const [selectedReport, setSelectedReport] = useState<EvaluationReport | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<EvaluationReport | null>(null);
   const [loadError, setLoadError] = useState(false);
+  const [trackerStatus, setTrackerStatus] = useState<"idle" | "saving" | "error">("idle");
 
   const loadReports = useCallback(async () => {
     try {
@@ -174,6 +176,63 @@ export default function ReportsPage() {
     setSelectedReport(null);
     setReports((prev) => prev.filter((report) => report.reportNum !== reportNum));
     loadReports();
+  };
+
+  const handleAddToTracker = async (report: EvaluationReport) => {
+    if (!report.reportNum) return;
+    setTrackerStatus("saving");
+    try {
+      const allApps = await db.applications.toArray();
+      const existing = allApps.find((app) => app.company === report.company && app.role === report.role);
+      const num = existing?.num || allApps.reduce((max, app) => Math.max(max, app.num || 0), 0) + 1;
+      const today = new Date().toISOString().slice(0, 10);
+      const reportPath = `/api/reports/${report.reportNum}/pdf`;
+      const notes = `Archetype: ${report.archetype || "unknown"}; Report #${report.reportNum}`;
+      const app: Application = {
+        ...(existing || {}),
+        num,
+        date: existing?.date || today,
+        company: report.company || "未知公司",
+        role: report.role || "未知岗位",
+        score: report.overallScore || 0,
+        status: existing?.status || "evaluated",
+        pdfGenerated: true,
+        reportPath,
+        notes,
+        createdAt: existing?.createdAt || new Date(),
+        updatedAt: new Date(),
+      };
+
+      const res = await fetch("/api/data/applications", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          num: app.num,
+          date: app.date,
+          company: app.company,
+          role: app.role,
+          score: app.score,
+          status: app.status,
+          pdf_generated: app.pdfGenerated ? 1 : 0,
+          report_path: app.reportPath || "",
+          notes: app.notes || "",
+        }),
+      });
+      if (!res.ok) throw new Error("server application write failed");
+
+      if (existing?.id != null) {
+        await db.applications.update(existing.id, app);
+      } else {
+        await db.applications.add(app);
+      }
+
+      setTrackerStatus("idle");
+      setSelectedReport(null);
+      router.push("/tracker");
+    } catch (error) {
+      console.error("[reports] add to tracker failed:", error);
+      setTrackerStatus("error");
+    }
   };
 
   const hasFilters = scoreMin != null || scoreMax != null || timeDays > 0;
@@ -441,6 +500,15 @@ export default function ReportsPage() {
                   <WarmButton
                     variant="soft"
                     size="sm"
+                    onClick={() => handleAddToTracker(selectedReport)}
+                    disabled={trackerStatus === "saving"}
+                  >
+                    <CheckCircle size={12} className="mr-1" />
+                    {trackerStatus === "saving" ? "加入中..." : "加入追踪"}
+                  </WarmButton>
+                  <WarmButton
+                    variant="soft"
+                    size="sm"
                     onClick={() => {
                       setSelectedReport(null);
                       router.push("/evaluate/jds");
@@ -450,6 +518,11 @@ export default function ReportsPage() {
                     查看 JD 库
                   </WarmButton>
                 </div>
+                {trackerStatus === "error" && (
+                  <p className="mt-2 text-xs text-red-500">
+                    加入追踪失败，请稍后重试。
+                  </p>
+                )}
               </div>
             </motion.div>
           </motion.div>

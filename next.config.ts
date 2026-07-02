@@ -10,6 +10,7 @@ function localIPv4Hosts(): string[] {
 
 const nextConfig: NextConfig = {
   images: { remotePatterns: [] },
+  serverExternalPackages: ["@napi-rs/canvas"],
   allowedDevOrigins: Array.from(new Set([
     "localhost",
     "127.0.0.1",

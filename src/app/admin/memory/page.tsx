@@ -13,6 +13,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { useToast } from "@/lib/use-toast";
 
 interface UsageSummary {
   total: number;
@@ -136,6 +137,7 @@ const EMPTY_DATA: MemoryGovernanceData = {
 };
 
 export default function AdminMemoryPage() {
+  const { showToast } = useToast();
   const [data, setData] = useState<MemoryGovernanceData>(EMPTY_DATA);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -194,9 +196,15 @@ export default function AdminMemoryPage() {
       });
       const payload = await res.json().catch(() => ({}));
       if (!res.ok || !payload.success) throw new Error(payload.error || "操作失败");
+      if (scope === "memory" && payload.data?.updated === false) {
+        throw new Error("候选记忆未更新，请刷新后重试");
+      }
       await loadData();
+      showToast(actionSuccessMessage(action));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "操作失败");
+      const message = err instanceof Error ? err.message : "操作失败";
+      setError(message);
+      showToast(message, "error");
     } finally {
       setBusyId(null);
     }
@@ -336,13 +344,13 @@ export default function AdminMemoryPage() {
                       </div>
                     </div>
                     <div className="flex shrink-0 gap-1">
-                      <IconButton label="批准" busy={busyId === `memory:${item.id}:approve_memory`} onClick={() => runAction(item.id, "approve_memory", "memory")}>
+                      <IconButton label="批准" disabled={busyId?.startsWith(`memory:${item.id}:`)} busy={busyId === `memory:${item.id}:approve_memory`} onClick={() => runAction(item.id, "approve_memory", "memory")}>
                         <Check size={13} />
                       </IconButton>
-                      <IconButton label="拒绝" busy={busyId === `memory:${item.id}:reject_memory`} onClick={() => runAction(item.id, "reject_memory", "memory")}>
+                      <IconButton label="拒绝" disabled={busyId?.startsWith(`memory:${item.id}:`)} busy={busyId === `memory:${item.id}:reject_memory`} onClick={() => runAction(item.id, "reject_memory", "memory")}>
                         <X size={13} />
                       </IconButton>
-                      <IconButton label="归档" busy={busyId === `memory:${item.id}:disable_memory`} onClick={() => runAction(item.id, "disable_memory", "memory")}>
+                      <IconButton label="归档" disabled={busyId?.startsWith(`memory:${item.id}:`)} busy={busyId === `memory:${item.id}:disable_memory`} onClick={() => runAction(item.id, "disable_memory", "memory")}>
                         <Ban size={13} />
                       </IconButton>
                     </div>
@@ -570,12 +578,14 @@ function FilterSelect({
 function IconButton({
   label,
   busy,
+  disabled,
   danger,
   onClick,
   children,
 }: {
   label: string;
   busy?: boolean;
+  disabled?: boolean;
   danger?: boolean;
   onClick: () => void;
   children: React.ReactNode;
@@ -585,7 +595,7 @@ function IconButton({
       type="button"
       title={label}
       aria-label={label}
-      disabled={busy}
+      disabled={busy || disabled}
       onClick={onClick}
       className={`inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-sm)] border border-[var(--color-border)] disabled:opacity-50 ${
         danger ? "text-red-600 hover:bg-red-50" : "text-[var(--color-text-soft)] hover:bg-[var(--color-divider)]"
@@ -625,6 +635,23 @@ function formatCountMap(value: Record<string, number>) {
   const entries = Object.entries(value);
   if (!entries.length) return "none";
   return entries.map(([key, count]) => `${key}:${count}`).join(" / ");
+}
+
+function actionSuccessMessage(action: string) {
+  const messages: Record<string, string> = {
+    approve_reference: "已批准共享材料",
+    reject_reference: "已退回共享材料",
+    disable_reference: "已停用材料",
+    restore_reference: "已恢复材料",
+    delete_reference: "已删除材料",
+    reindex_reference: "已提交重建索引",
+    approve_memory: "已批准候选记忆",
+    reject_memory: "已拒绝候选记忆",
+    disable_memory: "已归档候选记忆",
+    restore_memory: "已恢复候选记忆",
+    delete_memory: "已删除候选记忆",
+  };
+  return messages[action] || "操作完成";
 }
 
 function riskLabel(value: string) {

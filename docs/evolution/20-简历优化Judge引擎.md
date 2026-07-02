@@ -45,7 +45,7 @@
 │                                                     │
 │  1. variants[] 展示给用户 (定向/通用)                  │
 │  2. 用户选择 variant → save_resume_section 工具       │
-│  3. 写入 SQLite (canonical) → localStorage (cache)    │
+│  3. 写入 repository-backed CV data → browser cache      │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -106,7 +106,7 @@ JD 滤网优先级: "JD 是滤网，不是操作类型——你仍然要执行 O
 冲突解决:     "若 JD 内容基调与参考风格冲突，内容走 JD、表达技法走参考的可迁移部分"
 ```
 
-**Reference Style**：当用户指定了参考简历（通过 `referenceIds`），引擎从 SQLite 加载对应的优秀简历，提取思考框架并对标：
+**Reference Style**：当用户指定了参考简历（通过 `referenceIds`），引擎从参考简历存储中加载对应材料，提取思考框架并对标：
 
 参考简历对标不再是抽象的四维分析，而是**六步思考框架提取**：
 1. **项目背景** — 为什么做、解决什么问题、约束条件
@@ -232,7 +232,7 @@ placeholderCount: (v.content.match(/\[XX(?::[^\]]*)?\]/g) || []).length
 
 ## 5. CV 数据存储
 
-CV 数据采用双层存储架构：SQLite 为 canonical 数据源，localStorage 为前端缓存。
+CV 数据采用双层存储架构：当前 LAN 以 repository-backed CV data 为权威来源，前端缓存仅用于加速。
 
 ### 5.1 数据结构
 
@@ -263,7 +263,7 @@ interface CVData {
 
 ```
     ┌─────────────────┐          ┌──────────────────────┐
-    │   localStorage   │          │   SQLite (canonical)  │
+    │   localStorage   │          │   Repository-backed    │
     │   key: zhiyuan-cv│          │   cv_data 表          │
     │                  │          │                      │
     │   - 即时读写      │   sync   │   - 持久化存储        │
@@ -274,7 +274,7 @@ interface CVData {
 
 **存储规则：**
 
-| 操作 | localStorage 角色 | SQLite 角色 |
+| 操作 | localStorage 角色 | Repository 角色 |
 |------|-------------------|-------------|
 | 读取 (`loadCVData`) | 优先读取（快） | 仅在本地无数据时 fallback |
 | 写入 (`saveCVData`) | 同步写入（即时） | fire-and-forget async PUT |
@@ -301,7 +301,7 @@ interface CVData {
 - `renameVersion(versionId, newLabel)`: 重命名版本
 - 版本 ID 自动递增: `v1 → v2 → v3 → ...`
 
-### 5.5 SQLite 表结构
+### 5.5 数据表结构
 
 ```sql
 CREATE TABLE IF NOT EXISTS cv_data (
@@ -320,7 +320,7 @@ ON CONFLICT(id) DO UPDATE SET
   updated_at = datetime('now')
 ```
 
-服务端 API (`/api/cv/data`) 提供 GET 和 PUT 两个方法，均直接操作 SQLite 数据库。
+服务端 API (`/api/cv/data`) 提供 GET 和 PUT 两个方法，均通过 repository 访问当前权威数据层。
 
 ---
 
@@ -344,9 +344,9 @@ ON CONFLICT(id) DO UPDATE SET
    支持中英文双向匹配，默认 fallback 为 "experience"
 
 2. 读取 CV 数据
-   优先 localStorage (cache) → 命中则标记 fromLocalStorage=true
-   如果为空，fallback 到 GET /api/cv/data (SQLite)
-   如果来自 localStorage，后台 fire-and-forget 同步到 SQLite
+   优先 GET /api/cv/data 读取 repository-backed 当前版本
+   localStorage 只作为前端缓存和离线 fallback
+   如果命中本地缓存，后台会尝试同步到服务端，但不会把缓存当作主事实源
 
 3. 校验段落长度
    sectionContent.trim().length < 20 → 返回错误 "内容不足 20 字，无法优化"
@@ -408,8 +408,8 @@ Agent 收到用户选择后，调用 `save_resume_section` 工具执行写入。
 1. 解析 section 名称 (同 optimize 的中英文映射)
 
 2. 读取当前 CV 数据
-   优先 GET /api/cv/data (SQLite canonical)
-   如果 SQLite 为空，fallback 到 localStorage
+   优先 GET /api/cv/data (repository-backed canonical)
+   如果服务端暂无 CV 数据，才读取 localStorage 缓存辅助恢复
 
 3. 校验数据结构完整性
    cvData 为空 → 错误 "请先在 CV 页面创建简历"
@@ -419,13 +419,13 @@ Agent 收到用户选择后，调用 `save_resume_section` 工具执行写入。
 4. 内存更新
    找到匹配的 section，替换 content 字段
 
-5. 写入 SQLite (canonical)
+5. 写入 repository-backed data
    PUT /api/cv/data → 必须成功
-   失败 → 错误 "CV 数据写入 SQLite 失败" (recoverable)
+   失败 → 错误 "CV 数据写入失败" (recoverable)
 
 6. 更新 localStorage (cache only)
    写入 localStorage.setItem("zhiyuan-cv", ...)
-   失败 → 非关键错误（SQLite 已成功）
+   失败 → 非关键错误（主写入已成功）
 
 7. 返回成功
    { sectionId, sectionLabel, saved: true }
@@ -595,13 +595,13 @@ optimize_resume_section 工具:
 
 ```
 1. sectionContent 非空校验           → "新内容不能为空"
-2. SQLite CV data 存在性校验         → "请先在 CV 页面创建简历"
+2. CV data 存在性校验                 → "请先在 CV 页面创建简历"
 3. activeVersion 存在性校验          → "CV 版本数据异常"
 4. sectionId 在 sections 中查找      → "找不到板块: {sectionId}"
-5. SQLite PUT 写入成功校验           → "CV 数据写入 SQLite 失败"
+5. 主写入成功校验                   → "CV 数据写入失败"
 ```
 
-其中步骤 5 是 **硬门禁**——如果 SQLite 写入失败，工具返回 `recoverable: true` 错误，不会回退到 localStorage 作为备选写入路径。localStorage 仅作为写入成功后的缓存更新，不作为失败时的降级方案。
+其中步骤 5 是 **硬门禁**——如果主写入失败，工具返回 `recoverable: true` 错误，不会回退到 localStorage 作为备选写入路径。localStorage 仅作为写入成功后的缓存更新，不作为失败时的降级方案。
 
 ---
 
@@ -611,7 +611,7 @@ optimize_resume_section 工具:
 
 ### 10.1 数据收集
 
-每次用户接受/拒绝一个优化方案时，系统在 SQLite 中记录：
+每次用户接受/拒绝一个优化方案时，系统在数据层中记录：
 
 | 字段 | 说明 |
 |------|------|
@@ -687,10 +687,10 @@ optimize_resume_section 工具:
 | `src/lib/judge-engine.ts` | Judge 引擎核心：四维 prompt builder、effort/temperature 映射、占位符规则、追问生成器 |
 | `src/lib/agent/knowledge/role-writing-guides.ts` | 8 类角色的结构化写作模板和范例 |
 | `src/lib/agent/tools/action/optimize-resume-section.ts` | Agent 优化工具：读取 CV → 调用 API → 返回 variants |
-| `src/lib/agent/tools/action/save-resume-section.ts` | Agent 保存工具：确认门禁 + SQLite 写入 |
+| `src/lib/agent/tools/action/save-resume-section.ts` | Agent 保存工具：确认门禁 + 数据层写入 |
 | `src/lib/agent/tools/query/ats-check.ts` | ATS 兼容检查工具 |
 | `src/lib/cv-storage.ts` | 前端 CV 存储：localStorage 读写 + 版本管理 + 旧格式迁移 |
 | `src/app/api/cv/optimize-section/route.ts` | 优化 API：组装 prompt → DeepSeek API → 返回 variants |
-| `src/app/api/cv/data/route.ts` | CV 数据 API：GET/PUT SQLite |
+| `src/app/api/cv/data/route.ts` | CV 数据 API：GET/PUT repository |
 | `src/app/api/cv/ats-check/route.ts` | ATS 检查 API |
 | `src/types/index.ts` | 类型定义：Operation、CVData、CVSection、CVersion |

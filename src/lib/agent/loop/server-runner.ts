@@ -17,6 +17,8 @@ import { ZHIPU_API_URL, ZHIPU_FALLBACK_MODEL } from "@/lib/zhipu";
 import type { InterviewSessionState } from "@/types";
 import type { InterviewRebindAction } from "@/lib/agent/interview-rebind-policy";
 import { requiresReadBackVerification } from "@/lib/agent/tools/readback-verification";
+import type { AgentTaskContract } from "@/lib/agent/task-contract";
+import { enforceToolGovernance } from "@/lib/agent/tool-governance";
 
 /* ── Context cap (per-tool) ── */
 const DEFAULT_TOOL_CTX_CAP = 800;
@@ -94,7 +96,6 @@ const MODEL_CHAIN = [
   { model: "deepseek-v4-flash", url: "https://api.deepseek.com/chat/completions", keyEnv: "DEEPSEEK_API_KEY" },
   { model: "deepseek-v4-pro", url: "https://api.deepseek.com/chat/completions", keyEnv: "DEEPSEEK_API_KEY" },
   { model: ZHIPU_FALLBACK_MODEL, url: ZHIPU_API_URL, keyEnv: "ZHIPU_API_KEY" },
-  { model: "qwen-long", url: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", keyEnv: "DASHSCOPE_API_KEY" },
 ];
 
 interface DeepSeekMessage {
@@ -223,8 +224,9 @@ export async function* agentLoopServer(opts: {
   signal?: AbortSignal;
   interviewState?: InterviewSessionState;
   interviewRebindAction?: InterviewRebindAction;
+  taskContract?: AgentTaskContract | null;
 }): AsyncGenerator<SSEEvent> {
-  const { systemPrompt, messages, config = DEFAULT_LOOP_CONFIG, tools, agent, signal, interviewState, interviewRebindAction } = opts;
+  const { systemPrompt, messages, config = DEFAULT_LOOP_CONFIG, tools, agent, signal, interviewState, interviewRebindAction, taskContract } = opts;
   const modelPreference = agent?.model;
   const toolWhitelist = agent?.toolNames?.length ? agent.toolNames : undefined;
   const state: LoopState = {
@@ -347,6 +349,22 @@ export async function* agentLoopServer(opts: {
           yield { type: "tool_result", name: tc.name, result: formatted, success: false };
           yield { type: "tool_error", name: tc.name, error: toolResult.error || "工具调用被策略拦截", recoverable: false };
           ctx.push({ role: "user", content: `[TOOL_BLOCKED tool=${tc.name}] ${toolResult.llmSummary || toolResult.error || "工具调用被策略拦截"}\n\n请不要改用其它大工具重试。请基于已有本地上下文回答；缺少必要信息时只向用户索要那一项。` });
+          forceTextOnly = true;
+          continue;
+        }
+
+        const governanceResult = enforceToolGovernance({
+          toolName: tc.name,
+          params,
+          taskContract,
+          agentId: agent?.id,
+        });
+        if (governanceResult) {
+          toolResult = governanceResult;
+          formatted = formatToolResult(toolResult, tc.name);
+          yield { type: "tool_result", name: tc.name, result: formatted, success: false, data: toolResult.data, uiPayload: toolResult.uiPayload, verifiedAction: toolResult.verifiedAction };
+          yield { type: "tool_error", name: tc.name, error: toolResult.error || "工具调用被治理策略阻止", recoverable: false };
+          ctx.push({ role: "user", content: `[TOOL_BLOCKED tool=${tc.name}] ${toolResult.llmSummary || toolResult.error || "工具调用被治理策略阻止"}` });
           forceTextOnly = true;
           continue;
         }

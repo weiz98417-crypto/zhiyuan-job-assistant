@@ -35,6 +35,7 @@ interface CandidateResult {
   extractedText: string;
   structured?: Record<string, unknown>;
   candidateLabel: string;
+  candidateKind?: ImageCandidate["kind"];
 }
 
 interface ScanOptions {
@@ -44,7 +45,7 @@ interface ScanOptions {
 
 const MAX_IMAGES = 5;
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
-const CANDIDATE_TIMEOUT_MS = 30_000;
+const CANDIDATE_TIMEOUT_MS = 45_000;
 
 function clampConfidence(value: unknown, fallback = 0.65): number {
   const n = typeof value === "number" ? value : Number(value);
@@ -157,6 +158,10 @@ function cleanText(text: unknown): string {
   return text.replace(/\u0000/g, "").replace(/【缺失】/g, "").trim();
 }
 
+function isTimeoutReason(reason: unknown): boolean {
+  return /timeout|timed out|aborted|operation was aborted|超时/i.test(String(reason || ""));
+}
+
 function scoreCandidate(result: CandidateResult): number {
   const textBonus = Math.min(result.extractedText.length, 2400) / 2400;
   const qualityBonus =
@@ -172,6 +177,7 @@ async function inspectCandidate(
   dataUri: string,
   userText: string,
   candidateLabel: string,
+  candidateKind: ImageCandidate["kind"],
   preferredDocumentType?: ImageDocumentType,
 ): Promise<CandidateResult> {
   const apiKey = process.env.ZHIPU_API_KEY;
@@ -183,6 +189,7 @@ async function inspectCandidate(
       reason: "ZHIPU_API_KEY not configured",
       extractedText: "",
       candidateLabel,
+      candidateKind,
     };
   }
 
@@ -257,9 +264,12 @@ ${hintBlock}`.trim();
       documentType: "unknown",
       confidence: 0,
       quality: "unknown",
-      reason: `OCR request failed: ${message}`,
+      reason: isTimeoutReason(message)
+        ? `OCR request timeout: ${message}`
+        : `OCR request failed: ${message}`,
       extractedText: "",
       candidateLabel,
+      candidateKind,
     };
   }
 
@@ -272,6 +282,7 @@ ${hintBlock}`.trim();
       reason: `OCR API ${response.status}${errText ? `: ${errText.slice(0, 120)}` : ""}`,
       extractedText: "",
       candidateLabel,
+      candidateKind,
     };
   }
 
@@ -285,6 +296,7 @@ ${hintBlock}`.trim();
       reason: "Empty OCR response",
       extractedText: "",
       candidateLabel,
+      candidateKind,
     };
   }
 
@@ -297,6 +309,7 @@ ${hintBlock}`.trim();
       reason: "OCR 返回格式解析失败",
       extractedText: "",
       candidateLabel,
+      candidateKind,
     };
   }
 
@@ -315,6 +328,7 @@ ${hintBlock}`.trim();
     extractedText,
     structured,
     candidateLabel,
+    candidateKind,
   };
 }
 
@@ -343,23 +357,51 @@ async function inspectImage(
 
   const results: CandidateResult[] = [];
   for (const candidate of candidates) {
-    const result = await inspectCandidate(candidate.dataUri, userText, candidate.label, preferredDocumentType);
+    const result = await inspectCandidate(candidate.dataUri, userText, candidate.label, candidate.kind, preferredDocumentType);
     results.push(result);
+    const hasTallSlices = candidates.some((item) => item.kind === "tall_slice");
+    const successfulTallSlices = results.filter((item) =>
+      item.candidateKind === "tall_slice" &&
+      item.documentType !== "unknown" &&
+      item.confidence >= 0.72 &&
+      item.extractedText.trim().length >= 40
+    );
     if (
       result.documentType !== "unknown" &&
       result.quality === "clear" &&
       result.confidence >= 0.78 &&
-      result.extractedText.length >= 80
+      result.extractedText.length >= 80 &&
+      (!hasTallSlices || result.candidateKind !== "tall_slice" || successfulTallSlices.length >= 3)
     ) {
       break;
     }
   }
 
-  const best = results
+  const bestSingle = results
     .slice()
     .sort((a, b) => scoreCandidate(b) - scoreCandidate(a))[0] || results[0];
+  const mergedType = majorityType(results, preferredDocumentType);
+  const mergeableTallSlices = results.filter((item) =>
+    item.candidateKind === "tall_slice" &&
+    item.documentType === mergedType &&
+    item.extractedText.trim().length >= 40
+  );
+  if (mergeableTallSlices.length >= 2 && mergedType !== "unknown") {
+    const mergedText = mergeText(mergeableTallSlices, mergedType);
+    const first = mergeableTallSlices[0];
+    return {
+      ...first,
+      documentType: mergedType,
+      confidence: mergeableTallSlices.reduce((sum, item) => sum + item.confidence, 0) / mergeableTallSlices.length,
+      extractedText: mergedText || first.extractedText,
+      structured: mergeStructured(mergeableTallSlices, mergedType) || first.structured,
+      reason: first.reason,
+      candidateLabel: mergeableTallSlices.map((item) => item.candidateLabel).join(" + "),
+      candidateKind: "tall_slice",
+    };
+  }
 
-  return best;
+  return bestSingle;
 }
 
 function mergeStructured(results: CandidateResult[], documentType: ImageDocumentType): Record<string, unknown> | undefined {
@@ -451,6 +493,10 @@ export async function inspectDocumentImages(
 
     const result = await inspectImage(normalized, userText, options.preferredDocumentType);
     candidateResults.push(result);
+    if (result.reason && (result.documentType === "unknown" || isTimeoutReason(result.reason))) {
+      const reasonCode = isTimeoutReason(result.reason) ? "ocr_timeout" : result.reason;
+      errors.push(`第 ${i + 1} 张：${reasonCode}`);
+    }
     perImage.push({
       index: i,
       documentType: result.documentType,
@@ -490,12 +536,18 @@ export async function inspectDocumentImages(
     ? sameTypeResults.reduce((sum, item) => sum + item.confidence, 0) / sameTypeResults.length
     : best.confidence;
 
+  const timeoutOnly =
+    candidateResults.length > 0 &&
+    candidateResults.every((result) => isTimeoutReason(result.reason) && !result.extractedText.trim());
+
   return {
     documentType,
     confidence: Math.max(0, Math.min(1, confidenceBase)),
     extractedText,
     structured,
-    reason: best.reason || (documentType === "unknown" ? "无法稳定识别图片类型" : ""),
+    reason: timeoutOnly
+      ? "OCR 服务处理图片超时，未能在本次请求内返回识别结果"
+      : best.reason || (documentType === "unknown" ? "无法稳定识别图片类型" : ""),
     quality: best.quality,
     errors: errors.length ? errors : undefined,
     perImage,

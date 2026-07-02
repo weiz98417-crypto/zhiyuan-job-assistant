@@ -271,13 +271,16 @@ export async function migrateSqliteToPostgres({ sqliteDb, pgClient, defaultOwner
   return { plan, applied: true, migratedRows };
 }
 
-export async function verifyMigration({ sqliteDb, pgClient, defaultOwner = null, sampleSize = 3 }) {
+export async function verifyMigration({ sqliteDb, pgClient, defaultOwner = null, sampleSize = 3, mode = "strict" }) {
+  const verificationMode = mode === "cutover" || mode === "archive" ? "cutover" : "strict";
+  const allowTargetDrift = verificationMode === "cutover";
   const plan = await buildMigrationPlan({ sqliteDb, pgClient, defaultOwner });
   const sourceTables = new Set(listSqliteTables(sqliteDb));
   const tableChecks = [];
   const jsonSamples = [];
   const isolationChecks = [];
   const errors = [];
+  const warnings = [];
 
   for (const tableConfig of MIGRATION_TABLES) {
     if (!sourceTables.has(tableConfig.name)) {
@@ -315,20 +318,35 @@ export async function verifyMigration({ sqliteDb, pgClient, defaultOwner = null,
 
     jsonSamples.push(...(await compareJsonSamples({ sqliteDb, pgClient, tableConfig, targetColumns, defaultOwnerId: plan.defaultOwner?.id || null, sampleSize })));
     if (tableConfig.userOwned && targetColumns.includes("user_id")) {
-      isolationChecks.push(await compareUserCounts({ sqliteDb, pgClient, tableConfig, defaultOwnerId: plan.defaultOwner?.id || null }));
+      isolationChecks.push(await compareUserCounts({
+        sqliteDb,
+        pgClient,
+        tableConfig,
+        defaultOwnerId: plan.defaultOwner?.id || null,
+        allowTargetSuperset: allowTargetDrift,
+      }));
     }
   }
 
   for (const sample of jsonSamples) {
-    if (!sample.ok) errors.push(`${sample.table}.${sample.column} sample ${sample.key}: JSON mismatch`);
+    if (!sample.ok) {
+      const message = `${sample.table}.${sample.column} sample ${sample.key}: JSON mismatch`;
+      if (allowTargetDrift) warnings.push(`${message} (accepted as post-cutover target drift)`);
+      else errors.push(message);
+    }
   }
   for (const check of isolationChecks) {
     if (!check.ok) errors.push(`${check.table}: per-user counts mismatch`);
   }
+  if (allowTargetDrift && plan.ownership.missing.length > 0) {
+    warnings.push(`${plan.ownership.missing.length} legacy SQLite ownership issue(s) skipped in cutover archive mode`);
+  }
 
   return {
-    ok: errors.length === 0 && plan.jsonErrors.length === 0 && plan.ownership.missing.length === 0,
+    mode: verificationMode,
+    ok: errors.length === 0 && plan.jsonErrors.length === 0 && (allowTargetDrift || plan.ownership.missing.length === 0),
     errors,
+    warnings,
     plan,
     tableChecks,
     jsonSamples,
@@ -376,6 +394,7 @@ export function formatVerificationReport(report) {
   const lines = [];
   lines.push("# SQLite -> PostgreSQL migration verification");
   lines.push("");
+  lines.push(`Mode: ${report.mode || "strict"}`);
   lines.push(`Status: ${report.ok ? "PASS" : "FAIL"}`);
   lines.push("");
   lines.push("## Row checks");
@@ -388,16 +407,20 @@ export function formatVerificationReport(report) {
   const samples = report.jsonSamples.slice(0, 30);
   if (samples.length === 0) lines.push("- No JSON samples found.");
   for (const sample of samples) {
-    lines.push(`- ${sample.table}.${sample.column} ${sample.key}: ${sample.ok ? "ok" : "mismatch"}`);
+    const sampleStatus = sample.ok ? "ok" : (report.mode === "cutover" ? "drift" : "mismatch");
+    lines.push(`- ${sample.table}.${sample.column} ${sample.key}: ${sampleStatus}`);
   }
   lines.push("");
   lines.push("## Per-user isolation");
   if (report.isolationChecks.length === 0) lines.push("- No user-owned tables found.");
   for (const check of report.isolationChecks) {
-    lines.push(`- ${check.table}: ${check.ok ? "ok" : "mismatch"} (${JSON.stringify(check.sourceCounts)} -> ${JSON.stringify(check.targetCounts)})`);
+    const comparison = check.mode === "target_superset" ? "target>=source" : "exact";
+    lines.push(`- ${check.table}: ${check.ok ? "ok" : "mismatch"} [${comparison}] (${JSON.stringify(check.sourceCounts)} -> ${JSON.stringify(check.targetCounts)})`);
   }
   appendIssueList(lines, "Errors", report.errors.map((message) => ({ message })));
+  appendIssueList(lines, "Warnings", (report.warnings || []).map((message) => ({ message })));
   appendIssueList(lines, "Default owner assignments", report.plan.ownership.assignments);
+  appendIssueList(lines, "Legacy owner gaps", report.plan.ownership.missing);
   return `${lines.join("\n")}\n`;
 }
 
@@ -519,7 +542,7 @@ async function compareJsonSamples({ sqliteDb, pgClient, tableConfig, targetColum
   return samples;
 }
 
-async function compareUserCounts({ sqliteDb, pgClient, tableConfig, defaultOwnerId }) {
+async function compareUserCounts({ sqliteDb, pgClient, tableConfig, defaultOwnerId, allowTargetSuperset = false }) {
   const sourceColumns = getSqliteColumns(sqliteDb, tableConfig.name);
   const rows = sqliteDb.prepare(`SELECT * FROM ${quoteSqliteIdent(tableConfig.name)}`).all();
   const sourceCounts = {};
@@ -533,7 +556,16 @@ async function compareUserCounts({ sqliteDb, pgClient, tableConfig, defaultOwner
     `SELECT user_id, COUNT(*) AS count FROM ${quotePgIdent(tableConfig.name)} WHERE user_id IS NOT NULL GROUP BY user_id ORDER BY user_id`,
   );
   const targetCounts = Object.fromEntries(targetRows.rows.map((row) => [row.user_id, Number(row.count)]));
-  return { table: tableConfig.name, sourceCounts, targetCounts, ok: stableStringify(sourceCounts) === stableStringify(targetCounts) };
+  const ok = allowTargetSuperset
+    ? Object.entries(sourceCounts).every(([userId, count]) => Number(targetCounts[userId] || 0) >= Number(count))
+    : stableStringify(sourceCounts) === stableStringify(targetCounts);
+  return {
+    table: tableConfig.name,
+    sourceCounts,
+    targetCounts,
+    ok,
+    mode: allowTargetSuperset ? "target_superset" : "exact",
+  };
 }
 
 function normalizeJson(value) {

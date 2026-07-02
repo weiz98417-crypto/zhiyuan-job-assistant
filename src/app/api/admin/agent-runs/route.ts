@@ -2,9 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser, verifyTokenVersion } from "@/lib/auth";
 import {
   isAgentRunLedgerAvailable,
+  listRecentAgentRuns,
   listRecentFailedAgentRuns,
   type AgentRunDebugRecord,
   type AgentRunStepRecord,
+  type AgentRunStatus,
 } from "@/lib/agent/run-ledger";
 
 const MAX_TEXT = 180;
@@ -46,6 +48,10 @@ function toStepSummary(step: AgentRunStepRecord) {
 }
 
 function toRunSummary(run: AgentRunDebugRecord) {
+  const contractJson = run.contract_json as Record<string, unknown> | null;
+  const routing = contractJson?.routing && typeof contractJson.routing === "object"
+    ? contractJson.routing as Record<string, unknown>
+    : {};
   return {
     id: run.id,
     userId: run.user_id,
@@ -54,16 +60,31 @@ function toRunSummary(run: AgentRunDebugRecord) {
     agentId: run.agent_id,
     status: run.status,
     contract: {
-      taskType: typeof (run.contract_json as { taskType?: unknown })?.taskType === "string"
-        ? (run.contract_json as { taskType: string }).taskType
+      taskType: typeof contractJson?.taskType === "string"
+        ? contractJson.taskType
         : run.task_type,
-      target: redactText((run.contract_json as { target?: unknown })?.target || ""),
-      successCriteria: Array.isArray((run.contract_json as { successCriteria?: unknown })?.successCriteria)
-        ? ((run.contract_json as { successCriteria: unknown[] }).successCriteria).map(redactText).slice(0, 8)
+      target: redactText(contractJson?.target || ""),
+      successCriteria: Array.isArray(contractJson?.successCriteria)
+        ? (contractJson.successCriteria as unknown[]).map(redactText).slice(0, 8)
         : [],
-      validators: Array.isArray((run.contract_json as { validators?: unknown })?.validators)
-        ? ((run.contract_json as { validators: unknown[] }).validators).map(redactText).slice(0, 8)
+      validators: Array.isArray(contractJson?.validators)
+        ? (contractJson.validators as unknown[]).map(redactText).slice(0, 8)
         : [],
+      routing: {
+        contractPolicy: redactText(routing.contractPolicy || ""),
+        memoryTask: redactText(routing.memoryTask || ""),
+        allowedTools: Array.isArray(routing.allowedTools)
+          ? routing.allowedTools.map(redactText).slice(0, 20)
+          : [],
+        requiresClarification: routing.requiresClarification === true,
+        clarificationQuestion: redactText(routing.clarificationQuestion || ""),
+        blockedReason: redactText(routing.blockedReason || ""),
+        auditSummary: redactText(routing.auditSummary || ""),
+        activeTaskId: redactText(routing.activeTaskId || ""),
+        activeTaskType: redactText(routing.activeTaskType || ""),
+        activeTaskPhase: redactText(routing.activeTaskPhase || ""),
+        routeLocked: routing.routeLocked === true,
+      },
     },
     result: safeJson(run.result_json),
     error: safeJson(run.error_json),
@@ -85,12 +106,18 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: true, enabled: false, data: [] });
     }
 
-    const limit = Number(new URL(request.url).searchParams.get("limit") || 50);
-    const rows = await listRecentFailedAgentRuns(Number.isFinite(limit) ? limit : 50);
+    const url = new URL(request.url);
+    const limit = Number(url.searchParams.get("limit") || 50);
+    const status = cleanStatusFilter(url.searchParams.get("status"));
+    const rows = status === "failed"
+      ? await listRecentFailedAgentRuns(Number.isFinite(limit) ? limit : 50)
+      : await listRecentAgentRuns(Number.isFinite(limit) ? limit : 50, status ? [status] : undefined);
+    const data = rows.map(toRunSummary);
     return NextResponse.json({
       success: true,
       enabled: true,
-      data: rows.map(toRunSummary),
+      summary: buildSummary(data),
+      data,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -104,4 +131,51 @@ export async function GET(request: NextRequest) {
     console.error("[admin/agent-runs]", err);
     return NextResponse.json({ success: false, error: "Internal error" }, { status: 500 });
   }
+}
+
+function cleanStatusFilter(value: string | null): AgentRunStatus | "failed" | undefined {
+  const status = (value || "").trim();
+  if (!status || status === "all") return undefined;
+  if (status === "failed") return "failed";
+  const allowed = new Set<AgentRunStatus>([
+    "planned",
+    "running",
+    "waiting_user",
+    "verifying",
+    "repairing",
+    "recovered",
+    "needs_engineering",
+    "succeeded",
+    "failed",
+    "rolled_back",
+    "cancelled",
+  ]);
+  return allowed.has(status as AgentRunStatus) ? status as AgentRunStatus : undefined;
+}
+
+function buildSummary(rows: ReturnType<typeof toRunSummary>[]) {
+  const byStatus: Record<string, number> = {};
+  const byTaskType: Record<string, number> = {};
+  let failedSteps = 0;
+  let totalSteps = 0;
+
+  for (const run of rows) {
+    byStatus[run.status] = (byStatus[run.status] || 0) + 1;
+    byTaskType[run.taskType || "unknown"] = (byTaskType[run.taskType || "unknown"] || 0) + 1;
+    for (const step of run.recentSteps) {
+      totalSteps += 1;
+      if (step.status === "failed") failedSteps += 1;
+    }
+  }
+
+  return {
+    totalRuns: rows.length,
+    failedRuns: rows.filter((run) => run.status === "failed" || run.status === "rolled_back").length,
+    activeRuns: rows.filter((run) => ["planned", "running", "waiting_user", "verifying", "repairing"].includes(run.status)).length,
+    succeededRuns: rows.filter((run) => run.status === "succeeded").length,
+    failedSteps,
+    totalSteps,
+    byStatus,
+    byTaskType,
+  };
 }

@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
+import {
+  DocumentExtractionError,
+  extractResumeDocument,
+  type DocumentExtractionDiagnostics,
+} from "@/lib/server/document-extraction";
 import { ZHIPU_API_URL, ZHIPU_VISION_MODEL } from "@/lib/zhipu";
 
-const DASHSCOPE_BASE = "https://dashscope.aliyuncs.com/compatible-mode/v1";
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
 // ── Helpers ──
@@ -92,149 +96,6 @@ async function parseViaZhipu(dataUri: string): Promise<Record<string, string>> {
   } catch { return { summary: text, experience: "", projects: "", skills: "", education: "" }; }
 }
 
-// ── Split embedded projects from work experience ──
-
-function splitWorkAndProject(exp: string): { work: string; projects: string } {
-  // Split by "项目名称：" markers
-  const parts = exp.split(/\n(?=项目名称[：:])/);
-  // parts[0] = first company info (work), parts[1..n] = project blocks
-
-  const work: string[] = [parts[0].trim()];
-  const proj: string[] = [];
-
-  for (let i = 1; i < parts.length; i++) {
-    const block = parts[i];
-    // Try to find trailing company header (3-4 lines at end: company, position, date)
-    const lines = block.split("\n");
-    // Look for date pattern in last few lines
-    let splitAt = lines.length;
-    for (let j = lines.length - 1; j >= Math.max(0, lines.length - 5); j--) {
-      if (/\d{4}[\.-]\d{2}\s*[-–—]\s*(\d{4}[\.-]\d{2}|至今|现在)/.test(lines[j])) {
-        // Found date line — company header is lines j-2 to j
-        splitAt = Math.max(0, j - 2);
-        break;
-      }
-    }
-    if (splitAt < lines.length - 1) {
-      proj.push(lines.slice(0, splitAt).join("\n").trim());
-      work.push(lines.slice(splitAt).join("\n").trim());
-    } else {
-      // No trailing company — whole block is project (last one)
-      proj.push(block.trim());
-    }
-  }
-
-  return {
-    work: work.join("\n\n").replace(/\n{3,}/g, "\n\n"),
-    projects: proj.join("\n\n"),
-  };
-}
-
-// ── Qwen-Long: file upload → direct structured JSON ──
-
-async function parseViaQwenLong(buffer: Buffer, mimeType: string, filename: string): Promise<Record<string, string>> {
-  const apiKey = process.env.DASHSCOPE_API_KEY;
-  if (!apiKey) throw new Error("未配置 DASHSCOPE_API_KEY");
-
-  // 1. Upload
-  const form = new FormData();
-  form.append("file", new Blob([new Uint8Array(buffer)], { type: mimeType }), filename);
-  form.append("purpose", "file-extract");
-  const upRes = await fetch(`${DASHSCOPE_BASE}/files`, {
-    method: "POST", headers: { Authorization: `Bearer ${apiKey}` }, body: form,
-    signal: AbortSignal.timeout(30000),
-  });
-  if (!upRes.ok) throw new Error(`文件上传失败: ${upRes.status}`);
-  const { id: fileId } = await upRes.json() as { id: string };
-
-  // 2. Parse
-  const chatRes = await fetch(`${DASHSCOPE_BASE}/chat/completions`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model: "qwen-long",
-      messages: [
-        { role: "system", content: `fileid://${fileId}` },
-        { role: "user", content: `请把这份PDF简历的内容完整提取出来。输出格式要求：用 ===SECTION=== 作为每个栏目的分隔标记。严格按照以下6个标记输出，标记必须一模一样：
-
-===个人信息===
-（姓名、电话、邮箱等）
-===个人概述===
-（自我评价、求职目标段落）
-===工作经历===
-（每段工作原文）
-===项目经验===
-（每个项目原文）
-===技能===
-（技能列表原文）
-===教育背景===
-（学历信息原文）
-
-重要：1）标记必须原样输出 2）内容原样复制 3）栏目为空的写"无" 4）不要在标记前后加任何其他文字` },
-      ],
-      max_tokens: 16000,
-    }),
-    signal: AbortSignal.timeout(60000),
-  });
-  if (!chatRes.ok) throw new Error(`Qwen-Long 调用失败: ${chatRes.status}`);
-  const data = await chatRes.json() as { choices?: { message?: { content?: string } }[] };
-  const rawText = data.choices?.[0]?.message?.content || "";
-  if (!rawText) throw new Error("Qwen-Long 返回为空");
-
-  // Parse ===SECTION=== markers into CV fields
-  const cleaned = rawText
-    .replace(/[0-9a-fA-F]{30,}/g, "")
-    .replace(/([0-9a-fA-F]{2}\s?){10,}/g, "")
-    .trim();
-
-  const extract = (label: string) => {
-    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const re = new RegExp(`===${escaped}===\\s*\\n([\\s\\S]*?)(?=\\n===|$)`, "i");
-    const m = cleaned.match(re);
-    const val = m?.[1]?.trim() || "";
-    return val === "无" ? "" : val;
-  };
-
-  const personal = extract("个人信息");
-  const overview = extract("个人概述");
-  const work = extract("工作经历");
-  const proj = extract("项目经验");
-  const skill = extract("技能");
-  const edu = extract("教育背景");
-
-  // Post-process 1: extract project blocks from work experience
-  let exp = work;
-  let prj = proj;
-  if (!prj && exp && /项目名称[：:]/.test(exp)) {
-    const r = splitWorkAndProject(exp);
-    exp = r.work;
-    prj = r.projects;
-  }
-
-  // Post-process 2: extract education from summary/overview
-  let sum = [personal, overview].filter(Boolean).join("\n\n");
-  let edu2 = edu;
-  const eduPattern = /(?:大学|学院|本科|硕士|博士|学士|研究生|毕业|专业[：:]|学历[：:]|学位[：:]|学校[：:]|教育背景)/;
-  const eduLinePattern = /^.*(?:大学|学院|本科|硕士|博士|学士|专业[：:]|学历[：:]|学位[：:]|学校[：:]|教育背景).*$/gm;
-  if (!edu2 && eduPattern.test(sum)) {
-    const eduLines: string[] = [];
-    sum = sum.replace(eduLinePattern, (m) => {
-      eduLines.push(m);
-      return "";
-    });
-    sum = sum.replace(/\n{3,}/g, "\n\n").trim();
-    edu2 = eduLines.join("\n");
-  }
-
-  return {
-    summary: sum,
-    experience: exp,
-    projects: prj,
-    skills: skill,
-    education: edu2,
-  };
-}
-
 // ── DeepSeek parse (Word / Text only) ──
 
 async function parseViaDeepSeek(rawText: string): Promise<Record<string, string>> {
@@ -298,6 +159,7 @@ export async function POST(request: Request) {
   try {
     const contentType = request.headers.get("content-type") || "";
     let sections: Record<string, string>;
+    let extractionDiagnostics: DocumentExtractionDiagnostics | undefined;
 
     if (contentType.includes("multipart/form-data")) {
       const formData = await request.formData();
@@ -310,27 +172,15 @@ export async function POST(request: Request) {
         return NextResponse.json({ success: false, error: "文件大小不能超过 10MB" }, { status: 400 });
       }
 
-      if (ext === "pdf") {
-        // PDF → Qwen-Long (dedicated document channel)
-        sections = await parseViaQwenLong(buffer, "application/pdf", file.name);
+      if (["pdf", "doc", "docx", "txt", "md"].includes(ext)) {
+        const extraction = await extractResumeDocument({ buffer, filename: file.name, ext });
+        extractionDiagnostics = extraction.diagnostics;
+        sections = await parseViaDeepSeek(extraction.text);
       } else if (["png", "jpg", "jpeg", "webp"].includes(ext)) {
         // Image → Zhipu vision model → direct JSON
         const mimeType = ext === "jpg" || ext === "jpeg" ? "image/jpeg" : `image/${ext}`;
         const dataUri = `data:${mimeType};base64,${buffer.toString("base64")}`;
         sections = await parseViaZhipu(dataUri);
-      } else if (ext === "docx") {
-        const mammoth = require("mammoth");
-        const result = await mammoth.extractRawText({ buffer });
-        if (!result.value.trim()) {
-          return NextResponse.json({ success: false, error: "Word 文档中未提取到文本内容" }, { status: 400 });
-        }
-        sections = await parseViaDeepSeek(result.value);
-      } else if (ext === "doc") {
-        // Legacy .doc → Qwen-Long file upload (same as PDF)
-        sections = await parseViaQwenLong(buffer, "application/msword", file.name);
-      } else if (ext === "txt" || ext === "md") {
-        const rawText = new TextDecoder().decode(buffer);
-        sections = await parseViaDeepSeek(rawText);
       } else {
         return NextResponse.json({
           success: false,
@@ -346,9 +196,20 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: "请上传文件或粘贴简历文本" }, { status: 400 });
     }
 
-    return NextResponse.json({ success: true, data: { sections } });
+    return NextResponse.json({ success: true, data: { sections, extraction: extractionDiagnostics } });
   } catch (err) {
     console.error("CV import error:", err);
+    if (err instanceof DocumentExtractionError) {
+      return NextResponse.json(
+        {
+          success: false,
+          code: err.code,
+          error: err.userMessage,
+          diagnostics: err.diagnostics,
+        },
+        { status: err.status },
+      );
+    }
     return NextResponse.json(
       { success: false, error: err instanceof Error ? err.message : "导入失败" },
       { status: 500 },

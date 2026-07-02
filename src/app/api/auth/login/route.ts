@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { comparePassword, signToken } from '@/lib/auth';
+import { shouldUseSecureAuthCookie } from '@/lib/auth-cookie';
 import { getDataRepositories } from '@/lib/data-repositories';
 
 export async function POST(request: NextRequest) {
@@ -61,7 +62,7 @@ export async function POST(request: NextRequest) {
 
     response.cookies.set('auth_token', token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: shouldUseSecureAuthCookie(request),
       sameSite: 'lax',
       path: '/',
       maxAge: 60 * 60 * 24,

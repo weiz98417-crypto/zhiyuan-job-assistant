@@ -1,6 +1,6 @@
 # Architecture
 
-This document describes the current Zhiyuan web application architecture. The old CLI-first `career-ops` pipeline still informs some scripts and docs, but the runtime product is now a Next.js app with server-side agents, multi-user data access, screenshot intake, and optional PostgreSQL/pgvector memory.
+This document describes the current Zhiyuan web application architecture. The old CLI-first `career-ops` pipeline still informs some scripts and docs, but the runtime product is now a Next.js app with server-side agents, multi-user data access, screenshot intake, PostgreSQL/pgvector memory, and SQLite fallback/archive support.
 
 ## System Overview
 
@@ -46,11 +46,15 @@ Key modules:
 | --- | --- |
 | `src/lib/agent/orchestrator/index.ts` | Route user intent to the right sub-agent and build prompt context. |
 | `src/lib/agent/registry/agents/*` | Agent definitions and tool allowlists. |
-| `src/lib/agent/tools/index.ts` | Registers 44 tools and exposes execution helpers. |
+| `src/lib/agent/tools/index.ts` | Registers 48 tools and exposes execution helpers. |
+| `src/lib/agent/tool-governance.ts` | Classifies tool side effects, task contract policies, allowed agents, read-back requirements, and route conflicts. |
+| `src/lib/agent/task-routing.ts` | Central routing matrix for text intent, image document type, memory policy task, and allowed tools. |
 | `src/lib/agent/loop/client-runner.ts` | Client-facing loop orchestration, pending save flow, tool execution sequence. |
 | `src/lib/agent/loop/server-runner.ts` | Server-side model invocation and stream handling. |
 | `src/lib/agent/loop/tool-policy.ts` | Guardrails for interview rebinding, raw report leakage, and tool misuse. |
 | `src/components/MarkdownRenderer.tsx` | Sanitized Markdown rendering for readable chat output. |
+
+Tool execution is governed twice: static tests require registered tools to have metadata, and the runtime blocks calls when a tool effect conflicts with the active task contract. Durable writes, exports, and admin actions must return read-back or deterministic verifier evidence before the assistant can claim success.
 
 ## Image Intake Flow
 
@@ -126,16 +130,16 @@ Launch / bind materials
 
 ## Data Layer
 
-The data layer has two runtime drivers:
+The data layer has two runtime drivers. The current LAN deployment uses PostgreSQL/pgvector; SQLite remains for local fallback, migration, and archive reads.
 
 | Driver | Status | Usage |
 | --- | --- | --- |
-| SQLite | Default | Local/LAN development and current easiest deployment path. |
-| PostgreSQL | Optional | Repository-backed server data path and pgvector memory foundation. |
+| PostgreSQL | Current LAN runtime | Repository-backed server data path, multi-user data, run ledger, reviews, and pgvector memory foundation. |
+| SQLite | Fallback/archive | Local lightweight mode, migration source, and readonly archive path. |
 
-`src/lib/data-repositories.ts` is the canonical data access layer for server routes that need to work across both drivers. It delegates to SQLite by default and PostgreSQL when `DB_DRIVER=postgres`.
+`src/lib/data-repositories.ts` is the canonical data access layer for server routes that need to work across both drivers. It delegates to PostgreSQL when `DB_DRIVER=postgres`; otherwise it can use SQLite fallback.
 
-`src/lib/server-db.ts` still provides direct SQLite helpers and migrations. It throws when `DB_DRIVER=postgres` unless `ALLOW_SQLITE_LEGACY=1`, which helps reveal routes that still need repository conversion.
+`src/lib/server-db.ts` still provides direct SQLite helpers and migrations for fallback/archive scenarios. It throws when `DB_DRIVER=postgres` unless `ALLOW_SQLITE_LEGACY=readonly`, which helps reveal routes that still need repository conversion.
 
 ## Long-Term Memory
 

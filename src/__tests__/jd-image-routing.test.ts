@@ -55,24 +55,22 @@ describe("generic image intake routing", () => {
     expect(buildImageIntakeToolCall("帮我看看这个截图", images, intake, ["evaluate_jd_full", "evaluate_offer"])).toBeNull();
   });
 
-  it("forces JD evaluation from explicit user intent when image intake is unavailable", () => {
+  it("does not bypass image recognition for JD image turns when intake is unavailable", () => {
     const preferred = inferPreferredDocumentTypeFromText("帮我评估一个JD");
     expect(preferred).toBe("jd");
     expect(resolveImageIntakeAgentId("帮我评估一个JD", null, preferred)).toBe("evaluate");
 
     const call = buildImageIntakeToolCall("帮我评估一个JD", images, null, ["evaluate_jd_full"], preferred);
-    expect(call?.name).toBe("evaluate_jd_full");
-    expect(call?.params.images).toEqual(images);
+    expect(call).toBeNull();
   });
 
-  it("forces Offer evaluation from explicit user intent when image intake is unavailable", () => {
+  it("does not bypass image recognition for Offer image turns when intake is unavailable", () => {
     const preferred = inferPreferredDocumentTypeFromText("帮我评估这个 offer 截图");
     expect(preferred).toBe("offer");
     expect(resolveImageIntakeAgentId("帮我评估这个 offer 截图", null, preferred)).toBe("offer");
 
     const call = buildImageIntakeToolCall("帮我评估这个 offer 截图", images, null, ["evaluate_offer"], preferred);
-    expect(call?.name).toBe("evaluate_offer");
-    expect(call?.params.images).toEqual(images);
+    expect(call).toBeNull();
   });
 
   it("image-only input classifies before generic chat and asks user intent", () => {
@@ -211,5 +209,32 @@ describe("generic image intake routing", () => {
     const decision = routeImageIntake("帮我评估这个JD", intake);
     expect(decision.route).toBe("retry_image");
     expect(decision.retryHint).toContain("JD");
+  });
+
+  it("treats OCR timeout as a transient service failure instead of blaming image clarity", () => {
+    const intake: ImageIntakeResult = {
+      documentType: "unknown",
+      confidence: 0,
+      quality: "unknown",
+      extractedText: "",
+      reason: "OCR request failed: The operation was aborted due to timeout",
+      errors: ["ocr_timeout"],
+      perImage: [{
+        index: 0,
+        documentType: "unknown",
+        confidence: 0,
+        extractedTextLength: 0,
+        reason: "OCR request failed: The operation was aborted due to timeout",
+        candidate: "整图规范化",
+      }],
+    };
+
+    const decision = routeImageIntake("帮我评估这个JD", intake);
+
+    expect(decision.route).toBe("retry_image");
+    expect(decision.reason).toContain("超时");
+    expect(decision.retryHint).toContain("稍后");
+    expect(decision.retryHint).not.toContain("更清晰");
+    expect(decision.retryHint).not.toContain("裁剪到只保留正文");
   });
 });

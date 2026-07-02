@@ -4,6 +4,7 @@ import fs from "fs";
 import path from "path";
 import { getCurrentUser } from "@/lib/auth";
 import { getDataRepositories } from "@/lib/data-repositories";
+import { computeEvaluationOverallScore, extractEvaluationBlockScore } from "@/lib/evaluation-scoring";
 import { ZHIPU_API_URL, ZHIPU_VISION_MODEL } from "@/lib/zhipu";
 import { buildOCRImageCandidates, normalizeImageDataUri } from "@/lib/server-image-variants";
 
@@ -347,27 +348,6 @@ function cleanOCRBody(body: string): string {
   return cleaned.length >= 20 ? cleaned : "";
 }
 
-/* ── Score extraction ── */
-
-function extractScore(text: string, blockKey: string): number {
-  if (blockKey === "g") {
-    // Block G: 0 = no content, 1 = concerns found (the norm for legitimacy checks)
-    return text.trim().length > 20 ? 1 : 0;
-  }
-  // Prefer explicit score markers, then fall back to /5 pattern
-  const scoreMatch = text.match(/[总平]分[：:]\s*([\d.]+)/)
-    || text.match(/(?<!\d)(\d+\.?\d*)\s*\/\s*5(?!\d)/);
-  if (scoreMatch) {
-    const s = parseFloat(scoreMatch[1]);
-    if (s >= 1 && s <= 5) return Math.round(s * 10) / 10;
-  }
-  // If LLM explicitly says no data / can't evaluate, score low
-  if (/零(薪资|信息|数据)|无.*(信息|数据)|无法评估|不.*可.*(用|得)|缺失|cannot/i.test(text)) {
-    return 1;
-  }
-  return 3;
-}
-
 /* ══════════════════════════════════════════════════════════════
    MAIN HANDLER
    ══════════════════════════════════════════════════════════════ */
@@ -548,31 +528,31 @@ export async function POST(request: Request) {
         // Block-specific prompts (focused, not full modes)
         const blockPrompts: Record<string, { sys: string; user: string }> = {
           a: {
-            sys: `你是AI求职评估引擎。当前日期: ${todayCN} (${today})。只生成「A板块·职位概览」，不要涉及其他板块。提取JD中的关键信息填入表格，包含：Archetype、领域、职能、职级、工作模式、团队规模、一句话TL;DR。用中文markdown表格输出。`,
+            sys: `你是AI求职评估引擎。当前日期: ${todayCN} (${today})。只生成「A板块·职位概览」，不要涉及其他板块。提取JD中的关键信息填入表格，包含：Archetype、领域、职能、职级、工作模式、团队规模、一句话TL;DR。用中文markdown表格输出。最后一行必须输出：**评分：X/5**。`,
             user: `JD:\n${state.jdText.slice(0, 5000)}\n\n${archBrief}`,
           },
           b: {
-            sys: `你是AI求职评估引擎。当前日期: ${todayCN} (${today})。只生成「B板块·简历匹配」，不要涉及其他板块。逐条对照JD要求与候选人简历，标注匹配/缺口/应对策略。${cvTextEffective ? '简历已提供，请精确匹配并引用简历行号。' : '无简历，请列出JD要求并标注"待提供简历"。'}Archetype策略: ${state.archetype === 'AI产品经理' ? '优先PRD、产品规划、数据驱动决策的证据' : state.archetype === 'AI运营' ? '优先增长指标、AI工具应用、A/B测试' : '优先相关领域经验'}。用中文markdown表格输出。`,
+            sys: `你是AI求职评估引擎。当前日期: ${todayCN} (${today})。只生成「B板块·简历匹配」，不要涉及其他板块。逐条对照JD要求与候选人简历，标注匹配/缺口/应对策略。${cvTextEffective ? '简历已提供，请精确匹配并引用简历行号。' : '无简历，请列出JD要求并标注"待提供简历"。'}Archetype策略: ${state.archetype === 'AI产品经理' ? '优先PRD、产品规划、数据驱动决策的证据' : state.archetype === 'AI运营' ? '优先增长指标、AI工具应用、A/B测试' : '优先相关领域经验'}。用中文markdown表格输出。最后一行必须输出：**评分：X/5**，按JD要求与简历证据的匹配度评分；没有简历时输出 **评分：0/5**。`,
             user: `${cvTextEffective ? `候选人简历:\n${cvTextEffective.slice(0, 6000)}\n\n` : ""}JD:\n${state.jdText.slice(0, 4000)}\n\n${archBrief}`,
           },
           c: {
-            sys: `你是AI求职评估引擎。当前日期: ${todayCN} (${today})。只生成「C板块·职级与策略」，不要涉及其他板块。分析JD职级要求，对照中国互联网职级体系(P6/P7/P8等)，给出"卖senior不撒谎"方案和被downlevel应对策略。用中文markdown输出。`,
+            sys: `你是AI求职评估引擎。当前日期: ${todayCN} (${today})。只生成「C板块·职级与策略」，不要涉及其他板块。分析JD职级要求，对照中国互联网职级体系(P6/P7/P8等)，给出"卖senior不撒谎"方案和被downlevel应对策略。用中文markdown输出。最后一行必须输出：**评分：X/5**，按职级匹配度与可执行竞争策略评分；不要因为JD未明示职级就自动给低分。`,
             user: `JD:\n${state.jdText.slice(0, 4000)}\n\n${archBrief}`,
           },
           d: {
-            sys: `你是AI求职评估引擎。当前日期: ${todayCN} (${today})。只生成「D板块·薪资与市场」，不要涉及其他板块。分析薪资竞争力（税前月薪、五险一金、年终奖、加班情况）。${state.searchInfo ? `参考数据: ${state.searchInfo}` : '无公开数据，基于行业估算并标注。'}用中文markdown表格输出。`,
+            sys: `你是AI求职评估引擎。当前日期: ${todayCN} (${today})。只生成「D板块·薪资与市场」，不要涉及其他板块。分析薪资竞争力（税前月薪、五险一金、年终奖、加班情况）。${state.searchInfo ? `参考数据: ${state.searchInfo}` : '无公开数据，基于行业估算并标注。'}用中文markdown表格输出。最后一行必须输出：**评分：X/5**。`,
             user: `公司: ${state.company || "未知"}\n岗位: ${state.role || "未知"}\nJD:\n${state.jdText.slice(0, 3000)}`,
           },
           e: {
-            sys: `你是AI求职评估引擎。当前日期: ${todayCN} (${today})。只生成「E板块·定制化方案」，不要涉及其他板块。给出简历5项具体修改建议(修改前→修改后→原因)，格式为markdown表格。用中文输出。`,
+            sys: `你是AI求职评估引擎。当前日期: ${todayCN} (${today})。只生成「E板块·定制化方案」，不要涉及其他板块。给出简历5项具体修改建议(修改前→修改后→原因)，格式为markdown表格。用中文输出。最后一行必须输出：**评分：X/5**，按方案的具体性、可执行性、与JD的贴合度评分；不要因为建议里提到"缺口/补充/未明确"就给低分。`,
             user: `JD:\n${state.jdText.slice(0, 4000)}\n\n${archBrief}${cvTextEffective ? `\n候选人简历:\n${cvTextEffective.slice(0, 3000)}` : ""}`,
           },
           f: {
-            sys: `你是AI求职评估引擎。当前日期: ${todayCN} (${today})。只生成「F板块·面试准备」，不要涉及其他板块。生成6-10个STAR+R面试故事(情境-任务-行动-结果-反思)，和红线问题应对话术。用中文markdown表格输出。${state.archetype}对应策略: 强调该岗位相关的项目经验和量化成果。`,
+            sys: `你是AI求职评估引擎。当前日期: ${todayCN} (${today})。只生成「F板块·面试准备」，不要涉及其他板块。生成6-10个STAR+R面试故事(情境-任务-行动-结果-反思)，和红线问题应对话术。用中文markdown表格输出。${state.archetype}对应策略: 强调该岗位相关的项目经验和量化成果。最后一行必须输出：**评分：X/5**，按面试准备材料的完整度、针对性、可复用性评分；不要因为包含红线问题或风险话术就给低分。`,
             user: `JD:\n${state.jdText.slice(0, 4000)}\n\n${archBrief}${cvTextEffective ? `\n候选人简历:\n${cvTextEffective.slice(0, 3000)}` : ""}`,
           },
           g: {
-            sys: `你是AI求职评估引擎。当前日期: ${todayCN} (${today})。只生成「G板块·职位合法性」，不要涉及其他板块。分析JD是否为真实活跃职位，检测: 薪资是否合理、JD是否有技术细节、是否重复发布、中国平台特有风险(培训公司/猎头收集简历)。给出: 高可信度/谨慎推进/疑似虚假 + 理由。用中文输出。`,
+            sys: `你是AI求职评估引擎。当前日期: ${todayCN} (${today})。只生成「G板块·职位合法性」，不要涉及其他板块。分析JD是否为真实活跃职位，检测: 薪资是否合理、JD是否有技术细节、是否重复发布、中国平台特有风险(培训公司/猎头收集简历)。给出: 高可信度/谨慎推进/疑似虚假 + 理由。用中文输出。注意：G板块只做真实性定性判断，不参与A-F总分。`,
             user: `JD:\n${state.jdText.slice(0, 4000)}\n\n公司: ${state.company || "未知"}\n岗位: ${state.role || "未知"}`,
           },
         };
@@ -640,7 +620,7 @@ export async function POST(request: Request) {
 
           try {
             const content = await streamLLM(bp.sys, bp.user, controller, signal, bk);
-            const score = extractScore(content, bk);
+            const score = extractEvaluationBlockScore(content, bk);
             state.blocks[bk] = { content, score };
             emit(controller, { type: "block_done", block: bk });
             emit(controller, { type: "score", block: bk, score });
@@ -654,12 +634,7 @@ export async function POST(request: Request) {
         }
 
         /* ── Compute overall score ── */
-        const numericScores = Object.values(state.blocks)
-          .map((b) => b.score)
-          .filter((s) => s > 0);
-        state.overallScore = numericScores.length > 0
-          ? Math.round(numericScores.reduce((a, b) => a + b, 0) / numericScores.length * 10) / 10
-          : 3;
+        state.overallScore = computeEvaluationOverallScore(state.blocks);
 
         emit(controller, { type: "overall_score", score: state.overallScore });
 

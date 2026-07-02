@@ -1,12 +1,17 @@
 import type { ToolDefinition, ToolResult } from "./types";
 import { enforceReadBackSuccessGate } from "./readback-verification";
+import { getLegacyToolGovernanceCompatibility, getToolGovernance } from "@/lib/agent/tool-governance";
 
 export class ToolRegistry {
   private tools = new Map<string, ToolDefinition>();
   private activeAgentTools: Set<string> | null = null;
 
   register(tool: ToolDefinition): void {
-    this.tools.set(tool.name, tool);
+    const governance = tool.governance || getToolGovernance(tool.name);
+    if (!governance && process.env.NODE_ENV !== "production") {
+      console.warn(getLegacyToolGovernanceCompatibility(tool.name).warning);
+    }
+    this.tools.set(tool.name, governance ? { ...tool, governance } : tool);
   }
 
   get(name: string): ToolDefinition | undefined {

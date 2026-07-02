@@ -52,7 +52,17 @@ tmp-*.jpg
 tmp-*.png
 .tmp-*.png
 zhiyuan-server.*.log
+dev-server*.log
+lan-dev*.log
 *.tsbuildinfo
+data/backups/
+MinerU-master/
+MinerU-master/.venv/
+MinerU-master/output/
+MinerU-master/outputs/
+MinerU-master/models/
+MinerU-master/.cache/
+mineru.json
 
 # Openspec archive
 openspec/changes/archive/

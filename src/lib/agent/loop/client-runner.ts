@@ -17,12 +17,14 @@ import {
 import { buildResumeEditProposalActionPlan, buildResumeSavePlan } from "@/lib/agent/resume-save-guard";
 import type { AgentTaskContract } from "@/lib/agent/task-contract";
 import { requiresReadBackVerification } from "@/lib/agent/tools/readback-verification";
+import { enforceToolGovernance } from "@/lib/agent/tool-governance";
 
 export type { SSEEvent };
 
 type LoopMessage = { role: string; content: string; images?: string[] };
 
 interface AgentLoopRuntimeContext {
+  agentId?: string;
   imageIntake?: ImageIntakeResult | null;
   preferredDocumentType?: ImageDocumentType;
   interviewState?: InterviewSessionState;
@@ -101,6 +103,11 @@ function injectLatestImagesForImageTool(
   if (!toolDef?.parameters?.images) return;
   const hasImages = Array.isArray(params.images) && params.images.length > 0;
   if (hasImages) return;
+  if (toolName === "evaluate_jd_full") {
+    const hasJDText = typeof params.jd_text === "string" && params.jd_text.trim().length > 0;
+    const hasJDUrl = typeof params.jd_url === "string" && params.jd_url.trim().length > 0;
+    if (hasJDText || hasJDUrl) return;
+  }
   const inferredImages = latestUserImages(messages);
   if (inferredImages.length > 0) params.images = inferredImages;
 }
@@ -161,14 +168,7 @@ function inferDecodeTextFromMessages(messages: { role: string; content: string }
 }
 
 function latestUserImages(messages: LoopMessage[]): string[] {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i];
-    if (msg.role !== "user") continue;
-    if (!Array.isArray(msg.images)) continue;
-    const images = msg.images.filter((src) => typeof src === "string" && src.startsWith("data:image/"));
-    if (images.length > 0) return images.slice(0, 5);
-  }
-  return [];
+  return latestUserTurn(messages).images;
 }
 
 function latestUserText(messages: LoopMessage[]): string {
@@ -179,6 +179,27 @@ function latestUserText(messages: LoopMessage[]): string {
     if (text) return text;
   }
   return "";
+}
+
+function isNonSemanticUserInput(text: string): boolean {
+  const trimmed = text.trim();
+  return trimmed.length > 0 && trimmed.length <= 8 && /^[\p{P}\p{S}\s]+$/u.test(trimmed);
+}
+
+function latestUserTurn(messages: LoopMessage[]): { text: string; images: string[]; index: number } {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg.role !== "user") continue;
+    const images = Array.isArray(msg.images)
+      ? msg.images.filter((src) => typeof src === "string" && src.startsWith("data:image/")).slice(0, 5)
+      : [];
+    return {
+      text: msg.content?.trim() || "",
+      images,
+      index: i,
+    };
+  }
+  return { text: "", images: [], index: -1 };
 }
 
 /** Get LLM context text from a ToolResult.
@@ -620,10 +641,11 @@ export async function* agentLoopClient(
     }
 
     if (firstIteration && !forcedImageToolConsumed && !forcedToolCall) {
-      const images = latestUserImages(ctx);
-      const text = latestUserText(ctx);
+      const latestTurn = latestUserTurn(ctx);
+      const images = latestTurn.images;
+      const text = latestTurn.text;
       const preferredDocumentType =
-        runtimeContext?.preferredDocumentType ?? inferPreferredDocumentTypeFromText(text);
+        text ? runtimeContext?.preferredDocumentType ?? inferPreferredDocumentTypeFromText(text) : undefined;
       const imagePlan = buildImageIntakeToolCall(
         text,
         images,
@@ -744,13 +766,21 @@ export async function* agentLoopClient(
     }) && toolCalls.every(tc => isToolAllowedInMode(tc.name, toolWhitelist))
       && toolCalls.every(tc => {
         try {
+          const params = JSON.parse(tc.arguments) as Record<string, unknown>;
+          injectLatestImagesForImageTool(tc.name, params, ctx);
+          injectTaskContractForWriteTool(tc.name, params, runtimeContext?.taskContract);
           return !enforceToolPolicy({
             toolName: tc.name,
-            params: JSON.parse(tc.arguments) as Record<string, unknown>,
+            params,
             messages: ctx,
             toolWhitelist,
             interviewState: runtimeContext?.interviewState,
             interviewRebindAction: runtimeContext?.interviewRebindAction,
+          }) && !enforceToolGovernance({
+            toolName: tc.name,
+            params,
+            taskContract: runtimeContext?.taskContract,
+            agentId: runtimeContext?.agentId,
           });
         } catch {
           return false;
@@ -851,6 +881,18 @@ export async function* agentLoopClient(
         }
       }
 
+      if ((tc.name === "evaluate_jd_full" || tc.name === "evaluate_offer") && isNonSemanticUserInput(latestUserText(ctx))) {
+        const text = latestUserText(ctx);
+        const taskLabel = tc.name === "evaluate_jd_full" ? "JD 评估" : "Offer 评估";
+        yield { type: "phase", phase: "responding" };
+        yield {
+          type: "text",
+          content: `我只看到“${text}”，还不能判断你的具体意图。你是想继续「${taskLabel}」、补充材料，还是做别的操作？请直接说明。`,
+        };
+        yield { type: "done" };
+        return;
+      }
+
       const paramsKey = JSON.stringify(params);
       const recent = requiresReadBackVerification(tc.name)
         ? undefined
@@ -889,6 +931,22 @@ export async function* agentLoopClient(
           yield { type: "tool_result", name: tc.name, result: formatted, success: false, data: toolResult.data, uiPayload: toolResult.uiPayload, verifiedAction: toolResult.verifiedAction };
           yield { type: "tool_error", name: tc.name, error: toolResult.error || "工具调用被策略拦截", recoverable: false };
           ctx.push({ role: "user", content: `[TOOL_BLOCKED tool=${tc.name}] ${toolResult.llmSummary || toolResult.error || "工具调用被策略拦截"}\n\n请不要改用其它大工具重试。请基于已有本地上下文回答；缺少必要信息时只向用户索要那一项。` });
+          forceTextOnly = true;
+          continue;
+        }
+
+        const governanceResult = enforceToolGovernance({
+          toolName: tc.name,
+          params,
+          taskContract: runtimeContext?.taskContract,
+          agentId: runtimeContext?.agentId,
+        });
+        if (governanceResult) {
+          toolResult = governanceResult;
+          formatted = formatToolResult(toolResult, tc.name);
+          yield { type: "tool_result", name: tc.name, result: formatted, success: false, data: toolResult.data, uiPayload: toolResult.uiPayload, verifiedAction: toolResult.verifiedAction };
+          yield { type: "tool_error", name: tc.name, error: toolResult.error || "工具调用被治理策略阻止", recoverable: false };
+          ctx.push({ role: "user", content: `[TOOL_BLOCKED tool=${tc.name}] ${toolResult.llmSummary || toolResult.error || "工具调用被治理策略阻止"}` });
           forceTextOnly = true;
           continue;
         }

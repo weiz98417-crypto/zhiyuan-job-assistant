@@ -48,6 +48,12 @@ export async function PATCH(request: NextRequest) {
 
     if (action.endsWith("_memory")) {
       const result = await applyMemoryItemAction(id, action);
+      if ("updated" in result && !result.updated) {
+        return NextResponse.json({ success: false, error: "Memory item not found or not updated", data: result }, { status: 404 });
+      }
+      if ("deleted" in result && !result.deleted) {
+        return NextResponse.json({ success: false, error: "Memory item not found or not deleted", data: result }, { status: 404 });
+      }
       return NextResponse.json({ success: true, data: result });
     }
 
@@ -121,16 +127,16 @@ async function reindexLatestReference(id: number, ownerUserId: string) {
 
 async function applyMemoryItemAction(id: number, action: string) {
   if (action === "approve_memory") {
-    return { id, action, updated: await updateMemoryItemStatus(id, "active") };
+    return { id, action, nextStatus: "active", updated: await updateMemoryItemStatus(id, "active") };
   }
   if (action === "reject_memory") {
-    return { id, action, updated: await updateMemoryItemStatus(id, "rejected") };
+    return { id, action, nextStatus: "rejected", updated: await updateMemoryItemStatus(id, "rejected") };
   }
   if (action === "disable_memory") {
-    return { id, action, updated: await updateMemoryItemStatus(id, "archived") };
+    return { id, action, nextStatus: "archived", updated: await updateMemoryItemStatus(id, "archived") };
   }
   if (action === "restore_memory") {
-    return { id, action, updated: await updateMemoryItemStatus(id, "candidate") };
+    return { id, action, nextStatus: "candidate", updated: await updateMemoryItemStatus(id, "candidate") };
   }
   if (action === "delete_memory") {
     return { id, action, deleted: await deleteMemoryItem(id) };

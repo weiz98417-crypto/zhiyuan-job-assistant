@@ -2,10 +2,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ImageIntakeResult } from "@/lib/agent/image-intake";
 import type { SSEEvent } from "@/lib/agent/loop/types";
 
-vi.mock("@/lib/agent/tools", () => ({
+const toolMocks = vi.hoisted(() => ({
   executeTool: vi.fn(),
   formatToolResult: vi.fn(() => ""),
-  getTool: vi.fn(() => undefined),
+  getTool: vi.fn((() => undefined) as (_name: string) => unknown),
+}));
+
+vi.mock("@/lib/agent/tools", () => ({
+  executeTool: toolMocks.executeTool,
+  formatToolResult: toolMocks.formatToolResult,
+  getTool: toolMocks.getTool,
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -76,6 +82,125 @@ describe("agent image intake loop", () => {
     expect(events.some((event) => event.type === "tool_call")).toBe(false);
     const textEvent = events.find((event): event is Extract<SSEEvent, { type: "text" }> => event.type === "text");
     expect(textEvent?.content).toContain("求职评估流程");
+    expect(events.at(-1)).toEqual({ type: "done" });
+  });
+
+  it("does not reuse stale prior user text as the active instruction for image-only turns", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new Error("think proxy should not run for image-only clarification");
+    }) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    const imageIntake: ImageIntakeResult = {
+      documentType: "jd",
+      confidence: 0.92,
+      quality: "clear",
+      extractedText: "岗位职责：负责 AI 产品规划、Agent 工作流设计、RAG 知识库建设、评测体系搭建和跨团队落地。任职要求：熟悉大模型应用、数据分析、Prompt Engineering 和产品交付。",
+    };
+
+    const events = await collectEvents(agentLoopClient(
+      "system",
+      [
+        { role: "user", content: "我要做 JD 评估" },
+        { role: "assistant", content: "请上传 JD" },
+        { role: "user", content: "", images },
+      ],
+      undefined,
+      undefined,
+      undefined,
+      ["evaluate_jd_full"],
+      undefined,
+      { imageIntake, preferredDocumentType: "jd" },
+    ));
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(events.some((event) => event.type === "tool_call" && event.name === "evaluate_jd_full")).toBe(false);
+    const textEvent = events.find((event): event is Extract<SSEEvent, { type: "text" }> => event.type === "text");
+    expect(textEvent?.content).toContain("JD");
+    expect(events.at(-1)).toEqual({ type: "done" });
+  });
+
+  it("does not inject latest user images when JD text is already present", async () => {
+    toolMocks.getTool.mockReturnValue({
+      name: "evaluate_jd_full",
+      category: "action",
+      parameters: {
+        jd_text: { type: "string", required: false, description: "JD text" },
+        images: { type: "array", required: false, description: "JD images" },
+      },
+      handler: vi.fn(),
+      formatResult: vi.fn(),
+    });
+    toolMocks.executeTool.mockResolvedValue({
+      success: true,
+      data: null,
+      errorCategory: "ok",
+      llmSummary: "done",
+    });
+    toolMocks.formatToolResult.mockReturnValue("done");
+
+    const jdText = "岗位职责：负责 AI 产品规划、需求分析、Agent 工作流设计、评测体系搭建和跨团队落地。任职要求：熟悉大模型应用、数据分析、Prompt Engineering 和产品交付。";
+    const fetchMock = vi.fn(async () => thinkResponse([
+      { type: "text", content: "评估完成" },
+      { type: "finish_reason", finish_reason: "stop" },
+    ])) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    const imageIntake: ImageIntakeResult = {
+      documentType: "jd",
+      confidence: 0.97,
+      quality: "clear",
+      extractedText: jdText,
+    };
+
+    await collectEvents(agentLoopClient(
+      "system",
+      [{ role: "user", content: "帮我评估这个JD", images }],
+      undefined,
+      undefined,
+      undefined,
+      ["evaluate_jd_full"],
+      undefined,
+      { imageIntake, preferredDocumentType: "jd" },
+    ));
+
+    const [, params] = toolMocks.executeTool.mock.calls[0];
+    expect(params).toEqual({ jd_text: jdText });
+    expect(params).not.toHaveProperty("images");
+  });
+
+  it("blocks evaluation tools when the latest user turn is symbol-only", async () => {
+    toolMocks.executeTool.mockClear();
+    const fetchMock = vi.fn(async () => thinkResponse([
+      {
+        type: "tool_calls",
+        tool_calls: [{
+          id: "call-symbol-jd",
+          name: "evaluate_jd_full",
+          arguments: JSON.stringify({ jd_text: "stale JD text from earlier context" }),
+        }],
+      },
+      { type: "finish_reason", finish_reason: "tool_calls" },
+    ])) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    const events = await collectEvents(agentLoopClient(
+      "system",
+      [
+        { role: "user", content: "帮我评估这个 JD" },
+        { role: "assistant", content: "请发送 JD 文本" },
+        { role: "user", content: "+" },
+      ],
+      undefined,
+      undefined,
+      undefined,
+      ["evaluate_jd_full"],
+    ));
+
+    expect(toolMocks.executeTool).not.toHaveBeenCalled();
+    expect(events.some((event) => event.type === "tool_call" && event.name === "evaluate_jd_full")).toBe(false);
+    const textEvent = events.find((event): event is Extract<SSEEvent, { type: "text" }> => event.type === "text");
+    expect(textEvent?.content).toContain("我只看到“+”");
     expect(events.at(-1)).toEqual({ type: "done" });
   });
 

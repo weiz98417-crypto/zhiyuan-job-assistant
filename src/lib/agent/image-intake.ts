@@ -137,6 +137,10 @@ export function buildImageIntakeToolCall(
     }
     effectiveType = decision.documentType;
   } else {
+    // Image turns must not bypass recognition. Without an intake result the
+    // caller should show a visible recognition/retry state instead of sending
+    // raw images directly into a business tool.
+    if (imageList.length > 0) return null;
     effectiveType = preferredDocumentType ?? inferPreferredDocumentTypeFromText(userText);
   }
   if (!effectiveType || effectiveType === "unknown") return null;

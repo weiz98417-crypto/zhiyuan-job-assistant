@@ -4,8 +4,8 @@
   <img src="https://img.shields.io/badge/Next.js_16-000?style=flat&logo=next.js&logoColor=white" alt="Next.js 16">
   <img src="https://img.shields.io/badge/React_19-61DAFB?style=flat&logo=react&logoColor=black" alt="React 19">
   <img src="https://img.shields.io/badge/TypeScript-3178C6?style=flat&logo=typescript&logoColor=white" alt="TypeScript">
-  <img src="https://img.shields.io/badge/SQLite-default-003B57?style=flat&logo=sqlite&logoColor=white" alt="SQLite">
-  <img src="https://img.shields.io/badge/PostgreSQL_pgvector-ready-4169E1?style=flat&logo=postgresql&logoColor=white" alt="PostgreSQL pgvector">
+  <img src="https://img.shields.io/badge/PostgreSQL_pgvector-runtime-4169E1?style=flat&logo=postgresql&logoColor=white" alt="PostgreSQL pgvector">
+  <img src="https://img.shields.io/badge/SQLite-fallback-003B57?style=flat&logo=sqlite&logoColor=white" alt="SQLite fallback">
   <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT">
 </p>
 
@@ -18,8 +18,9 @@ Zhiyuan is a local-first AI job search assistant for the Chinese market. It eval
 ### Conversational Agent
 
 - 6 routed sub-agents: Resume, Evaluate, Interview, Profile, Offer, and General.
-- 44 registered tools: 15 query tools, 22 action tools, 2 interview tools, and 5 MCP shims.
+- 48 registered tools: 15 query tools, 26 action tools, 2 interview tools, and 5 MCP shims.
 - Server-side agent loop keeps API keys off the browser and applies per-agent tool policy.
+- Tool governance classifies every tool by side effect and blocks contract mismatches before execution, so guidance, write, export, and admin flows cannot silently steal each other's routes.
 - Markdown rendering and compact tool cards keep chat output readable instead of dumping raw reports.
 - Image intake router classifies uploaded screenshots as JD, offer, resume, or unrelated content before dispatching the right workflow.
 
@@ -67,8 +68,8 @@ Zhiyuan is a local-first AI job search assistant for the Chinese market. It eval
 | Frontend | Next.js 16, React 19, TypeScript, Tailwind CSS |
 | Agent runtime | Custom ReAct-style loop, tool registry, per-agent prompts, streaming responses |
 | AI providers | DeepSeek for chat/evaluation, Zhipu GLM vision for screenshots, DashScope/OpenAI-compatible embeddings |
-| Default database | SQLite via `better-sqlite3` |
-| Optional database | PostgreSQL with pgvector, selected by `DB_DRIVER=postgres` |
+| Current LAN database | PostgreSQL with pgvector, selected by `DB_DRIVER=postgres` |
+| Fallback/archive database | SQLite via `better-sqlite3` |
 | Memory | Reference resume vectors, memory chunks/items, feedback promotion, eval harness |
 | PDF/export | Playwright, HTML/CSS templates, report export routes |
 | Tests | Vitest, TypeScript, deterministic memory evals |
@@ -114,7 +115,7 @@ The first registered user becomes the active admin. Later users register as pend
 
 ## PostgreSQL And pgvector
 
-SQLite remains the default runtime. PostgreSQL is available for the repository-backed server data path and vector memory work.
+The current LAN deployment uses PostgreSQL/pgvector through the repository-backed server data path. SQLite remains in the project as a local fallback, migration source, and archive-read path.
 
 Check the target database:
 
@@ -130,14 +131,26 @@ npm run migrate:postgres -- --apply --default-owner admin --report reports/postg
 npm run check:postgres-migration -- --default-owner admin --report reports/postgres-migration-verify.md
 ```
 
-Switch runtime only after verification:
+Runtime configuration:
 
 ```bash
 DB_DRIVER=postgres
 DATABASE_URL=postgresql://user:password@localhost:5432/zhiyuan
 ```
 
+After switching, run:
+
+```bash
+npm run check:postgres-cutover
+```
+
 See [docs/POSTGRES_MIGRATION.md](docs/POSTGRES_MIGRATION.md) for the full runbook.
+
+## Agent Tool Governance
+
+Every registered agent tool must declare governance metadata: side effect, allowed task types, agent allowlist, confirmation requirement, read-back requirement, success contract, and Chinese display name. Development and test environments default-deny tools missing this metadata.
+
+When adding or changing a tool, follow [docs/AGENT_TOOL_GOVERNANCE.md](docs/AGENT_TOOL_GOVERNANCE.md) and run the routing/governance evals before shipping.
 
 ## Verification
 
@@ -172,7 +185,7 @@ src/
     data-repositories.ts
     postgres.ts
     postgres-schema.sql
-    server-db.ts
+    server-db.ts       SQLite fallback/archive adapter
 scripts/
   migrate-sqlite-to-postgres.mjs
   check-postgres.mjs

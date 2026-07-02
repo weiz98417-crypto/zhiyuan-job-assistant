@@ -17,6 +17,7 @@ import { orchestrate } from "@/lib/agent/orchestrator";
 import { agentLoopClient } from "@/lib/agent/loop/client-runner";
 import { inferPreferredDocumentTypeFromText, type ImageDocumentType, type ImageIntakeResult } from "@/lib/agent/image-intake";
 import { buildImageIntakeStatusText, buildImageIntakeToolSummary, routeImageIntake } from "@/lib/agent/image-intake-router";
+import { routeAgentTask } from "@/lib/agent/task-routing";
 import type { AgentDefinition } from "@/lib/agent/registry/types";
 import {
   createAgentTaskContract,
@@ -25,8 +26,8 @@ import {
   inferCompletedCriteriaFromToolResult,
   type AgentTaskBaseSnapshot,
   type AgentTaskContract,
-  type AgentTaskType,
 } from "@/lib/agent/task-contract";
+import type { AgentTaskType } from "@/lib/agent/task-contract";
 import type { VerifiedActionResult } from "@/lib/agent/verified-action";
 import {
   appendAgentRunStepClient,
@@ -40,6 +41,11 @@ import {
   type ClientAgentRunStepRecord,
 } from "@/lib/agent/run-ledger-client";
 import type { AgentRunStatus } from "@/lib/agent/run-ledger";
+import {
+  buildRunRecoveryMessage,
+  shortRunId,
+  upsertRunRecoveryStatusMessage,
+} from "@/lib/agent/run-recovery-message";
 import { triggerProfileUpdate } from "@/lib/profile-update";
 import { scanMessage, deduplicateSignals, maybeRawContext } from "@/lib/agent/signal-extractor";
 import type { ExtractedSignal } from "@/lib/agent/signal-extractor";
@@ -80,6 +86,19 @@ import {
   type ReferenceResumeSaveSessionState,
 } from "@/lib/agent/reference-resume-save-flow";
 import { sanitizeUnsupportedResumeSaveClaim } from "@/lib/agent/resume-save-guard";
+import {
+  buildGuidedSessionRuntimeDirective,
+  finishGuidedSession,
+  inferRequestedTaskFromText,
+  isConfirmedGuidedTaskSwitch,
+  isExplicitGuidedTaskCancel,
+  isGuidedTaskType,
+  resolveActiveGuidedSession,
+  startOrContinueGuidedSession,
+  taskAgentId,
+  taskLabelZh,
+  type GuidedSessionState,
+} from "@/lib/agent/guided-session-state";
 import type { ResumeEditProposalDTO } from "@/lib/agent/resume-edit-proposals";
 import { getReadBackRequirementStatus } from "@/lib/agent/tools/readback-verification";
 import type { AgentMessage, AgentInteraction, ChatSession } from "@/types";
@@ -91,6 +110,7 @@ type AgentPhase = "understanding" | "executing" | "verifying" | "reflecting" | "
 
 const CONTEXT_COMPRESSION_STATUS_MS = 120;
 const LEDGER_TEXT_LIMIT = 240;
+const IMAGE_INTAKE_TIMEOUT_MS = 180_000;
 
 type ActiveRunNotice = {
   id: string;
@@ -98,6 +118,8 @@ type ActiveRunNotice = {
   agentId: string;
   status: AgentRunStatus;
   phase?: string;
+  guidedTaskId?: string;
+  guidedTaskPhase?: string;
   toolName?: string;
   verifierSummary?: string;
   updatedAt?: string;
@@ -136,28 +158,6 @@ function summarizeLedgerParams(params: Record<string, unknown> | undefined): str
     }
   }
   return truncateLedgerText(safe);
-}
-
-function isReferenceResumeSaveIntent(content: string): boolean {
-  return /(保存|存|沉淀|加入|放到).{0,20}(优秀|参考|标杆|样例|范例).{0,20}(简历|履历|resume|cv)|(优秀|参考|标杆|样例|范例).{0,20}(简历|履历|resume|cv).{0,20}(保存|存|沉淀|加入|放到)/i.test(content);
-}
-
-function inferAgentTaskType(
-  agentId: string,
-  content: string,
-  imageIntake?: ImageIntakeResult | null,
-  preferredDocumentType?: ImageDocumentType,
-): AgentTaskType | null {
-  const documentType = imageIntake?.documentType || preferredDocumentType;
-  if (agentId === "evaluate" || documentType === "jd") return "jd_evaluation";
-  if (agentId === "offer" || documentType === "offer") return "offer_evaluation";
-  if (agentId === "interview") return "interview_coaching";
-  if (agentId === "profile") return "profile_update";
-  if (isReferenceResumeSaveIntent(content)) return "reference_resume_save";
-  if (agentId === "resume" || documentType === "resume") {
-    return /\b(pdf|download|export|markdown|md)\b/i.test(content) ? "file_export" : "resume_edit";
-  }
-  return null;
 }
 
 function buildRunTarget(
@@ -200,22 +200,52 @@ function activeNoticeFromRunDetail(detail: ClientAgentRunDetail): ActiveRunNotic
   };
 }
 
-function shortRunId(id: string): string {
-  return id.length <= 8 ? id : id.slice(0, 8);
+function runStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    planned: "已计划",
+    running: "运行中",
+    waiting_user: "等待用户",
+    verifying: "自检中",
+    repairing: "自愈中",
+    recovered: "已恢复",
+    needs_engineering: "需工程处理",
+    succeeded: "成功",
+    failed: "失败",
+    rolled_back: "已回滚",
+    cancelled: "已取消",
+  };
+  return labels[status] || status || "未知";
 }
 
-function buildRunRecoveryMessage(detail: ClientAgentRunDetail): string {
-  const lastStep = latestRunStep(detail.steps);
-  const run = detail.run;
-  const stepText = lastStep
-    ? `最近一步：${lastStep.phase}${lastStep.tool_name ? ` / ${lastStep.tool_name}` : ""}（${lastStep.status || "unknown"}）`
-    : "还没有记录到具体执行步骤";
-  return [
-    `已恢复 Agent run #${shortRunId(run.id)} 的运行状态。`,
-    `任务：${run.task_type || "unknown"}，状态：${run.status}。`,
-    stepText,
-    "我不会自动重复执行高风险写入；你可以继续输入下一步需求，或取消这次运行。",
-  ].join("\n");
+function runPhaseLabel(phase: string): string {
+  const labels: Record<string, string> = {
+    understanding: "理解意图",
+    executing: "执行工具",
+    verifying: "自检验证",
+    repairing: "自愈修复",
+    responding: "生成回复",
+    "image-intake": "图片识别",
+  };
+  return labels[phase] || phase || "未知阶段";
+}
+
+function triggerSessionAnomalyReview(input: {
+  sessionId: number | null;
+  messages: AgentMessage[];
+  activeTask?: GuidedSessionState | null;
+  recentRuns?: unknown[];
+}): void {
+  if (!input.sessionId) return;
+  fetch("/api/agent/session-review", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sessionId: input.sessionId,
+      messages: input.messages.slice(-8),
+      activeTask: input.activeTask || null,
+      recentRuns: input.recentRuns || [],
+    }),
+  }).catch(() => {});
 }
 
 async function loadTaskBaseSnapshot(taskType: AgentTaskType): Promise<AgentTaskBaseSnapshot> {
@@ -482,6 +512,19 @@ function AgentPageInner() {
     refreshLatestRollbackProposal().catch(() => {});
   }, [mounted, currentSessionId, refreshLatestRollbackProposal]);
 
+  const clearConsumedHandoffParams = useCallback(() => {
+    const url = new URL(window.location.href);
+    let changed = false;
+    for (const key of ["jdId", "offerId", "offerReportId", "intent"]) {
+      if (url.searchParams.has(key)) {
+        url.searchParams.delete(key);
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  }, []);
+
   const handleResumeActiveRun = useCallback(async () => {
     const runId = activeRunNotice?.id;
     if (!runId || activeRunAction) return;
@@ -494,11 +537,16 @@ function AgentPageInner() {
         return;
       }
       setActiveRunNotice(activeNoticeFromRunDetail(detail));
-      await appendAssistantStatusMessage(buildRunRecoveryMessage(detail));
+      const content = buildRunRecoveryMessage(detail);
+      const nextMessages = upsertRunRecoveryStatusMessage(messages, runId, content, new Date().toISOString());
+      setMessages(nextMessages);
+      if (currentSessionId) {
+        await updateSession(currentSessionId, { messages: nextMessages }).catch(() => {});
+      }
     } finally {
       setActiveRunAction(null);
     }
-  }, [activeRunAction, activeRunNotice?.id, appendAssistantStatusMessage]);
+  }, [activeRunAction, activeRunNotice?.id, appendAssistantStatusMessage, currentSessionId, messages]);
 
   const handleRollbackLatestProposal = useCallback(async () => {
     const proposal = latestRollbackProposal;
@@ -688,6 +736,13 @@ function AgentPageInner() {
         const currentSessionForRun = currentSessionId ? await getSession(currentSessionId) : undefined;
         const memoryDigest = currentSessionForRun?.memoryDigest;
         const agentState = markOfferStateStaleFromText(currentSessionForRun?.agentState, content) || currentSessionForRun?.agentState;
+        const activeGuidedSession = resolveActiveGuidedSession({
+          agentState,
+          interviewState: currentSessionForRun?.interviewState,
+        });
+        const requestedTaskForSwitch = inferRequestedTaskFromText(content);
+        const confirmedGuidedSwitch =
+          Boolean(activeGuidedSession && requestedTaskForSwitch && requestedTaskForSwitch !== activeGuidedSession.taskType && isConfirmedGuidedTaskSwitch(content));
         let rebindResolution: InterviewRebindResolution | null = null;
         if (currentSessionForRun?.interviewState?.planSnapshot) {
           const decision = classifyInterviewMaterialReference(content);
@@ -704,7 +759,7 @@ function AgentPageInner() {
         let imageIntake: ImageIntakeResult | null = null;
         if (imageDataUris.length > 0) {
           const intakeController = new AbortController();
-          const intakeTimeout = window.setTimeout(() => intakeController.abort(), 35_000);
+          const intakeTimeout = window.setTimeout(() => intakeController.abort(), IMAGE_INTAKE_TIMEOUT_MS);
           let intakeFailure = "";
           try {
             const intakeRes = await fetch("/api/agent/image-intake", {
@@ -714,6 +769,7 @@ function AgentPageInner() {
               body: JSON.stringify({
                 images: imageDataUris,
                 userText: content,
+                preferredDocumentType,
               }),
             });
             const intakeJson = await intakeRes.json().catch(() => ({}));
@@ -832,6 +888,15 @@ function AgentPageInner() {
                 agentState: {
                   ...(agentState || {}),
                   referenceResumeSave: { pending: askedPending },
+                  guidedSession: startOrContinueGuidedSession({
+                    existing: activeGuidedSession,
+                    taskType: "reference_resume_save",
+                    agentId: "resume",
+                    phase: "role_category_confirmation",
+                    expectedInput: "确认优秀简历要保存到哪个岗位类别，例如 AI产品经理、AI运营、AI售前",
+                    summary: "等待确认优秀简历岗位类别",
+                    source: "reference_resume_save",
+                  }),
                 },
               });
               setSessions(await listSessions());
@@ -855,6 +920,10 @@ function AgentPageInner() {
           preferredDocumentType,
           forcedAgentId: pendingReferenceResumeSaveForRun
             ? "resume"
+            : confirmedGuidedSwitch && requestedTaskForSwitch
+            ? taskAgentId(requestedTaskForSwitch)
+            : activeGuidedSession
+            ? taskAgentId(activeGuidedSession.taskType)
             : currentSessionForRun?.interviewState?.planSnapshot
             ? "interview"
             : undefined,
@@ -889,11 +958,23 @@ Rules:
         const rebindContext = rebindResolution
           ? `\n\n${formatInterviewRebindRuntimeDirective(rebindResolution)}`
           : "";
-        const activeSystemPrompt = `${systemPrompt}${interviewContext}${rebindContext}`;
 
         setActiveAgent(agent);
 
         let activeTaskContract: AgentTaskContract | null = null;
+        const routeDecision = routeAgentTask({
+          agentId: agent.id,
+          content,
+          imageIntake,
+          preferredDocumentType,
+          activeTask: activeGuidedSession,
+        });
+        const guidedDirective = buildGuidedSessionRuntimeDirective({
+          activeTask: activeGuidedSession,
+          requiresSwitchConfirmation: routeDecision.requiresClarification && Boolean(activeGuidedSession),
+          clarificationQuestion: routeDecision.clarificationQuestion,
+        });
+        const activeSystemPrompt = `${systemPrompt}${interviewContext}${rebindContext}${guidedDirective}`;
         const completedContractCriteria = new Set<string>();
         const addContractCriteria = (criteria: string[]) => {
           if (!activeTaskContract) return;
@@ -903,8 +984,7 @@ Rules:
             }
           }
         };
-
-        const taskType = inferAgentTaskType(agent.id, content, imageIntake, preferredDocumentType);
+        const taskType = routeDecision.taskType;
         if (taskType) {
           try {
             const baseSnapshot = await loadTaskBaseSnapshot(taskType);
@@ -912,6 +992,25 @@ Rules:
               taskType,
               target: buildRunTarget(content, agent, imageIntake),
               requiresUserApproval: taskType === "resume_edit",
+              successCriteria: routeDecision.requiresClarification
+                ? ["clarification question asked"]
+                : undefined,
+              validators: routeDecision.requiresClarification
+                ? ["user_intent_clarification"]
+                : undefined,
+              routing: {
+                contractPolicy: routeDecision.contractPolicy,
+                memoryTask: routeDecision.memoryTask,
+                allowedTools: routeDecision.allowedTools.slice(0, 20),
+                requiresClarification: routeDecision.requiresClarification,
+                clarificationQuestion: routeDecision.clarificationQuestion,
+                blockedReason: routeDecision.blockedReason,
+                auditSummary: routeDecision.auditSummary,
+                activeTaskId: activeGuidedSession?.taskId,
+                activeTaskType: activeGuidedSession?.taskType,
+                activeTaskPhase: activeGuidedSession?.phase,
+                routeLocked: Boolean(activeGuidedSession),
+              },
               ...baseSnapshot,
             });
             activeTaskContract = contract;
@@ -930,7 +1029,59 @@ Rules:
                 ...activeNoticeFromRun(createdRun),
                 status: "running",
                 phase: "understanding",
+                guidedTaskId: activeGuidedSession?.taskId,
+                guidedTaskPhase: activeGuidedSession?.phase,
               });
+              if (activeGuidedSession) {
+                await appendAgentRunStepClient(createdRun.id, {
+                  phase: "guided-task-lock",
+                  status: "succeeded",
+                  inputSummary: summarizeLedgerParams({
+                    userText: content,
+                    activeTask: activeGuidedSession.taskType,
+                    agentId: activeGuidedSession.agentId,
+                  }),
+                  outputSummary: routeDecision.requiresClarification
+                    ? `需要确认是否切换到 ${routeDecision.clarificationQuestion || "新任务"}`
+                    : `继续 ${taskLabelZh(activeGuidedSession.taskType)}`,
+                  verifier: {
+                    taskId: activeGuidedSession.taskId,
+                    taskType: activeGuidedSession.taskType,
+                    phase: activeGuidedSession.phase,
+                    expectedInput: activeGuidedSession.expectedInput,
+                    routeLocked: true,
+                    routeAudit: routeDecision.auditSummary,
+                    requiresClarification: routeDecision.requiresClarification,
+                  },
+                }).catch(() => null);
+              }
+              if (imageIntake) {
+                const imageDecision = routeImageIntake(content, imageIntake);
+                await appendAgentRunStepClient(createdRun.id, {
+                  phase: "image-intake",
+                  toolName: "recognize_document_image",
+                  status: imageDecision.route === "retry_image" ? "failed" : "succeeded",
+                  inputSummary: summarizeLedgerParams({
+                    userText: content,
+                    images: imageDataUris,
+                    preferredDocumentType,
+                  }),
+                  outputSummary: truncateLedgerText(buildImageIntakeToolSummary(imageDecision, imageIntake), 240),
+                  verifier: {
+                    documentType: imageDecision.documentType,
+                    route: imageDecision.route,
+                    confidence: imageDecision.confidence,
+                    quality: imageDecision.quality || "unknown",
+                    reason: imageDecision.reason,
+                    retryHint: imageDecision.retryHint,
+                    extractedTextLength: imageIntake.extractedText?.length || 0,
+                    perImageCount: imageIntake.perImage?.length || 0,
+                  },
+                  error: imageDecision.route === "retry_image"
+                    ? { reason: imageDecision.reason, errors: imageIntake.errors || [] }
+                    : {},
+                }).catch(() => null);
+              }
               await updateAgentRunClient(createdRun.id, "running").catch(() => null);
             }
           } catch {
@@ -956,6 +1107,8 @@ Rules:
                   phase: input.phase,
                   toolName: input.toolName || prev.toolName,
                   verifierSummary: input.verifier ? truncateLedgerText(input.verifier, 140) : prev.verifierSummary,
+                  guidedTaskId: activeGuidedSession?.taskId || prev.guidedTaskId,
+                  guidedTaskPhase: activeGuidedSession?.phase || prev.guidedTaskPhase,
                   status: input.phase === "verifying" ? "verifying" : input.phase === "repairing" ? "repairing" : prev.status,
                 }
               : prev,
@@ -996,6 +1149,7 @@ Rules:
           activeSystemPrompt, msgList, undefined, controller.signal, undefined,
           toolWhitelist.length > 0 ? toolWhitelist : undefined, tools,
           {
+            agentId: agent.id,
             imageIntake,
             preferredDocumentType,
             interviewState,
@@ -1135,7 +1289,7 @@ Rules:
                   const lastIdx = copy.length - 1;
                   if (copy[lastIdx]?.role === "tool" && copy[lastIdx]?.toolName === event.name) copy[lastIdx] = toolMsg;
                   else copy.push(toolMsg);
-                } else if (event.name === "evaluate_jd_full" && (event as { data?: unknown }).data) {
+                } else if (event.name === "evaluate_jd_full" && event.success && (event as { data?: unknown }).data) {
                   // Legacy: evaluate_jd_full stores JSON data
                   const raw = (event as { data?: Record<string, unknown> }).data;
                   copy.push({
@@ -1213,12 +1367,16 @@ Rules:
               setEvalProgress(prev => prev.map(p => p.block === "search" ? { ...p, status: "done", score: event.count } : p));
               break;
             case "persist_done":
-              setCompletionInfo({
-                reportNum: event.reportNum,
-                company: event.company,
-                role: event.role,
-                score: event.score,
-              });
+              if (event.readBackVerified) {
+                setCompletionInfo({
+                  reportNum: event.reportNum,
+                  company: event.company,
+                  role: event.role,
+                  score: event.score,
+                });
+              } else {
+                setCompletionInfo(null);
+              }
               if (activeTaskContract?.taskType === "jd_evaluation") {
                 addContractCriteria(["report persisted"]);
                 if (event.readBackVerified) {
@@ -1242,6 +1400,15 @@ Rules:
         }
 
         // ── Finalize ──
+        if (routeDecision.requiresClarification && activeTaskContract) {
+          addContractCriteria(["clarification question asked"]);
+        }
+        if (activeTaskContract?.taskType === "career_positioning_guidance" && assistantText.trim()) {
+          addContractCriteria(["next question or guidance response generated"]);
+        }
+        if (activeTaskContract?.taskType === "resume_query" && assistantText.trim()) {
+          addContractCriteria(["answer generated"]);
+        }
         if (activeTaskContract?.taskType === "interview_coaching" && assistantText.trim()) {
           if (interviewState?.planSnapshot) addContractCriteria(["JD/resume context bound"]);
           addContractCriteria(["one question generated", "session state updated without losing context"]);
@@ -1271,6 +1438,14 @@ Rules:
         if (contractGateFailed && contractGateResult?.safeMessage) {
           finalAssistantContent = contractGateResult.safeMessage;
         }
+        const finalRunStatus: AgentRunStatus =
+          routeDecision.requiresClarification
+            ? "waiting_user"
+            : toolResultInfo && !toolResultInfo.success
+            ? "failed"
+            : contractGateFailed
+              ? "failed"
+              : "succeeded";
         streamContentRef.current = finalAssistantContent;
         setStreamText(finalAssistantContent);
         setPhase(null);
@@ -1374,6 +1549,86 @@ Rules:
               const nextReferenceResumeSave = shouldClearReferenceResumeSave
                 ? undefined
                 : currentAgentState.referenceResumeSave as ReferenceResumeSaveSessionState | undefined;
+              let nextGuidedSession: GuidedSessionState | undefined =
+                (currentAgentState.guidedSession && typeof currentAgentState.guidedSession === "object"
+                  ? currentAgentState.guidedSession as GuidedSessionState
+                  : undefined);
+              const confirmedSwitchAway =
+                Boolean(activeGuidedSession && routeDecision.taskType !== activeGuidedSession.taskType && isConfirmedGuidedTaskSwitch(content));
+              const cancelledActiveGuidedTask =
+                Boolean(activeGuidedSession && isExplicitGuidedTaskCancel(content) && !confirmedSwitchAway);
+              const completedReferenceResumeSave =
+                taskType === "reference_resume_save" &&
+                toolResultInfo?.name === "save_reference_resume" &&
+                toolResultInfo.success === true;
+              const shouldKeepLockForSwitchConfirmation =
+                Boolean(activeGuidedSession && routeDecision.requiresClarification);
+              const imageDecisionForState = imageIntake ? routeImageIntake(content, imageIntake) : undefined;
+              const shouldKeepImageClarification =
+                Boolean(imageDecisionForState && (imageDecisionForState.route === "clarify_intent" || imageDecisionForState.route === "retry_image"));
+              const imageClarificationTaskType =
+                imageDecisionForState
+                  ? (imageDecisionForState.documentType === "jd"
+                      ? "jd_evaluation"
+                      : imageDecisionForState.documentType === "offer"
+                        ? "offer_evaluation"
+                        : imageDecisionForState.documentType === "resume"
+                          ? routeDecision.taskType || "resume_query"
+                          : taskType)
+                  : taskType;
+              const completedImageBusinessTask =
+                (taskType === "jd_evaluation" && toolResultInfo?.name === "evaluate_jd_full" && toolResultInfo.success === true && !contractGateFailed) ||
+                (taskType === "offer_evaluation" && toolResultInfo?.name === "evaluate_offer" && toolResultInfo.success === true && !contractGateFailed) ||
+                (taskType === "resume_edit" && (resumeEditAppliedSucceeded || resumeEditRolledBackSucceeded));
+              if (
+                completedReferenceResumeSave ||
+                completedImageBusinessTask ||
+                (cancelledActiveGuidedTask && !shouldKeepLockForSwitchConfirmation) ||
+                confirmedSwitchAway
+              ) {
+                nextGuidedSession = finishGuidedSession(
+                  activeGuidedSession || nextGuidedSession,
+                  completedReferenceResumeSave ? "completed" : "cancelled",
+                  completedReferenceResumeSave
+                    ? "优秀简历已保存并完成读回校验"
+                    : completedImageBusinessTask
+                      ? "图片业务任务已完成"
+                      : "用户结束或切换了当前引导任务",
+                );
+              } else if (shouldKeepImageClarification && imageClarificationTaskType && isGuidedTaskType(imageClarificationTaskType)) {
+                nextGuidedSession = startOrContinueGuidedSession({
+                  existing: activeGuidedSession || nextGuidedSession,
+                  taskType: imageClarificationTaskType,
+                  agentId: taskAgentId(imageClarificationTaskType),
+                  allowedTools: routeDecision.allowedTools.slice(0, 20),
+                  phase: imageDecisionForState?.route === "retry_image" ? "image_retry" : "image_intent_clarification",
+                  expectedInput: imageDecisionForState?.clarificationQuestion || imageDecisionForState?.retryHint || "确认图片内容要走哪个求职任务",
+                  summary: `等待图片任务澄清：${taskLabelZh(imageClarificationTaskType)}`,
+                  documentType: imageDecisionForState?.documentType,
+                  imageRoute: imageDecisionForState?.route,
+                  imageQuality: imageDecisionForState?.quality,
+                  imageConfidence: imageDecisionForState?.confidence,
+                  sourceText: imageIntake?.extractedText?.slice(0, 4000),
+                  source: "image_clarification",
+                });
+              } else if (taskType && isGuidedTaskType(taskType)) {
+                nextGuidedSession = startOrContinueGuidedSession({
+                  existing: activeGuidedSession || nextGuidedSession,
+                  taskType,
+                  agentId: taskAgentId(taskType),
+                  allowedTools: routeDecision.allowedTools.slice(0, 20),
+                  phase: taskType === "career_positioning_guidance"
+                    ? "career_direction_discovery"
+                    : taskType === "interview_coaching"
+                      ? "one_question_loop"
+                      : "role_category_confirmation",
+              summary: taskLabelZh(taskType),
+              source: activeGuidedSession?.source || "agent_state",
+              sourceText: activeGuidedSession?.sourceText,
+            });
+              } else if (activeGuidedSession && !routeDecision.requiresClarification) {
+                nextGuidedSession = activeGuidedSession;
+              }
               await updateSession(currentSessionId, {
                 messages: fullMessages,
                 title: sessionTitle,
@@ -1383,7 +1638,16 @@ Rules:
                   ...currentAgentState,
                   offer: nextOfferState,
                   referenceResumeSave: nextReferenceResumeSave,
+                  guidedSession: nextGuidedSession,
                 },
+              });
+              triggerSessionAnomalyReview({
+                sessionId: currentSessionId,
+                messages: fullMessages,
+                activeTask: nextGuidedSession || activeGuidedSession,
+                recentRuns: durableRunId
+                  ? [{ id: durableRunId, task_type: taskType || "", agent_id: agent.id, status: finalRunStatus }]
+                  : [],
               });
               // Refresh sessions list
               setSessions(await listSessions());
@@ -1403,12 +1667,6 @@ Rules:
           if (!hideUserMessage) {
             try { persistMessages([...updated, finalAssistant]); } catch { /* ok */ }
           }
-          const finalRunStatus: AgentRunStatus =
-            toolResultInfo && !toolResultInfo.success
-              ? "failed"
-              : contractGateFailed
-                ? "failed"
-                : "succeeded";
           await updateRunStatus(finalRunStatus, {
             result: {
               assistantLength: finalAssistantContent.length,
@@ -1526,8 +1784,9 @@ Rules:
     const handoffKey = `${currentSessionId}:${jdId}`;
     if (handoffKeyRef.current === handoffKey) return;
     handoffKeyRef.current = handoffKey;
+    clearConsumedHandoffParams();
     sendMessage(`请结合我的简历评估 JD 库里的这份职位。先调用 get_recent_jd_context 读取 jdId=${jdId}，不要让我重新粘贴 JD。`).catch(() => {});
-  }, [mounted, streaming, currentSessionId, searchParams, sendMessage]);
+  }, [mounted, streaming, currentSessionId, searchParams, sendMessage, clearConsumedHandoffParams]);
 
   useEffect(() => {
     if (!mounted || streaming || !currentSessionId) return;
@@ -1539,6 +1798,7 @@ Rules:
     const handoffKey = `${currentSessionId}:offer:${intent || "open"}:${offerId || ""}:${offerReportId || ""}`;
     if (handoffKeyRef.current === handoffKey) return;
     handoffKeyRef.current = handoffKey;
+    clearConsumedHandoffParams();
 
     if (offerId && intent === "evaluate") {
       sendMessage(`请评估 Offer 工作台里的 offerId=${offerId}。直接调用 evaluate_offer，不要让我重新粘贴 Offer。`, undefined, { hideUserMessage: true }).catch(() => {});
@@ -1555,7 +1815,7 @@ Rules:
     if (offerReportId) {
       sendMessage(`请读取并解释已保存的 Offer 报告 offerReportId=${offerReportId}。优先调用 read_offer_report，不要重新评估 Offer。`, undefined, { hideUserMessage: true }).catch(() => {});
     }
-  }, [mounted, streaming, currentSessionId, searchParams, sendMessage]);
+  }, [mounted, streaming, currentSessionId, searchParams, sendMessage, clearConsumedHandoffParams]);
 
   const handleSelectSession = useCallback(async (id: number) => {
     if (id === currentSessionId) return;
@@ -1774,11 +2034,11 @@ Rules:
                 type="button"
                 onClick={handleResumeActiveRun}
                 disabled={activeRunAction !== null}
-                title="恢复运行状态"
+                title="查看运行状态"
                 className="inline-flex h-7 items-center gap-1 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-[var(--color-text)] transition-colors hover:bg-[var(--color-bg)] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <RotateCcw size={13} />
-                {activeRunAction === "resume" ? "恢复中" : "继续"}
+                {activeRunAction === "resume" ? "查看中" : "查看状态"}
               </button>
               <button
                 type="button"
