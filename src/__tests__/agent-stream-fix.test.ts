@@ -1,5 +1,24 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
+import { POST } from '@/app/api/agent/think/route';
 import { LLMError } from '@/lib/llm-retry';
+
+const originalDeepSeekKey = process.env.DEEPSEEK_API_KEY;
+const originalZhipuKey = process.env.ZHIPU_API_KEY;
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  if (originalDeepSeekKey === undefined) {
+    delete process.env.DEEPSEEK_API_KEY;
+  } else {
+    process.env.DEEPSEEK_API_KEY = originalDeepSeekKey;
+  }
+  if (originalZhipuKey === undefined) {
+    delete process.env.ZHIPU_API_KEY;
+  } else {
+    process.env.ZHIPU_API_KEY = originalZhipuKey;
+  }
+});
 
 describe('LLMError class', () => {
   it('creates timeout error with retryable=true', () => {
@@ -110,5 +129,51 @@ describe('line buffer pattern', () => {
   it('ignores non-data lines', () => {
     const results = processChunks(['event: ping\ndata: {"a":1}\n']);
     expect(results).toEqual(['{"a":1}']);
+  });
+});
+
+describe('think stream cancellation', () => {
+  it('cancels upstream and suppresses closed-controller errors when the client disconnects', async () => {
+    process.env.DEEPSEEK_API_KEY = 'test-key';
+    delete process.env.ZHIPU_API_KEY;
+
+    let upstreamCancelled = false;
+    const encoder = new TextEncoder();
+    const upstream = new Response(new ReadableStream<Uint8Array>({
+      async start(controller) {
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        if (upstreamCancelled) return;
+        controller.enqueue(encoder.encode(
+          'data: {"choices":[{"delta":{"content":"hello world"},"finish_reason":null}]}\n\n',
+        ));
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        if (upstreamCancelled) return;
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+        controller.close();
+      },
+      cancel() {
+        upstreamCancelled = true;
+      },
+    }), { status: 200 });
+
+    const fetchMock = vi.fn(async () => upstream) as unknown as typeof fetch;
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await POST(new Request('http://localhost/api/agent/think', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: [{ role: 'user', content: '看看我的简历' }] }),
+    }));
+
+    const reader = response.body!.getReader();
+    await reader.read();
+    await reader.cancel('client disconnected');
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    expect(upstreamCancelled).toBe(true);
+    const errorOutput = errorSpy.mock.calls.map((call) => String(call[0])).join('\n');
+    expect(errorOutput).not.toContain('Think stream error');
+    expect(errorOutput).not.toContain('Controller is already closed');
   });
 });

@@ -9,6 +9,21 @@ function sse(event: { type: string } & Record<string, unknown>): string {
   return `data: ${JSON.stringify(event)}\n\n`;
 }
 
+function isClosedStreamError(error: unknown): boolean {
+  const maybeError = error as { code?: unknown; message?: unknown } | null;
+  const message = typeof maybeError?.message === "string" ? maybeError.message : "";
+  return maybeError?.code === "ERR_INVALID_STATE" || /controller is already closed|invalid state/i.test(message);
+}
+
+function isExpectedStreamStop(error: unknown): boolean {
+  if (isClosedStreamError(error)) return true;
+  const maybeError = error as { name?: unknown; code?: unknown; message?: unknown } | null;
+  const name = typeof maybeError?.name === "string" ? maybeError.name : "";
+  const code = typeof maybeError?.code === "string" ? maybeError.code : "";
+  const message = typeof maybeError?.message === "string" ? maybeError.message : "";
+  return name === "AbortError" || code === "ABORT_ERR" || /aborted|cancelled|canceled/i.test(message);
+}
+
 // Model fallback chain: DeepSeek → Zhipu
 const MODEL_CHAIN = [
   { model: "deepseek-v4-flash", url: "https://api.deepseek.com/chat/completions", keyEnv: "DEEPSEEK_API_KEY" },
@@ -108,12 +123,53 @@ export async function POST(request: Request) {
 
     const encoder = new TextEncoder();
 
+    let closed = false;
+    let downstreamCancelled = false;
+    let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+
     const stream = new ReadableStream({
       async start(controller) {
-        // thinking phase
-        controller.enqueue(encoder.encode(sse({ type: "phase", phase: "thinking" })));
+        const shouldStop = () => closed || downstreamCancelled || request.signal.aborted;
+        const safeEnqueue = (event: { type: string } & Record<string, unknown>): boolean => {
+          if (shouldStop()) return false;
+          try {
+            controller.enqueue(encoder.encode(sse(event)));
+            return true;
+          } catch (err) {
+            closed = true;
+            if (!isClosedStreamError(err)) {
+              console.error("Think stream enqueue error:", err);
+            }
+            return false;
+          }
+        };
+        const safeClose = () => {
+          if (closed || downstreamCancelled) return;
+          closed = true;
+          try {
+            controller.close();
+          } catch (err) {
+            if (!isClosedStreamError(err)) {
+              console.error("Think stream close error:", err);
+            }
+          }
+        };
+        const cancelUpstream = async (reason?: unknown) => {
+          downstreamCancelled = true;
+          closed = true;
+          try {
+            await reader?.cancel(reason);
+          } catch (err) {
+            if (!isExpectedStreamStop(err)) {
+              console.error("Think upstream cancel error:", err);
+            }
+          }
+        };
+        const abortHandler = () => {
+          void cancelUpstream(request.signal.reason);
+        };
+        request.signal.addEventListener("abort", abortHandler, { once: true });
 
-        const reader = response.body!.getReader();
         const decoder = new TextDecoder();
         let buffered = "";
         let phaseSent = false;
@@ -124,13 +180,18 @@ export async function POST(request: Request) {
         let lineBuf = "";
 
         try {
+          if (!safeEnqueue({ type: "phase", phase: "thinking" })) return;
+
+          reader = response.body!.getReader();
           while (true) {
+            if (shouldStop()) break;
             const { done, value } = await reader.read();
-            if (done) break;
+            if (done || shouldStop()) break;
             lineBuf += decoder.decode(value, { stream: true });
             const lines = lineBuf.split("\n");
             lineBuf = lines.pop() || "";
             for (const line of lines) {
+              if (shouldStop()) break;
               if (!line.startsWith("data: ")) continue;
               const data = line.slice(6);
               if (data === "[DONE]") continue;
@@ -164,11 +225,11 @@ export async function POST(request: Request) {
                   }
                   if (!phaseSent && buffered.length < 6) continue;
                   if (!phaseSent) {
-                    controller.enqueue(encoder.encode(sse({ type: "phase", phase: "responding" })));
+                    if (!safeEnqueue({ type: "phase", phase: "responding" })) break;
                     phaseSent = true;
-                    controller.enqueue(encoder.encode(sse({ type: "text", content: buffered })));
+                    if (!safeEnqueue({ type: "text", content: buffered })) break;
                   } else {
-                    controller.enqueue(encoder.encode(sse({ type: "text", content })));
+                    if (!safeEnqueue({ type: "text", content })) break;
                   }
                 }
               } catch {
@@ -178,7 +239,7 @@ export async function POST(request: Request) {
           }
 
           // Drain remaining buffer lines (could contain tool_calls/finish_reason SSE)
-          if (lineBuf.trim()) {
+          if (!shouldStop() && lineBuf.trim()) {
             for (const line of lineBuf.split("\n")) {
               if (!line.startsWith("data: ")) continue;
               const data = line.slice(6);
@@ -192,20 +253,44 @@ export async function POST(request: Request) {
           }
 
           // Emit accumulated tool_calls at end of stream (before done)
-          if (toolCallFragments.size > 0) {
+          if (!shouldStop() && toolCallFragments.size > 0) {
             const toolCalls = Array.from(toolCallFragments.values());
-            controller.enqueue(encoder.encode(sse({ type: "tool_calls", tool_calls: toolCalls })));
+            safeEnqueue({ type: "tool_calls", tool_calls: toolCalls });
           }
           // Emit finish_reason so the client loop knows whether to continue or stop (Anthropic stop_reason pattern)
-          if (finishReason) {
-            controller.enqueue(encoder.encode(sse({ type: "finish_reason", finish_reason: finishReason })));
+          if (!shouldStop() && finishReason) {
+            safeEnqueue({ type: "finish_reason", finish_reason: finishReason });
           }
-          controller.enqueue(encoder.encode(sse({ type: "done" })));
+          if (!shouldStop()) {
+            safeEnqueue({ type: "done" });
+          }
         } catch (err) {
-          console.error("Think stream error:", err);
+          if (!shouldStop() && !isExpectedStreamStop(err)) {
+            console.error("Think stream error:", err);
+            safeEnqueue({ type: "error", error: "模型响应中断，请稍后重试。" });
+            safeEnqueue({ type: "done" });
+          }
         } finally {
-          reader.releaseLock();
-          controller.close();
+          request.signal.removeEventListener("abort", abortHandler);
+          try {
+            reader?.releaseLock();
+          } catch (err) {
+            if (!isExpectedStreamStop(err)) {
+              console.error("Think stream release error:", err);
+            }
+          }
+          safeClose();
+        }
+      },
+      async cancel(reason) {
+        downstreamCancelled = true;
+        closed = true;
+        try {
+          await reader?.cancel(reason);
+        } catch (err) {
+          if (!isExpectedStreamStop(err)) {
+            console.error("Think response cancel error:", err);
+          }
         }
       },
     });
