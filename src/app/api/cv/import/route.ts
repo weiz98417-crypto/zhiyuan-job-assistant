@@ -7,6 +7,11 @@ import {
 import { ZHIPU_API_URL, ZHIPU_VISION_MODEL } from "@/lib/zhipu";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
+const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
+const RESUME_PARSE_MODEL = process.env.DEEPSEEK_RESUME_PARSE_MODEL || "deepseek-v4-flash";
+
+type ResumeSectionId = "summary" | "experience" | "projects" | "skills" | "education";
+type ResumeSections = Record<ResumeSectionId, string>;
 
 // ── Helpers ──
 
@@ -51,6 +56,80 @@ function fmtField(v: unknown): string {
   return String(v);
 }
 
+function normalizeResumeSections(input: Record<string, string>): ResumeSections {
+  const sections: ResumeSections = {
+    summary: cleanSection(input.summary),
+    experience: cleanSection(input.experience),
+    projects: cleanSection(input.projects),
+    skills: cleanSection(input.skills),
+    education: cleanSection(input.education),
+  };
+
+  const split = splitEmbeddedProjectsFromExperience(sections.experience);
+  if (split.projects) {
+    sections.experience = split.experience;
+    sections.projects = appendSection(sections.projects, split.projects);
+  }
+
+  return sections;
+}
+
+function cleanSection(value: string): string {
+  return String(value || "").replace(/\r\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function appendSection(existing: string, addition: string): string {
+  const cleanExisting = cleanSection(existing);
+  const cleanAddition = cleanSection(addition);
+  if (!cleanAddition) return cleanExisting;
+  if (!cleanExisting) return cleanAddition;
+  if (cleanExisting.includes(cleanAddition)) return cleanExisting;
+  return `${cleanExisting}\n\n${cleanAddition}`;
+}
+
+function splitEmbeddedProjectsFromExperience(experience: string): { experience: string; projects: string } {
+  const text = cleanSection(experience);
+  if (!text) return { experience: "", projects: "" };
+
+  const lines = text.split("\n");
+  const projectStartIndex = lines.findIndex((line) => isProjectSectionStart(line));
+  if (projectStartIndex < 0) return { experience: text, projects: "" };
+
+  return {
+    experience: cleanSection(lines.slice(0, projectStartIndex).join("\n")),
+    projects: cleanSection(lines.slice(projectStartIndex).join("\n")),
+  };
+}
+
+function isProjectSectionStart(line: string): boolean {
+  const text = line.trim().replace(/^[-•\d.、\s]+/, "");
+  if (!text) return false;
+  if (/^(项目经历|项目经验|项目实践|代表项目|主要项目|项目案例|Projects?)\s*[:：]?\s*$/i.test(text)) return true;
+  return /^(项目经历|项目经验|项目实践|代表项目|主要项目|项目名称|项目背景|项目描述|项目职责|核心工作|项目成果|项目业绩|项目内容|项目亮点)\s*[:：]/i.test(text);
+}
+
+function parseJsonObject(content: string): Record<string, unknown> {
+  const clean = content.trim().replace(/^```(?:json)?\s*\n?/gm, "").replace(/\n?```\s*$/gm, "");
+  const strategies = [
+    () => JSON.parse(clean),
+    () => {
+      const match = clean.match(/\{[\s\S]*\}/);
+      return match ? JSON.parse(match[0]) : null;
+    },
+  ];
+
+  for (const strategy of strategies) {
+    try {
+      const parsed = strategy();
+      if (parsed && typeof parsed === "object") return parsed as Record<string, unknown>;
+    } catch {
+      // Try the next extraction strategy.
+    }
+  }
+
+  throw new Error("No JSON found");
+}
+
 // ── Zhipu vision multimodal → direct JSON (images) ──
 
 async function parseViaZhipu(dataUri: string): Promise<Record<string, string>> {
@@ -86,13 +165,13 @@ async function parseViaZhipu(dataUri: string): Promise<Record<string, string>> {
     const jsonMatch = clean.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error("No JSON found");
     const json = JSON.parse(jsonMatch[0]);
-    return {
+    return normalizeResumeSections({
       summary: fmtField(json.summary) || fmtField(json.personal_info) || "",
       experience: fmtField(json.experience) || fmtField(json.work_experience) || "",
       projects: fmtField(json.projects) || fmtField(json.project_experience) || "",
       skills: fmtField(json.skills) || "",
       education: fmtField(json.education) || "",
-    };
+    });
   } catch { return { summary: text, experience: "", projects: "", skills: "", education: "" }; }
 }
 
@@ -102,51 +181,59 @@ async function parseViaDeepSeek(rawText: string): Promise<Record<string, string>
   const apiKey = process.env.DEEPSEEK_API_KEY;
   if (!apiKey) throw new Error("未配置 DEEPSEEK_API_KEY");
 
-  const res = await fetch("https://api.deepseek.com/chat/completions", {
+  const res = await fetch(DEEPSEEK_API_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
-      model: "deepseek-chat",
+      model: RESUME_PARSE_MODEL,
       messages: [
-        { role: "system", content: `你是精确的简历文本归类器。把原文段落按栏目归类，直接复制原文，不增不减不改。
+        { role: "system", content: `你是精确的简历文本重新分栏器。把原文段落按栏目归类，直接复制原文，不增不减不改。
 
 输出JSON：{"personal":"","summary":"","experience":"","projects":"","skills":"","education":""}
 
 归类规则：
 - personal: 姓名、电话、邮箱、城市
 - summary: 个人总结段落（如"本人具有X年经验，擅长..."）
-- experience: 工作经历（含公司名、职位、时间段、工作内容描述）
-- projects: 项目经验（含项目名称、角色、成果数据）
+- experience: 工作经历，只保留公司、职位、时间段、部门、职责概述、业务范围等任职信息
+- projects: 项目经历/项目经验，必须保留项目名称、项目背景、目标、角色、核心工作、技术/产品方案、成果数据
 - skills: 技能列表（编程语言、工具、证书等）
 - education: 学校、专业、学历、毕业时间
+
+项目拆分硬规则：
+- 即使项目写在某一段工作经历下面，只要出现"项目经历""项目经验""项目名称""项目背景""项目职责""核心工作""项目成果""XX项目"等项目块，也必须完整放入projects。
+- 如果项目隶属于某家公司，projects里保留公司/岗位/时间上下文，experience里只保留任职框架和非项目型职责。
+- 禁止把具体项目块整段放在experience里。
+- 如果没有独立项目标题，但某段明显围绕一个系统/平台/助手/工具/模型/Agent/App/小程序从背景、工作、结果展开，也归projects。
 
 ❌ 反例（绝对禁止）：
 - summary里不要放学校、专业、学历 → 这些归education
 - summary里不要放Python、React等技能词 → 这些归skills
 - experience里不要把时间和岗位描述拆散 → 同一段经历的完整原文放一起
+- experience里不要包含"项目名称/项目背景/核心工作/项目成果"这类项目块 → 这些归projects
 - 不要自己总结"毕业于XX大学" → 照抄原文
 
-复制原文完整段落，禁止压缩成一句。原文没有的填空字符串""。` },
-        { role: "user", content: rawText.slice(0, 12000) },
+自检后再输出JSON：检查experience中是否还有项目块；如果有，先迁移到projects再输出。复制原文完整段落，禁止压缩成一句。原文没有的填空字符串""。` },
+        { role: "user", content: rawText.slice(0, 16000) },
       ],
-      temperature: 0, max_tokens: 8000,
+      temperature: 0,
+      max_tokens: 16000,
       response_format: { type: "json_object" },
     }),
-    signal: AbortSignal.timeout(30000),
+    signal: AbortSignal.timeout(120000),
   });
   if (!res.ok) throw new Error(`DeepSeek 解析失败: ${res.status}`);
   const data = await res.json() as { choices?: { message?: { content?: string } }[] };
   const content = data.choices?.[0]?.message?.content || "";
-  const parsed = JSON.parse(content.replace(/```json\s*|```\s*/g, "").trim());
+  const parsed = parseJsonObject(content);
   const personal = fmtField(parsed.personal);
   const summary = fmtField(parsed.summary);
-  return {
+  return normalizeResumeSections({
     summary: [personal, summary].filter(Boolean).join("\n\n"),
     experience: fmtField(parsed.experience),
     projects: fmtField(parsed.projects),
     skills: fmtField(parsed.skills),
     education: fmtField(parsed.education),
-  };
+  });
 }
 
 // ── Route ──
