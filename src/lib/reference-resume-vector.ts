@@ -61,7 +61,7 @@ const ROLE_ALIASES: Array<[RegExp, string]> = [
   [/产品经理|product manager|\bpm\b/i, "product_manager"],
 ];
 
-const RESUME_HINT_RE = /简历|履历|resume|curriculum vitae|\bcv\b|教育经历|项目经历|工作经历|实习经历|专业技能|个人优势|求职意向/i;
+const RESUME_HINT_RE = /简历|履历|resume|curriculum vitae|\bcv\b|教育(?:经历|背景)|项目(?:经历|经验)|工作(?:经历|经验)|实习经历|专业技能|技能与能力|个人(?:优势|概述|简介)|自我评价|求职意向/i;
 const SAVE_EXCELLENT_RE = /(保存|存|沉淀|加入|放到).{0,12}(优秀|参考|标杆|样例|范例).{0,12}(简历|履历|resume|cv)|(优秀|参考|标杆|样例|范例).{0,12}(简历|履历|resume|cv).{0,12}(保存|存|沉淀|加入|放到)/i;
 
 export function detectSaveExcellentResumeIntent(text: string): boolean {
@@ -72,12 +72,12 @@ export function looksLikeResumeText(text: string): boolean {
   const normalized = normalizeWhitespace(text);
   if (normalized.length < 120) return false;
   const hits = [
-    /教育经历|education/i,
-    /项目经历|projects?/i,
-    /工作经历|experience|employment/i,
+    /教育(?:经历|背景)|education/i,
+    /项目(?:经历|经验)|projects?/i,
+    /工作(?:经历|经验)|experience|employment/i,
     /实习经历|intern/i,
-    /专业技能|skills?/i,
-    /个人优势|summary|profile/i,
+    /专业技能|技能与能力|skills?/i,
+    /个人(?:优势|概述|简介)|自我评价|summary|profile/i,
   ].filter((pattern) => pattern.test(normalized)).length;
   return hits >= 2 || (RESUME_HINT_RE.test(normalized) && normalized.length >= 300);
 }

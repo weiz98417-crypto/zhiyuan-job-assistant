@@ -57,6 +57,17 @@ describe("reference resume vector helpers", () => {
   it("recognizes complete resume-like text and rejects noisy fragments", () => {
     const resumeText = buildReferenceResumeRawText(sections).repeat(2);
     expect(looksLikeResumeText(resumeText)).toBe(true);
+    expect(looksLikeResumeText([
+      "张三",
+      "教育背景",
+      "某大学 统计学 硕士",
+      "技能与能力",
+      "SQL / Python / R / A/B 测试 / 数据分析",
+      "工作经验",
+      "某银行 高级数据经理，负责数据中台建设、经营分析和跨部门协同。",
+      "项目经验",
+      "AI 客户经营 Agent 项目，负责需求调研、方案设计、RAG 知识库和合规校验闭环。",
+    ].join("\n"))).toBe(true);
     expect(looksLikeResumeText("岗位要求：至少3年数据产品经验，理解主数据、数仓、UAT。")).toBe(false);
   });
 
