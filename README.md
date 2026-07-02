@@ -85,6 +85,14 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
+For job discovery scans on Linux/Aliyun, install the Playwright Chromium runtime before starting the service:
+
+```bash
+npm run install:playwright
+```
+
+The discovery worker scans configured Chinese company career sites first, then falls back to Liepin, 51job, and Zhaopin. Results with explicit overseas or remote locations are filtered before they are saved.
+
 Required environment variables:
 
 ```bash

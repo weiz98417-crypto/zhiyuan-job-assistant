@@ -38,6 +38,7 @@ ZHIPU_VISION_MODEL=glm-5v-turbo
 Run checks and start the app:
 
 ```bash
+npm run install:playwright
 npm run doctor
 npm run dev
 ```
@@ -215,4 +216,5 @@ npx tsc --noEmit
 | Screenshot OCR says format error | Confirm the uploaded file is the original image, not a tiny chat thumbnail; verify `ZHIPU_API_KEY`. |
 | OCR rate limited | Wait and retry, or paste text/link; check provider quota. |
 | PostgreSQL routes fail | Run `npm run check:postgres` and confirm `DB_DRIVER`/`DATABASE_URL`. |
+| Job discovery scan fails on Aliyun/Linux | Run `npm run install:playwright`, then restart the service so the worker can launch Chromium. |
 | Memory retrieval empty | Run `npm run eval:memory`; if provider-backed, run `npm run smoke:embedding`. |

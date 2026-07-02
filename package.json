@@ -20,6 +20,7 @@
     "pdf": "node generate-pdf.mjs",
     "sync-check": "node cv-sync-check.mjs",
     "liveness": "node check-liveness.mjs",
+    "install:playwright": "node scripts/install-playwright.mjs",
     "check:postgres": "node scripts/check-postgres.mjs",
     "check:postgres-cutover": "node scripts/check-postgres-cutover.mjs",
     "check:jd-eval-partials": "node scripts/check-jd-eval-partials.mjs",
