@@ -24,8 +24,8 @@ vi.mock("@/lib/jd-storage", () => ({
   createJD: vi.fn(),
 }));
 
-import { agentLoopClient, AGENT_LOOP_MAX_MESSAGES } from "@/lib/agent/loop/client-runner";
-import { generateMemoryDigest, MEMORY_DIGEST_USER_MESSAGE_THRESHOLD } from "@/lib/agent/sessions";
+import { agentLoopClient, AGENT_LOOP_MAX_CONTEXT_TOKENS, AGENT_LOOP_MAX_MESSAGES } from "@/lib/agent/loop/client-runner";
+import { generateMemoryDigest, MEMORY_DIGEST_USER_MESSAGE_THRESHOLD, resolveMemoryDigestUpdate } from "@/lib/agent/sessions";
 
 const images = ["data:image/png;base64,abc"];
 
@@ -204,7 +204,7 @@ describe("agent image intake loop", () => {
     expect(events.at(-1)).toEqual({ type: "done" });
   });
 
-  it("announces context compression before long history is truncated for the model", async () => {
+  it("announces context compression before oversized context is rewritten", async () => {
     const fetchMock = vi.fn(async () => thinkResponse([
       { type: "text", content: "ok" },
       { type: "finish_reason", finish_reason: "stop" },
@@ -213,7 +213,7 @@ describe("agent image intake loop", () => {
 
     const longHistory = Array.from({ length: AGENT_LOOP_MAX_MESSAGES }, (_, index) => ({
       role: index % 2 === 0 ? "user" : "assistant",
-      content: `message ${index}`,
+      content: index === 0 ? "x".repeat(AGENT_LOOP_MAX_CONTEXT_TOKENS + 1) : `message ${index}`,
     }));
 
     const events = await collectEvents(agentLoopClient(
@@ -222,6 +222,27 @@ describe("agent image intake loop", () => {
     ));
 
     expect(events).toContainEqual({ type: "phase", phase: "compressing_context" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not show compression just because the outbound request hits the message cap", async () => {
+    const fetchMock = vi.fn(async () => thinkResponse([
+      { type: "text", content: "ok" },
+      { type: "finish_reason", finish_reason: "stop" },
+    ])) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    const longHistory = Array.from({ length: AGENT_LOOP_MAX_MESSAGES + 5 }, (_, index) => ({
+      role: index % 2 === 0 ? "user" : "assistant",
+      content: `short message ${index}`,
+    }));
+
+    const events = await collectEvents(agentLoopClient(
+      "system",
+      longHistory,
+    ));
+
+    expect(events).not.toContainEqual({ type: "phase", phase: "compressing_context" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -244,5 +265,31 @@ describe("agent image intake loop", () => {
     expect(MEMORY_DIGEST_USER_MESSAGE_THRESHOLD).toBe(5);
     expect(generateMemoryDigest(fourUserMessages)).toBeNull();
     expect(generateMemoryDigest(fiveUserMessages)).toEqual(expect.any(String));
+  });
+
+  it("announces session memory digest only for the first generated digest", () => {
+    const messages = [
+      ...Array.from({ length: MEMORY_DIGEST_USER_MESSAGE_THRESHOLD }, (_, index) => ({
+        role: "user" as const,
+        content: `用户消息 ${index}`,
+        timestamp: new Date().toISOString(),
+      })),
+      {
+        role: "assistant" as const,
+        content: "这是一段足够长的最近分析内容，".repeat(6),
+        timestamp: new Date().toISOString(),
+      },
+    ];
+
+    const firstDigest = resolveMemoryDigestUpdate(messages);
+    expect(firstDigest.digest).toEqual(expect.any(String));
+    expect(firstDigest.shouldAnnounce).toBe(true);
+
+    const nextDigest = resolveMemoryDigestUpdate([
+      ...messages,
+      { role: "user" as const, content: "继续补充", timestamp: new Date().toISOString() },
+    ], firstDigest.digest);
+    expect(nextDigest.digest).toEqual(expect.any(String));
+    expect(nextDigest.shouldAnnounce).toBe(false);
   });
 });

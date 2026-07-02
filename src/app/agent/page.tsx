@@ -58,7 +58,7 @@ import {
   undoDeleteSession,
   pinSession,
   ensureDefaultSession,
-  generateMemoryDigest,
+  resolveMemoryDigestUpdate,
   MEMORY_DIGEST_USER_MESSAGE_THRESHOLD,
 } from "@/lib/agent/sessions";
 import {
@@ -101,6 +101,13 @@ import {
 } from "@/lib/agent/guided-session-state";
 import type { ResumeEditProposalDTO } from "@/lib/agent/resume-edit-proposals";
 import { getReadBackRequirementStatus } from "@/lib/agent/tools/readback-verification";
+import {
+  buildCareerPositioningArtifact,
+  buildCareerPositioningFallback,
+  isCareerPositioningConfirmation,
+  parseCareerPositioningArtifact,
+  type CareerPositioningArtifact,
+} from "@/lib/agent/career-positioning-result";
 import type { AgentMessage, AgentInteraction, ChatSession } from "@/types";
 
 
@@ -158,6 +165,104 @@ function summarizeLedgerParams(params: Record<string, unknown> | undefined): str
     }
   }
   return truncateLedgerText(safe);
+}
+
+async function persistCareerPositioningArtifact(
+  artifact: CareerPositioningArtifact,
+  sessionId?: number | null,
+): Promise<{ role: string; readBackVerified: boolean }> {
+  const profileRes = await fetch("/api/data/profile", { cache: "no-store" });
+  const profileJson = await profileRes.json().catch(() => ({}));
+  if (!profileRes.ok || !profileJson.success) {
+    throw new Error(profileJson.error || `读取画像失败 HTTP ${profileRes.status}`);
+  }
+
+  const current = (profileJson.data || {}) as {
+    data?: Record<string, unknown>;
+    goals?: Record<string, unknown>;
+    history?: unknown[];
+  };
+  const currentGoals = current.goals && typeof current.goals === "object" ? current.goals : {};
+  const currentCompanyPrefs = currentGoals.companyPrefs && typeof currentGoals.companyPrefs === "object"
+    ? currentGoals.companyPrefs as Record<string, unknown>
+    : {};
+  const currentIndustries = Array.isArray(currentCompanyPrefs.industry)
+    ? currentCompanyPrefs.industry.filter((item): item is string => typeof item === "string")
+    : [];
+  const goals = {
+    ...currentGoals,
+    targetRoles: artifact.targetRoles,
+    positioningSummary: artifact.positioningSummary,
+    positioningEvidence: artifact.evidence,
+    positioningScenario: artifact.targetScenario,
+    positioningMvp: artifact.mvp,
+    nextActions: artifact.nextActions,
+    companyPrefs: {
+      ...currentCompanyPrefs,
+      industry: Array.from(new Set([
+        ...currentIndustries,
+        "餐饮培训",
+        "智能餐饮设备",
+        "AI 产品",
+      ])),
+    },
+  };
+  const history = [
+    ...(Array.isArray(current.history) ? current.history : []),
+    artifact.historyEntry,
+  ];
+
+  const saveRes = await fetch("/api/data/profile", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      data: current.data || {},
+      goals,
+      history,
+    }),
+  });
+  const saveJson = await saveRes.json().catch(() => ({}));
+  if (!saveRes.ok || !saveJson.success) {
+    throw new Error(saveJson.error || `写入画像失败 HTTP ${saveRes.status}`);
+  }
+
+  const signalRes = await fetch("/api/data/signals", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      source: "dingwei",
+      signal_type: "role_preference",
+      session_id: sessionId ? String(sessionId) : undefined,
+      content_json: {
+        role: artifact.roleSignal.role,
+        reason: artifact.roleSignal.reason,
+        evidence: artifact.roleSignal.evidence,
+        confidence: artifact.roleSignal.confidence,
+        status: "confirmed",
+      },
+    }),
+  });
+  const signalJson = await signalRes.json().catch(() => ({}));
+  if (!signalRes.ok || !signalJson.success || signalJson.data?.readBackVerified !== true) {
+    throw new Error(signalJson.error || `画像信号写入校验失败 HTTP ${signalRes.status}`);
+  }
+
+  const verifyRes = await fetch("/api/data/profile", { cache: "no-store" });
+  const verifyJson = await verifyRes.json().catch(() => ({}));
+  const readBackRoles = verifyJson.data?.goals?.targetRoles;
+  const role = artifact.targetRoles[0]?.role || artifact.roleSignal.role;
+  const readBackVerified =
+    verifyRes.ok &&
+    verifyJson.success &&
+    Array.isArray(readBackRoles) &&
+    readBackRoles.some((item: unknown) =>
+      item && typeof item === "object" && (item as { role?: unknown }).role === role
+    );
+  if (!readBackVerified) {
+    throw new Error("画像写入后读回校验失败，未在 goals.targetRoles 中读到确认方向");
+  }
+
+  return { role, readBackVerified };
 }
 
 function buildRunTarget(
@@ -391,10 +496,12 @@ function AgentPageInner() {
   ): Promise<string | undefined> => {
     const userMsgCount = fullMessages.filter((m) => m.role === "user").length;
     if (userMsgCount < MEMORY_DIGEST_USER_MESSAGE_THRESHOLD) return fallbackDigest;
+    const { digest, shouldAnnounce } = resolveMemoryDigestUpdate(fullMessages, fallbackDigest);
+    if (!shouldAnnounce) return digest;
     setPhase("compressing_context");
     setExecutingTool(undefined);
     await waitForStatusPaint();
-    return generateMemoryDigest(fullMessages) || fallbackDigest;
+    return digest;
   }, []);
 
   const renameSessionFromFirstUserMessage = useCallback(async (sessionId: number, firstText: string) => {
@@ -740,6 +847,75 @@ function AgentPageInner() {
           agentState,
           interviewState: currentSessionForRun?.interviewState,
         });
+        const pendingCareerPositioningArtifact =
+          activeGuidedSession?.taskType === "career_positioning_guidance" &&
+          activeGuidedSession.phase === "awaiting_positioning_confirmation"
+            ? parseCareerPositioningArtifact(activeGuidedSession.sourceText)
+            : null;
+        if (
+          pendingCareerPositioningArtifact &&
+          isCareerPositioningConfirmation(content) &&
+          currentSessionId &&
+          currentSessionForRun
+        ) {
+          setPhase("executing");
+          setExecutingTool("save_career_positioning");
+          let finalAssistantContent = "";
+          let nextGuidedSession: GuidedSessionState | undefined = activeGuidedSession || undefined;
+          try {
+            const saved = await persistCareerPositioningArtifact(pendingCareerPositioningArtifact, currentSessionId);
+            nextGuidedSession = finishGuidedSession(
+              activeGuidedSession,
+              "completed",
+              `自我定位已写入画像：${saved.role}`,
+            );
+            finalAssistantContent = [
+              `已把这次自我定位写入求职画像：${saved.role}。`,
+              "",
+              "我也记录了一条已确认的定位信号，后续 JD 评估、简历优化和推荐方向都会优先参考它。",
+            ].join("\n");
+            triggerProfileUpdate({ force: true }).catch(() => {});
+          } catch (err) {
+            finalAssistantContent = `这次定位结果没有写入画像：${err instanceof Error ? err.message : "未知错误"}。我没有把任务标记为完成，你可以再回复“确认”重试，或告诉我要调整哪里。`;
+          }
+
+          const finalAssistant: AgentMessage = {
+            ...assistantMsg,
+            content: finalAssistantContent,
+            agent_id: "profile",
+          };
+          streamContentRef.current = finalAssistantContent;
+          setStreamText(finalAssistantContent);
+          setPhase(null);
+          setExecutingTool(undefined);
+          setStreaming(false);
+          setEvalProgress([]);
+          setMessages((prev) => {
+            const copy = [...prev];
+            const last = copy[copy.length - 1];
+            if (last && last.role === "assistant" && last.content === "") copy[copy.length - 1] = finalAssistant;
+            else copy.push(finalAssistant);
+            return copy;
+          });
+
+          const fullMessages = [...currentSessionForRun.messages];
+          if (!hideUserMessage) fullMessages.push({ ...userMsg, agent_id: "profile" });
+          fullMessages.push(finalAssistant);
+          await updateSession(currentSessionId, {
+            messages: fullMessages,
+            memoryDigest: await generateMemoryDigestWithStatus(
+              fullMessages,
+              currentSessionForRun.memoryDigest,
+            ),
+            interviewState: currentSessionForRun.interviewState,
+            agentState: {
+              ...(agentState || {}),
+              guidedSession: nextGuidedSession,
+            },
+          });
+          setSessions(await listSessions());
+          return;
+        }
         const requestedTaskForSwitch = inferRequestedTaskFromText(content);
         const confirmedGuidedSwitch =
           Boolean(activeGuidedSession && requestedTaskForSwitch && requestedTaskForSwitch !== activeGuidedSession.taskType && isConfirmedGuidedTaskSwitch(content));
@@ -1403,7 +1579,17 @@ Rules:
         if (routeDecision.requiresClarification && activeTaskContract) {
           addContractCriteria(["clarification question asked"]);
         }
-        if (activeTaskContract?.taskType === "career_positioning_guidance" && assistantText.trim()) {
+        const careerPositioningArtifact = activeTaskContract?.taskType === "career_positioning_guidance"
+          ? buildCareerPositioningArtifact(updated)
+          : null;
+        const careerPositioningFallback = activeTaskContract?.taskType === "career_positioning_guidance"
+          ? buildCareerPositioningFallback({
+              messages: updated,
+              assistantText,
+              toolResult: toolResultInfo,
+            })
+          : null;
+        if (activeTaskContract?.taskType === "career_positioning_guidance" && (assistantText.trim() || careerPositioningFallback)) {
           addContractCriteria(["next question or guidance response generated"]);
         }
         if (activeTaskContract?.taskType === "resume_query" && assistantText.trim()) {
@@ -1432,12 +1618,19 @@ Rules:
           });
         }
         let finalAssistantContent = sanitizeUnsupportedResumeSaveClaim(
-          assistantText || "操作完成。",
+          careerPositioningFallback || assistantText || "操作完成。",
           resumeSectionSaveSucceeded && !contractGateFailed,
         );
         if (contractGateFailed && contractGateResult?.safeMessage) {
           finalAssistantContent = contractGateResult.safeMessage;
         }
+        const shouldAwaitCareerPositioningConfirmation = Boolean(
+          activeTaskContract?.taskType === "career_positioning_guidance" &&
+          careerPositioningArtifact &&
+          !contractGateFailed &&
+          /(定位卡|定位假设|目标方向|阶段性结果)/.test(finalAssistantContent) &&
+          /(确认|认可|保存|写入求职画像)/.test(finalAssistantContent),
+        );
         const finalRunStatus: AgentRunStatus =
           routeDecision.requiresClarification
             ? "waiting_user"
@@ -1452,7 +1645,7 @@ Rules:
         setExecutingTool(undefined);
         setEvalProgress([]);
 
-        if (assistantText || toolResultInfo) {
+        if (assistantText || toolResultInfo || careerPositioningFallback) {
           // Build final assistant
           const finalAssistant: AgentMessage = {
             ...assistantMsg,
@@ -1610,6 +1803,18 @@ Rules:
                   imageConfidence: imageDecisionForState?.confidence,
                   sourceText: imageIntake?.extractedText?.slice(0, 4000),
                   source: "image_clarification",
+                });
+              } else if (shouldAwaitCareerPositioningConfirmation && careerPositioningArtifact) {
+                nextGuidedSession = startOrContinueGuidedSession({
+                  existing: activeGuidedSession || nextGuidedSession,
+                  taskType: "career_positioning_guidance",
+                  agentId: "profile",
+                  allowedTools: routeDecision.allowedTools.slice(0, 20),
+                  phase: "awaiting_positioning_confirmation",
+                  expectedInput: "回复“确认”保存定位结果到求职画像，或直接说明要调整的地方",
+                  summary: `等待确认定位卡：${careerPositioningArtifact.targetRoles[0]?.role || "自我定位"}`,
+                  source: "career_positioning",
+                  sourceText: JSON.stringify(careerPositioningArtifact),
                 });
               } else if (taskType && isGuidedTaskType(taskType)) {
                 nextGuidedSession = startOrContinueGuidedSession({

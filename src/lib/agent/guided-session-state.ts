@@ -21,7 +21,7 @@ export interface GuidedSessionState {
   lastUpdatedAt: string;
   exitConditions?: string[];
   summary?: string;
-  source?: "agent_state" | "interview_state" | "reference_resume_save" | "image_clarification";
+  source?: "agent_state" | "interview_state" | "reference_resume_save" | "image_clarification" | "career_positioning";
   documentType?: string;
   imageRoute?: string;
   imageQuality?: string;
@@ -367,7 +367,7 @@ function defaultExpectedInput(taskType: AgentTaskType): string {
 }
 
 function defaultExitConditions(taskType: AgentTaskType): string[] {
-  if (taskType === "career_positioning_guidance") return ["阶段总结完成", "用户明确取消", "用户确认切换任务"];
+  if (taskType === "career_positioning_guidance") return ["用户确认定位卡并写入画像", "用户明确取消", "用户确认切换任务"];
   if (taskType === "interview_coaching") return ["用户要求结束面试", "面试复盘完成", "用户确认切换任务"];
   if (taskType === "reference_resume_save") return ["优秀简历保存并读回校验完成", "用户取消保存", "用户确认切换任务"];
   return ["任务完成", "用户取消", "用户确认切换任务"];

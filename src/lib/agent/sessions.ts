@@ -230,3 +230,15 @@ export function generateMemoryDigest(messages: AgentMessage[]): string | null {
   if (parts.length === 0) return null;
   return parts.join("; ");
 }
+
+export function resolveMemoryDigestUpdate(
+  messages: AgentMessage[],
+  fallbackDigest?: string,
+): { digest?: string; shouldAnnounce: boolean } {
+  const generated = generateMemoryDigest(messages) || undefined;
+  const digest = generated || fallbackDigest;
+  return {
+    digest,
+    shouldAnnounce: Boolean(generated && !fallbackDigest),
+  };
+}

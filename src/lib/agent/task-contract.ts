@@ -243,7 +243,12 @@ export function inferCompletedCriteriaFromToolResult(
   }
 
   if (contract.taskType === "career_positioning_guidance") {
-    if (signals.toolName === "self_positioning" || signals.toolName === "get_profile" || signals.toolName === "get_profile_insights") {
+    if (
+      signals.toolName === "mine_profile" ||
+      signals.toolName === "self_positioning" ||
+      signals.toolName === "get_profile" ||
+      signals.toolName === "get_profile_insights"
+    ) {
       completed.add("guidance framework loaded");
     }
   }

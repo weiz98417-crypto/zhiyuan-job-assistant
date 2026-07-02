@@ -57,7 +57,7 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
     triggerProfileUpdate().catch(() => {});
 
     if (state.stage === 5) {
-      // Write goals to SQLite via API
+      // Write goals through the profile API; the API owns the active storage backend.
       try {
         await fetch("/api/data/profile", {
           method: "PATCH",
@@ -96,7 +96,7 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
   if (action === "complete") {
     const state = loadSOP();
     if (state) {
-      // Write goals to SQLite via API
+      // Write goals through the profile API; the API owns the active storage backend.
       try {
         const goals: Record<string, unknown> = {
           targetRoles: [],
@@ -110,7 +110,7 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
           }
         }
 
-        // Write goals + signal
+        // Write goals + signal through the profile APIs.
         await fetch("/api/data/profile", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },

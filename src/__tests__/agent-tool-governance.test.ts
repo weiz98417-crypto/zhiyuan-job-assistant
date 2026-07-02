@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { createAgentTaskContract } from "@/lib/agent/task-contract";
+import {
+  createAgentTaskContract,
+  inferCompletedCriteriaFromToolResult,
+} from "@/lib/agent/task-contract";
 import {
   auditToolGovernance,
   auditToolRouteConflicts,
@@ -84,6 +87,10 @@ describe("agent tool governance", () => {
     })).toMatchObject({ allowed: true, effect: "guide", contractPolicy: "guidance" });
     expect(resolveToolEffectForCall("mine_profile", { action: "start" })).toBe("guide");
     expect(resolveToolEffectForCall("mine_profile", { action: "answer" })).toBe("guide");
+    expect(inferCompletedCriteriaFromToolResult(contract, {
+      toolName: "mine_profile",
+      toolSuccess: true,
+    })).toContain("guidance framework loaded");
   });
 
   it("blocks high-risk writes during guidance contracts", () => {

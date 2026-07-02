@@ -871,7 +871,7 @@ export interface AgentSessionState {
     lastUpdatedAt: string;
     exitConditions?: string[];
     summary?: string;
-    source?: "agent_state" | "interview_state" | "reference_resume_save" | "image_clarification";
+    source?: "agent_state" | "interview_state" | "reference_resume_save" | "image_clarification" | "career_positioning";
     documentType?: string;
     imageRoute?: string;
     imageQuality?: string;

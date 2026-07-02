@@ -377,7 +377,15 @@ export async function* agentLoopServer(opts: {
         formatted = formatToolResult(toolResult, tc.name);
       }
 
-      yield { type: "tool_result", name: tc.name, result: formatted, success: toolResult.success };
+      yield {
+        type: "tool_result",
+        name: tc.name,
+        result: formatted,
+        success: toolResult.success,
+        data: toolResult.data,
+        uiPayload: toolResult.uiPayload,
+        verifiedAction: toolResult.verifiedAction,
+      };
 
       // ── Self-healing: yield error info so LLM can adapt ──
       if (!toolResult.success) {

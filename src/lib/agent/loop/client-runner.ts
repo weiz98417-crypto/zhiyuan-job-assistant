@@ -130,16 +130,6 @@ function truncateContext(
   return messages.slice(-keepLast);
 }
 
-function willTruncateOutboundMessages(
-  messages: LoopMessage[],
-  searchProgress: string,
-  skipResearchProtocol?: boolean,
-): boolean {
-  const protocolCount = skipResearchProtocol ? 0 : 1;
-  const searchProgressCount = searchProgress ? 1 : 0;
-  return messages.length + protocolCount + searchProgressCount > AGENT_LOOP_MAX_MESSAGES;
-}
-
 /** Enforce context budget before pushing. Harness hard-gate, not prompt suggestion. */
 function pushWithBudget(
   ctx: LoopMessage[],
@@ -691,11 +681,8 @@ export async function* agentLoopClient(
         finishReason = "tool_calls";
         forcedToolCall = null;
       } else {
-        if (willTruncateOutboundMessages(ctx, searchProgress, skipResearchProtocol)) {
-          state.phase = "compressing_context";
-          yield { type: "phase", phase: "compressing_context" };
-          await new Promise((resolve) => setTimeout(resolve, 120));
-        }
+        // Outbound requests are capped silently every turn once a chat is long.
+        // Reserve the visible compression state for actual in-loop context rewrites.
         const thinkResponse = await fetchFromThinkProxy(systemPrompt, ctx, signal, searchProgress, skipResearchProtocol, tools);
         if (!thinkResponse.ok) {
           yield { type: "phase", phase: "responding" };
