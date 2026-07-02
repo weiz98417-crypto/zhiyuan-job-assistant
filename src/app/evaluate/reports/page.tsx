@@ -221,7 +221,7 @@ export default function ReportsPage() {
       if (!res.ok) throw new Error("server application write failed");
 
       if (existing?.id != null) {
-        await db.applications.update(existing.id, app);
+        await db.applications.put({ ...app, id: existing.id });
       } else {
         await db.applications.add(app);
       }
