@@ -17,9 +17,11 @@ export interface JobDiscoveryRunInput {
 let workerStartedAt = 0;
 
 export function normalizeJobDiscoveryCriteria(input: JobDiscoveryRunInput) {
-  const titlePositive = normalizeKeywordList(input.titleKeywords)
-    .concat(normalizeKeywordList(input.titleKeyword))
-    .concat(normalizeKeywordList(input.query));
+  const explicitTitleKeywords = normalizeKeywordList(input.titleKeywords)
+    .concat(normalizeKeywordList(input.titleKeyword));
+  const titlePositive = explicitTitleKeywords.length > 0
+    ? explicitTitleKeywords
+    : normalizeKeywordList(input.query);
   const titleNegative = normalizeKeywordList(input.excludeKeywords).concat(normalizeKeywordList(input.excludeKeyword));
   const location = (input.location || "").trim();
   const maxResults = clampMaxResults(input.maxResults);

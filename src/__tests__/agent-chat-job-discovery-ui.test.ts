@@ -24,5 +24,8 @@ describe("Agent Chat job discovery cards", () => {
     expect(sourceText).toContain("getAgentEvaluationUrl");
     expect(sourceText).toContain("原链接");
     expect(sourceText).toContain("打开 JD");
+    expect(sourceText).toContain("/api/scan/status?scanId=");
+    expect(sourceText).toContain("/api/scan/jobs?scanId=");
+    expect(sourceText).toContain("scan_result_poll");
   });
 });

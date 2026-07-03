@@ -1188,41 +1188,106 @@ function JobDiscoveryConfirmationCard({
 }
 
 function JobDiscoveryRunCard({ payload }: { payload: Record<string, unknown> }) {
-  const scanId = textValue(payload.scanId);
-  const status = textValue(payload.status) || "pending";
-  const companiesDone = numberValue(payload.companiesDone);
-  const companiesTotal = numberValue(payload.companiesTotal);
-  const jobsFound = numberValue(payload.jobsFound);
-  const jobsNew = numberValue(payload.jobsNew);
+  const [snapshot, setSnapshot] = useState<Record<string, unknown>>(payload);
+  const [jobs, setJobs] = useState<Record<string, unknown>[]>([]);
+  const [pollError, setPollError] = useState("");
+  const scanId = textValue(snapshot.scanId);
+  const status = textValue(snapshot.status) || "pending";
+  const companiesDone = numberValue(snapshot.companiesDone);
+  const companiesTotal = numberValue(snapshot.companiesTotal);
+  const jobsFound = numberValue(snapshot.jobsFound);
+  const jobsNew = numberValue(snapshot.jobsNew);
   const progress = companiesTotal > 0 ? Math.min(100, Math.round((companiesDone / companiesTotal) * 100)) : 0;
-  const recovered = payload.recoveredExistingScan === true;
+  const recovered = snapshot.recoveredExistingScan === true;
+  const active = status === "pending" || status === "running";
+  const finished = status === "done";
+
+  useEffect(() => {
+    setSnapshot(payload);
+    setJobs([]);
+    setPollError("");
+  }, [payload]);
+
+  useEffect(() => {
+    if (!scanId) return;
+    let canceled = false;
+    let interval: ReturnType<typeof setInterval> | undefined;
+
+    const loadJobs = async () => {
+      try {
+        const res = await fetch(`/api/scan/jobs?scanId=${encodeURIComponent(scanId)}&status=all&limit=5`, { cache: "no-store" });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || json.success !== true) throw new Error(json.error || "岗位结果读取失败");
+        const items = Array.isArray(json.data?.jobs)
+          ? json.data.jobs.filter((item: unknown): item is Record<string, unknown> => typeof item === "object" && item !== null)
+          : [];
+        if (!canceled) setJobs(items);
+      } catch (error) {
+        if (!canceled) setPollError(error instanceof Error ? error.message : "岗位结果读取失败");
+      }
+    };
+
+    const refresh = async () => {
+      try {
+        const res = await fetch(`/api/scan/status?scanId=${encodeURIComponent(scanId)}`, { cache: "no-store" });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || json.success !== true) throw new Error(json.error || "岗位发现状态读取失败");
+        const data = payloadRecord(json.data);
+        if (canceled) return;
+        setSnapshot((prev) => ({ ...prev, ...data }));
+        const nextStatus = textValue(data.status);
+        if (nextStatus && nextStatus !== "pending" && nextStatus !== "running") {
+          if (interval) clearInterval(interval);
+          if (nextStatus === "done") await loadJobs();
+        }
+      } catch (error) {
+        if (!canceled) setPollError(error instanceof Error ? error.message : "岗位发现状态读取失败");
+      }
+    };
+
+    refresh();
+    interval = setInterval(refresh, 3000);
+    return () => {
+      canceled = true;
+      if (interval) clearInterval(interval);
+    };
+  }, [scanId]);
 
   return (
-    <div className="max-w-[94%] min-w-0">
-      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-        className="overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-divider)] bg-[var(--color-surface)]">
-        <div className="flex items-center gap-2 border-b border-[var(--color-divider)] bg-[var(--color-bg)] px-3 py-2">
-          <RefreshCw size={14} className={status === "pending" || status === "running" ? "animate-spin text-[var(--color-primary)]" : "text-emerald-500"} />
-          <span className="text-xs font-medium text-[var(--color-text)]">岗位发现运行中</span>
-          <span className="ml-auto text-xs text-[var(--color-muted)]">{status}</span>
-        </div>
-        <div className="space-y-3 px-3 py-3 text-sm">
-          <div className="flex flex-wrap gap-3 text-xs text-[var(--color-muted)]">
-            <span>公司 {companiesDone}/{companiesTotal}</span>
-            <span>已发现 {jobsFound}</span>
-            <span>新增 {jobsNew}</span>
-            {recovered && <span className="text-amber-600">已恢复进行中的任务</span>}
+    <div className="space-y-2">
+      <div className="max-w-[94%] min-w-0">
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+          className="overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-divider)] bg-[var(--color-surface)]">
+          <div className="flex items-center gap-2 border-b border-[var(--color-divider)] bg-[var(--color-bg)] px-3 py-2">
+            <RefreshCw size={14} className={active ? "animate-spin text-[var(--color-primary)]" : finished ? "text-emerald-500" : "text-amber-500"} />
+            <span className="text-xs font-medium text-[var(--color-text)]">{finished ? "岗位发现已完成" : active ? "岗位发现运行中" : "岗位发现已停止"}</span>
+            <span className="ml-auto text-xs text-[var(--color-muted)]">{status}</span>
           </div>
-          <div className="h-1.5 overflow-hidden rounded-full bg-[var(--color-divider)]">
-            <div className="h-full rounded-full bg-[var(--color-primary)] transition-all" style={{ width: `${progress}%` }} />
+          <div className="space-y-3 px-3 py-3 text-sm">
+            <div className="flex flex-wrap gap-3 text-xs text-[var(--color-muted)]">
+              <span>公司 {companiesDone}/{companiesTotal}</span>
+              <span>已发现 {jobsFound}</span>
+              <span>新增 {jobsNew}</span>
+              {recovered && <span className="text-amber-600">已恢复进行中的任务</span>}
+            </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-[var(--color-divider)]">
+              <div className="h-full rounded-full bg-[var(--color-primary)] transition-all" style={{ width: `${progress}%` }} />
+            </div>
+            {finished && jobsFound > 0 && jobs.length === 0 && !pollError && (
+              <div className="text-xs text-[var(--color-muted)]">正在加载岗位卡片...</div>
+            )}
+            {pollError && <div className="text-xs text-amber-600">{pollError}</div>}
+            <a href={scanId ? `/discover?scanId=${encodeURIComponent(scanId)}` : "/discover"}
+              className="inline-flex items-center gap-1 text-xs text-[var(--color-primary)] hover:underline">
+              去岗位发现工作台查看全部
+              <ExternalLink size={12} />
+            </a>
           </div>
-          <a href={scanId ? `/discover?scanId=${encodeURIComponent(scanId)}` : "/discover"}
-            className="inline-flex items-center gap-1 text-xs text-[var(--color-primary)] hover:underline">
-            去岗位发现工作台查看全部
-            <ExternalLink size={12} />
-          </a>
-        </div>
-      </motion.div>
+        </motion.div>
+      </div>
+      {jobs.length > 0 && (
+        <JobDiscoveryBatchCard payload={{ type: "job_discovery_batch", jobs, scanId, source: "scan_result_poll" }} />
+      )}
     </div>
   );
 }

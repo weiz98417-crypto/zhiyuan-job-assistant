@@ -59,6 +59,22 @@ describe("scan_portals job discovery tool", () => {
     expect(result.rawData?.createdScan).toBe(false);
   });
 
+  it("does not mix the conversational query into explicit title keywords", async () => {
+    const result = await scanPortals.handler({
+      query: "确认开始岗位发现：岗位关键词 AI 产品经理、找一下杭州的AI产品经理岗位，地点 杭州，数量上限 50",
+      titleKeywords: ["AI 产品经理"],
+      location: "杭州",
+      maxResults: 50,
+    });
+
+    expect(result.uiPayload?.type).toBe("job_discovery_confirmation");
+    expect(result.rawData?.criteria).toMatchObject({
+      titlePositive: ["AI 产品经理"],
+      location: "杭州",
+      maxResults: 50,
+    });
+  });
+
   it("uses current opportunity pool for change-batch requests instead of creating a new scan", async () => {
     const result = await scanPortals.handler({
       query: "换一批",
