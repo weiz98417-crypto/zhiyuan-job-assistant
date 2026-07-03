@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCurrentUser } from "@/lib/auth";
 import { startJobDiscoveryRunForUser, type JobDiscoveryRunInput } from "@/lib/job-discovery-run";
+import { getCurrentScanUserId, isScanAuthError } from "@/lib/scan-auth";
 
 export async function POST(request: NextRequest) {
   try {
-    const user = await getCurrentUser();
-    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const userId = await getCurrentScanUserId();
 
     let body: JobDiscoveryRunInput = {};
     try {
@@ -14,7 +13,7 @@ export async function POST(request: NextRequest) {
       // empty body
     }
 
-    const run = await startJobDiscoveryRunForUser(String(user.userId), body);
+    const run = await startJobDiscoveryRunForUser(userId, body);
     if (!run.success && run.error === "missing_title_keywords") {
       return NextResponse.json(
         { error: run.error, message: run.message },
@@ -33,6 +32,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ scanId: run.scanId, companiesTotal: run.companiesTotal }, { status: 201 });
   } catch (error: unknown) {
+    if (isScanAuthError(error)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const msg = error instanceof Error ? error.message : "未知错误";
     console.error("POST /api/scan error:", msg);
     return NextResponse.json({ error: msg }, { status: 500 });

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as cheerio from "cheerio";
-import { getCurrentUser } from "@/lib/auth";
 import { getDataRepositories } from "@/lib/data-repositories";
+import { getCurrentScanUserId, isScanAuthError } from "@/lib/scan-auth";
 import {
   attachJdToScanJobForUser,
   getScanJobForUser,
@@ -102,11 +102,9 @@ async function fetchJDText(url: string): Promise<{ title: string; text: string }
 
 export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const user = await getCurrentUser();
-    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const userId = await getCurrentScanUserId();
     const { id } = await params;
     const jobId = Number(id);
-    const userId = String(user.userId);
     const job = await getScanJobForUser(jobId, userId) as ScanJob | undefined;
     if (!job) return NextResponse.json({ success: false, error: "Job not found" }, { status: 404 });
 
@@ -144,6 +142,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
       });
     }
   } catch (err) {
+    if (isScanAuthError(err)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const message = err instanceof Error ? err.message : "unknown";
     return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
@@ -151,11 +150,9 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const user = await getCurrentUser();
-    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const userId = await getCurrentScanUserId();
     const { id } = await params;
     const jobId = Number(id);
-    const userId = String(user.userId);
     const job = await getScanJobForUser(jobId, userId) as ScanJob | undefined;
     if (!job) return NextResponse.json({ success: false, error: "Job not found" }, { status: 404 });
 
@@ -193,6 +190,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       data: reusable ? toClientJD(reusable) : { ...toClientJD(row), id: jdId },
     });
   } catch (err) {
+    if (isScanAuthError(err)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const message = err instanceof Error ? err.message : "unknown";
     return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
