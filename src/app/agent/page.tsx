@@ -119,6 +119,41 @@ const CONTEXT_COMPRESSION_STATUS_MS = 120;
 const LEDGER_TEXT_LIMIT = 240;
 const IMAGE_INTAKE_TIMEOUT_MS = 180_000;
 
+type SendMessageOptions = {
+  hideUserMessage?: boolean;
+  forcedAgentId?: string;
+};
+
+type SavedJDForEvaluation = {
+  id?: number;
+  company?: string;
+  role?: string;
+  sourceUrl?: string;
+  body?: string;
+};
+
+function buildSavedJDEvaluationPrompt(jdId: string, jd: SavedJDForEvaluation): string {
+  const body = (jd.body || "").trim();
+  const clippedBody = body.length > 12000 ? `${body.slice(0, 12000)}\n\n[JD 正文过长，已截断到前 12000 字用于本次评估]` : body;
+  return [
+    "请结合我的简历评估这份已保存 JD。",
+    "",
+    "执行要求：",
+    "- 你现在就是 JD 评估 Agent，直接进入评估流程。",
+    "- 先读取我的简历或求职画像，再调用 evaluate_jd_full。",
+    "- 不要要求我重新粘贴 JD，不要说你没有 get_recent_jd_context。",
+    "- 如果需要引用来源，用下面的原 JD 链接。",
+    "",
+    `JD ID：${jd.id || jdId}`,
+    `公司：${jd.company || "未知公司"}`,
+    `岗位：${jd.role || "未知岗位"}`,
+    `原 JD 链接：${jd.sourceUrl || "无"}`,
+    "",
+    "JD 正文：",
+    clippedBody || "（这条 JD 暂无正文，请读取 JD 库上下文后再评估。）",
+  ].join("\n");
+}
+
 type ActiveRunNotice = {
   id: string;
   taskType: string;
@@ -704,8 +739,9 @@ function AgentPageInner() {
   }, [activeRunAction, activeRunNotice?.id, appendAssistantStatusMessage]);
 
   const sendMessage = useCallback(
-    async (content: string, images?: string[], options?: { hideUserMessage?: boolean }) => {
+    async (content: string, images?: string[], options?: SendMessageOptions) => {
       const hideUserMessage = options?.hideUserMessage === true;
+      const explicitForcedAgentId = options?.forcedAgentId;
       const userMsg: AgentMessage = {
         role: "user",
         content,
@@ -920,7 +956,7 @@ function AgentPageInner() {
         const confirmedGuidedSwitch =
           Boolean(activeGuidedSession && requestedTaskForSwitch && requestedTaskForSwitch !== activeGuidedSession.taskType && isConfirmedGuidedTaskSwitch(content));
         let rebindResolution: InterviewRebindResolution | null = null;
-        if (currentSessionForRun?.interviewState?.planSnapshot) {
+        if (!explicitForcedAgentId && currentSessionForRun?.interviewState?.planSnapshot) {
           const decision = classifyInterviewMaterialReference(content);
           if (decision.intent !== "continue_current_session") {
             const materialRecords = await loadInterviewMaterialRecords();
@@ -1086,14 +1122,18 @@ function AgentPageInner() {
         }
 
         const routedContent = content;
+        const shouldBypassConversationLocks = Boolean(explicitForcedAgentId);
+        const activeGuidedSessionForRun = shouldBypassConversationLocks ? null : activeGuidedSession;
         const forcedAgentId =
-          pendingReferenceResumeSaveForRun
+          explicitForcedAgentId
+            ? explicitForcedAgentId
+            : pendingReferenceResumeSaveForRun
             ? "resume"
             : confirmedGuidedSwitch && requestedTaskForSwitch
             ? taskAgentId(requestedTaskForSwitch)
-            : activeGuidedSession
-            ? taskAgentId(activeGuidedSession.taskType)
-            : currentSessionForRun?.interviewState?.planSnapshot
+            : activeGuidedSessionForRun
+            ? taskAgentId(activeGuidedSessionForRun.taskType)
+            : !shouldBypassConversationLocks && currentSessionForRun?.interviewState?.planSnapshot
             ? "interview"
             : undefined;
         let routeDecision = routeAgentTask({
@@ -1101,7 +1141,7 @@ function AgentPageInner() {
           content,
           imageIntake,
           preferredDocumentType,
-          activeTask: activeGuidedSession,
+          activeTask: activeGuidedSessionForRun,
         });
         const routeForcedAgentId = forcedAgentId || (routeDecision.taskType ? taskAgentId(routeDecision.taskType) : undefined);
 
@@ -1115,7 +1155,7 @@ function AgentPageInner() {
           forcedAgentId: routeForcedAgentId,
         });
 
-        const interviewState = currentSessionForRun?.interviewState;
+        const interviewState = shouldBypassConversationLocks ? undefined : currentSessionForRun?.interviewState;
         const interviewContext = interviewState?.planSnapshot
           ? `\n\n## Active Interview Session
 This chat is running a mock interview. Treat the following snapshot as the source of truth and do not silently switch materials.
@@ -1154,12 +1194,12 @@ Rules:
             content,
             imageIntake,
             preferredDocumentType,
-            activeTask: activeGuidedSession,
+            activeTask: activeGuidedSessionForRun,
           });
         }
         const guidedDirective = buildGuidedSessionRuntimeDirective({
-          activeTask: activeGuidedSession,
-          requiresSwitchConfirmation: routeDecision.requiresClarification && Boolean(activeGuidedSession),
+          activeTask: activeGuidedSessionForRun,
+          requiresSwitchConfirmation: routeDecision.requiresClarification && Boolean(activeGuidedSessionForRun),
           clarificationQuestion: routeDecision.clarificationQuestion,
         });
         const activeSystemPrompt = `${systemPrompt}${interviewContext}${rebindContext}${guidedDirective}`;
@@ -1194,10 +1234,10 @@ Rules:
                 clarificationQuestion: routeDecision.clarificationQuestion,
                 blockedReason: routeDecision.blockedReason,
                 auditSummary: routeDecision.auditSummary,
-                activeTaskId: activeGuidedSession?.taskId,
-                activeTaskType: activeGuidedSession?.taskType,
-                activeTaskPhase: activeGuidedSession?.phase,
-                routeLocked: Boolean(activeGuidedSession),
+                activeTaskId: activeGuidedSessionForRun?.taskId,
+                activeTaskType: activeGuidedSessionForRun?.taskType,
+                activeTaskPhase: activeGuidedSessionForRun?.phase,
+                routeLocked: Boolean(activeGuidedSessionForRun),
               },
               ...baseSnapshot,
             });
@@ -1217,26 +1257,26 @@ Rules:
                 ...activeNoticeFromRun(createdRun),
                 status: "running",
                 phase: "understanding",
-                guidedTaskId: activeGuidedSession?.taskId,
-                guidedTaskPhase: activeGuidedSession?.phase,
+                guidedTaskId: activeGuidedSessionForRun?.taskId,
+                guidedTaskPhase: activeGuidedSessionForRun?.phase,
               });
-              if (activeGuidedSession) {
+              if (activeGuidedSessionForRun) {
                 await appendAgentRunStepClient(createdRun.id, {
                   phase: "guided-task-lock",
                   status: "succeeded",
                   inputSummary: summarizeLedgerParams({
                     userText: content,
-                    activeTask: activeGuidedSession.taskType,
-                    agentId: activeGuidedSession.agentId,
+                    activeTask: activeGuidedSessionForRun.taskType,
+                    agentId: activeGuidedSessionForRun.agentId,
                   }),
                   outputSummary: routeDecision.requiresClarification
                     ? `需要确认是否切换到 ${routeDecision.clarificationQuestion || "新任务"}`
-                    : `继续 ${taskLabelZh(activeGuidedSession.taskType)}`,
+                    : `继续 ${taskLabelZh(activeGuidedSessionForRun.taskType)}`,
                   verifier: {
-                    taskId: activeGuidedSession.taskId,
-                    taskType: activeGuidedSession.taskType,
-                    phase: activeGuidedSession.phase,
-                    expectedInput: activeGuidedSession.expectedInput,
+                    taskId: activeGuidedSessionForRun.taskId,
+                    taskType: activeGuidedSessionForRun.taskType,
+                    phase: activeGuidedSessionForRun.phase,
+                    expectedInput: activeGuidedSessionForRun.expectedInput,
                     routeLocked: true,
                     routeAudit: routeDecision.auditSummary,
                     requiresClarification: routeDecision.requiresClarification,
@@ -1295,8 +1335,8 @@ Rules:
                   phase: input.phase,
                   toolName: input.toolName || prev.toolName,
                   verifierSummary: input.verifier ? truncateLedgerText(input.verifier, 140) : prev.verifierSummary,
-                  guidedTaskId: activeGuidedSession?.taskId || prev.guidedTaskId,
-                  guidedTaskPhase: activeGuidedSession?.phase || prev.guidedTaskPhase,
+                  guidedTaskId: activeGuidedSessionForRun?.taskId || prev.guidedTaskId,
+                  guidedTaskPhase: activeGuidedSessionForRun?.phase || prev.guidedTaskPhase,
                   status: input.phase === "verifying" ? "verifying" : input.phase === "repairing" ? "repairing" : prev.status,
                 }
               : prev,
@@ -1802,7 +1842,7 @@ Rules:
                 );
               } else if (shouldKeepImageClarification && imageClarificationTaskType && isGuidedTaskType(imageClarificationTaskType)) {
                 nextGuidedSession = startOrContinueGuidedSession({
-                  existing: activeGuidedSession || nextGuidedSession,
+                  existing: activeGuidedSessionForRun || nextGuidedSession,
                   taskType: imageClarificationTaskType,
                   agentId: taskAgentId(imageClarificationTaskType),
                   allowedTools: routeDecision.allowedTools.slice(0, 20),
@@ -1818,7 +1858,7 @@ Rules:
                 });
               } else if (shouldAwaitCareerPositioningConfirmation && careerPositioningArtifact) {
                 nextGuidedSession = startOrContinueGuidedSession({
-                  existing: activeGuidedSession || nextGuidedSession,
+                  existing: activeGuidedSessionForRun || nextGuidedSession,
                   taskType: "career_positioning_guidance",
                   agentId: "profile",
                   allowedTools: routeDecision.allowedTools.slice(0, 20),
@@ -1840,11 +1880,11 @@ Rules:
                       ? "one_question_loop"
                       : "role_category_confirmation",
               summary: taskLabelZh(taskType),
-              source: activeGuidedSession?.source || "agent_state",
-              sourceText: activeGuidedSession?.sourceText,
+              source: activeGuidedSessionForRun?.source || "agent_state",
+              sourceText: activeGuidedSessionForRun?.sourceText,
             });
-              } else if (activeGuidedSession && !routeDecision.requiresClarification) {
-                nextGuidedSession = activeGuidedSession;
+              } else if (activeGuidedSessionForRun && !routeDecision.requiresClarification) {
+                nextGuidedSession = activeGuidedSessionForRun;
               }
               await updateSession(currentSessionId, {
                 messages: fullMessages,
@@ -2002,7 +2042,28 @@ Rules:
     if (handoffKeyRef.current === handoffKey) return;
     handoffKeyRef.current = handoffKey;
     clearConsumedHandoffParams();
-    sendMessage(`请结合我的简历评估 JD 库里的这份职位。先调用 get_recent_jd_context 读取 jdId=${jdId}，不要让我重新粘贴 JD。`).catch(() => {});
+    const startEvaluation = async () => {
+      let prompt = "";
+      try {
+        const res = await fetch(`/api/data/jds?id=${encodeURIComponent(jdId)}`, { cache: "no-store" });
+        const json = await res.json().catch(() => ({}));
+        if (res.ok && json.success && json.data) {
+          prompt = buildSavedJDEvaluationPrompt(jdId, json.data as SavedJDForEvaluation);
+        }
+      } catch {
+        // Fall back to the JD context tool below.
+      }
+      if (!prompt) {
+        prompt = [
+          "请结合我的简历评估 JD 库里的这份职位。",
+          `JD ID：${jdId}`,
+          "你现在就是 JD 评估 Agent。请先读取我的简历或求职画像，再用 get_recent_jd_context 读取这个 jdId，最后调用 evaluate_jd_full。",
+          "不要让我重新粘贴 JD；如果读取失败，请说明读取失败的具体原因。",
+        ].join("\n");
+      }
+      await sendMessage(prompt, undefined, { hideUserMessage: true, forcedAgentId: "evaluate" });
+    };
+    startEvaluation().catch(() => {});
   }, [mounted, streaming, currentSessionId, searchParams, sendMessage, clearConsumedHandoffParams]);
 
   useEffect(() => {

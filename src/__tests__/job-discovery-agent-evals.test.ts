@@ -299,4 +299,17 @@ describe("job discovery agent evals - regression", () => {
     expect(proposal).toContain("持续岗位发现");
     expect(tasks).toContain("Continuous job discovery remains out of MVP implementation");
   });
+
+  it("R9 JD card evaluation handoff loads saved JD and forces the evaluate agent", () => {
+    const page = source("src/app/agent/page.tsx");
+
+    expect(page).toContain("buildSavedJDEvaluationPrompt");
+    expect(page).toContain("/api/data/jds?id=");
+    expect(page).toContain("forcedAgentId?: string");
+    expect(page).toContain('forcedAgentId: "evaluate"');
+    expect(page).toContain("shouldBypassConversationLocks");
+    expect(page).toContain("activeGuidedSessionForRun = shouldBypassConversationLocks ? null : activeGuidedSession");
+    expect(page).toContain("hideUserMessage: true");
+    expect(page).not.toContain("先调用 get_recent_jd_context 读取 jdId=");
+  });
 });
