@@ -329,6 +329,15 @@ export function inferCompletedCriteriaFromToolResult(
     if (readBackVerified && hash.trim().length > 0) completed.add("file hash verified");
   }
 
+  if (contract.taskType === "job_search" && signals.toolName === "scan_portals") {
+    const type = typeof uiPayload.type === "string" ? uiPayload.type : "";
+    if (type === "job_discovery_confirmation" || type === "job_discovery_run" || type === "job_discovery_batch" || type === "job_discovery_detail") {
+      completed.add("job discovery criteria confirmed");
+      completed.add("scan creation gated by user confirmation");
+      completed.add("scan read-back or opportunity pool response returned");
+    }
+  }
+
   return contract.successCriteria.filter((criterion) => completed.has(criterion));
 }
 

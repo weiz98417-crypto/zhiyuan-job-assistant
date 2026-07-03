@@ -5,6 +5,7 @@ import path from "node:path";
 import { makeDedupKey } from "../../lib/scan/orchestrator.mjs";
 import { classifyIntentHardRule } from "@/lib/agent/classify-intent-llm";
 import { routeAgentTask } from "@/lib/agent/task-routing";
+import { createAgentTaskContract, inferCompletedCriteriaFromToolResult } from "@/lib/agent/task-contract";
 import { scanPortals } from "@/lib/agent/tools/action/scan-portals";
 import { getWeakDuplicateHintCounts, jobFingerprint, mergeJobDiscoveryItems } from "@/lib/job-discovery";
 
@@ -206,6 +207,35 @@ describe("job discovery agent evals - regression", () => {
     expect(decision.allowedTools).toContain("scan_portals");
     expect(page.indexOf("let routeDecision = routeAgentTask")).toBeLessThan(page.indexOf("await orchestrate"));
     expect(page).toContain("const routeForcedAgentId = forcedAgentId || (routeDecision.taskType ? taskAgentId(routeDecision.taskType) : undefined)");
+  });
+
+  it("R0b job search forces scan_portals instead of allowing free-form chat", () => {
+    const runner = source("src/lib/agent/loop/client-runner.ts");
+
+    expect(runner).toContain('runtimeContext?.taskContract?.taskType === "job_search"');
+    expect(runner).toContain('name: "scan_portals"');
+    expect(runner).toContain("buildForcedJobSearchParams(latestUserText(ctx))");
+    expect(runner).toContain('tc.name === "scan_portals" && toolResult.success');
+    expect(runner).toContain("已生成岗位发现确认卡");
+  });
+
+  it("R0c job discovery cards satisfy the job_search contract gate", () => {
+    const contract = createAgentTaskContract({
+      taskType: "job_search",
+      target: "找一下杭州的AI产品经理岗位",
+    });
+
+    const completed = inferCompletedCriteriaFromToolResult(contract, {
+      toolName: "scan_portals",
+      toolSuccess: true,
+      uiPayload: { type: "job_discovery_confirmation" },
+    });
+
+    expect(completed).toEqual([
+      "job discovery criteria confirmed",
+      "scan creation gated by user confirmation",
+      "scan read-back or opportunity pool response returned",
+    ]);
   });
 
   it("R1 URL variants do not duplicate in workbench or Chat", () => {

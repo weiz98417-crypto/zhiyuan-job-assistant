@@ -176,6 +176,35 @@ function isNonSemanticUserInput(text: string): boolean {
   return trimmed.length > 0 && trimmed.length <= 8 && /^[\p{P}\p{S}\s]+$/u.test(trimmed);
 }
 
+function buildForcedJobSearchParams(text: string): Record<string, unknown> {
+  const city = [
+    "北京", "上海", "深圳", "广州", "杭州", "成都", "南京", "苏州", "武汉",
+    "西安", "重庆", "厦门", "长沙", "天津", "远程",
+  ].find((item) => text.includes(item));
+  const maxMatch = text.match(/(?:数量上限|最多|找|来|给我)?\s*(\d{1,3})\s*(?:个|条|份|家|个岗位|条岗位)?/);
+  const keywordMatch = text.match(/(?:岗位关键词|职位关键词)\s*[:：]\s*([^，,；;。]+)/);
+  const titleKeywords: string[] = [];
+  if (keywordMatch?.[1]?.trim()) {
+    titleKeywords.push(keywordMatch[1].trim());
+  } else if (/(AI|人工智能).{0,10}产品经理|产品经理.{0,10}(AI|人工智能)/i.test(text)) {
+    titleKeywords.push("AI 产品经理");
+  } else if (/大模型.{0,10}产品|产品.{0,10}大模型/i.test(text)) {
+    titleKeywords.push("大模型产品经理");
+  } else if (/产品经理/.test(text)) {
+    titleKeywords.push("产品经理");
+  } else if (/运营/.test(text)) {
+    titleKeywords.push(/AI|人工智能/i.test(text) ? "AI 运营" : "运营");
+  }
+
+  return {
+    query: text,
+    titleKeywords: titleKeywords.length ? titleKeywords : [text],
+    location: city || "",
+    maxResults: maxMatch ? Number(maxMatch[1]) : 50,
+    confirmed: /(确认|开始|启动|执行|直接).{0,16}(岗位发现|职位搜索|扫描|扫|找)|开始岗位发现/i.test(text),
+  };
+}
+
 function latestUserTurn(messages: LoopMessage[]): { text: string; images: string[]; index: number } {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
@@ -628,6 +657,20 @@ export async function* agentLoopClient(
           }),
         };
       }
+    }
+
+    if (
+      firstIteration &&
+      !forcedToolCall &&
+      runtimeContext?.taskContract?.taskType === "job_search" &&
+      !runtimeContext.taskContract.routing?.requiresClarification &&
+      isToolAllowedInMode("scan_portals", toolWhitelist)
+    ) {
+      forcedToolCall = {
+        id: `forced-scan-portals-${Date.now()}`,
+        name: "scan_portals",
+        arguments: JSON.stringify(buildForcedJobSearchParams(latestUserText(ctx))),
+      };
     }
 
     if (firstIteration && !forcedImageToolConsumed && !forcedToolCall) {
@@ -1204,6 +1247,21 @@ ${followupInstruction}`,
       }
 
       // ── Self-healing ──
+      if (tc.name === "scan_portals" && toolResult.success) {
+        const uiType = toolResult.uiPayload?.type;
+        const responseText = uiType === "job_discovery_confirmation"
+          ? "已生成岗位发现确认卡，请确认条件后开始扫描。"
+          : uiType === "job_discovery_run"
+            ? "岗位发现任务已开始，进度卡会展示当前扫描状态。"
+            : uiType === "job_discovery_batch" || uiType === "job_discovery_detail"
+              ? "已返回一批岗位机会，详情可在卡片中打开。"
+              : toolResult.llmSummary || formatted || "岗位发现已更新。";
+        yield { type: "phase", phase: "responding" };
+        yield { type: "text", content: responseText };
+        yield { type: "done" };
+        return;
+      }
+
       if (!toolResult.success) {
         yield { type: "tool_error", name: tc.name, error: toolResult.error || "未知错误", recoverable: toolResult.recoverable !== false };
       }
