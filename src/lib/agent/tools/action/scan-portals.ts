@@ -104,6 +104,7 @@ export const scanPortals: ToolDefinition<ScanPortalsParams> = {
           scanId,
           conflict: createResponse.status === 409,
           readBack,
+          readBackVerified: true,
         },
         errorCategory: "ok",
         llmSummary: createResponse.status === 409
@@ -119,13 +120,14 @@ export const scanPortals: ToolDefinition<ScanPortalsParams> = {
           jobsNew: readBack.jobsNew,
           criteria,
           recoveredExistingScan: createResponse.status === 409,
+          readBackVerified: true,
           readBackEvidence: {
             scanId: readBack.scanId,
             status: readBack.status,
             createdAt: readBack.createdAt,
           },
         },
-        rawData: { scanId, criteria, readBack },
+        rawData: { scanId, criteria, readBack, readBackVerified: true },
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : "岗位发现扫描创建失败";

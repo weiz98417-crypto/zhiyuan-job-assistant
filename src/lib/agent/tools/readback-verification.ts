@@ -24,6 +24,22 @@ function hasBooleanReadBackFlag(value: unknown): boolean {
   );
 }
 
+function scanPortalsResultDoesNotMutate(result: Pick<ToolResult, "data" | "uiPayload" | "rawData">): boolean {
+  const uiType = isRecord(result.uiPayload) && typeof result.uiPayload.type === "string"
+    ? result.uiPayload.type
+    : "";
+  const data = isRecord(result.data) ? result.data : {};
+  const rawData = isRecord(result.rawData) ? result.rawData : {};
+  return (
+    uiType === "job_discovery_confirmation" ||
+    uiType === "job_discovery_batch" ||
+    uiType === "job_discovery_detail" ||
+    data.needsConfirmation === true ||
+    rawData.createdScan === false ||
+    data.createdScan === false
+  );
+}
+
 export function requiresReadBackVerification(toolName: string): boolean {
   const risk = getActionToolRisk(toolName);
   const governance = getToolGovernance(toolName);
@@ -45,6 +61,14 @@ export function hasReadBackVerificationEvidence(result: Pick<ToolResult, "verifi
 export function getReadBackRequirementStatus(toolName: string, result: ToolResult): ReadBackRequirementStatus {
   const required = requiresReadBackVerification(toolName);
   if (!required) return { required: false, satisfied: false, deferred: false };
+  if (toolName === "scan_portals" && scanPortalsResultDoesNotMutate(result)) {
+    return {
+      required: false,
+      satisfied: true,
+      deferred: false,
+      reason: "scan_portals returned a non-mutating confirmation or opportunity-pool response.",
+    };
+  }
   if (result._streaming) {
     return {
       required: true,
