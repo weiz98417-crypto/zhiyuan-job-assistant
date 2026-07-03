@@ -1086,6 +1086,24 @@ function AgentPageInner() {
         }
 
         const routedContent = content;
+        const forcedAgentId =
+          pendingReferenceResumeSaveForRun
+            ? "resume"
+            : confirmedGuidedSwitch && requestedTaskForSwitch
+            ? taskAgentId(requestedTaskForSwitch)
+            : activeGuidedSession
+            ? taskAgentId(activeGuidedSession.taskType)
+            : currentSessionForRun?.interviewState?.planSnapshot
+            ? "interview"
+            : undefined;
+        let routeDecision = routeAgentTask({
+          agentId: forcedAgentId || "general",
+          content,
+          imageIntake,
+          preferredDocumentType,
+          activeTask: activeGuidedSession,
+        });
+        const routeForcedAgentId = forcedAgentId || (routeDecision.taskType ? taskAgentId(routeDecision.taskType) : undefined);
 
         const { agent, systemPrompt, toolWhitelist, tools } = await orchestrate(routedContent, {
           sessionId: currentSessionId,
@@ -1094,15 +1112,7 @@ function AgentPageInner() {
           agentState,
           imageIntake,
           preferredDocumentType,
-          forcedAgentId: pendingReferenceResumeSaveForRun
-            ? "resume"
-            : confirmedGuidedSwitch && requestedTaskForSwitch
-            ? taskAgentId(requestedTaskForSwitch)
-            : activeGuidedSession
-            ? taskAgentId(activeGuidedSession.taskType)
-            : currentSessionForRun?.interviewState?.planSnapshot
-            ? "interview"
-            : undefined,
+          forcedAgentId: routeForcedAgentId,
         });
 
         const interviewState = currentSessionForRun?.interviewState;
@@ -1138,13 +1148,15 @@ Rules:
         setActiveAgent(agent);
 
         let activeTaskContract: AgentTaskContract | null = null;
-        const routeDecision = routeAgentTask({
-          agentId: agent.id,
-          content,
-          imageIntake,
-          preferredDocumentType,
-          activeTask: activeGuidedSession,
-        });
+        if (!routeDecision.taskType) {
+          routeDecision = routeAgentTask({
+            agentId: agent.id,
+            content,
+            imageIntake,
+            preferredDocumentType,
+            activeTask: activeGuidedSession,
+          });
+        }
         const guidedDirective = buildGuidedSessionRuntimeDirective({
           activeTask: activeGuidedSession,
           requiresSwitchConfirmation: routeDecision.requiresClarification && Boolean(activeGuidedSession),

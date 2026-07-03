@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { makeDedupKey } from "../../lib/scan/orchestrator.mjs";
+import { classifyIntentHardRule } from "@/lib/agent/classify-intent-llm";
 import { routeAgentTask } from "@/lib/agent/task-routing";
 import { scanPortals } from "@/lib/agent/tools/action/scan-portals";
 import { getWeakDuplicateHintCounts, jobFingerprint, mergeJobDiscoveryItems } from "@/lib/job-discovery";
@@ -194,6 +195,19 @@ describe("job discovery agent evals - boundary", () => {
 });
 
 describe("job discovery agent evals - regression", () => {
+  it("R0 search requests are hard-routed away from JD evaluation", () => {
+    const message = "找一下杭州的AI产品经理岗位";
+    const intent = classifyIntentHardRule(message);
+    const decision = routeAgentTask({ agentId: "evaluate", content: message });
+    const page = source("src/app/agent/page.tsx");
+
+    expect(intent?.agentId).toBe("general");
+    expect(decision.taskType).toBe("job_search");
+    expect(decision.allowedTools).toContain("scan_portals");
+    expect(page.indexOf("let routeDecision = routeAgentTask")).toBeLessThan(page.indexOf("await orchestrate"));
+    expect(page).toContain("const routeForcedAgentId = forcedAgentId || (routeDecision.taskType ? taskAgentId(routeDecision.taskType) : undefined)");
+  });
+
   it("R1 URL variants do not duplicate in workbench or Chat", () => {
     const left = "https://jobs.example.com/job/123?utm_source=chat#detail";
     const right = "https://jobs.example.com/job/123/";

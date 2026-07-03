@@ -21,6 +21,29 @@ export interface IntentResult {
   modelTier?: "default" | "pro";
 }
 
+export function classifyIntentHardRule(content: string): IntentResult | null {
+  const text = content.trim();
+  if (!text) return null;
+
+  const isEvaluation =
+    /(评估|分析|看看|看一下|打分|匹配).{0,16}(JD|jd|职位|岗位|这个|这份|链接)/i.test(text) ||
+    /\bJD\b.{0,16}(评估|分析|打分|匹配)/i.test(text);
+  const isJobDiscovery =
+    /(岗位发现|职位搜索|找岗位|找职位|搜岗位|搜职位|搜索岗位|搜索职位|推荐岗位|推荐职位|扫一批\s*JD|扫描\s*JD)/i.test(text) ||
+    /(找|搜|搜索|推荐|发现|扫描|扫).{0,20}(岗位|职位|工作|JD|jd|招聘|机会)/i.test(text) ||
+    /(岗位|职位|工作|JD|jd|招聘|机会).{0,20}(找|搜|搜索|推荐|发现|扫描|扫)/i.test(text);
+
+  if (isJobDiscovery && !isEvaluation) {
+    return {
+      agentId: "general",
+      reason: "用户在请求职位搜索/岗位发现，应进入通用 Agent 并使用岗位发现工具，而不是 JD 评估。",
+      modelTier: detectModelTier(content),
+    };
+  }
+
+  return null;
+}
+
 /** 基于用户措辞判断是否需要 Pro */
 function detectModelTier(content: string): "default" | "pro" {
   if (/深度|精修|仔细|详细|认真|最好|高质量|专业|精品/.test(content)) return "pro";
@@ -126,6 +149,9 @@ export async function classifyIntentLLM(
   agents: AgentDefinition[],
   historyContext?: string,
 ): Promise<IntentResult | null> {
+  const hardRule = classifyIntentHardRule(content);
+  if (hardRule) return hardRule;
+
   const prompt = historyContext
     ? buildClassifierPromptWithHistory(agents, content, historyContext)
     : buildClassifierPrompt(agents, content);

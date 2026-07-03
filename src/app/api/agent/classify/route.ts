@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
-import { classifyIntentLLM, isValidAgent, buildClassifierPrompt, detectModelTier } from "@/lib/agent/classify-intent-llm";
+import {
+  classifyIntentHardRule,
+  classifyIntentLLM,
+  detectModelTier,
+  isValidAgent,
+} from "@/lib/agent/classify-intent-llm";
 import { classifyIntent, getAllAgents } from "@/lib/agent/registry";
 
 /** Build context summary from recent messages */
@@ -28,9 +33,21 @@ export async function POST(request: Request) {
     }
 
     const lastMsg = messages[messages.length - 1]?.content || "";
+    const modelTier = detectModelTier(lastMsg);
+    const hardRule = classifyIntentHardRule(lastMsg);
+    if (hardRule && isValidAgent(hardRule.agentId, getAllAgents())) {
+      return NextResponse.json({
+        success: true,
+        data: {
+          agentId: hardRule.agentId,
+          reason: hardRule.reason,
+          modelTier: hardRule.modelTier || modelTier,
+        },
+      });
+    }
+
     const contextSummary = buildContextSummary(messages);
     const agents = getAllAgents().filter((a) => a.id !== "orchestrator" && a.id !== "general");
-    const modelTier = detectModelTier(lastMsg);
 
     // Try LLM classification with history context
     try {
