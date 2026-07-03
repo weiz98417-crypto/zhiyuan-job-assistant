@@ -2,11 +2,12 @@
 
 import { useRef, useEffect, useState, useCallback } from "react";
 import { motion } from "framer-motion";
-import { Send, Loader2, Check, CheckCircle, X, ChevronDown, ChevronUp, Brain, RefreshCw, Plus, FileText, BookOpen, Trash2, Briefcase, User, Target, Square, Maximize2 } from "lucide-react";
+import { Send, Loader2, Check, CheckCircle, X, ChevronDown, ChevronUp, Brain, RefreshCw, Plus, FileText, BookOpen, Trash2, Briefcase, User, Target, Square, Maximize2, ExternalLink, MapPin } from "lucide-react";
 import { WarmButton, ScoreBadge } from "@/components/design";
 import MarkdownRenderer from "@/components/MarkdownRenderer";
 import { getToolDisplay } from "@/lib/agent/tool-display-names";
 import { getAgentById } from "@/lib/agent/registry";
+import { fetchDiscoveryJobDetail, getAgentEvaluationUrl, saveDiscoveryJobJD } from "@/lib/job-discovery";
 import type { AgentMessage, CoachMode, InterviewQuestion, InterviewSessionState } from "@/types";
 import { createJD } from "@/lib/jd-storage";
 
@@ -1119,6 +1120,278 @@ function ProfileViewCard({ data }: { data: ProfileViewData }) {
   );
 }
 
+function numberValue(value: unknown, fallback = 0): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function payloadRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function JobDiscoveryConfirmationCard({
+  payload,
+  onSend,
+}: {
+  payload: Record<string, unknown>;
+  onSend: (content: string) => Promise<void>;
+}) {
+  const criteria = payloadRecord(payload.criteria);
+  const keywords = Array.isArray(criteria.titlePositive) ? criteria.titlePositive.map(textValue).filter(Boolean) : [];
+  const excludes = Array.isArray(criteria.titleNegative) ? criteria.titleNegative.map(textValue).filter(Boolean) : [];
+  const location = textValue(criteria.location) || "全国";
+  const maxResults = numberValue(criteria.maxResults, 50);
+  const profileDerived = Array.isArray(payload.profileDerived)
+    ? payload.profileDerived.filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
+    : [];
+
+  const start = () => {
+    const keywordText = keywords.length ? keywords.join("、") : textValue(criteria.query) || "岗位机会";
+    return onSend(`确认开始岗位发现：岗位关键词 ${keywordText}，地点 ${location}，数量上限 ${maxResults}`);
+  };
+
+  return (
+    <div className="max-w-[94%] min-w-0">
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+        className="overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-divider)] bg-[var(--color-surface)]">
+        <div className="flex items-center gap-2 border-b border-[var(--color-divider)] bg-[var(--color-bg)] px-3 py-2">
+          <Briefcase size={14} className="text-[var(--color-primary)]" />
+          <span className="text-xs font-medium text-[var(--color-text)]">岗位发现确认</span>
+          <span className="ml-auto text-xs text-amber-600">等待确认</span>
+        </div>
+        <div className="space-y-3 px-3 py-3 text-sm">
+          <div className="grid gap-2 sm:grid-cols-2">
+            <div className="rounded-[var(--radius-sm)] border border-[var(--color-divider)] bg-[var(--color-bg)] px-3 py-2">
+              <div className="text-[11px] text-[var(--color-muted)]">岗位关键词</div>
+              <div className="mt-1 text-[var(--color-text)]">{keywords.join("、") || "待补充"}</div>
+            </div>
+            <div className="rounded-[var(--radius-sm)] border border-[var(--color-divider)] bg-[var(--color-bg)] px-3 py-2">
+              <div className="text-[11px] text-[var(--color-muted)]">地点 / 上限</div>
+              <div className="mt-1 text-[var(--color-text)]">{location} / {maxResults}</div>
+            </div>
+          </div>
+          {excludes.length > 0 && <div className="text-xs text-[var(--color-muted)]">排除：{excludes.join("、")}</div>}
+          {profileDerived.length > 0 && (
+            <div className="rounded-[var(--radius-sm)] border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              这些条件来自你的求职画像：{profileDerived.map((item) => `${textValue(item.label || item.field)}${item.value ? `=${textValue(item.value)}` : ""}`).join("、")}
+            </div>
+          )}
+          <button type="button" onClick={start}
+            className="inline-flex items-center gap-1.5 rounded-[var(--radius-sm)] bg-[var(--color-primary)] px-3 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90">
+            <Check size={13} />
+            开始岗位发现
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+function JobDiscoveryRunCard({ payload }: { payload: Record<string, unknown> }) {
+  const scanId = textValue(payload.scanId);
+  const status = textValue(payload.status) || "pending";
+  const companiesDone = numberValue(payload.companiesDone);
+  const companiesTotal = numberValue(payload.companiesTotal);
+  const jobsFound = numberValue(payload.jobsFound);
+  const jobsNew = numberValue(payload.jobsNew);
+  const progress = companiesTotal > 0 ? Math.min(100, Math.round((companiesDone / companiesTotal) * 100)) : 0;
+  const recovered = payload.recoveredExistingScan === true;
+
+  return (
+    <div className="max-w-[94%] min-w-0">
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+        className="overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-divider)] bg-[var(--color-surface)]">
+        <div className="flex items-center gap-2 border-b border-[var(--color-divider)] bg-[var(--color-bg)] px-3 py-2">
+          <RefreshCw size={14} className={status === "pending" || status === "running" ? "animate-spin text-[var(--color-primary)]" : "text-emerald-500"} />
+          <span className="text-xs font-medium text-[var(--color-text)]">岗位发现运行中</span>
+          <span className="ml-auto text-xs text-[var(--color-muted)]">{status}</span>
+        </div>
+        <div className="space-y-3 px-3 py-3 text-sm">
+          <div className="flex flex-wrap gap-3 text-xs text-[var(--color-muted)]">
+            <span>公司 {companiesDone}/{companiesTotal}</span>
+            <span>已发现 {jobsFound}</span>
+            <span>新增 {jobsNew}</span>
+            {recovered && <span className="text-amber-600">已恢复进行中的任务</span>}
+          </div>
+          <div className="h-1.5 overflow-hidden rounded-full bg-[var(--color-divider)]">
+            <div className="h-full rounded-full bg-[var(--color-primary)] transition-all" style={{ width: `${progress}%` }} />
+          </div>
+          <a href={scanId ? `/discover?scanId=${encodeURIComponent(scanId)}` : "/discover"}
+            className="inline-flex items-center gap-1 text-xs text-[var(--color-primary)] hover:underline">
+            去岗位发现工作台查看全部
+            <ExternalLink size={12} />
+          </a>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+function JobDiscoveryCard({ job }: { job: Record<string, unknown> }) {
+  const id = textValue(job.id);
+  const title = textValue(job.title) || "未知岗位";
+  const company = textValue(job.company) || "未知公司";
+  const location = textValue(job.location);
+  const url = textValue(job.url);
+  const snippet = textValue(job.jdSnippet || job.jd_snippet || job.snippet);
+  const [open, setOpen] = useState(false);
+  const [manualBody, setManualBody] = useState(snippet);
+  const [detailError, setDetailError] = useState("");
+  const [loadingDetail, setLoadingDetail] = useState(false);
+  const [savingAction, setSavingAction] = useState<"save" | "evaluate" | null>(null);
+
+  const openJD = async () => {
+    setOpen(true);
+    if (!id) {
+      setManualBody(snippet);
+      setDetailError(snippet ? "" : "暂未读取到 JD 正文，可先打开原链接查看。");
+      return;
+    }
+    setLoadingDetail(true);
+    setDetailError("");
+    try {
+      const result = await fetchDiscoveryJobDetail({ id, company, title, url });
+      if (result.detail) {
+        setManualBody(result.manualBody);
+      } else {
+        setManualBody("");
+        setDetailError(result.error);
+      }
+    } catch (error) {
+      setDetailError(error instanceof Error ? error.message : "JD 加载失败");
+    } finally {
+      setLoadingDetail(false);
+    }
+  };
+
+  const saveOrEvaluate = async (evaluate: boolean) => {
+    if (!id || manualBody.trim().length < 50 || savingAction) return;
+    setSavingAction(evaluate ? "evaluate" : "save");
+    try {
+      const result = await saveDiscoveryJobJD(id, {
+        jdBody: manualBody.trim(),
+        company,
+        role: title,
+        evaluate,
+      });
+      if (evaluate) window.location.assign(getAgentEvaluationUrl(result.jdId));
+    } catch (error) {
+      setDetailError(error instanceof Error ? error.message : "保存 JD 失败");
+    } finally {
+      setSavingAction(null);
+    }
+  };
+
+  const dismissJob = async () => {
+    if (!id) return;
+    await fetch(`/api/scan/jobs/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "dismissed" }),
+    }).catch(() => {});
+  };
+
+  return (
+    <div className="rounded-[var(--radius-sm)] border border-[var(--color-divider)] bg-[var(--color-bg)] px-3 py-2">
+      <div className="min-w-0">
+        <div className="text-[11px] font-medium uppercase text-[var(--color-muted)]">{company}</div>
+        <div className="mt-1 line-clamp-2 text-sm font-medium text-[var(--color-text)]">{title}</div>
+        {location && <div className="mt-1 inline-flex items-center gap-1 text-xs text-[var(--color-muted)]"><MapPin size={11} />{location}</div>}
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <button type="button" onClick={openJD}
+          className="rounded-[var(--radius-sm)] bg-[var(--color-primary-muted)] px-2 py-1 text-xs text-[var(--color-text)]">
+          打开 JD
+        </button>
+        {id && (
+          <>
+            <button type="button" onClick={() => saveOrEvaluate(false)} disabled={!open || manualBody.trim().length < 50 || savingAction !== null}
+              className="rounded-[var(--radius-sm)] border border-[var(--color-divider)] px-2 py-1 text-xs text-[var(--color-muted)] disabled:opacity-50">
+              保存
+            </button>
+            <button type="button" onClick={() => saveOrEvaluate(true)} disabled={!open || manualBody.trim().length < 50 || savingAction !== null}
+              className="rounded-[var(--radius-sm)] border border-[var(--color-divider)] px-2 py-1 text-xs text-[var(--color-muted)] disabled:opacity-50">
+              评估
+            </button>
+            <button type="button" onClick={dismissJob}
+              className="rounded-[var(--radius-sm)] border border-[var(--color-divider)] px-2 py-1 text-xs text-[var(--color-muted)]">
+              跳过
+            </button>
+          </>
+        )}
+        {url && <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-[var(--color-muted)] hover:text-[var(--color-text)]">原链接 <ExternalLink size={11} /></a>}
+      </div>
+      {open && (
+        <div className="mt-2 space-y-2">
+          {loadingDetail ? (
+            <div className="rounded-[var(--radius-sm)] border border-[var(--color-divider)] bg-[var(--color-surface)] px-3 py-2 text-xs text-[var(--color-muted)]">
+              正在读取 JD 正文...
+            </div>
+          ) : (
+            <textarea
+              value={manualBody}
+              onChange={(event) => setManualBody(event.target.value)}
+              className="max-h-48 min-h-24 w-full resize-y overflow-y-auto rounded-[var(--radius-sm)] border border-[var(--color-divider)] bg-[var(--color-surface)] px-3 py-2 text-xs text-[var(--color-text)]"
+              placeholder="自动读取失败时，可把 JD 正文粘贴到这里。"
+            />
+          )}
+          {detailError && (
+            <div className="rounded-[var(--radius-sm)] border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              {detailError}
+            </div>
+          )}
+          {id && (
+            <div className="text-[11px] text-[var(--color-muted)]">
+              点击“评估”会先保存到 JD 库，再进入 Agent 评估。
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function JobDiscoveryBatchCard({ payload }: { payload: Record<string, unknown> }) {
+  const jobs = Array.isArray(payload.jobs)
+    ? payload.jobs.filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
+    : [];
+  const visible = jobs.slice(0, 5);
+  const remaining = Math.max(0, jobs.length - visible.length);
+
+  return (
+    <div className="max-w-[94%] min-w-0">
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+        className="overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-divider)] bg-[var(--color-surface)]">
+        <div className="flex items-center gap-2 border-b border-[var(--color-divider)] bg-[var(--color-bg)] px-3 py-2">
+          <Briefcase size={14} className="text-[var(--color-primary)]" />
+          <span className="text-xs font-medium text-[var(--color-text)]">岗位发现结果</span>
+          <span className="ml-auto text-xs text-[var(--color-muted)]">显示 {visible.length}/5</span>
+        </div>
+        <div className="space-y-2 px-3 py-3">
+          {visible.map((job, index) => <JobDiscoveryCard key={`${textValue(job.id)}-${index}`} job={job} />)}
+          {remaining > 0 && (
+            <a href="/discover" className="inline-flex items-center gap-1 text-xs text-[var(--color-primary)] hover:underline">
+              还有 {remaining} 个结果，去岗位发现工作台查看全部
+              <ExternalLink size={12} />
+            </a>
+          )}
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+function JobDiscoveryErrorCard({ payload }: { payload: Record<string, unknown> }) {
+  const error = textValue(payload.error) || "岗位发现暂时不可用";
+  return (
+    <div className="max-w-[94%] min-w-0">
+      <div className="rounded-[var(--radius-md)] border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+        {error}
+      </div>
+    </div>
+  );
+}
+
 /* ── Message Bubble ── */
 
 function MessageBubble({
@@ -1225,6 +1498,19 @@ function MessageBubble({
       uiPayload?.type === "resume_edit_proposal_rolled_back"
     ) {
       return <ResumeEditProposalCard payload={uiPayload} success={toolSuccess} onSend={onSend} />;
+    }
+
+    if (uiPayload?.type === "job_discovery_confirmation") {
+      return <JobDiscoveryConfirmationCard payload={uiPayload} onSend={onSend} />;
+    }
+    if (uiPayload?.type === "job_discovery_run") {
+      return <JobDiscoveryRunCard payload={uiPayload} />;
+    }
+    if (uiPayload?.type === "job_discovery_batch" || uiPayload?.type === "job_discovery_detail") {
+      return <JobDiscoveryBatchCard payload={uiPayload} />;
+    }
+    if (uiPayload?.type === "job_discovery_error") {
+      return <JobDiscoveryErrorCard payload={uiPayload} />;
     }
 
     // Report blocks: uiPayload or legacy text

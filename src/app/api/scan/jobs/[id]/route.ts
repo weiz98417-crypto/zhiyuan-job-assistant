@@ -4,7 +4,7 @@ import { updateScanJobStatusForUser } from "@/lib/scan-data";
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
     const user = await getCurrentUser();
@@ -18,15 +18,12 @@ export async function PATCH(
     if (!newStatus || !validStatuses.includes(newStatus)) {
       return NextResponse.json(
         { error: `Invalid status. Must be: ${validStatuses.join(", ")}` },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
-    const result = await updateScanJobStatusForUser(parseInt(id), String(user.userId), newStatus);
-
-    if (!result.success) {
-      return NextResponse.json({ error: "Job not found" }, { status: 404 });
-    }
+    const result = await updateScanJobStatusForUser(Number(id), String(user.userId), newStatus);
+    if (!result.success) return NextResponse.json({ error: "Job not found" }, { status: 404 });
 
     return NextResponse.json({ success: true });
   } catch (error: unknown) {

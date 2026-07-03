@@ -43,7 +43,7 @@ const PHASE_GROUPS = [
     label: "准备 · Prepare",
     items: [
       { href: "/agent", label: "纸鸢Agent", icon: Bot },
-      { href: "/discover", label: "职位发现", icon: Search },
+      { href: "/discover", label: "岗位发现工作台", icon: Search },
       { href: "/evaluate", label: "JD 管理", icon: FileSearch },
       { href: "/profile", label: "求职画像", icon: User },
       { href: "/cv", label: "简历管理", icon: FileText },

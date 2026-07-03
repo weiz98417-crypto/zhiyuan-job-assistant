@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "crypto";
+import { randomUUID } from "crypto";
 import { getDatabaseDriver, withPostgresClient } from "./postgres";
 import { getDb } from "./server-db";
 import {
@@ -9,12 +9,21 @@ import {
   getScanHistory,
   getScanJobs,
   getScanStatus,
+  makeDedupKey,
   updateJobStatus,
 } from "../../lib/scan/orchestrator.mjs";
 
 type AnyRow = Record<string, unknown>;
 type ScanIssue = { company?: string; error?: string; level?: string };
 type ScanCompany = { name: string; careers_url?: string; ats_type?: string; [key: string]: unknown };
+type ScanJobFilters = {
+  status?: string;
+  page?: number;
+  limit?: number;
+  scanId?: string;
+  after?: string;
+  since?: string;
+};
 
 export async function createScanEntryForUser(
   userId: string,
@@ -50,20 +59,23 @@ export async function createScanEntryForUser(
   });
 }
 
-export async function getScanJobsForUser(userId: string, filters: { status?: string; page?: number; limit?: number }) {
+export async function getScanJobsForUser(userId: string, filters: ScanJobFilters) {
   if (getDatabaseDriver() !== "postgres") return getScanJobs(getDb(), userId, filters);
 
   const status = filters.status || "new";
-  const limit = filters.limit || 20;
-  const page = filters.page || 1;
-  const offset = (page - 1) * limit;
-  return withPostgresClient(async (client) => {
-    const [total, jobs] = await Promise.all([
-      client.query("SELECT COUNT(*) AS count FROM scan_jobs WHERE user_id = $1 AND status = $2", [userId, status]),
-      client.query("SELECT * FROM scan_jobs WHERE user_id = $1 AND status = $2 ORDER BY discovered_at DESC LIMIT $3 OFFSET $4", [userId, status, limit, offset]),
-    ]);
-    return { jobs: normalizeRows(jobs.rows), total: Number(total.rows[0]?.count || 0), page };
-  });
+  return queryPostgresScanJobs(userId, { ...filters, status });
+}
+
+export async function getScanJobsForRun(
+  userId: string,
+  scanId: string,
+  opts: Omit<ScanJobFilters, "scanId"> = {},
+) {
+  const filters = { ...opts, scanId };
+  if (getDatabaseDriver() !== "postgres") return querySqliteScanJobsForRun(userId, scanId, opts);
+
+  const result = await queryPostgresScanJobs(userId, filters);
+  return { ...result, scanId };
 }
 
 export async function getScanJobForUser(jobId: number, userId: string) {
@@ -127,7 +139,7 @@ export async function enqueueEvaluatedScanJobForUser(
     `).run(input.url, userId);
 
     if (updated.changes === 0) {
-      const dedupKey = createHash("sha256").update(input.url).digest("hex");
+      const dedupKey = makeDedupKey(input.url);
       db.prepare(`
         INSERT OR IGNORE INTO scan_queue (id, user_id, status, companies_total, companies_done, jobs_found, jobs_new, error_log)
         VALUES ('manual', ?, 'done', 0, 0, 0, 0, '[]')
@@ -148,7 +160,7 @@ export async function enqueueEvaluatedScanJobForUser(
     `, [input.url, userId]);
 
     if (!updated.rowCount) {
-      const dedupKey = createHash("sha256").update(input.url).digest("hex");
+      const dedupKey = makeDedupKey(input.url);
       const manualScanId = `manual:${userId}`;
       await client.query(`
         INSERT INTO scan_queue (id, user_id, status, companies_total, companies_done, jobs_found, jobs_new, error_log)
@@ -350,4 +362,66 @@ function normalizeRows(rows: AnyRow[]) {
 
 function normalizeDate(value: unknown) {
   return value instanceof Date ? value.toISOString() : value;
+}
+
+function normalizePagination(filters: ScanJobFilters) {
+  const limit = Math.min(Math.max(Number(filters.limit || 20), 1), 100);
+  const page = Math.max(Number(filters.page || 1), 1);
+  return { limit, page, offset: (page - 1) * limit };
+}
+
+function querySqliteScanJobsForRun(userId: string, scanId: string, filters: Omit<ScanJobFilters, "scanId"> = {}) {
+  const { limit, page, offset } = normalizePagination(filters);
+  const clauses = ["user_id = @userId", "scan_id = @scanId"];
+  const params: Record<string, unknown> = { userId, scanId, limit, offset };
+  if (filters.status) {
+    clauses.push("status = @status");
+    params.status = filters.status;
+  }
+  if (filters.after) {
+    clauses.push("discovered_at > @after");
+    params.after = filters.after;
+  } else if (filters.since) {
+    clauses.push("discovered_at >= @since");
+    params.since = filters.since;
+  }
+  const where = clauses.join(" AND ");
+  const total = getDb().prepare(`SELECT COUNT(*) AS count FROM scan_jobs WHERE ${where}`).get(params) as { count: number };
+  const jobs = getDb().prepare(`
+    SELECT * FROM scan_jobs WHERE ${where}
+    ORDER BY discovered_at DESC LIMIT @limit OFFSET @offset
+  `).all(params) as AnyRow[];
+  return { jobs, total: Number(total.count || 0), page, scanId };
+}
+
+async function queryPostgresScanJobs(userId: string, filters: ScanJobFilters) {
+  const { limit, page, offset } = normalizePagination(filters);
+  const clauses = ["user_id = $1"];
+  const values: unknown[] = [userId];
+
+  if (filters.scanId) {
+    values.push(filters.scanId);
+    clauses.push(`scan_id = $${values.length}`);
+  }
+  if (filters.status) {
+    values.push(filters.status);
+    clauses.push(`status = $${values.length}`);
+  }
+  if (filters.after) {
+    values.push(filters.after);
+    clauses.push(`discovered_at > $${values.length}`);
+  } else if (filters.since) {
+    values.push(filters.since);
+    clauses.push(`discovered_at >= $${values.length}`);
+  }
+
+  const where = clauses.join(" AND ");
+  return withPostgresClient(async (client) => {
+    const total = await client.query(`SELECT COUNT(*) AS count FROM scan_jobs WHERE ${where}`, values);
+    const jobs = await client.query(
+      `SELECT * FROM scan_jobs WHERE ${where} ORDER BY discovered_at DESC LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
+      [...values, limit, offset],
+    );
+    return { jobs: normalizeRows(jobs.rows), total: Number(total.rows[0]?.count || 0), page };
+  });
 }

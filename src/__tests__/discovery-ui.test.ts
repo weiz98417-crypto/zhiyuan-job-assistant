@@ -7,18 +7,45 @@ function source(file: string): string {
 }
 
 describe("Discovery UI", () => {
+  it("uses job discovery workbench product language", () => {
+    const page = source("src/app/discover/page.tsx");
+    const shell = source("src/components/shell/AppShell.tsx");
+    const toolDisplay = source("src/lib/agent/tool-display-names.ts");
+    const toolGovernance = source("src/lib/agent/tool-governance.ts");
+
+    expect(page).toContain("岗位发现工作台");
+    expect(page).toContain("开始岗位发现");
+    expect(shell).toContain("岗位发现工作台");
+    expect(toolDisplay).toContain("开始岗位发现");
+    expect(toolGovernance).toContain("开始岗位发现");
+    expect(page).not.toContain(">职位发现<");
+    expect(page).not.toContain(">开始扫描<");
+  });
+
   it("shows lightweight scan job state badges on discovery cards", () => {
     const page = source("src/app/discover/page.tsx");
+    const helper = source("src/lib/job-discovery.ts");
 
     expect(page).toContain("DISCOVERY_VISIBLE_STATUSES");
-    expect(page).toContain("DISCOVERY_JOB_STATUS_BADGES");
+    expect(helper).toContain("DISCOVERY_JOB_STATUS_BADGES");
     expect(page).toContain("jobStatusBadge(job.status)");
-    expect(page).toContain("新发现");
-    expect(page).toContain("已查看");
-    expect(page).toContain("已保存");
-    expect(page).toContain("已评估");
-    expect(page).toContain("已跳过");
+    expect(helper).toContain("新发现");
+    expect(helper).toContain("已查看");
+    expect(helper).toContain("已保存");
+    expect(helper).toContain("已评估");
+    expect(helper).toContain("已跳过");
     expect(page).toContain("status=${status}");
+  });
+
+  it("keeps dismissed jobs out of the default list but available through a filter", () => {
+    const page = source("src/app/discover/page.tsx");
+    const helper = source("src/lib/job-discovery.ts");
+
+    expect(helper).toContain('["new", "viewed", "saved", "evaluating", "evaluated"]');
+    expect(page).toContain("showDismissed ? [\"dismissed\"] : DISCOVERY_VISIBLE_STATUSES");
+    expect(page).toContain("setShowDismissed(true)");
+    expect(page).toContain("已跳过");
+    expect(page).toContain("undoDismiss(job.id)");
   });
 
   it("defaults discovery scanning toward Chinese AI/product roles and domestic companies", () => {

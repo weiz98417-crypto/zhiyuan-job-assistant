@@ -26,7 +26,7 @@ export const TOOL_DISPLAY: Record<string, ToolDisplay> = {
   evaluate_jd:          { label: "评估 JD",      emoji: "🔍" },
   evaluate_offer:       { label: "评估 Offer",   emoji: "💰" },
   generate_cv:          { label: "生成简历",     emoji: "📄" },
-  scan_portals:         { label: "扫描招聘网站", emoji: "🔎" },
+  scan_portals:         { label: "开始岗位发现", emoji: "🔎" },
   check_health:         { label: "健康检查",     emoji: "🩺" },
   fetch_jd_content:     { label: "获取 JD 内容", emoji: "📥" },
   export_file:          { label: "导出文件",     emoji: "📦" },
@@ -57,7 +57,7 @@ export const TOOL_DISPLAY: Record<string, ToolDisplay> = {
   get_weather:          { label: "天气查询",     emoji: "🌤️" },
   search_place:         { label: "地点搜索",     emoji: "📍" },
   get_directions:       { label: "路线规划",     emoji: "🗺️" },
-  search_jobs:          { label: "搜索职位",     emoji: "🔎" },
+  search_jobs:          { label: "岗位发现",     emoji: "🔎" },
 };
 
 const DEFAULT_DISPLAY: ToolDisplay = { label: "", emoji: "🔧" };

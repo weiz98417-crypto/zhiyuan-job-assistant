@@ -9,7 +9,8 @@ export type AgentTaskType =
   | "interview_coaching"
   | "profile_update"
   | "reference_resume_save"
-  | "file_export";
+  | "file_export"
+  | "job_search";
 
 export interface AgentTaskContract {
   taskType: AgentTaskType;
@@ -106,6 +107,11 @@ const DEFAULT_SUCCESS_CRITERIA: Record<AgentTaskType, string[]> = {
     "file size is non-zero",
     "file hash verified",
   ],
+  job_search: [
+    "job discovery criteria confirmed",
+    "scan creation gated by user confirmation",
+    "scan read-back or opportunity pool response returned",
+  ],
 };
 
 const DEFAULT_VALIDATORS: Record<AgentTaskType, string[]> = {
@@ -118,6 +124,7 @@ const DEFAULT_VALIDATORS: Record<AgentTaskType, string[]> = {
   profile_update: ["signal_quality", "source_evidence", "read_back_match"],
   reference_resume_save: ["source_resume_present", "role_category", "read_back_match"],
   file_export: ["file_exists", "file_size", "file_hash"],
+  job_search: ["confirmation_required", "scan_read_back", "opportunity_pool_response"],
 };
 
 export function createAgentTaskContract(input: {
@@ -133,7 +140,7 @@ export function createAgentTaskContract(input: {
   return {
     taskType: input.taskType,
     target: input.target,
-    requiresUserApproval: input.requiresUserApproval ?? input.taskType === "resume_edit",
+    requiresUserApproval: input.requiresUserApproval ?? (input.taskType === "resume_edit" || input.taskType === "job_search"),
     baseVersion: input.baseVersion,
     baseHash: input.baseHash,
     successCriteria: input.successCriteria || DEFAULT_SUCCESS_CRITERIA[input.taskType],

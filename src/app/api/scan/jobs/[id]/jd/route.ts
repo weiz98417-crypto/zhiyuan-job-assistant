@@ -186,7 +186,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const reusable = await repos.jds.findReusable({ source_url: row.source_url, body: row.body }, userId);
     const jdId = reusable?.id || await repos.jds.insert(row, userId);
     await attachJdToScanJobForUser(jobId, userId, Number(jdId), body.evaluate ? "evaluating" : "saved");
-    return NextResponse.json({ success: true, jdId, reused: Boolean(reusable), data: reusable ? toClientJD(reusable) : { ...toClientJD(row), id: jdId } });
+    return NextResponse.json({
+      success: true,
+      jdId,
+      reused: Boolean(reusable),
+      data: reusable ? toClientJD(reusable) : { ...toClientJD(row), id: jdId },
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : "unknown";
     return NextResponse.json({ success: false, error: message }, { status: 500 });

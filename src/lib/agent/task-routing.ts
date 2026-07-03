@@ -50,6 +50,38 @@ export function isResumeReadOnlyIntent(content: string): boolean {
   return /(我现在的|当前|现在|已有|我的).{0,12}(简历|履历|resume|cv).{0,16}(是什么|内容|写了什么|长什么样|有哪些|在哪|给我看|展示|读取|读一下|打开|查询)?|(读取|读一下|打开|展示|看一下|看看|查看|查询|给我看).{0,16}(我|当前|现在|已有|我的)?(简历|履历|resume|cv)|(简历|履历|resume|cv).{0,16}(是什么|内容|写了什么|长什么样|有哪些|在哪|查询)/i.test(text);
 }
 
+export function getJobDiscoveryIntent(content: string): {
+  intent: boolean;
+  requiresClarification: boolean;
+  clarificationQuestion?: string;
+  changeBatch: boolean;
+} {
+  const text = content.trim();
+  if (!text) return { intent: false, requiresClarification: false, changeBatch: false };
+  const changeBatch = /(换一批|再来一批|下一批|换几个|换一组)/i.test(text);
+  const hasDiscoveryAction = /(岗位发现|职位搜索|找岗位|找职位|找工作|搜岗位|搜职位|搜索岗位|搜索职位|推荐岗位|推荐职位|扫一批\s*JD|扫描\s*JD|扫岗位|扫职位)/i.test(text)
+    || /(找|搜|搜索|推荐|发现|扫描|扫).{0,16}(岗位|职位|工作|JD|jd|招聘|机会)/i.test(text)
+    || /(岗位|职位|工作|JD|jd|招聘|机会).{0,16}(找|搜|搜索|推荐|发现|扫描|扫)/i.test(text);
+  const isEvaluation = /(评估|分析|看看|看下|评价|打分|匹配).{0,16}(JD|jd|职位|岗位|招聘|这个)|\bJD\b.{0,16}(评估|分析|评价|打分|匹配)/i.test(text);
+  if (!changeBatch && (!hasDiscoveryAction || isEvaluation)) {
+    return { intent: false, requiresClarification: false, changeBatch: false };
+  }
+
+  const requiresClarification = !changeBatch && !hasJobDiscoveryCriteria(text);
+  return {
+    intent: true,
+    requiresClarification,
+    clarificationQuestion: requiresClarification
+      ? "你想发现什么方向的岗位？请告诉我岗位关键词、城市和数量上限，我会先给你确认卡。"
+      : undefined,
+    changeBatch,
+  };
+}
+
+function hasJobDiscoveryCriteria(text: string): boolean {
+  return /(AI|Agent|大模型|产品|运营|数据|增长|策略|商业|用户|平台|B端|C端|经理|实习|校招|社招|北京|上海|深圳|广州|杭州|成都|南京|苏州|武汉|远程|\d+\s*(个|条|份|家)|top\s*\d+)/i.test(text);
+}
+
 function isNonSemanticInput(content: string): boolean {
   const text = content.trim();
   return text.length > 0 && text.length <= 8 && /^[\p{P}\p{S}\s]+$/u.test(text);
@@ -177,6 +209,21 @@ export function routeAgentTask(input: {
     });
   }
 
+  const jobDiscoveryIntent = getJobDiscoveryIntent(content);
+  if (jobDiscoveryIntent.intent) {
+    return buildRouteDecision({
+      taskType: "job_search",
+      requiresClarification: jobDiscoveryIntent.requiresClarification,
+      clarificationQuestion: jobDiscoveryIntent.clarificationQuestion,
+      blockedReason: jobDiscoveryIntent.requiresClarification ? "job discovery criteria missing and no profile defaults available" : undefined,
+      auditSummary: jobDiscoveryIntent.changeBatch
+        ? "intent:job_search:next_batch"
+        : jobDiscoveryIntent.requiresClarification
+          ? "intent:job_search:needs_criteria"
+          : "intent:job_search",
+    });
+  }
+
   if (agentId === "evaluate" || documentType === "jd") return buildRouteDecision({ taskType: "jd_evaluation", auditSummary: "agent:evaluate" });
   if (agentId === "offer" || documentType === "offer") return buildRouteDecision({ taskType: "offer_evaluation", auditSummary: "agent:offer" });
   if (agentId === "interview") return buildRouteDecision({ taskType: "interview_coaching", auditSummary: "agent:interview" });
@@ -260,6 +307,7 @@ export function mapAgentTaskToMemoryTask(taskType: AgentTaskType | null): AgentM
     profile_update: "profile_growth",
     reference_resume_save: "reference_resume_save",
     file_export: "general_chat",
+    job_search: "general_chat",
   };
   return map[taskType];
 }

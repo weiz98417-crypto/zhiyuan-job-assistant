@@ -103,7 +103,7 @@ export async function PATCH(request: Request) {
     };
     const id = Number(body.id);
     if (!Number.isFinite(id) || id <= 0) {
-      return NextResponse.json({ success: false, error: "JD 缂栧彿鏃犳晥" }, { status: 400 });
+      return NextResponse.json({ success: false, error: "JD 编号无效" }, { status: 400 });
     }
     const user = await getCurrentUser();
     const updates = {
@@ -127,7 +127,7 @@ export async function PATCH(request: Request) {
       error: jdReadBackVerified ? undefined : "JD update read-back verification failed",
     }, { status: jdReadBackVerified ? 200 : 500 });
   } catch (err: unknown) {
-    return NextResponse.json({ success: false, error: `鏇存柊澶辫触: ${err instanceof Error ? err.message : "unknown"}` }, { status: 500 });
+    return NextResponse.json({ success: false, error: `更新失败: ${err instanceof Error ? err.message : "unknown"}` }, { status: 500 });
   }
 }
 

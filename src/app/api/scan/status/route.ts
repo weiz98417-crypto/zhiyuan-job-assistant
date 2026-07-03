@@ -16,14 +16,10 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: true, data: scan });
     }
 
-    if (!scanId) {
-      return NextResponse.json({ error: "Missing scanId or active=true param" }, { status: 400 });
-    }
+    if (!scanId) return NextResponse.json({ error: "Missing scanId or active=true param" }, { status: 400 });
 
     const status = await getScanStatusForUser(scanId, String(user.userId));
-    if (!status) {
-      return NextResponse.json({ error: "Scan not found" }, { status: 404 });
-    }
+    if (!status) return NextResponse.json({ error: "Scan not found" }, { status: 404 });
 
     return NextResponse.json({ success: true, data: status });
   } catch (error: unknown) {
@@ -41,14 +37,10 @@ export async function PATCH(request: NextRequest) {
     const body = await request.json();
     const scanId = body?.scanId;
     const action = body?.action;
-    if (action !== "cancel") {
-      return NextResponse.json({ error: "Invalid action" }, { status: 400 });
-    }
+    if (action !== "cancel") return NextResponse.json({ error: "Invalid action" }, { status: 400 });
 
     const result = await cancelScanForUser(scanId || null, String(user.userId));
-    if (!result.success) {
-      return NextResponse.json({ success: true, alreadyFinished: true });
-    }
+    if (!result.success) return NextResponse.json({ success: true, alreadyFinished: true });
 
     return NextResponse.json({ success: true });
   } catch (error: unknown) {

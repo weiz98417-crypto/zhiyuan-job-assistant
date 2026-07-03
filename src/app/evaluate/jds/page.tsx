@@ -40,7 +40,7 @@ const SOURCE_LABELS: Record<JDSourceType, string> = {
   ocr: "OCR 识别",
   url: "链接",
   agent: "Agent",
-  discovery: "职位发现",
+  discovery: "岗位发现",
 };
 
 function truncateBody(body: string, maxLen = 200): string {

@@ -36,6 +36,52 @@ describe("agent task routing", () => {
     })).toBe("reference_resume_save");
   });
 
+  it("routes clear job discovery requests to job_search with governed tools", () => {
+    const decision = routeAgentTask({
+      agentId: "general",
+      content: "帮我找上海 AI 产品经理岗位，先扫一批 JD",
+    });
+
+    expect(decision.taskType).toBe("job_search");
+    expect(decision.contractPolicy).toBe("verified_write");
+    expect(decision.requiresClarification).toBe(false);
+    expect(decision.allowedTools).toContain("scan_portals");
+    expect(decision.allowedTools).toContain("search_jobs");
+  });
+
+  it("asks one clarification for vague job discovery requests", () => {
+    const decision = routeAgentTask({
+      agentId: "general",
+      content: "帮我找岗位",
+    });
+
+    expect(decision.taskType).toBe("job_search");
+    expect(decision.requiresClarification).toBe(true);
+    expect(decision.clarificationQuestion).toContain("岗位关键词");
+    expect(decision.allowedTools).toContain("scan_portals");
+  });
+
+  it("does not confuse JD evaluation with job discovery", () => {
+    const decision = routeAgentTask({
+      agentId: "evaluate",
+      content: "帮我评估这个 JD",
+    });
+
+    expect(decision.taskType).toBe("jd_evaluation");
+    expect(decision.allowedTools).toContain("evaluate_jd_full");
+  });
+
+  it("routes change-batch requests to job_search without creating a vague new scan route", () => {
+    const decision = routeAgentTask({
+      agentId: "general",
+      content: "换一批",
+    });
+
+    expect(decision.taskType).toBe("job_search");
+    expect(decision.requiresClarification).toBe(false);
+    expect(decision.auditSummary).toBe("intent:job_search:next_batch");
+  });
+
   it("routes current-resume read questions to a read-only resume query contract", () => {
     const decision = routeAgentTask({
       agentId: "resume",

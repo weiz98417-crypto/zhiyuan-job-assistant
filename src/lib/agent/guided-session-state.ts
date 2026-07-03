@@ -70,6 +70,7 @@ const TASK_AGENT_ID: Record<AgentTaskType, string> = {
   profile_update: "profile",
   reference_resume_save: "resume",
   file_export: "general",
+  job_search: "general",
 };
 
 const TASK_LABEL_ZH: Record<AgentTaskType, string> = {
@@ -82,6 +83,7 @@ const TASK_LABEL_ZH: Record<AgentTaskType, string> = {
   profile_update: "画像更新",
   reference_resume_save: "优秀简历沉淀",
   file_export: "文件导出",
+  job_search: "岗位发现",
 };
 
 export function taskAgentId(taskType: AgentTaskType): string {
@@ -274,6 +276,11 @@ export function isConfirmedGuidedTaskSwitch(content: string): boolean {
 export function inferRequestedTaskFromText(content: string): AgentTaskType | null {
   const text = content.trim();
   if (!text) return null;
+  if (
+    (/(换一批|再来一批|下一批|岗位发现|职位搜索|找岗位|找职位|搜岗位|搜职位|搜索岗位|搜索职位|扫一批\s*JD|扫描\s*JD)/i.test(text)
+      || /(找|搜|搜索|推荐|发现|扫描|扫).{0,16}(岗位|职位|工作|JD|jd|招聘|机会)/i.test(text))
+    && !/(评估|分析|看看|看下|评价|打分|匹配).{0,16}(JD|jd|职位|岗位|招聘|这个)/i.test(text)
+  ) return "job_search";
   if (/(评估|分析|看看|看下).{0,16}(offer|录用|薪资|合同|待遇)|\boffer\b/i.test(text)) return "offer_evaluation";
   if (/(评估|分析|看看|看下).{0,16}(JD|jd|职位|岗位|招聘|job description)|\bjd\b/i.test(text)) return "jd_evaluation";
   if (/(模拟|练习|准备|继续).{0,10}(面试)|下一题|追问/.test(text)) return "interview_coaching";
@@ -356,6 +363,7 @@ function defaultGuidedPhase(taskType: AgentTaskType): string {
   if (taskType === "career_positioning_guidance") return "career_direction_discovery";
   if (taskType === "interview_coaching") return "one_question_loop";
   if (taskType === "reference_resume_save") return "role_category_confirmation";
+  if (taskType === "job_search") return "job_discovery_confirmation";
   return "active";
 }
 
@@ -363,6 +371,7 @@ function defaultExpectedInput(taskType: AgentTaskType): string {
   if (taskType === "career_positioning_guidance") return "回答当前自我定位问题，或明确取消/切换任务";
   if (taskType === "interview_coaching") return "回答当前面试题、要求示范回答，或进入下一题";
   if (taskType === "reference_resume_save") return "确认优秀简历要保存到哪个岗位类别";
+  if (taskType === "job_search") return "确认岗位发现条件，或补充岗位关键词、城市和数量上限";
   return "继续当前任务";
 }
 
@@ -370,5 +379,6 @@ function defaultExitConditions(taskType: AgentTaskType): string[] {
   if (taskType === "career_positioning_guidance") return ["用户确认定位卡并写入画像", "用户明确取消", "用户确认切换任务"];
   if (taskType === "interview_coaching") return ["用户要求结束面试", "面试复盘完成", "用户确认切换任务"];
   if (taskType === "reference_resume_save") return ["优秀简历保存并读回校验完成", "用户取消保存", "用户确认切换任务"];
+  if (taskType === "job_search") return ["岗位发现条件已确认", "scan 创建并读回校验完成", "用户取消岗位发现"];
   return ["任务完成", "用户取消", "用户确认切换任务"];
 }

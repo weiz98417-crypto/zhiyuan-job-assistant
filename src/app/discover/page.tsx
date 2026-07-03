@@ -13,6 +13,18 @@ import {
   HandwritingTitle, WarmButton, PaperCard,
   StaggerList, StaggerItem,
 } from "@/components/design";
+import {
+  DISCOVERY_VISIBLE_STATUSES,
+  fetchDiscoveryJobDetail,
+  getAgentEvaluationUrl,
+  getWeakDuplicateHintCounts,
+  jobFingerprint,
+  jobStatusBadge,
+  mergeJobDiscoveryItems,
+  saveDiscoveryJobJD,
+  timeAgo,
+  type DiscoveryJDDetail,
+} from "@/lib/job-discovery";
 import { useToast } from "@/lib/use-toast";
 
 // ── Types ───────────────────────────────────────────────────────────
@@ -28,14 +40,6 @@ interface JobItem {
   last_error?: string;
   status: "new" | "viewed" | "saved" | "evaluating" | "evaluated" | "dismissed";
   discovered_at: string;
-}
-
-interface DiscoveryJDDetail {
-  body: string;
-  company: string;
-  role: string;
-  sourceUrl: string;
-  title?: string;
 }
 
 interface ScanStatus {
@@ -65,53 +69,8 @@ interface ScanHistoryEntry {
   maxResults?: number;
 }
 
-const DISCOVERY_VISIBLE_STATUSES: JobItem["status"][] = ["new", "viewed", "saved", "evaluating", "evaluated"];
-
 const DEFAULT_DISCOVERY_TITLE_KEYWORDS = "AI产品经理,大模型产品经理,Agent产品经理,数据产品经理,AI运营";
 const DEFAULT_DISCOVERY_EXCLUDE_KEYWORDS = "实习,销售,客服,外包,劳务,兼职,电话销售,地推";
-
-const DISCOVERY_JOB_STATUS_BADGES: Record<JobItem["status"], { label: string; className: string }> = {
-  new: {
-    label: "新发现",
-    className: "bg-[var(--color-primary)] text-white",
-  },
-  viewed: {
-    label: "已查看",
-    className: "bg-sky-50 text-sky-700 border border-sky-100",
-  },
-  saved: {
-    label: "已保存",
-    className: "bg-emerald-50 text-emerald-700 border border-emerald-100",
-  },
-  evaluating: {
-    label: "评估中",
-    className: "bg-amber-50 text-amber-700 border border-amber-100",
-  },
-  evaluated: {
-    label: "已评估",
-    className: "bg-violet-50 text-violet-700 border border-violet-100",
-  },
-  dismissed: {
-    label: "已跳过",
-    className: "bg-[var(--color-surface)] text-[var(--color-muted)] border border-[var(--color-border)]",
-  },
-};
-
-// ── Helpers ─────────────────────────────────────────────────────────
-
-function timeAgo(dateStr: string) {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "刚刚";
-  if (mins < 60) return `${mins}分钟前`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}小时前`;
-  return `${Math.floor(hours / 24)}天前`;
-}
-
-function jobStatusBadge(status: JobItem["status"]) {
-  return DISCOVERY_JOB_STATUS_BADGES[status] || DISCOVERY_JOB_STATUS_BADGES.new;
-}
 
 // ── Page ────────────────────────────────────────────────────────────
 
@@ -126,6 +85,7 @@ export default function DiscoverPage() {
   const [history, setHistory] = useState<ScanHistoryEntry[]>([]);
   const [historyPage, setHistoryPage] = useState(1);
   const [historyTotal, setHistoryTotal] = useState(0);
+  const [showDismissed, setShowDismissed] = useState(false);
   const [evalJob, setEvalJob] = useState<JobItem | null>(null);
   const [detail, setDetail] = useState<DiscoveryJDDetail | null>(null);
   const [manualBody, setManualBody] = useState("");
@@ -147,23 +107,22 @@ export default function DiscoverPage() {
 
   const fetchJobs = useCallback(async () => {
     try {
+      const statuses = showDismissed ? ["dismissed"] : DISCOVERY_VISIBLE_STATUSES;
       const batches = await Promise.all(
-        DISCOVERY_VISIBLE_STATUSES.map(async (status) => {
+        statuses.map(async (status) => {
           const res = await fetch(`/api/scan/jobs?status=${status}&limit=50`);
           if (!res.ok) return [] as JobItem[];
           const data = await res.json();
           return (data?.data?.jobs || []) as JobItem[];
         }),
       );
-      const deduped = new Map<number, JobItem>();
-      batches.flat().forEach((job) => deduped.set(job.id, job));
       setJobs(
-        Array.from(deduped.values()).sort((a, b) =>
+        mergeJobDiscoveryItems(batches.flat()).sort((a, b) =>
           new Date(b.discovered_at).getTime() - new Date(a.discovered_at).getTime()
         ),
       );
     } catch { /* ignore */ }
-  }, []);
+  }, [showDismissed]);
 
   const fetchHistory = useCallback(async (page = 1) => {
     try {
@@ -204,7 +163,7 @@ export default function DiscoverPage() {
         await fetchJobs();
         await fetchHistory();
         if (st.status === "done" && st.jobsNew > 0) {
-          showToast(`扫描完成 — 发现 ${st.jobsFound} 个职位，${st.jobsNew} 个为新`);
+          showToast(`岗位发现完成 — 发现 ${st.jobsFound} 个机会，${st.jobsNew} 个为新`);
         } else if (st.status === "canceled") {
           showToast("扫描已取消");
         }
@@ -321,23 +280,12 @@ export default function DiscoverPage() {
     setDetailError("");
     setDetailLoading(true);
     try {
-      const res = await fetch(`/api/scan/jobs/${job.id}/jd`);
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.error || "JD 加载失败");
-      const data = json.data;
-      if (data?.jd) {
-        setDetail({
-          body: data.jd.body,
-          company: data.jd.company || job.company,
-          role: data.jd.role || job.title,
-          sourceUrl: data.jd.sourceUrl || job.url,
-        });
-        setManualBody(data.jd.body || "");
-      } else if (data?.fetched) {
-        setDetail(data.fetched);
-        setManualBody(data.fetched.body || "");
+      const result = await fetchDiscoveryJobDetail(job);
+      if (result.detail) {
+        setDetail(result.detail);
+        setManualBody(result.manualBody);
       } else {
-        setDetailError(data?.error || "没有抓到 JD 正文，可以手动粘贴。");
+        setDetailError(result.error);
       }
       await fetchJobs();
     } catch (err) {
@@ -357,19 +305,12 @@ export default function DiscoverPage() {
     }
     setSavingJD(true);
     try {
-      const res = await fetch(`/api/scan/jobs/${evalJob.id}/jd`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          jdBody,
-          company: detail?.company || evalJob.company,
-          role: detail?.role || evalJob.title,
-          evaluate,
-        }),
+      const { jdId } = await saveDiscoveryJobJD(evalJob.id, {
+        jdBody,
+        company: detail?.company || evalJob.company,
+        role: detail?.role || evalJob.title,
+        evaluate,
       });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.error || "保存 JD 失败");
-      const jdId = Number(json.jdId);
       const nextStatus: JobItem["status"] = evaluate ? "evaluating" : "saved";
       setEvalJob((prev) => prev && prev.id === jobId ? { ...prev, jd_id: jdId, status: nextStatus } : prev);
       setJobs((prev) => prev.map((job) => job.id === jobId ? { ...job, jd_id: jdId, status: nextStatus } : job));
@@ -391,7 +332,7 @@ export default function DiscoverPage() {
   const evaluateWithAgent = async () => {
     const jdId = await saveDiscoveryJD(true);
     if (!jdId) return;
-    router.push(`/agent?jdId=${jdId}&intent=evaluate`);
+    router.push(getAgentEvaluationUrl(jdId));
   };
 
   const goToJDManagement = () => {
@@ -411,7 +352,8 @@ export default function DiscoverPage() {
 
   // ── Derived ──────────────────────────────────────────────────
 
-  const visibleJobs = jobs.filter(j => !dismissedIds.has(j.id));
+  const visibleJobs = showDismissed ? jobs : jobs.filter(j => !dismissedIds.has(j.id));
+  const weakDuplicateHintCounts = getWeakDuplicateHintCounts(visibleJobs);
   const errorCompanies = scanStatus?.companies?.filter(c => c.status === "error") || [];
   const emptyCompanies = scanStatus?.companies?.filter(c => c.status === "empty") || [];
   const hasErrors = errorCompanies.length > 0;
@@ -428,7 +370,7 @@ export default function DiscoverPage() {
               : visibleJobs.length > 0 ? `${visibleJobs.length} 个新机会`
               : "企业招聘官网 · 自动发现"}
           </p>
-          <HandwritingTitle as="h1">职位发现</HandwritingTitle>
+          <HandwritingTitle as="h1">岗位发现工作台</HandwritingTitle>
         </div>
         <div className="flex items-center gap-2">
           <WarmButton variant="ghost" size="sm" onClick={() => setShowScanIntro(!showScanIntro)}>
@@ -498,7 +440,7 @@ export default function DiscoverPage() {
             ) : (
               <>
                 <Search size={14} className="mr-1" />
-                开始扫描
+                开始岗位发现
               </>
             )}
           </WarmButton>
@@ -506,7 +448,7 @@ export default function DiscoverPage() {
         <div className="mt-3 flex flex-wrap gap-3 text-xs text-[var(--color-muted)]">
           <span>流程：公司官网优先，0 个新结果时补扫猎聘 / 前程无忧 / 智联。</span>
           <span>地点：{locationFilter.trim() || "全国"}</span>
-          <span>上限：本次最多展示 {maxResults} 个候选职位</span>
+          <span>上限：本次最多展示 {maxResults} 个岗位机会</span>
         </div>
       </PaperCard>
 
@@ -520,7 +462,7 @@ export default function DiscoverPage() {
                 <div>
                   <p className="text-sm font-medium text-[var(--color-text)] mb-2">扫描说明</p>
                   <p className="text-xs text-[var(--color-muted)] mb-2">
-                    点击「开始扫描」后，后台 Worker 会先抓取配置公司的招聘官网；如果没有命中新职位，再按同一岗位、地点和数量上限补扫猎聘 / 前程无忧 / 智联。
+                    点击「开始岗位发现」后，后台 Worker 会先抓取配置公司的招聘官网；如果没有命中新机会，再按同一岗位、地点和数量上限补扫猎聘 / 前程无忧 / 智联。
                     扫描过程取决于公司数量和平台连接情况，你可以随时取消。
                   </p>
                   <p className="text-xs text-[var(--color-muted)]">
@@ -539,7 +481,7 @@ export default function DiscoverPage() {
           <div className="flex items-center gap-6 flex-wrap text-sm">
             <span className="flex items-center gap-1.5 text-[var(--color-text)] font-medium">
               <Zap size={14} className="text-[var(--color-primary)]" />
-              {visibleJobs.length} 个新职位
+              {visibleJobs.length} 个新机会
             </span>
             <span className="flex items-center gap-1.5 text-[var(--color-muted)]">
               <Building2 size={14} />
@@ -563,7 +505,7 @@ export default function DiscoverPage() {
                 <div className="flex-1">
                   <div className="flex justify-between text-xs text-[var(--color-muted)] mb-1">
                     <span>正在扫描 {scanStatus.companiesDone}/{scanStatus.companiesTotal} 家公司</span>
-                    <span>已发现 {scanStatus.jobsFound} 个职位 / 上限 {scanStatus.maxResults || maxResults}</span>
+                    <span>已发现 {scanStatus.jobsFound} 个岗位机会 / 上限 {scanStatus.maxResults || maxResults}</span>
                   </div>
                   <div className="h-1.5 bg-[var(--color-divider)] rounded-full overflow-hidden">
                     <div
@@ -610,7 +552,7 @@ export default function DiscoverPage() {
               <div className="flex items-start gap-3">
                 <AlertTriangle size={18} className="text-amber-500 mt-0.5" />
                 <div className="flex-1">
-                  <p className="text-sm font-medium text-[var(--color-text)]">本次没有匹配到职位</p>
+                  <p className="text-sm font-medium text-[var(--color-text)]">本次没有匹配到岗位机会</p>
                   <p className="mt-1 text-xs text-[var(--color-muted)]">
                     当前条件是「{scanStatus?.titleFilter?.positive?.join("、") || titleKeyword || "未设置"}」/「{scanStatus?.locationFilter || locationFilter || "全国"}」，可以放宽岗位关键词或地点后再扫。
                   </p>
@@ -656,7 +598,7 @@ export default function DiscoverPage() {
       {/* ── Tab bar ────────────────────────────────────────────── */}
       <div className="flex gap-1 p-0.5 bg-[var(--color-divider)] rounded-[var(--radius-md)] w-fit">
         {[
-          { id: "results" as const, label: "新职位" },
+          { id: "results" as const, label: "岗位机会" },
           { id: "sources" as const, label: "扫描源" },
           { id: "history" as const, label: "扫描历史" },
         ].map(tab => (
@@ -670,6 +612,29 @@ export default function DiscoverPage() {
           </button>
         ))}
       </div>
+
+      {activeTab === "results" && (
+        <div className="flex gap-1 p-0.5 bg-[var(--color-divider)] rounded-[var(--radius-md)] w-fit">
+          <button
+            type="button"
+            onClick={() => setShowDismissed(false)}
+            className={`px-3 py-1.5 rounded-[var(--radius-sm)] text-xs transition-colors ${
+              !showDismissed ? "bg-[var(--color-surface)] text-[var(--color-text)] font-medium" : "text-[var(--color-muted)] hover:text-[var(--color-text)]"
+            }`}
+          >
+            岗位机会
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowDismissed(true)}
+            className={`px-3 py-1.5 rounded-[var(--radius-sm)] text-xs transition-colors ${
+              showDismissed ? "bg-[var(--color-surface)] text-[var(--color-text)] font-medium" : "text-[var(--color-muted)] hover:text-[var(--color-text)]"
+            }`}
+          >
+            已跳过
+          </button>
+        </div>
+      )}
 
       {/* ── Tab: Results ───────────────────────────────────────── */}
       {activeTab === "results" && (
@@ -689,9 +654,9 @@ export default function DiscoverPage() {
               <div className="w-16 h-16 mx-auto rounded-full bg-[var(--color-primary-muted)] flex items-center justify-center">
                 <Search size={24} className="text-[var(--color-primary)]" />
               </div>
-              <HandwritingTitle as="h2">尚未扫描职位</HandwritingTitle>
-              <p className="text-[var(--color-muted)] text-sm">点击「开始扫描」自动抓取国内目标公司的招聘官网</p>
-              <WarmButton variant="primary" size="sm" onClick={startScan}>开始扫描</WarmButton>
+              <HandwritingTitle as="h2">尚未开始岗位发现</HandwritingTitle>
+              <p className="text-[var(--color-muted)] text-sm">点击「开始岗位发现」自动抓取国内目标公司的招聘官网</p>
+              <WarmButton variant="primary" size="sm" onClick={startScan}>开始岗位发现</WarmButton>
             </div>
           ) : (
             <StaggerList className="grid gap-3 sm:grid-cols-2">
@@ -713,6 +678,11 @@ export default function DiscoverPage() {
                         {job.location && <span className="flex items-center gap-1"><MapPin size={11} />{job.location}</span>}
                         {job.department && <span className="flex items-center gap-1"><Building2 size={11} />{job.department}</span>}
                         <span className="flex items-center gap-1"><Clock size={11} />{timeAgo(job.discovered_at)}</span>
+                        {(weakDuplicateHintCounts.get(jobFingerprint(job)) || 0) > 0 && (
+                          <span className="rounded-full bg-amber-50 px-2 py-0.5 text-amber-700 border border-amber-100">
+                            可能重复 +{weakDuplicateHintCounts.get(jobFingerprint(job))}
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center gap-2 pt-1">
                         <WarmButton variant="soft" size="sm" onClick={() => openJobDetail(job)}>
@@ -721,9 +691,15 @@ export default function DiscoverPage() {
                         <WarmButton variant="ghost" size="sm" onClick={() => openJobDetail(job)}>
                           <Bot size={12} className="mr-1" />Agent 评估
                         </WarmButton>
-                        <WarmButton variant="ghost" size="sm" onClick={() => dismissJob(job.id)}>
-                          <SkipForward size={12} className="mr-1" />跳过
-                        </WarmButton>
+                        {job.status === "dismissed" || dismissedIds.has(job.id) ? (
+                          <WarmButton variant="ghost" size="sm" onClick={() => undoDismiss(job.id)}>
+                            <Plus size={12} className="mr-1" />恢复
+                          </WarmButton>
+                        ) : (
+                          <WarmButton variant="ghost" size="sm" onClick={() => dismissJob(job.id)}>
+                            <SkipForward size={12} className="mr-1" />跳过
+                          </WarmButton>
+                        )}
                         {job.jd_id ? (
                           <WarmButton variant="ghost" size="sm" onClick={goToJDManagement}>
                             <ChevronRight size={12} className="mr-1" />去 JD 管理

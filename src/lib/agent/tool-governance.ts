@@ -552,7 +552,7 @@ export const TOOL_GOVERNANCE_REGISTRY: Record<string, ToolGovernance> = {
     requiresUserConfirmation: true,
     requiresReadBack: true,
     successContract: "Record scan/job discovery state only after confirmation.",
-    userVisibleNameZh: "扫描职位",
+    userVisibleNameZh: "开始岗位发现",
   }),
   score_interview_answer: meta({
     name: "score_interview_answer",
@@ -584,7 +584,7 @@ export const TOOL_GOVERNANCE_REGISTRY: Record<string, ToolGovernance> = {
     requiresUserConfirmation: false,
     requiresReadBack: false,
     successContract: "Search external jobs without saving discovered records.",
-    userVisibleNameZh: "搜索职位",
+    userVisibleNameZh: "岗位发现",
   }),
   search_place: meta({
     name: "search_place",
@@ -652,6 +652,7 @@ export const TASK_CONTRACT_POLICY: Record<AgentTaskType, TaskContractPolicy> = {
   profile_update: "high_risk_verified_write",
   reference_resume_save: "high_risk_verified_write",
   file_export: "export_verified",
+  job_search: "verified_write",
 };
 
 export function getTaskContractPolicy(taskType: AgentTaskType): TaskContractPolicy {
