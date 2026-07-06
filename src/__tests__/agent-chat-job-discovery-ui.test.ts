@@ -12,6 +12,7 @@ describe("Agent Chat job discovery cards", () => {
 
     expect(sourceText).toContain("function JobDiscoveryConfirmationCard");
     expect(sourceText).toContain("function JobDiscoveryRunCard");
+    expect(sourceText).toContain("function JobDiscoveryZeroResultStrategyCard");
     expect(sourceText).toContain("function JobDiscoveryCard");
     expect(sourceText).toContain("function JobDiscoveryBatchCard");
     expect(sourceText).toContain("job_discovery_confirmation");
@@ -27,5 +28,6 @@ describe("Agent Chat job discovery cards", () => {
     expect(sourceText).toContain("/api/scan/status?scanId=");
     expect(sourceText).toContain("/api/scan/jobs?scanId=");
     expect(sourceText).toContain("scan_result_poll");
+    expect(sourceText).toContain("0 结果策略卡");
   });
 });

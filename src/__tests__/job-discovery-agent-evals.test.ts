@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { makeDedupKey } from "../../lib/scan/orchestrator.mjs";
+import { buildSearchIndexQueries, expandTitleFilter } from "../../lib/scan/query-expansion.mjs";
 import { classifyIntentHardRule } from "@/lib/agent/classify-intent-llm";
 import { routeAgentTask } from "@/lib/agent/task-routing";
 import { createAgentTaskContract, inferCompletedCriteriaFromToolResult } from "@/lib/agent/task-contract";
@@ -116,6 +117,18 @@ describe("job discovery agent evals - baseline", () => {
     expect(discover).toContain("getAgentEvaluationUrl(jdId)");
     expect(chat).toContain("getAgentEvaluationUrl(result.jdId)");
   });
+
+  it("B7 fallback includes BOSS and domestic search-index leads", () => {
+    const fallback = source("lib/scan/job-board-fallback.mjs");
+
+    expect(fallback).toContain("async function searchBoss");
+    expect(fallback).toContain("https://www.zhipin.com/web/geek/job");
+    expect(fallback).toContain('["杭州", "101210100"]');
+    expect(fallback).toContain("async function searchIndexLeads");
+    expect(fallback).toContain("https://www.so.com/s?q=");
+    expect(fallback).toContain("https://www.baidu.com/s?wd=");
+    expect(fallback).toContain("待校验线索｜搜索索引");
+  });
 });
 
 describe("job discovery agent evals - boundary", () => {
@@ -192,6 +205,17 @@ describe("job discovery agent evals - boundary", () => {
 
     expect(result.uiPayload?.type).toBe("job_discovery_confirmation");
     expect(result.rawData?.createdScan).toBe(false);
+  });
+
+  it("E9 AI product manager queries expand to adjacent domestic job titles", () => {
+    const expanded = expandTitleFilter({ positive: ["AI 产品经理"], negative: ["实习"] });
+    const queries = buildSearchIndexQueries({ positive: ["AI 产品经理"], negative: [] }, { location: "杭州" });
+
+    expect(expanded.positive).toContain("大模型产品经理");
+    expect(expanded.positive).toContain("AIGC 产品经理");
+    expect(expanded.positive).toContain("智能体产品经理");
+    expect(expanded.negative).toContain("实习");
+    expect(queries.some((query) => query.includes("杭州") && query.includes("site:zhipin.com"))).toBe(true);
   });
 });
 

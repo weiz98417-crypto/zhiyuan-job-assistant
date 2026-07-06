@@ -40,6 +40,7 @@ const COMPANY_FILTER = (() => {
   return idx >= 0 ? args[idx + 1] : null;
 })();
 const COMPANY_TIMEOUT_MS = Number(process.env.SCAN_COMPANY_TIMEOUT_MS || 20_000);
+const SCAN_MIN_RESULTS_BEFORE_FALLBACK = Math.min(Math.max(Number(process.env.SCAN_MIN_RESULTS_BEFORE_FALLBACK || 3), 0), 50);
 
 function log(msg) {
   const ts = new Date().toISOString();
@@ -68,6 +69,20 @@ function parseJsonArray(value) {
   } catch {
     return [];
   }
+}
+
+function buildZeroResultStrategyIssue(titleFilter, scanScope) {
+  const keywords = (titleFilter.positive || []).join('、') || '岗位关键词';
+  const location = scanScope.location || '不限城市';
+  return {
+    company: 'zero_result_strategy',
+    level: 'INFO',
+    error: [
+      `zero_result_strategy: 本次已尝试公司官网、BOSS直聘、智联招聘、猎聘、前程无忧和国内搜索索引，但没有拿到可展示岗位。`,
+      `当前条件：${keywords} / ${location}。`,
+      `建议下一步：放宽地点到杭州周边或全国远程；把关键词扩展为大模型产品经理、AIGC产品经理、智能体产品经理、AI应用产品经理；或降低数量上限后重试。`,
+    ].join(' '),
+  };
 }
 
 function createScanStore() {
@@ -434,19 +449,26 @@ async function executeScan(scanId) {
       }
     }
 
-    if (!(await isCanceled(scanId)) && jobsNew === 0) {
-      log('company portals produced no new jobs; falling back to Liepin/51job/Zhaopin');
+    if (!(await isCanceled(scanId)) && jobsNew < SCAN_MIN_RESULTS_BEFORE_FALLBACK && jobsNew < scanScope.maxResults) {
+      log(`company portals produced ${jobsNew} new jobs; falling back to BOSS/Zhaopin/Liepin/51job/search-index leads`);
       const { jobs: boardJobs, errors } = await scanJobBoards(context, titleFilter, scanScope);
       errorLog.push(...errors);
       const filteredBoardJobs = applyLocationFilter(applyDomesticLocationGuard(applyTitleFilter(boardJobs, titleFilter)), scanScope.location);
       if (filteredBoardJobs.length === 0) {
-        errorLog.push({ company: 'Job board', error: 'fallback job boards returned zero matching results', level: 'INFO' });
+        errorLog.push({ company: 'Job board', error: 'fallback job boards and search-index leads returned zero matching results', level: 'INFO' });
       }
       await insertJobs(userId, filteredBoardJobs);
+      if (jobsNew === 0 && !errorLog.some((entry) => entry.company === 'zero_result_strategy')) {
+        errorLog.push(buildZeroResultStrategyIssue(titleFilter, scanScope));
+      }
       await store.updateTotals(scanId, progress());
     }
   } finally {
     if (browser) await browser.close().catch(() => {});
+  }
+
+  if (!(await isCanceled(scanId)) && jobsNew === 0 && !errorLog.some((entry) => entry.company === 'zero_result_strategy')) {
+    errorLog.push(buildZeroResultStrategyIssue(titleFilter, scanScope));
   }
 
   await store.markDone(scanId, progress());

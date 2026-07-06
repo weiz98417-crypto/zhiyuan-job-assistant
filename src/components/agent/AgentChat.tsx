@@ -1187,7 +1187,13 @@ function JobDiscoveryConfirmationCard({
   );
 }
 
-function JobDiscoveryRunCard({ payload }: { payload: Record<string, unknown> }) {
+function JobDiscoveryRunCard({
+  payload,
+  onSend,
+}: {
+  payload: Record<string, unknown>;
+  onSend: (content: string) => Promise<void>;
+}) {
   const [snapshot, setSnapshot] = useState<Record<string, unknown>>(payload);
   const [jobs, setJobs] = useState<Record<string, unknown>[]>([]);
   const [pollError, setPollError] = useState("");
@@ -1288,6 +1294,98 @@ function JobDiscoveryRunCard({ payload }: { payload: Record<string, unknown> }) 
       {jobs.length > 0 && (
         <JobDiscoveryBatchCard payload={{ type: "job_discovery_batch", jobs, scanId, source: "scan_result_poll" }} />
       )}
+      {finished && jobsFound === 0 && (
+        <JobDiscoveryZeroResultStrategyCard snapshot={snapshot} onSend={onSend} />
+      )}
+    </div>
+  );
+}
+
+function JobDiscoveryZeroResultStrategyCard({
+  snapshot,
+  onSend,
+}: {
+  snapshot: Record<string, unknown>;
+  onSend: (content: string) => Promise<void>;
+}) {
+  const [submitting, setSubmitting] = useState<string | null>(null);
+  const companies = Array.isArray(snapshot.companies)
+    ? snapshot.companies.filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
+    : [];
+  const strategyIssue = companies.find((company) => (
+    textValue(company.name) === "zero_result_strategy" || textValue(company.error).includes("zero_result_strategy")
+  ));
+  const titleFilter = payloadRecord(snapshot.titleFilter);
+  const positives = Array.isArray(titleFilter.positive)
+    ? titleFilter.positive.map(textValue).filter(Boolean)
+    : [];
+  const location = textValue(snapshot.locationFilter) || "不限城市";
+  const blockedSources = companies
+    .filter((company) => textValue(company.level) === "WARN" || textValue(company.status) === "error")
+    .map((company) => textValue(company.name))
+    .filter(Boolean);
+  const sourceSummary = "公司官网、BOSS直聘、智联招聘、猎聘、前程无忧、国内搜索索引";
+  const reason = textValue(strategyIssue?.error)
+    .replace(/^zero_result_strategy:\s*/, "")
+    || `本次已尝试 ${sourceSummary}，但没有拿到可展示岗位。`;
+
+  const retryPrompts = [
+    `把地点放宽到杭州、上海和国内远程，继续找 ${positives[0] || "AI 产品经理"} 岗位`,
+    `用大模型产品经理、AIGC 产品经理、智能体产品经理、AI 应用产品经理在${location}再搜一轮`,
+    `优先从 BOSS 直聘和搜索索引线索里找${location}的 AI 产品经理岗位`,
+  ];
+
+  const sendRetry = async (prompt: string) => {
+    if (submitting) return;
+    setSubmitting(prompt);
+    try {
+      await onSend(prompt);
+    } finally {
+      setSubmitting(null);
+    }
+  };
+
+  return (
+    <div className="max-w-[94%] min-w-0">
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+        className="overflow-hidden rounded-[var(--radius-md)] border border-amber-200 bg-amber-50/60">
+        <div className="flex items-center gap-2 border-b border-amber-200 bg-amber-100/70 px-3 py-2">
+          <Target size={14} className="text-amber-700" />
+          <span className="text-xs font-medium text-amber-900">0 结果策略卡</span>
+          <span className="ml-auto text-xs text-amber-700">需要放宽条件或换源重试</span>
+        </div>
+        <div className="space-y-3 px-3 py-3 text-sm text-amber-950">
+          <div className="grid gap-2 text-xs md:grid-cols-2">
+            <div className="rounded-[var(--radius-sm)] border border-amber-200 bg-white/70 px-3 py-2">
+              <div className="mb-1 font-medium text-amber-900">当前条件</div>
+              <div>关键词：{positives.length ? positives.join("、") : "未指定"}</div>
+              <div className="inline-flex items-center gap-1"><MapPin size={12} />地点：{location}</div>
+            </div>
+            <div className="rounded-[var(--radius-sm)] border border-amber-200 bg-white/70 px-3 py-2">
+              <div className="mb-1 font-medium text-amber-900">已尝试来源</div>
+              <div>{sourceSummary}</div>
+              {blockedSources.length > 0 && (
+                <div className="mt-1 text-amber-700">受限来源：{blockedSources.join("、")}</div>
+              )}
+            </div>
+          </div>
+          <p className="text-xs leading-relaxed">{reason}</p>
+          <div className="flex flex-col gap-2">
+            {retryPrompts.map((prompt) => (
+              <button
+                key={prompt}
+                type="button"
+                disabled={submitting !== null}
+                onClick={() => sendRetry(prompt)}
+                className="inline-flex items-center justify-between gap-2 rounded-[var(--radius-sm)] border border-amber-300 bg-white px-3 py-2 text-left text-xs font-medium text-amber-900 transition-colors hover:bg-amber-100 disabled:opacity-60"
+              >
+                <span>{prompt}</span>
+                {submitting === prompt ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+              </button>
+            ))}
+          </div>
+        </div>
+      </motion.div>
     </div>
   );
 }
@@ -1569,7 +1667,7 @@ function MessageBubble({
       return <JobDiscoveryConfirmationCard payload={uiPayload} onSend={onSend} />;
     }
     if (uiPayload?.type === "job_discovery_run") {
-      return <JobDiscoveryRunCard payload={uiPayload} />;
+      return <JobDiscoveryRunCard payload={uiPayload} onSend={onSend} />;
     }
     if (uiPayload?.type === "job_discovery_batch" || uiPayload?.type === "job_discovery_detail") {
       return <JobDiscoveryBatchCard payload={uiPayload} />;
