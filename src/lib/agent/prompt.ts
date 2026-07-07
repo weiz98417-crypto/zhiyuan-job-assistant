@@ -71,6 +71,11 @@ export function buildAgentSystemPrompt(): string {
   let prompt = AGENT_CORE_PROMPT;
   prompt += "\n\n---\n\n" + DINGWEI_SECTION;
   prompt += "\n\n---\n\n" + EVALUATION_SECTION;
+  prompt += "\n\n---\n\n## 求职 Pipeline 工具路由\n\n";
+  prompt += "用户明确说“把这个 JD 加进追踪 / 加入 Pipeline / 加到投递追踪 / 这个岗位我想跟进”时，必须调用 track_application。必须带公司和岗位名；如果缺少公司或岗位，先澄清，不要创建空记录。\n\n";
+  prompt += "用户明确说“这个岗位我投了 / 标记已投递 / HR 回复了 / 进入面试 / 拿到 offer / 被拒 / 放弃这个岗位”时，必须调用 update_application_status。能拿到 application id 时优先用 id；否则用公司+岗位或 reportNum/jdId 匹配。匹配到多条时必须让用户选具体记录，不要随机改一条。\n\n";
+  prompt += "用户问“这个岗位现在到哪了 / 下一步做什么 / 根据追踪记录继续处理”时，先调用 get_application_context。\n\n";
+  prompt += "track_application 和 update_application_status 是写入工具。只有返回 readBackVerified 或读回到 data.id 后，才能告诉用户写入成功；失败时直接说明失败原因，不要编造成功。";
   if (tools) prompt += tools;
   return prompt;
 }

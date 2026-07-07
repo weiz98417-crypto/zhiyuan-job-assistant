@@ -4,6 +4,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { getReadBackRequirementStatus } from "@/lib/agent/tools/readback-verification";
 import { scanPortals } from "@/lib/agent/tools/action/scan-portals";
 
+type ScanPortalsRawData = {
+  createdScan?: boolean;
+  criteria?: Record<string, unknown>;
+};
+
 function source(file: string): string {
   return readFileSync(path.join(process.cwd(), file), "utf-8");
 }
@@ -36,7 +41,7 @@ describe("scan_portals job discovery tool", () => {
 
     expect(result.success).toBe(true);
     expect(result.uiPayload?.type).toBe("job_discovery_confirmation");
-    expect(result.rawData?.createdScan).toBe(false);
+    expect((result.rawData as ScanPortalsRawData | undefined)?.createdScan).toBe(false);
     expect(readBackRequirement).toMatchObject({ required: false, satisfied: true });
   });
 
@@ -56,7 +61,7 @@ describe("scan_portals job discovery tool", () => {
       { field: "titleKeywords", label: "目标岗位", value: "AI 产品经理" },
       { field: "location", label: "城市偏好", value: "上海" },
     ]);
-    expect(result.rawData?.createdScan).toBe(false);
+    expect((result.rawData as ScanPortalsRawData | undefined)?.createdScan).toBe(false);
   });
 
   it("does not mix the conversational query into explicit title keywords", async () => {
@@ -68,7 +73,7 @@ describe("scan_portals job discovery tool", () => {
     });
 
     expect(result.uiPayload?.type).toBe("job_discovery_confirmation");
-    expect(result.rawData?.criteria).toMatchObject({
+    expect((result.rawData as ScanPortalsRawData | undefined)?.criteria).toMatchObject({
       titlePositive: ["AI 产品经理"],
       location: "杭州",
       maxResults: 50,

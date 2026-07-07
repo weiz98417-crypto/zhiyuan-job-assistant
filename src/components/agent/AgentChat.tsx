@@ -1391,7 +1391,7 @@ function JobDiscoveryRunCard({
         </motion.div>
       </div>
       {jobs.length > 0 && (
-        <JobDiscoveryBatchCard payload={{ type: "job_discovery_batch", jobs, scanId, source: "scan_result_poll" }} />
+        <JobDiscoveryBatchCard payload={{ type: "job_discovery_batch", jobs, scanId, source: "scan_result_poll" }} onSend={onSend} />
       )}
       {finished && jobsFound === 0 && (
         <JobDiscoveryZeroResultStrategyCard snapshot={snapshot} onSend={onSend} />
@@ -1489,7 +1489,7 @@ function JobDiscoveryZeroResultStrategyCard({
   );
 }
 
-function JobDiscoveryCard({ job }: { job: Record<string, unknown> }) {
+function JobDiscoveryCard({ job, onSend }: { job: Record<string, unknown>; onSend: (content: string) => Promise<void> }) {
   const id = textValue(job.id);
   const title = textValue(job.title) || "未知岗位";
   const company = textValue(job.company) || "未知公司";
@@ -1503,7 +1503,8 @@ function JobDiscoveryCard({ job }: { job: Record<string, unknown> }) {
   const [manualBody, setManualBody] = useState(snippet);
   const [detailError, setDetailError] = useState("");
   const [loadingDetail, setLoadingDetail] = useState(false);
-  const [savingAction, setSavingAction] = useState<"save" | "evaluate" | null>(null);
+  const [savingAction, setSavingAction] = useState<"save" | "evaluate" | "track" | "applied" | "prepare" | null>(null);
+  const [trackedApplication, setTrackedApplication] = useState<{ id: number; status?: string } | null>(null);
 
   const openJD = async () => {
     setOpen(true);
@@ -1556,6 +1557,84 @@ function JobDiscoveryCard({ job }: { job: Record<string, unknown> }) {
     }).catch(() => {});
   };
 
+  const trackJob = async () => {
+    if (savingAction) return;
+    setSavingAction("track");
+    setDetailError("");
+    try {
+      const res = await fetch("/api/data/applications", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          company,
+          role: title,
+          status: "evaluated",
+          sourceUrl: url,
+          source: "job_discovery_card",
+          notes: snippet ? snippet.slice(0, 500) : "",
+          metadata: {
+            scanJobId: id || undefined,
+            sourceName: sourceName || undefined,
+            verificationStatus: verificationStatus || undefined,
+          },
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.success || !json.data?.id) {
+        throw new Error(json.error || "加入追踪失败");
+      }
+      setTrackedApplication({
+        id: Number(json.data.id),
+        status: textValue(json.data.status) || "evaluated",
+      });
+    } catch (error) {
+      setDetailError(error instanceof Error ? error.message : "加入追踪失败");
+    } finally {
+      setSavingAction(null);
+    }
+  };
+
+  const markApplied = async () => {
+    if (!trackedApplication?.id || savingAction) return;
+    setSavingAction("applied");
+    setDetailError("");
+    try {
+      const res = await fetch("/api/data/applications", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: trackedApplication.id,
+          status: "applied",
+          note: "来自岗位发现卡片快捷动作",
+          source: "job_discovery_card",
+          metadata: { scanJobId: id || undefined },
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.success || !json.data?.id) {
+        throw new Error(json.error || "标记已投递失败");
+      }
+      setTrackedApplication({
+        id: Number(json.data.id),
+        status: textValue(json.data.status) || "applied",
+      });
+    } catch (error) {
+      setDetailError(error instanceof Error ? error.message : "标记已投递失败");
+    } finally {
+      setSavingAction(null);
+    }
+  };
+
+  const prepareInterview = async () => {
+    if (savingAction) return;
+    setSavingAction("prepare");
+    try {
+      await onSend(`帮我准备 ${company} - ${title} 的面试${trackedApplication?.id ? `，投递记录ID ${trackedApplication.id}` : ""}`);
+    } finally {
+      setSavingAction(null);
+    }
+  };
+
   return (
     <div className="rounded-[var(--radius-sm)] border border-[var(--color-divider)] bg-[var(--color-bg)] px-3 py-2">
       <div className="min-w-0">
@@ -1580,6 +1659,26 @@ function JobDiscoveryCard({ job }: { job: Record<string, unknown> }) {
               className="rounded-[var(--radius-sm)] border border-[var(--color-divider)] px-2 py-1 text-xs text-[var(--color-muted)] disabled:opacity-50">
               保存
             </button>
+            <button type="button" onClick={trackJob} disabled={savingAction !== null}
+              className="rounded-[var(--radius-sm)] border border-[var(--color-divider)] px-2 py-1 text-xs text-[var(--color-muted)] disabled:opacity-50">
+              {savingAction === "track" ? "加入中" : "加入追踪"}
+            </button>
+            {trackedApplication && (
+              <>
+                <span className="inline-flex items-center gap-1 rounded-[var(--radius-sm)] border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs text-emerald-700">
+                  <Check size={12} />
+                  已加入
+                </span>
+                <button type="button" onClick={markApplied} disabled={savingAction !== null || trackedApplication.status === "applied"}
+                  className="rounded-[var(--radius-sm)] border border-[var(--color-divider)] px-2 py-1 text-xs text-[var(--color-muted)] disabled:opacity-50">
+                  {savingAction === "applied" ? "更新中" : trackedApplication.status === "applied" ? "已投递" : "标记已投递"}
+                </button>
+                <button type="button" onClick={prepareInterview} disabled={savingAction !== null}
+                  className="rounded-[var(--radius-sm)] border border-[var(--color-divider)] px-2 py-1 text-xs text-[var(--color-muted)] disabled:opacity-50">
+                  {savingAction === "prepare" ? "发送中" : "准备面试"}
+                </button>
+              </>
+            )}
             <button type="button" onClick={() => saveOrEvaluate(true)} disabled={!open || manualBody.trim().length < 50 || savingAction !== null}
               className="rounded-[var(--radius-sm)] border border-[var(--color-divider)] px-2 py-1 text-xs text-[var(--color-muted)] disabled:opacity-50">
               评估
@@ -1622,7 +1721,7 @@ function JobDiscoveryCard({ job }: { job: Record<string, unknown> }) {
   );
 }
 
-function JobDiscoveryBatchCard({ payload }: { payload: Record<string, unknown> }) {
+function JobDiscoveryBatchCard({ payload, onSend }: { payload: Record<string, unknown>; onSend: (content: string) => Promise<void> }) {
   const jobs = Array.isArray(payload.jobs)
     ? payload.jobs.filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
     : [];
@@ -1639,7 +1738,7 @@ function JobDiscoveryBatchCard({ payload }: { payload: Record<string, unknown> }
           <span className="ml-auto text-xs text-[var(--color-muted)]">显示 {visible.length}/5</span>
         </div>
         <div className="space-y-2 px-3 py-3">
-          {visible.map((job, index) => <JobDiscoveryCard key={`${textValue(job.id)}-${index}`} job={job} />)}
+          {visible.map((job, index) => <JobDiscoveryCard key={`${textValue(job.id)}-${index}`} job={job} onSend={onSend} />)}
           {remaining > 0 && (
             <a href="/discover" className="inline-flex items-center gap-1 text-xs text-[var(--color-primary)] hover:underline">
               还有 {remaining} 个结果，去岗位发现查看全部
@@ -1664,6 +1763,93 @@ function JobDiscoveryErrorCard({ payload }: { payload: Record<string, unknown> }
 }
 
 /* ── Message Bubble ── */
+
+function ApplicationPipelineCard({
+  payload,
+  success,
+  onSend,
+}: {
+  payload: Record<string, unknown>;
+  success: boolean;
+  onSend: (content: string) => Promise<void>;
+}) {
+  const data = typeof payload.data === "object" && payload.data !== null
+    ? payload.data as Record<string, unknown>
+    : typeof payload.application === "object" && payload.application !== null
+      ? payload.application as Record<string, unknown>
+      : {};
+  const candidates = Array.isArray(payload.candidates)
+    ? payload.candidates.filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
+    : [];
+  const nextActions = Array.isArray(payload.nextActions)
+    ? payload.nextActions.filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
+    : [];
+  const type = textValue(payload.type);
+  const title = type === "application_status_updated"
+    ? "Pipeline 状态已更新"
+    : type === "application_context"
+      ? "Pipeline 上下文"
+      : "已加入求职 Pipeline";
+  const status = textValue(data.status);
+  const event = typeof payload.event === "object" && payload.event !== null ? payload.event as Record<string, unknown> : {};
+
+  return (
+    <div className="max-w-[94%] min-w-0">
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+        className={`overflow-hidden rounded-[var(--radius-md)] border ${success ? "border-emerald-200 bg-emerald-50/30" : "border-red-200 bg-red-50/30"}`}>
+        <div className="flex items-center gap-2 border-b border-[var(--color-divider)] bg-[var(--color-bg)] px-3 py-2">
+          {success ? <CheckCircle size={14} className="text-emerald-600" /> : <X size={14} className="text-red-500" />}
+          <span className="text-xs font-medium text-[var(--color-text)]">{title}</span>
+          {payload.readBackVerified === true && <span className="ml-auto text-[11px] text-emerald-600">已读回校验</span>}
+        </div>
+        <div className="space-y-2 px-3 py-3 text-sm">
+          {candidates.length > 0 ? (
+            <div className="space-y-2">
+              <p className="text-xs text-[var(--color-muted)]">匹配到多条记录，请指定要更新哪一条：</p>
+              {candidates.slice(0, 5).map((candidate, index) => (
+                <button
+                  key={`${textValue(candidate.id)}-${index}`}
+                  type="button"
+                  onClick={() => onSend(`更新投递记录ID ${textValue(candidate.id)}`)}
+                  className="block w-full rounded-[var(--radius-sm)] border border-[var(--color-divider)] bg-[var(--color-surface)] px-3 py-2 text-left text-xs text-[var(--color-text)]"
+                >
+                  #{textValue(candidate.id)} {textValue(candidate.company)} - {textValue(candidate.role)} · {textValue(candidate.status)}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-medium text-[var(--color-text)]">{textValue(data.company) || "未知公司"}</span>
+                <span className="text-[var(--color-muted)]">-</span>
+                <span className="text-[var(--color-text-soft)]">{textValue(data.role) || "未知岗位"}</span>
+                {status && <span className="rounded-full bg-[var(--color-primary-muted)] px-2 py-0.5 text-xs text-[var(--color-text-soft)]">{status}</span>}
+              </div>
+              <div className="flex flex-wrap gap-3 text-xs text-[var(--color-muted)]">
+                {textValue(data.id) && <span>记录ID: {textValue(data.id)}</span>}
+                {textValue(event.id) && <span>事件ID: {textValue(event.id)}</span>}
+              </div>
+              {nextActions.length > 0 && (
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {nextActions.slice(0, 4).map((action, index) => (
+                    <button
+                      key={`${textValue(action.id)}-${index}`}
+                      type="button"
+                      onClick={() => onSend(textValue(action.intent || action.label))}
+                      className="rounded-[var(--radius-sm)] border border-[var(--color-divider)] bg-[var(--color-surface)] px-2 py-1 text-xs text-[var(--color-muted)] hover:text-[var(--color-text)]"
+                    >
+                      {textValue(action.label)}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </motion.div>
+    </div>
+  );
+}
 
 function MessageBubble({
   msg,
@@ -1778,10 +1964,17 @@ function MessageBubble({
       return <JobDiscoveryRunCard payload={uiPayload} onSend={onSend} />;
     }
     if (uiPayload?.type === "job_discovery_batch" || uiPayload?.type === "job_discovery_detail") {
-      return <JobDiscoveryBatchCard payload={uiPayload} />;
+      return <JobDiscoveryBatchCard payload={uiPayload} onSend={onSend} />;
     }
     if (uiPayload?.type === "job_discovery_error") {
       return <JobDiscoveryErrorCard payload={uiPayload} />;
+    }
+    if (
+      uiPayload?.type === "application_tracked" ||
+      uiPayload?.type === "application_status_updated" ||
+      uiPayload?.type === "application_context"
+    ) {
+      return <ApplicationPipelineCard payload={uiPayload} success={toolSuccess} onSend={onSend} />;
     }
     if (uiPayload?.type === "offer_evaluation" || uiPayload?.type === "offer_report") {
       return <OfferResultCard payload={uiPayload} success={toolSuccess} />;

@@ -19,19 +19,40 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE TABLE IF NOT EXISTS applications (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id TEXT REFERENCES users(id),
   num INTEGER NOT NULL DEFAULT 0,
   date TEXT NOT NULL DEFAULT '',
   company TEXT NOT NULL DEFAULT '',
   role TEXT NOT NULL DEFAULT '',
   score REAL NOT NULL DEFAULT 0,
-  status TEXT NOT NULL DEFAULT 'Evaluated',
+  status TEXT NOT NULL DEFAULT 'evaluated',
   pdf_generated INTEGER NOT NULL DEFAULT 0,
   report_path TEXT NOT NULL DEFAULT '',
   notes TEXT NOT NULL DEFAULT '',
+  jd_id INTEGER,
+  source_url TEXT NOT NULL DEFAULT '',
+  metadata_json TEXT NOT NULL DEFAULT '{}',
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE(company, role)
+  UNIQUE(user_id, company, role)
 );
+
+CREATE TABLE IF NOT EXISTS application_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  application_id INTEGER NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
+  event_type TEXT NOT NULL DEFAULT 'note',
+  from_status TEXT,
+  to_status TEXT,
+  note TEXT NOT NULL DEFAULT '',
+  source TEXT NOT NULL DEFAULT 'system',
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_application_events_user_app ON application_events(user_id, application_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_application_events_type ON application_events(user_id, event_type, created_at);
+CREATE INDEX IF NOT EXISTS idx_applications_user_status ON applications(user_id, status, updated_at);
 
 CREATE TABLE IF NOT EXISTS reports (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

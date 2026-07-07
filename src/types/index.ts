@@ -1058,7 +1058,45 @@ export interface TeamInsights {
     totalUsers: number;
     activeThisWeek: number;
     pendingApprovals: number;
+    totalApplications: number;
+    totalReports: number;
+    totalJds: number;
+    totalOffers: number;
+    averageScore: number;
   };
+  pipelineFunnel: Array<{
+    stage: "discovered" | "saved_jd" | "evaluated" | "tracked" | "applied" | "responded" | "interview" | "offer";
+    label: string;
+    count: number;
+    rateFromPrevious: number | null;
+  }>;
+  marketSignals: {
+    directions: Array<{ name: string; count: number; averageScore: number; highRiskCount: number }>;
+    sources: Array<{ source: string; count: number }>;
+    cities: Array<{ city: string; count: number }>;
+  };
+  bottlenecks: Array<{
+    key: string;
+    label: string;
+    count: number;
+    severity: "info" | "warning" | "critical";
+    recommendation: string;
+  }>;
+  agentQuality: {
+    totalRuns: number;
+    toolSuccessRate: number | null;
+    failedRuns: number;
+    readBackFailures: number;
+    routingIssues: number;
+    topFailureTypes: Array<{ type: string; count: number }>;
+  };
+  sharedAssets: {
+    referenceResumes: number;
+    sharedReferenceResumes: number;
+    reusedAssets: Array<{ name: string; count: number }>;
+    assetGaps: Array<{ direction: string; missing: string; count: number }>;
+  };
+  actionRecommendations: Array<{ title: string; detail: string; priority: "low" | "medium" | "high" }>;
   weeklyActivity: Array<{ displayName: string; count: number }>;
   hotDirections: Array<{ archetype: string; count: number }>;
   weeklyTrend: Array<{ week: string; count: number }>;

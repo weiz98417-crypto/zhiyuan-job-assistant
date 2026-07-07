@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import path from "path";
 import fs from "fs";
 import { getDatabaseDriver } from "@/lib/postgres";
+import { normalizeApplicationStatus } from "@/lib/application-status";
 
 const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), "data");
 const DB_PATH = path.join(DATA_DIR, "zhiyuan.db");
@@ -84,6 +85,78 @@ export function getDb(): Database.Database {
       _db.exec("ALTER TABLE reports ADD COLUMN source_hash TEXT NOT NULL DEFAULT ''");
     }
     _db.exec("CREATE INDEX IF NOT EXISTS idx_reports_source_hash ON reports(source_hash)");
+
+    const appCols = _db.prepare("PRAGMA table_info(applications)").all() as { name: string }[];
+    const applicationMigrations = [
+      ["user_id", "ALTER TABLE applications ADD COLUMN user_id TEXT REFERENCES users(id)"],
+      ["jd_id", "ALTER TABLE applications ADD COLUMN jd_id INTEGER"],
+      ["source_url", "ALTER TABLE applications ADD COLUMN source_url TEXT NOT NULL DEFAULT ''"],
+      ["metadata_json", "ALTER TABLE applications ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'"],
+    ];
+    for (const [name, sql] of applicationMigrations) {
+      if (!appCols.some((c) => c.name === name)) _db.exec(sql);
+    }
+    const appIndexes = _db.prepare("PRAGMA index_list(applications)").all() as { name: string; unique: number }[];
+    const hasLegacyCompanyRoleUnique = appIndexes.some((index) => {
+      if (!index.unique) return false;
+      const indexName = `'${index.name.replace(/'/g, "''")}'`;
+      const columns = (_db!.prepare(`PRAGMA index_info(${indexName})`).all() as { name: string }[]).map((column) => column.name);
+      return columns.length === 2 && columns[0] === "company" && columns[1] === "role";
+    });
+    if (hasLegacyCompanyRoleUnique) {
+      _db.pragma("foreign_keys = OFF");
+      _db.exec(`
+        DROP TABLE IF EXISTS applications_new;
+        CREATE TABLE applications_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id TEXT REFERENCES users(id),
+          num INTEGER NOT NULL DEFAULT 0,
+          date TEXT NOT NULL DEFAULT '',
+          company TEXT NOT NULL DEFAULT '',
+          role TEXT NOT NULL DEFAULT '',
+          score REAL NOT NULL DEFAULT 0,
+          status TEXT NOT NULL DEFAULT 'evaluated',
+          pdf_generated INTEGER NOT NULL DEFAULT 0,
+          report_path TEXT NOT NULL DEFAULT '',
+          notes TEXT NOT NULL DEFAULT '',
+          jd_id INTEGER,
+          source_url TEXT NOT NULL DEFAULT '',
+          metadata_json TEXT NOT NULL DEFAULT '{}',
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+          UNIQUE(user_id, company, role)
+        );
+        INSERT OR IGNORE INTO applications_new (
+          id, user_id, num, date, company, role, score, status, pdf_generated,
+          report_path, notes, jd_id, source_url, metadata_json, created_at, updated_at
+        )
+        SELECT
+          id, user_id, num, date, company, role, score, lower(status), pdf_generated,
+          report_path, notes, jd_id, source_url, metadata_json, created_at, updated_at
+        FROM applications;
+        DROP TABLE applications;
+        ALTER TABLE applications_new RENAME TO applications;
+      `);
+      _db.pragma("foreign_keys = ON");
+    }
+    _db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_applications_user_company_role ON applications(user_id, company, role)");
+    _db.exec("CREATE INDEX IF NOT EXISTS idx_applications_user_status ON applications(user_id, status, updated_at)");
+    _db.exec(`
+      CREATE TABLE IF NOT EXISTS application_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL REFERENCES users(id),
+        application_id INTEGER NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
+        event_type TEXT NOT NULL DEFAULT 'note',
+        from_status TEXT,
+        to_status TEXT,
+        note TEXT NOT NULL DEFAULT '',
+        source TEXT NOT NULL DEFAULT 'system',
+        metadata_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_application_events_user_app ON application_events(user_id, application_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_application_events_type ON application_events(user_id, event_type, created_at);
+    `);
 
     // Migration: job discovery scan queue + discovered jobs
     _db.exec(`
@@ -277,6 +350,21 @@ export function getDb(): Database.Database {
 export interface AppRow {
   id?: number; num: number; date: string; company: string; role: string;
   score: number; status: string; pdf_generated: number; report_path: string; notes: string;
+  jd_id?: number | null; source_url?: string | null; metadata_json?: string; user_id?: string | null;
+  created_at?: string; updated_at?: string;
+}
+
+export interface ApplicationEventRow {
+  id?: number;
+  user_id?: string;
+  application_id: number;
+  event_type: string;
+  from_status?: string | null;
+  to_status?: string | null;
+  note: string;
+  source: string;
+  metadata_json: string;
+  created_at?: string;
 }
 
 export function listApps(filters?: { status?: string; company?: string; limit?: number; offset?: number }, userId?: string): AppRow[] {
@@ -284,23 +372,32 @@ export function listApps(filters?: { status?: string; company?: string; limit?: 
   let sql = "SELECT * FROM applications WHERE 1=1";
   const params: Record<string, unknown> = {};
   if (userId) { sql += " AND user_id = @userId"; params.userId = userId; }
-  if (filters?.status) { sql += " AND status = @status"; params.status = filters.status; }
+  if (filters?.status) { sql += " AND lower(status) = @status"; params.status = normalizeApplicationStatus(filters.status); }
   if (filters?.company) { sql += " AND company LIKE @company"; params.company = `%${filters.company}%`; }
   sql += " ORDER BY num DESC";
   if (filters?.limit) { sql += " LIMIT @limit"; params.limit = filters.limit; }
   if (filters?.offset) { sql += " OFFSET @offset"; params.offset = filters.offset; }
-  return db.prepare(sql).all(params) as AppRow[];
+  return (db.prepare(sql).all(params) as AppRow[]).map((row) => ({ ...row, status: normalizeApplicationStatus(row.status) }));
 }
 
 export function upsertApp(app: AppRow, userId?: string): void {
   const db = getDb();
   db.prepare(`
-    INSERT INTO applications (user_id, num, date, company, role, score, status, pdf_generated, report_path, notes, updated_at)
-    VALUES (@userId, @num, @date, @company, @role, @score, @status, @pdf_generated, @report_path, @notes, datetime('now'))
-    ON CONFLICT(company, role) DO UPDATE SET
+    INSERT INTO applications (user_id, num, date, company, role, score, status, pdf_generated, report_path, notes, jd_id, source_url, metadata_json, updated_at)
+    VALUES (@userId, @num, @date, @company, @role, @score, @status, @pdf_generated, @report_path, @notes, @jd_id, @source_url, @metadata_json, datetime('now'))
+    ON CONFLICT(user_id, company, role) DO UPDATE SET
       score=excluded.score, status=excluded.status, report_path=excluded.report_path,
-      notes=excluded.notes, updated_at=datetime('now')
-  `).run({ ...app, userId: userId || null });
+      notes=excluded.notes, jd_id=COALESCE(excluded.jd_id, applications.jd_id),
+      source_url=COALESCE(NULLIF(excluded.source_url, ''), applications.source_url),
+      metadata_json=excluded.metadata_json, updated_at=datetime('now')
+  `).run({
+    ...app,
+    status: normalizeApplicationStatus(app.status),
+    jd_id: app.jd_id ?? null,
+    source_url: app.source_url || "",
+    metadata_json: app.metadata_json || "{}",
+    userId: userId || null,
+  });
 }
 
 /* ── Reports ── */

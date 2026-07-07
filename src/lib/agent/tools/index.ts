@@ -8,6 +8,7 @@ import { getRecentActivity } from "./query/get-recent-activity";
 import { getRecentJDContext } from "./query/get-recent-jd-context";
 import { getRecommendations } from "./query/get-recommendations";
 import { getPipelineStatus } from "./query/get-pipeline-status";
+import { getApplicationContextTool } from "./query/get-application-context";
 import { decodeBlackMarketTerms } from "./query/decode-terms";
 import { checkPipelineHealth } from "./query/check-pipeline-health";
 import { getProfileInsights } from "./query/get-profile-insights";
@@ -44,6 +45,8 @@ import { getReferenceDetail } from "./query/get-reference-detail";
 import { readFile } from "./query/read-file";
 import { downloadReportPDF } from "./action/download-report-pdf";
 import { updateReportMetadata } from "./action/update-report-metadata";
+import { trackApplicationTool } from "./action/track-application";
+import { updateApplicationStatusTool } from "./action/update-application-status";
 
 // Interview tools
 import { generateInterviewQuestions, scoreInterviewAnswer } from "./interview-tools";
@@ -69,6 +72,7 @@ registry.register(getRecentActivity);
 registry.register(getRecentJDContext);
 registry.register(getRecommendations);
 registry.register(getPipelineStatus);
+registry.register(getApplicationContextTool);
 registry.register(decodeBlackMarketTerms);
 registry.register(checkPipelineHealth);
 registry.register(getProfileInsights);
@@ -103,6 +107,8 @@ registry.register(saveResumeSection);
 registry.register(saveReferenceResume);
 registry.register(downloadReportPDF);
 registry.register(updateReportMetadata);
+registry.register(trackApplicationTool);
+registry.register(updateApplicationStatusTool);
 
 // Interview tools
 registry.register(generateInterviewQuestions);

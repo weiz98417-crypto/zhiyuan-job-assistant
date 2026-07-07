@@ -16,6 +16,12 @@ import {
   Info,
   ExternalLink,
   GripVertical,
+  Send,
+  MessageSquare,
+  ClipboardList,
+  Handshake,
+  RotateCcw,
+  Ban,
 } from "lucide-react";
 import {
   HandwritingTitle,
@@ -25,12 +31,60 @@ import {
   StatusTag,
 } from "@/components/design";
 import { StaggerList, StaggerItem } from "@/components/design/PageTransition";
-import db from "@/lib/db";
 import { exportApplicationsMD, downloadAsFile } from "@/lib/exporters";
 import type { Application, ApplicationStatus, InterviewRound } from "@/types";
 import { STATUS_LABELS, STATUS_ORDER } from "@/types";
 
 type ViewMode = "list" | "grouped" | "kanban";
+
+type TrackerNextAction = {
+  id: string;
+  label: string;
+  status?: ApplicationStatus;
+  note?: string;
+  variant?: "primary" | "soft" | "ghost";
+  icon: typeof Send;
+  run?: (app: Application) => void | Promise<void>;
+};
+
+function serverApplicationToClient(row: Record<string, unknown>): Application {
+  const created = row.created_at || row.createdAt || row.date || new Date().toISOString();
+  const updated = row.updated_at || row.updatedAt || created;
+  return {
+    id: typeof row.id === "number" ? row.id : Number(row.id || 0),
+    num: Number(row.num || row.report_num || row.id || 0),
+    date: String(row.date || String(created).slice(0, 10)),
+    company: String(row.company || ""),
+    role: String(row.role || ""),
+    score: Number(row.score || 0),
+    status: String(row.status || "evaluated") as ApplicationStatus,
+    pdfGenerated: Boolean(row.pdf_generated || row.pdfGenerated),
+    reportPath: String(row.report_path || row.reportPath || ""),
+    notes: String(row.notes || ""),
+    url: String(row.source_url || row.url || ""),
+    interviews: [],
+    createdAt: new Date(String(created)),
+    updatedAt: new Date(String(updated)),
+  };
+}
+
+async function patchApplicationStatus(input: {
+  id: number;
+  status: ApplicationStatus;
+  note?: string;
+  source?: string;
+}): Promise<Application> {
+  const res = await fetch("/api/data/applications", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || !json.success || !json.data?.id) {
+    throw new Error(json.error || "application status update failed");
+  }
+  return serverApplicationToClient(json.data);
+}
 
 export default function TrackerPage() {
   const [applications, setApplications] = useState<Application[]>([]);
@@ -44,6 +98,8 @@ export default function TrackerPage() {
   const [detailApp, setDetailApp] = useState<Application | null>(null);
   const [dragOverStatus, setDragOverStatus] = useState<ApplicationStatus | null>(null);
   const [showInterviewModal, setShowInterviewModal] = useState<Application | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [updatingId, setUpdatingId] = useState<number | null>(null);
   const [interviewForm, setInterviewForm] = useState<InterviewRound>({
     round: 1,
     date: new Date().toISOString().slice(0, 10),
@@ -54,9 +110,21 @@ export default function TrackerPage() {
   }, []);
 
   async function loadData() {
-    const apps = await db.applications.toArray();
-    setApplications(apps);
-    setMounted(true);
+    try {
+      setLoadError(null);
+      const res = await fetch("/api/data/applications?limit=500", { cache: "no-store" });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.success || !Array.isArray(json.data)) {
+        throw new Error(json.error || "application load failed");
+      }
+      setApplications(json.data.map(serverApplicationToClient));
+    } catch (error) {
+      console.error("[tracker] load failed:", error);
+      setLoadError(error instanceof Error ? error.message : "load failed");
+      setApplications([]);
+    } finally {
+      setMounted(true);
+    }
   }
 
   const filtered = applications
@@ -98,33 +166,145 @@ export default function TrackerPage() {
   };
 
   const updateStatus = async (app: Application, status: ApplicationStatus) => {
-    const updates: Partial<Application> = { status, updatedAt: new Date() };
     // If moving to interview, auto-add interview round
     if (status === "interview" && (!app.interviews || app.interviews.length === 0)) {
       setShowInterviewModal({ ...app, status: "interview" });
       return;
     }
-    await db.applications.update(app.id!, updates);
-    if (detailApp && detailApp.id === app.id) {
-      setDetailApp({ ...detailApp, ...updates });
+    if (!app.id) return;
+    setUpdatingId(app.id);
+    try {
+      const updated = await patchApplicationStatus({ id: app.id, status, source: "tracker_page" });
+      setApplications((prev) => prev.map((item) => item.id === updated.id ? updated : item));
+      if (detailApp && detailApp.id === app.id) {
+        setDetailApp(updated);
+      }
+    } catch (error) {
+      console.error("[tracker] status update failed:", error);
+      setLoadError(error instanceof Error ? error.message : "status update failed");
+    } finally {
+      setUpdatingId(null);
     }
-    loadData();
+  };
+
+  const openAgentForApplication = (app: Application, intent: string) => {
+    const params = new URLSearchParams({
+      newSession: "1",
+      intent,
+      applicationId: String(app.id || ""),
+    });
+    if (app.num) params.set("reportNum", String(app.num));
+    if (app.company) params.set("company", app.company);
+    if (app.role) params.set("role", app.role);
+    window.location.href = `/agent?${params.toString()}`;
+  };
+
+  const getTrackerNextActions = useCallback((app: Application): TrackerNextAction[] => {
+    const status = app.status;
+    if (status === "evaluated") {
+      return [
+        { id: "apply", label: "标记已投递", status: "applied", icon: Send, variant: "primary" },
+        { id: "prepare", label: "准备面试", status: "interview", icon: ClipboardList, variant: "soft" },
+        { id: "discard", label: "放弃", status: "discarded", icon: Ban, variant: "ghost" },
+      ];
+    }
+    if (status === "applied") {
+      return [
+        { id: "followup", label: "创建跟进", status: "applied", note: "创建跟进提醒", icon: MessageSquare, variant: "soft" },
+        { id: "responded", label: "记录 HR 回复", status: "responded", icon: MessageSquare, variant: "primary" },
+        { id: "prepare", label: "准备面试", status: "interview", icon: ClipboardList, variant: "soft" },
+      ];
+    }
+    if (status === "responded") {
+      return [
+        { id: "prepare", label: "准备面试", status: "interview", icon: ClipboardList, variant: "primary" },
+        { id: "reject", label: "标记拒绝", status: "rejected", icon: Ban, variant: "ghost" },
+      ];
+    }
+    if (status === "interview") {
+      return [
+        { id: "retro", label: "复盘", icon: RotateCcw, variant: "soft", run: addInterviewRound },
+        { id: "offer", label: "标记 Offer", status: "offer", icon: Handshake, variant: "primary" },
+        { id: "reject", label: "标记未通过", status: "rejected", icon: Ban, variant: "ghost" },
+      ];
+    }
+    if (status === "offer") {
+      return [
+        { id: "negotiate", label: "谈薪策略", icon: Handshake, variant: "primary", run: (item) => openAgentForApplication(item, "negotiate") },
+        { id: "hr", label: "HR 问询点", icon: MessageSquare, variant: "soft", run: (item) => openAgentForApplication(item, "ask_hr") },
+      ];
+    }
+    if (status === "rejected") {
+      return [
+        { id: "retro", label: "复盘", icon: RotateCcw, variant: "soft", run: addInterviewRound },
+        { id: "discard", label: "放弃", status: "discarded", icon: Ban, variant: "ghost" },
+      ];
+    }
+    return [
+      { id: "reopen", label: "重新评估", status: "evaluated", icon: RotateCcw, variant: "soft" },
+    ];
+  }, []);
+
+  const runNextAction = async (app: Application, action: TrackerNextAction) => {
+    if (action.run) {
+      await action.run(app);
+      return;
+    }
+    if (action.status) {
+      if (action.note) {
+        if (!app.id) return;
+        setUpdatingId(app.id);
+        try {
+          const updated = await patchApplicationStatus({
+            id: app.id,
+            status: action.status,
+            note: action.note,
+            source: "tracker_page",
+          });
+          setApplications((prev) => prev.map((item) => item.id === updated.id ? updated : item));
+          if (detailApp && detailApp.id === app.id) setDetailApp(updated);
+        } catch (error) {
+          console.error("[tracker] next action failed:", error);
+          setLoadError(error instanceof Error ? error.message : "next action failed");
+        } finally {
+          setUpdatingId(null);
+        }
+        return;
+      }
+      await updateStatus(app, action.status);
+    }
   };
 
   const saveInterview = async () => {
     if (!showInterviewModal) return;
     const app = showInterviewModal;
-    const interviews = [...(app.interviews || []), { ...interviewForm }];
-    await db.applications.update(app.id!, {
-      status: "interview" as ApplicationStatus,
-      interviews,
-      updatedAt: new Date(),
-    });
-    setShowInterviewModal(null);
-    loadData();
+    if (!app.id) return;
+    setUpdatingId(app.id);
+    try {
+      const updated = await patchApplicationStatus({
+        id: app.id,
+        status: "interview",
+        note: `Interview R${interviewForm.round} ${interviewForm.date}${interviewForm.notes ? ` - ${interviewForm.notes}` : ""}`,
+        source: "tracker_page",
+      });
+      setApplications((prev) => prev.map((item) => item.id === updated.id ? {
+        ...updated,
+        interviews: [...(item.interviews || []), { ...interviewForm }],
+      } : item));
+      setDetailApp((prev) => {
+        if (!prev || prev.id !== updated.id) return prev;
+        return { ...updated, interviews: [...(prev.interviews || []), { ...interviewForm }] };
+      });
+      setShowInterviewModal(null);
+    } catch (error) {
+      console.error("[tracker] interview save failed:", error);
+      setLoadError(error instanceof Error ? error.message : "interview save failed");
+    } finally {
+      setUpdatingId(null);
+    }
   };
 
-  const addInterviewRound = async (app: Application) => {
+  async function addInterviewRound(app: Application) {
     if (!app.interviews || app.interviews.length === 0) {
       setShowInterviewModal(app);
       return;
@@ -135,7 +315,7 @@ export default function TrackerPage() {
       round: nextRound,
       date: new Date().toISOString().slice(0, 10),
     });
-  };
+  }
 
   /* ── Drag & Drop (Kanban) ── */
   const handleDragStart = (e: React.DragEvent<HTMLDivElement>, app: Application) => {
@@ -184,6 +364,23 @@ export default function TrackerPage() {
       <div className="space-y-6 animate-pulse">
         <div className="h-8 bg-[var(--color-divider)] rounded w-40" />
         <div className="h-64 bg-[var(--color-divider)] rounded-[var(--radius-lg)]" />
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="max-w-xl mx-auto py-16 text-center space-y-4">
+        <div className="w-16 h-16 mx-auto rounded-full bg-red-50 flex items-center justify-center">
+          <Info size={24} className="text-red-500" />
+        </div>
+        <div>
+          <HandwritingTitle as="h2">投递追踪加载失败</HandwritingTitle>
+          <p className="text-[var(--color-muted)] text-sm mt-2 break-words">{loadError}</p>
+        </div>
+        <WarmButton variant="soft" size="sm" onClick={loadData}>
+          重试
+        </WarmButton>
       </div>
     );
   }
@@ -343,6 +540,7 @@ export default function TrackerPage() {
                         <button
                           key={s}
                           onClick={() => updateStatus(app, s)}
+                          disabled={updatingId === app.id}
                           className={`block w-full text-left px-3 py-1.5 text-sm rounded-[var(--radius-sm)] transition-colors ${
                             s === app.status
                               ? "bg-[var(--color-primary-muted)] text-[var(--color-text)]"
@@ -354,6 +552,21 @@ export default function TrackerPage() {
                       ))}
                     </div>
                   </div>
+                  {getTrackerNextActions(app).slice(0, 1).map((action) => {
+                    const Icon = action.icon;
+                    return (
+                      <button
+                        key={action.id}
+                        onClick={() => runNextAction(app, action)}
+                        disabled={updatingId === app.id}
+                        className="hidden sm:flex items-center gap-1 rounded-[var(--radius-sm)] bg-[var(--color-primary-muted)] px-2.5 py-1 text-xs text-[var(--color-primary)] hover:bg-[var(--color-primary-soft)] disabled:opacity-50"
+                        title={action.label}
+                      >
+                        <Icon size={13} />
+                        <span>{action.label}</span>
+                      </button>
+                    );
+                  })}
                   <button
                     onClick={() => setDetailApp(app)}
                     className="p-1 text-[var(--color-muted)] hover:text-[var(--color-text)] transition-colors"
@@ -470,6 +683,23 @@ export default function TrackerPage() {
                               </span>
                             )}
                           </div>
+                          {getTrackerNextActions(app).slice(0, 1).map((action) => {
+                            const Icon = action.icon;
+                            return (
+                              <button
+                                key={action.id}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  runNextAction(app, action);
+                                }}
+                                disabled={updatingId === app.id}
+                                className="mt-2 inline-flex items-center gap-1 rounded-[var(--radius-sm)] bg-[var(--color-primary-muted)] px-2 py-1 text-[11px] text-[var(--color-primary)] hover:bg-[var(--color-primary-soft)] disabled:opacity-50"
+                              >
+                                <Icon size={12} />
+                                {action.label}
+                              </button>
+                            );
+                          })}
                         </div>
                         <button
                           onClick={(e) => { e.stopPropagation(); setDetailApp(app); }}
@@ -567,6 +797,27 @@ export default function TrackerPage() {
                   <p className="text-sm text-[var(--color-text-soft)]">
                     {detailApp.notes || "暂无备注"}
                   </p>
+                </PaperCard>
+
+                <PaperCard padding="md">
+                  <h4 className="text-sm font-medium text-[var(--color-text)] mb-3">下一步动作</h4>
+                  <div className="grid grid-cols-2 gap-2">
+                    {getTrackerNextActions(detailApp).map((action) => {
+                      const Icon = action.icon;
+                      return (
+                        <WarmButton
+                          key={action.id}
+                          variant={action.variant || "soft"}
+                          size="sm"
+                          onClick={() => runNextAction(detailApp, action)}
+                          disabled={updatingId === detailApp.id}
+                        >
+                          <Icon size={14} className="mr-1" />
+                          {action.label}
+                        </WarmButton>
+                      );
+                    })}
+                  </div>
                 </PaperCard>
 
                 {/* Interview Records */}

@@ -1,11 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { motion } from "framer-motion";
 import {
   BarChart3,
   TrendingUp,
-  TrendingDown,
   AlertCircle,
   Bell,
   Clock,
@@ -22,10 +20,9 @@ import {
   PaperCard,
   StatusTag,
 } from "@/components/design";
-import db from "@/lib/db";
-import type { Application, ApplicationStatus, HealthCheck } from "@/types";
-import { STATUS_LABELS, STATUS_ORDER } from "@/types";
-import { computeFunnel, analyzeFollowUps, computeUrgency, type Urgency } from "@/lib/analytics";
+import type { Application, ApplicationStatus } from "@/types";
+import { STATUS_ORDER } from "@/types";
+import { computeFunnel, analyzeFollowUps, type Urgency } from "@/lib/analytics";
 
 const URGENCY_LABELS: Record<Urgency, { level: string; action: string }> = {
   urgent: { level: "立即处理", action: "对方已回复，尽快响应" },
@@ -34,6 +31,40 @@ const URGENCY_LABELS: Record<Urgency, { level: string; action: string }> = {
   cold: { level: "已冷却", action: "建议归档并继续投递" },
 };
 
+type ServerApplicationRow = {
+  id?: number;
+  num?: number;
+  date?: string;
+  company?: string;
+  role?: string;
+  score?: number;
+  status?: ApplicationStatus;
+  pdf_generated?: number;
+  report_path?: string;
+  notes?: string;
+  source_url?: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+function serverApplicationToUi(row: ServerApplicationRow): Application {
+  return {
+    id: row.id,
+    num: Number(row.num || row.id || 0),
+    date: row.date || row.created_at || new Date().toISOString().slice(0, 10),
+    company: row.company || "",
+    role: row.role || "",
+    score: Number(row.score || 0),
+    status: row.status || "evaluated",
+    pdfGenerated: Boolean(row.pdf_generated),
+    reportPath: row.report_path || "",
+    notes: row.notes || "",
+    url: row.source_url || "",
+    createdAt: new Date(row.created_at || Date.now()),
+    updatedAt: new Date(row.updated_at || row.created_at || Date.now()),
+  };
+}
+
 export default function AnalyticsPage() {
   const [applications, setApplications] = useState<Application[]>([]);
   const [mounted, setMounted] = useState(false);
@@ -41,9 +72,14 @@ export default function AnalyticsPage() {
 
   useEffect(() => {
     async function load() {
-      const apps = await db.applications.toArray();
-      setApplications(apps);
-      setMounted(true);
+      try {
+        const res = await fetch("/api/data/applications?limit=1000", { cache: "no-store" });
+        const json = await res.json();
+        const rows = Array.isArray(json.data) ? json.data : [];
+        setApplications(rows.map(serverApplicationToUi));
+      } finally {
+        setMounted(true);
+      }
     }
     load();
   }, []);

@@ -20,7 +20,7 @@ import ReportBlocks from "@/components/ReportBlocks";
 import db from "@/lib/db";
 import { clearJDReportId } from "@/lib/jd-storage";
 import { normalizeReportBlocks, normalizeReportScores, parseJsonValue } from "@/lib/report-normalize";
-import type { Application, EvaluationReport } from "@/types";
+import type { EvaluationReport } from "@/types";
 
 type SortMode = "date-desc" | "date-asc" | "score-desc" | "score-asc";
 
@@ -182,13 +182,12 @@ export default function ReportsPage() {
     if (!report.reportNum) return;
     setTrackerStatus("saving");
     try {
-      const allApps = await db.applications.toArray();
-      const existing = allApps.find((app) => app.company === report.company && app.role === report.role);
-      const num = existing?.num || allApps.reduce((max, app) => Math.max(max, app.num || 0), 0) + 1;
+      const existing: any = undefined;
+      const num = report.reportNum;
       const today = new Date().toISOString().slice(0, 10);
       const reportPath = `/api/reports/${report.reportNum}/pdf`;
       const notes = `Archetype: ${report.archetype || "unknown"}; Report #${report.reportNum}`;
-      const app: Application = {
+      const app = {
         ...(existing || {}),
         num,
         date: existing?.date || today,
@@ -216,15 +215,12 @@ export default function ReportsPage() {
           pdf_generated: app.pdfGenerated ? 1 : 0,
           report_path: app.reportPath || "",
           notes: app.notes || "",
+          source: "reports_page",
+          metadata: { archetype: report.archetype || "unknown", reportNum: report.reportNum },
         }),
       });
-      if (!res.ok) throw new Error("server application write failed");
-
-      if (existing?.id != null) {
-        await db.applications.put({ ...app, id: existing.id });
-      } else {
-        await db.applications.add(app);
-      }
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.success || !json.data?.id) throw new Error(json.error || "server application write failed");
 
       setTrackerStatus("idle");
       setSelectedReport(null);

@@ -20,6 +20,7 @@ import {
   type ResumeEditProposalStatus,
 } from "@/lib/agent/resume-edit-proposals";
 import type {
+  ApplicationEventRow,
   AppRow,
   JDRow,
   NewsCacheRow,
@@ -31,6 +32,7 @@ import type {
   SignalQuery,
   SignalRow,
 } from "@/lib/server-db";
+import { normalizeApplicationStatus } from "@/lib/application-status";
 
 type AnyRow = Record<string, unknown>;
 
@@ -81,6 +83,7 @@ const USER_PRIVATE_TABLES = [
   "offer_reports",
   "reference_resumes",
   "reference_resume_usage",
+  "application_events",
   "memory_evidence",
   "memory_status_transitions",
   "memory_chunks",
@@ -140,8 +143,12 @@ export interface DataRepositories {
     rollback(id: string, userId: string): Promise<ResumeEditProposalRollbackResult>;
   };
   applications: {
-    list(filters: { status?: string; company?: string; limit?: number; offset?: number }, userId: string): Promise<AppRow[]>;
-    upsert(app: AppRow, userId: string): Promise<void>;
+    list(filters: ApplicationListFilters, userId: string): Promise<AppRow[]>;
+    get(id: number, userId: string): Promise<AppRow | undefined>;
+    upsert(app: AppRow, userId: string): Promise<AppRow>;
+    updateStatus(id: number, status: string, userId: string, note?: string): Promise<AppRow | undefined>;
+    insertEvent(event: ApplicationEventInput, userId: string): Promise<ApplicationEventRow>;
+    listEvents(applicationId: number, userId: string): Promise<ApplicationEventRow[]>;
   };
   reports: {
     list(userId?: string): Promise<ReportRow[]>;
@@ -327,21 +334,71 @@ function createSqliteRepositories(): DataRepositories {
       async list(filters, userId) {
         let sql = "SELECT * FROM applications WHERE user_id = ?";
         const params: unknown[] = [userId];
-        if (filters.status) { sql += " AND status = ?"; params.push(filters.status); }
+        if (filters.id) { sql += " AND id = ?"; params.push(filters.id); }
+        if (filters.reportNum) { sql += " AND (num = ? OR report_path LIKE ?)"; params.push(filters.reportNum, `%${String(filters.reportNum).padStart(3, "0")}%`); }
+        if (filters.jdId) { sql += " AND jd_id = ?"; params.push(filters.jdId); }
+        if (filters.status) { sql += " AND lower(status) = ?"; params.push(normalizeApplicationStatus(filters.status)); }
         if (filters.company) { sql += " AND company LIKE ?"; params.push(`%${filters.company}%`); }
+        if (filters.role) { sql += " AND role LIKE ?"; params.push(`%${filters.role}%`); }
+        if (typeof filters.score_min === "number" && Number.isFinite(filters.score_min)) { sql += " AND score >= ?"; params.push(filters.score_min); }
+        if (filters.date_from) { sql += " AND date >= ?"; params.push(filters.date_from); }
         sql += " ORDER BY num DESC";
         if (filters.limit) { sql += " LIMIT ?"; params.push(filters.limit); }
         if (filters.offset) { sql += " OFFSET ?"; params.push(filters.offset); }
-        return getDb().prepare(sql).all(...params) as AppRow[];
+        return (getDb().prepare(sql).all(...params) as AppRow[]).map(normalizeApplicationRecord);
+      },
+      async get(id, userId) {
+        const row = getDb().prepare("SELECT * FROM applications WHERE id = ? AND user_id = ?").get(id, userId) as AppRow | undefined;
+        return row ? normalizeApplicationRecord(row) : undefined;
       },
       async upsert(app, userId) {
-        getDb().prepare(`
-          INSERT INTO applications (user_id, num, date, company, role, score, status, pdf_generated, report_path, notes, updated_at)
-          VALUES (?, @num, @date, @company, @role, @score, @status, @pdf_generated, @report_path, @notes, datetime('now'))
-          ON CONFLICT(company, role) DO UPDATE SET
+        const payload = normalizeApplicationPayload(app);
+        const existing = getDb().prepare("SELECT id FROM applications WHERE user_id = ? AND lower(company) = lower(?) AND lower(role) = lower(?)").get(userId, payload.company, payload.role) as { id: number } | undefined;
+        if (existing) {
+          getDb().prepare(`
+            UPDATE applications SET num=@num, date=@date, score=@score, status=@status, pdf_generated=@pdf_generated,
+              report_path=@report_path, notes=@notes, jd_id=COALESCE(@jd_id, jd_id),
+              source_url=COALESCE(NULLIF(@source_url, ''), source_url),
+              metadata_json=@metadata_json, updated_at=datetime('now')
+            WHERE id=@id AND user_id=@user_id
+          `).run({ ...payload, id: existing.id, user_id: userId });
+          const updated = await this.get(existing.id, userId);
+          if (!updated) throw new Error("Application upsert read-back failed");
+          return updated;
+        }
+        const result = getDb().prepare(`
+          INSERT INTO applications (user_id, num, date, company, role, score, status, pdf_generated, report_path, notes, jd_id, source_url, metadata_json, updated_at)
+          VALUES (@user_id, @num, @date, @company, @role, @score, @status, @pdf_generated, @report_path, @notes, @jd_id, @source_url, @metadata_json, datetime('now'))
+          ON CONFLICT(user_id, company, role) DO UPDATE SET
             score=excluded.score, status=excluded.status, report_path=excluded.report_path,
-            notes=excluded.notes, updated_at=datetime('now')
-        `).run(userId, app);
+            notes=excluded.notes, jd_id=COALESCE(excluded.jd_id, applications.jd_id),
+            source_url=COALESCE(NULLIF(excluded.source_url, ''), applications.source_url),
+            metadata_json=excluded.metadata_json, updated_at=datetime('now')
+        `).run({ ...payload, user_id: userId });
+        const id = Number(result.lastInsertRowid) || (getDb().prepare("SELECT id FROM applications WHERE user_id = ? AND lower(company) = lower(?) AND lower(role) = lower(?)").get(userId, payload.company, payload.role) as { id: number } | undefined)?.id;
+        const saved = id ? await this.get(id, userId) : undefined;
+        if (!saved) throw new Error("Application upsert read-back failed");
+        return saved;
+      },
+      async updateStatus(id, status, userId, note) {
+        const normalized = normalizeApplicationStatus(status);
+        getDb().prepare("UPDATE applications SET status = ?, notes = COALESCE(NULLIF(?, ''), notes), updated_at = datetime('now') WHERE id = ? AND user_id = ?")
+          .run(normalized, note || "", id, userId);
+        return this.get(id, userId);
+      },
+      async insertEvent(event, userId) {
+        const payload = normalizeApplicationEventPayload(event);
+        const result = getDb().prepare(`
+          INSERT INTO application_events (user_id, application_id, event_type, from_status, to_status, note, source, metadata_json)
+          VALUES (@user_id, @application_id, @event_type, @from_status, @to_status, @note, @source, @metadata_json)
+        `).run({ ...payload, user_id: userId });
+        const row = getDb().prepare("SELECT * FROM application_events WHERE id = ? AND user_id = ?").get(Number(result.lastInsertRowid), userId) as ApplicationEventRow | undefined;
+        if (!row) throw new Error("Application event read-back failed");
+        return normalizeApplicationEventRecord(row);
+      },
+      async listEvents(applicationId, userId) {
+        return (getDb().prepare("SELECT * FROM application_events WHERE application_id = ? AND user_id = ? ORDER BY created_at DESC, id DESC").all(applicationId, userId) as ApplicationEventRow[])
+          .map(normalizeApplicationEventRecord);
       },
     },
     reports: {
@@ -556,6 +613,29 @@ function createPostgresCvRepository(): DataRepositories["cv"] {
       `, [userId, JSON.stringify(data || {})]));
     },
   };
+}
+
+export interface ApplicationListFilters {
+  id?: number;
+  reportNum?: number;
+  jdId?: number;
+  status?: string;
+  company?: string;
+  role?: string;
+  score_min?: number;
+  date_from?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface ApplicationEventInput {
+  application_id: number;
+  event_type: string;
+  from_status?: string | null;
+  to_status?: string | null;
+  note?: string;
+  source?: string;
+  metadata_json?: string;
 }
 
 function createSqliteResumeEditProposalRepository(): DataRepositories["resumeEditProposals"] {
@@ -789,22 +869,82 @@ function createPostgresApplicationRepository(): DataRepositories["applications"]
       return withPostgresClient(async (client) => {
         const clauses = ["user_id = $1"];
         const params: unknown[] = [userId];
-        if (filters.status) { params.push(filters.status); clauses.push(`status = $${params.length}`); }
+        if (filters.id) { params.push(filters.id); clauses.push(`id = $${params.length}`); }
+        if (filters.reportNum) {
+          params.push(filters.reportNum);
+          clauses.push(`(num = $${params.length} OR report_path ILIKE $${params.length + 1})`);
+          params.push(`%${String(filters.reportNum).padStart(3, "0")}%`);
+        }
+        if (filters.jdId) { params.push(filters.jdId); clauses.push(`jd_id = $${params.length}`); }
+        if (filters.status) { params.push(normalizeApplicationStatus(filters.status)); clauses.push(`lower(status) = $${params.length}`); }
         if (filters.company) { params.push(`%${filters.company}%`); clauses.push(`company ILIKE $${params.length}`); }
+        if (filters.role) { params.push(`%${filters.role}%`); clauses.push(`role ILIKE $${params.length}`); }
+        if (typeof filters.score_min === "number" && Number.isFinite(filters.score_min)) { params.push(filters.score_min); clauses.push(`score >= $${params.length}`); }
+        if (filters.date_from) { params.push(filters.date_from); clauses.push(`date >= $${params.length}`); }
         let sql = `SELECT * FROM applications WHERE ${clauses.join(" AND ")} ORDER BY num DESC`;
         if (filters.limit) { params.push(filters.limit); sql += ` LIMIT $${params.length}`; }
         if (filters.offset) { params.push(filters.offset); sql += ` OFFSET $${params.length}`; }
-        return rows<AppRow>((await client.query(sql, params)).rows);
+        return rows<AppRow>((await client.query(sql, params)).rows).map(normalizeApplicationRecord);
+      });
+    },
+    async get(id, userId) {
+      return withPostgresClient(async (client) => {
+        const row = one<AppRow>(await client.query("SELECT * FROM applications WHERE id=$1 AND user_id=$2", [id, userId]));
+        return row ? normalizeApplicationRecord(row) : undefined;
       });
     },
     async upsert(app, userId) {
-      await withPostgresClient((client) => client.query(`
-        INSERT INTO applications (user_id, num, date, company, role, score, status, pdf_generated, report_path, notes, updated_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now())
+      return withPostgresClient(async (client) => {
+        const payload = normalizeApplicationPayload(app);
+        const result = await client.query(`
+        INSERT INTO applications (user_id, num, date, company, role, score, status, pdf_generated, report_path, notes, jd_id, source_url, metadata_json, updated_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,now())
         ON CONFLICT (user_id, company, role) DO UPDATE SET
-          score=EXCLUDED.score, status=EXCLUDED.status, report_path=EXCLUDED.report_path,
-          notes=EXCLUDED.notes, updated_at=now()
-      `, [userId, app.num, app.date, app.company, app.role, app.score, app.status, app.pdf_generated, app.report_path, app.notes]));
+          num=EXCLUDED.num, date=EXCLUDED.date, score=EXCLUDED.score, status=EXCLUDED.status,
+          pdf_generated=EXCLUDED.pdf_generated, report_path=EXCLUDED.report_path, notes=EXCLUDED.notes,
+          jd_id=COALESCE(EXCLUDED.jd_id, applications.jd_id),
+          source_url=COALESCE(NULLIF(EXCLUDED.source_url, ''), applications.source_url),
+          metadata_json=EXCLUDED.metadata_json, updated_at=now()
+        RETURNING *
+      `, [userId, payload.num, payload.date, payload.company, payload.role, payload.score, payload.status, payload.pdf_generated, payload.report_path, payload.notes, payload.jd_id, payload.source_url, payload.metadata_json]);
+        const saved = one<AppRow>(result);
+        if (!saved) throw new Error("Application upsert read-back failed");
+        return normalizeApplicationRecord(saved);
+      });
+    },
+    async updateStatus(id, status, userId, note) {
+      return withPostgresClient(async (client) => {
+        const result = await client.query(`
+          UPDATE applications
+          SET status=$1, notes=COALESCE(NULLIF($2, ''), notes), updated_at=now()
+          WHERE id=$3 AND user_id=$4
+          RETURNING *
+        `, [normalizeApplicationStatus(status), note || "", id, userId]);
+        const row = one<AppRow>(result);
+        return row ? normalizeApplicationRecord(row) : undefined;
+      });
+    },
+    async insertEvent(event, userId) {
+      return withPostgresClient(async (client) => {
+        const payload = normalizeApplicationEventPayload(event);
+        const result = await client.query(`
+          INSERT INTO application_events (user_id, application_id, event_type, from_status, to_status, note, source, metadata_json)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)
+          RETURNING *
+        `, [userId, payload.application_id, payload.event_type, payload.from_status, payload.to_status, payload.note, payload.source, payload.metadata_json]);
+        const row = one<ApplicationEventRow>(result);
+        if (!row) throw new Error("Application event read-back failed");
+        return normalizeApplicationEventRecord(row);
+      });
+    },
+    async listEvents(applicationId, userId) {
+      return withPostgresClient(async (client) => {
+        const result = await client.query(
+          "SELECT * FROM application_events WHERE application_id=$1 AND user_id=$2 ORDER BY created_at DESC, id DESC",
+          [applicationId, userId],
+        );
+        return rows<ApplicationEventRow>(result.rows).map(normalizeApplicationEventRecord);
+      });
     },
   };
 }
@@ -1814,6 +1954,53 @@ function offerReportValues(input: AnyRow) {
     input.report_markdown || "",
     input.num_offers ?? 0,
   ];
+}
+
+function normalizeApplicationPayload(app: AppRow): Required<Pick<AppRow, "num" | "date" | "company" | "role" | "score" | "status" | "pdf_generated" | "report_path" | "notes" | "metadata_json">> & Pick<AppRow, "jd_id" | "source_url"> {
+  return {
+    num: Number(app.num || 0),
+    date: app.date || new Date().toISOString().slice(0, 10),
+    company: String(app.company || "").trim(),
+    role: String(app.role || "").trim(),
+    score: Number(app.score || 0),
+    status: normalizeApplicationStatus(app.status),
+    pdf_generated: Number(app.pdf_generated || 0),
+    report_path: app.report_path || "",
+    notes: app.notes || "",
+    jd_id: app.jd_id ?? null,
+    source_url: app.source_url || "",
+    metadata_json: jsonString(app.metadata_json, {}),
+  };
+}
+
+function normalizeApplicationRecord(row: AppRow): AppRow {
+  return {
+    ...row,
+    status: normalizeApplicationStatus(row.status),
+    metadata_json: jsonString(row.metadata_json, {}),
+    source_url: row.source_url || "",
+  };
+}
+
+function normalizeApplicationEventPayload(event: ApplicationEventInput): Required<ApplicationEventInput> {
+  return {
+    application_id: Number(event.application_id),
+    event_type: event.event_type || "note",
+    from_status: event.from_status ? normalizeApplicationStatus(event.from_status) : null,
+    to_status: event.to_status ? normalizeApplicationStatus(event.to_status) : null,
+    note: event.note || "",
+    source: event.source || "system",
+    metadata_json: jsonString(event.metadata_json, {}),
+  };
+}
+
+function normalizeApplicationEventRecord(row: ApplicationEventRow): ApplicationEventRow {
+  return {
+    ...row,
+    from_status: row.from_status ? normalizeApplicationStatus(row.from_status) : null,
+    to_status: row.to_status ? normalizeApplicationStatus(row.to_status) : null,
+    metadata_json: jsonString(row.metadata_json, {}),
+  };
 }
 
 function buildSessionUpdate(updates: AnyRow, driver: DatabaseDriver) {

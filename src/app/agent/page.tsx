@@ -646,14 +646,17 @@ function AgentPageInner() {
     const jdId = searchParams.get("jdId");
     const offerId = searchParams.get("offerId");
     const offerReportId = searchParams.get("offerReportId");
-    if (!jdId && !offerId && !offerReportId) return;
+    const applicationId = searchParams.get("applicationId");
+    if (!jdId && !offerId && !offerReportId && !applicationId) return;
 
-    const createKey = `handoff:${jdId || ""}:${offerId || ""}:${offerReportId || ""}:${searchParams.get("intent") || ""}`;
+    const createKey = `handoff:${jdId || ""}:${offerId || ""}:${offerReportId || ""}:${applicationId || ""}:${searchParams.get("intent") || ""}`;
     if (handoffSessionCreateKeyRef.current === createKey) return;
     handoffSessionCreateKeyRef.current = createKey;
 
     const createDedicatedSession = async () => {
-      const title = offerId
+      const title = applicationId
+        ? `Pipeline #${applicationId}`
+        : offerId
         ? `Offer评估 #${offerId}`
         : offerReportId
           ? `Offer报告 #${offerReportId}`
@@ -729,7 +732,7 @@ function AgentPageInner() {
   const clearConsumedHandoffParams = useCallback(() => {
     const url = new URL(window.location.href);
     let changed = false;
-    for (const key of ["jdId", "offerId", "offerReportId", "intent", "newSession"]) {
+    for (const key of ["jdId", "offerId", "offerReportId", "applicationId", "reportNum", "company", "role", "intent", "newSession"]) {
       if (url.searchParams.has(key)) {
         url.searchParams.delete(key);
         changed = true;
@@ -2148,6 +2151,48 @@ Rules:
       });
     };
     startEvaluation().catch(() => {});
+  }, [mounted, streaming, currentSessionId, searchParams, sendMessage, clearConsumedHandoffParams]);
+
+  useEffect(() => {
+    if (!mounted || streaming || !currentSessionId) return;
+    const requestedSessionId = searchParams.get("sessionId");
+    if (requestedSessionId && Number(requestedSessionId) !== currentSessionId) return;
+    if (searchParams.get("newSession") === "1" && !requestedSessionId && createdHandoffSessionIdRef.current !== currentSessionId) return;
+    const applicationId = searchParams.get("applicationId");
+    if (!applicationId) return;
+    const intent = searchParams.get("intent") || "open";
+    const company = searchParams.get("company") || "";
+    const role = searchParams.get("role") || "";
+    const handoffKey = `${currentSessionId}:application:${intent}:${applicationId}`;
+    if (handoffKeyRef.current === handoffKey || hasConsumedHandoff(handoffKey)) {
+      clearConsumedHandoffParams();
+      return;
+    }
+    handoffKeyRef.current = handoffKey;
+    markHandoffConsumed(handoffKey);
+    clearConsumedHandoffParams();
+
+    const intentText = intent === "negotiate"
+      ? "生成谈薪策略"
+      : intent === "ask_hr"
+        ? "整理 HR 问询点"
+        : intent === "interview"
+          ? "准备面试"
+          : intent === "retro"
+            ? "做阶段复盘"
+            : "给出下一步建议";
+    queueMicrotask(() => {
+      sendMessage(
+        [
+          `请围绕投递追踪里的 applicationId=${applicationId} ${intentText}。`,
+          company || role ? `已知上下文：${company} ${role}` : "",
+          "先调用 get_application_context 读取 application 上下文和事件，不要让我重新粘贴 JD 或 Offer 信息。",
+          "如果上下文不足，请明确说明缺什么；不要编造不存在的 JD、Offer 或 HR 回复。",
+        ].filter(Boolean).join("\n"),
+        undefined,
+        { hideUserMessage: true },
+      ).catch(() => {});
+    });
   }, [mounted, streaming, currentSessionId, searchParams, sendMessage, clearConsumedHandoffParams]);
 
   useEffect(() => {

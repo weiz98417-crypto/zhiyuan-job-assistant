@@ -9,6 +9,7 @@ export interface ToolDisplay {
 
 export const TOOL_DISPLAY: Record<string, ToolDisplay> = {
   recognize_document_image: { label: "识别图片", emoji: "🖼️" },
+  get_application_context: { label: "读取追踪上下文", emoji: "i" },
   // Query tools
   search_applications:  { label: "搜索投递记录", emoji: "📋" },
   get_report_detail:    { label: "查看评估报告", emoji: "📊" },
@@ -22,6 +23,8 @@ export const TOOL_DISPLAY: Record<string, ToolDisplay> = {
   generate_interview_questions: { label: "生成面试题", emoji: "📝" },
   score_interview_answer:  { label: "评分面试回答", emoji: "⭐" },
 
+  track_application: { label: "加入投递追踪", emoji: "+" },
+  update_application_status: { label: "更新投递状态", emoji: "*" },
   // Action tools
   evaluate_jd:          { label: "评估 JD",      emoji: "🔍" },
   evaluate_offer:       { label: "评估 Offer",   emoji: "💰" },

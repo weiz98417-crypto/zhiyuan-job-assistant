@@ -10,6 +10,10 @@ import { createAgentTaskContract, inferCompletedCriteriaFromToolResult } from "@
 import { scanPortals } from "@/lib/agent/tools/action/scan-portals";
 import { getWeakDuplicateHintCounts, jobFingerprint, mergeJobDiscoveryItems } from "@/lib/job-discovery";
 
+type ScanPortalsRawData = {
+  createdScan?: boolean;
+};
+
 type ServerDbModule = typeof import("@/lib/server-db");
 
 const TEST_USER_ID = "user-job-discovery-agent-evals";
@@ -62,7 +66,7 @@ describe("job discovery agent evals - baseline", () => {
     expect(decision.taskType).toBe("job_search");
     expect(decision.requiresClarification).toBe(false);
     expect(result.uiPayload?.type).toBe("job_discovery_confirmation");
-    expect(result.rawData?.createdScan).toBe(false);
+    expect((result.rawData as ScanPortalsRawData | undefined)?.createdScan).toBe(false);
   });
 
   it("B2 confirmation creates real scan_queue and returns read-back scanId", async () => {
@@ -206,7 +210,7 @@ describe("job discovery agent evals - boundary", () => {
     const result = await scanPortals.handler({ titleKeywords: ["AI 产品经理"] });
 
     expect(result.uiPayload?.type).toBe("job_discovery_confirmation");
-    expect(result.rawData?.createdScan).toBe(false);
+    expect((result.rawData as ScanPortalsRawData | undefined)?.createdScan).toBe(false);
   });
 
   it("E9 AI product manager queries expand to adjacent domestic job titles", () => {

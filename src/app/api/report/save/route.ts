@@ -3,6 +3,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { getDataRepositories } from "@/lib/data-repositories";
+import { trackApplication } from "@/lib/application-workflow";
 
 interface SaveRequest {
   company: string;
@@ -49,17 +50,24 @@ export async function POST(request: Request) {
     }, user.userId);
 
     // Add to tracker if requested
+    let trackerResult = null;
     if (actions.addToTracker) {
-      await repos.applications.upsert({
-        num: reportNum,
+      trackerResult = await trackApplication({
+        reportNum,
         date,
-        company, role,
+        company,
+        role,
         score: overallScore,
-        status: "Evaluated",
-        pdf_generated: 0,
-        report_path: `reports/${String(reportNum).padStart(3, "0")}-${slugify(company)}-${date}.md`,
+        status: "evaluated",
         notes: `Archetype: ${archetype}`,
+        source: "report_save",
+        metadata: {
+          reportPath: `reports/${String(reportNum).padStart(3, "0")}-${slugify(company)}-${date}.md`,
+        },
       }, user.userId);
+      if (!trackerResult.success) {
+        return NextResponse.json({ success: false, error: trackerResult.error || "投递追踪写入失败" }, { status: 400 });
+      }
     }
 
     if (actions.saveJD && jdText && jdText.trim().length >= 50) {
@@ -76,7 +84,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: true,
-      data: { reportNum, jdSaved: actions.saveJD, trackerUpdated: actions.addToTracker },
+      data: { reportNum, jdSaved: actions.saveJD, trackerUpdated: Boolean(trackerResult?.success), tracker: trackerResult?.data },
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "未知错误";
