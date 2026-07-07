@@ -7,18 +7,20 @@ function source(file: string): string {
 }
 
 describe("Discovery UI", () => {
-  it("uses job discovery workbench product language", () => {
+  it("uses concise job discovery product language", () => {
     const page = source("src/app/discover/page.tsx");
     const shell = source("src/components/shell/AppShell.tsx");
     const toolDisplay = source("src/lib/agent/tool-display-names.ts");
     const toolGovernance = source("src/lib/agent/tool-governance.ts");
 
-    expect(page).toContain("岗位发现工作台");
+    expect(page).toContain("岗位发现");
     expect(page).toContain("开始岗位发现");
-    expect(shell).toContain("岗位发现工作台");
+    expect(shell).toContain("岗位发现");
     expect(toolDisplay).toContain("开始岗位发现");
     expect(toolGovernance).toContain("开始岗位发现");
     expect(page).not.toContain(">职位发现<");
+    expect(page).not.toContain("岗位发现工作台");
+    expect(shell).not.toContain("岗位发现工作台");
     expect(page).not.toContain(">开始扫描<");
   });
 

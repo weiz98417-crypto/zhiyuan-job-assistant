@@ -210,7 +210,7 @@ export async function saveDiscoveryJobJD(
 }
 
 export function getAgentEvaluationUrl(jdId: number | string) {
-  return `/agent?jdId=${encodeURIComponent(String(jdId))}&intent=evaluate`;
+  return `/agent?jdId=${encodeURIComponent(String(jdId))}&intent=evaluate&newSession=1`;
 }
 
 function shouldPreferJob(candidate: JobDiscoveryMergeItem, existing: JobDiscoveryMergeItem) {

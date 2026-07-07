@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useRef, useState, useCallback } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { Menu, User, Bot, RotateCcw, XCircle } from "lucide-react";
@@ -166,6 +166,35 @@ type ActiveRunNotice = {
   verifierSummary?: string;
   updatedAt?: string;
 };
+
+const HANDOFF_CONSUMED_STORAGE_KEY = "agent:consumed-handoffs:v1";
+
+function readConsumedHandoffKeys(): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = window.sessionStorage.getItem(HANDOFF_CONSUMED_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function hasConsumedHandoff(key: string): boolean {
+  return readConsumedHandoffKeys().has(key);
+}
+
+function markHandoffConsumed(key: string): void {
+  if (typeof window === "undefined") return;
+  const keys = readConsumedHandoffKeys();
+  keys.add(key);
+  const latest = Array.from(keys).slice(-80);
+  try {
+    window.sessionStorage.setItem(HANDOFF_CONSUMED_STORAGE_KEY, JSON.stringify(latest));
+  } catch {
+    // Storage may be unavailable in private modes; the in-memory ref still guards this mount.
+  }
+}
 
 type LastToolResultInfo = {
   name: string;
@@ -488,6 +517,7 @@ async function persistMessages(messages: AgentMessage[]): Promise<void> {
 /* ── Inner page ── */
 
 function AgentPageInner() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
@@ -516,6 +546,8 @@ function AgentPageInner() {
   const interviewBootstrapRef = useRef<number | null>(null);
   const seenSignalKeys = useRef<Set<string>>(new Set());
   const handoffKeyRef = useRef<string>("");
+  const handoffSessionCreateKeyRef = useRef<string>("");
+  const createdHandoffSessionIdRef = useRef<number | null>(null);
 
   const rafRef = useRef<number>(0);
 
@@ -608,6 +640,46 @@ function AgentPageInner() {
   }, [mounted, searchParams, currentSessionId]);
 
   useEffect(() => {
+    if (!mounted || streaming) return;
+    if (searchParams.get("newSession") !== "1" || searchParams.get("sessionId")) return;
+
+    const jdId = searchParams.get("jdId");
+    const offerId = searchParams.get("offerId");
+    const offerReportId = searchParams.get("offerReportId");
+    if (!jdId && !offerId && !offerReportId) return;
+
+    const createKey = `handoff:${jdId || ""}:${offerId || ""}:${offerReportId || ""}:${searchParams.get("intent") || ""}`;
+    if (handoffSessionCreateKeyRef.current === createKey) return;
+    handoffSessionCreateKeyRef.current = createKey;
+
+    const createDedicatedSession = async () => {
+      const title = offerId
+        ? `Offer评估 #${offerId}`
+        : offerReportId
+          ? `Offer报告 #${offerReportId}`
+          : `JD评估 #${jdId}`;
+      const id = await createSession([], { title });
+      createdHandoffSessionIdRef.current = id;
+      setCurrentSessionId(id);
+      setMessages([]);
+      setStreamText("");
+      setThinkingContent("");
+      streamContentRef.current = "";
+      setSessions(await listSessions());
+
+      const url = new URL(window.location.href);
+      url.searchParams.set("sessionId", String(id));
+      const nextUrl = `${url.pathname}${url.search}${url.hash}`;
+      window.history.replaceState(null, "", nextUrl);
+      router.replace(nextUrl, { scroll: false });
+    };
+
+    createDedicatedSession().catch((error) => {
+      setSessionLoadError(error instanceof Error ? error.message : "Failed to create handoff session");
+    });
+  }, [mounted, streaming, searchParams, router]);
+
+  useEffect(() => {
     if (!mounted || !currentSessionId) return;
     let cancelled = false;
 
@@ -657,15 +729,18 @@ function AgentPageInner() {
   const clearConsumedHandoffParams = useCallback(() => {
     const url = new URL(window.location.href);
     let changed = false;
-    for (const key of ["jdId", "offerId", "offerReportId", "intent"]) {
+    for (const key of ["jdId", "offerId", "offerReportId", "intent", "newSession"]) {
       if (url.searchParams.has(key)) {
         url.searchParams.delete(key);
         changed = true;
       }
     }
     if (!changed) return;
-    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
-  }, []);
+    const nextUrl = `${url.pathname}${url.search}${url.hash}`;
+    window.history.replaceState(null, "", nextUrl);
+    router.replace(nextUrl, { scroll: false });
+    createdHandoffSessionIdRef.current = null;
+  }, [router]);
 
   const handleResumeActiveRun = useCallback(async () => {
     const runId = activeRunNotice?.id;
@@ -2035,12 +2110,19 @@ Rules:
 
   useEffect(() => {
     if (!mounted || streaming || !currentSessionId) return;
+    const requestedSessionId = searchParams.get("sessionId");
+    if (requestedSessionId && Number(requestedSessionId) !== currentSessionId) return;
+    if (searchParams.get("newSession") === "1" && !requestedSessionId && createdHandoffSessionIdRef.current !== currentSessionId) return;
     const jdId = searchParams.get("jdId");
     const intent = searchParams.get("intent");
     if (!jdId || intent !== "evaluate") return;
-    const handoffKey = `${currentSessionId}:${jdId}`;
-    if (handoffKeyRef.current === handoffKey) return;
+    const handoffKey = `${currentSessionId}:jd:evaluate:${jdId}`;
+    if (handoffKeyRef.current === handoffKey || hasConsumedHandoff(handoffKey)) {
+      clearConsumedHandoffParams();
+      return;
+    }
     handoffKeyRef.current = handoffKey;
+    markHandoffConsumed(handoffKey);
     clearConsumedHandoffParams();
     const startEvaluation = async () => {
       let prompt = "";
@@ -2061,37 +2143,54 @@ Rules:
           "不要让我重新粘贴 JD；如果读取失败，请说明读取失败的具体原因。",
         ].join("\n");
       }
-      await sendMessage(prompt, undefined, { hideUserMessage: true, forcedAgentId: "evaluate" });
+      queueMicrotask(() => {
+        sendMessage(prompt, undefined, { hideUserMessage: true, forcedAgentId: "evaluate" }).catch(() => {});
+      });
     };
     startEvaluation().catch(() => {});
   }, [mounted, streaming, currentSessionId, searchParams, sendMessage, clearConsumedHandoffParams]);
 
   useEffect(() => {
     if (!mounted || streaming || !currentSessionId) return;
+    const requestedSessionId = searchParams.get("sessionId");
+    if (requestedSessionId && Number(requestedSessionId) !== currentSessionId) return;
+    if (searchParams.get("newSession") === "1" && !requestedSessionId && createdHandoffSessionIdRef.current !== currentSessionId) return;
     const offerId = searchParams.get("offerId");
     const offerReportId = searchParams.get("offerReportId");
     const intent = searchParams.get("intent");
     if (!offerId && !offerReportId) return;
 
     const handoffKey = `${currentSessionId}:offer:${intent || "open"}:${offerId || ""}:${offerReportId || ""}`;
-    if (handoffKeyRef.current === handoffKey) return;
+    if (handoffKeyRef.current === handoffKey || hasConsumedHandoff(handoffKey)) {
+      clearConsumedHandoffParams();
+      return;
+    }
     handoffKeyRef.current = handoffKey;
+    markHandoffConsumed(handoffKey);
     clearConsumedHandoffParams();
 
     if (offerId && intent === "evaluate") {
-      sendMessage(`请评估 Offer 工作台里的 offerId=${offerId}。直接调用 evaluate_offer，不要让我重新粘贴 Offer。`, undefined, { hideUserMessage: true }).catch(() => {});
+      queueMicrotask(() => {
+        sendMessage(`请评估 Offer 工作台里的 offerId=${offerId}。直接调用 evaluate_offer，不要让我重新粘贴 Offer。`, undefined, { hideUserMessage: true, forcedAgentId: "offer" }).catch(() => {});
+      });
       return;
     }
     if (offerReportId && intent === "negotiate") {
-      sendMessage(`请基于已保存的 Offer 报告 offerReportId=${offerReportId} 生成谈判策略。优先调用 generate_offer_negotiation_strategy，不要重新评估 Offer。`, undefined, { hideUserMessage: true }).catch(() => {});
+      queueMicrotask(() => {
+        sendMessage(`请基于已保存的 Offer 报告 offerReportId=${offerReportId} 生成谈判策略。优先调用 generate_offer_negotiation_strategy，不要重新评估 Offer。`, undefined, { hideUserMessage: true, forcedAgentId: "offer" }).catch(() => {});
+      });
       return;
     }
     if (offerReportId && intent === "ask_hr") {
-      sendMessage(`请基于已保存的 Offer 报告 offerReportId=${offerReportId} 生成 HR 问询清单。优先调用 generate_offer_hr_question_list，不要重新评估 Offer。`, undefined, { hideUserMessage: true }).catch(() => {});
+      queueMicrotask(() => {
+        sendMessage(`请基于已保存的 Offer 报告 offerReportId=${offerReportId} 生成 HR 问询清单。优先调用 generate_offer_hr_question_list，不要重新评估 Offer。`, undefined, { hideUserMessage: true, forcedAgentId: "offer" }).catch(() => {});
+      });
       return;
     }
     if (offerReportId) {
-      sendMessage(`请读取并解释已保存的 Offer 报告 offerReportId=${offerReportId}。优先调用 read_offer_report，不要重新评估 Offer。`, undefined, { hideUserMessage: true }).catch(() => {});
+      queueMicrotask(() => {
+        sendMessage(`请读取并解释已保存的 Offer 报告 offerReportId=${offerReportId}。优先调用 read_offer_report，不要重新评估 Offer。`, undefined, { hideUserMessage: true, forcedAgentId: "offer" }).catch(() => {});
+      });
     }
   }, [mounted, streaming, currentSessionId, searchParams, sendMessage, clearConsumedHandoffParams]);
 

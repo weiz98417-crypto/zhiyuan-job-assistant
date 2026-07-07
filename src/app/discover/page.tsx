@@ -386,7 +386,7 @@ export default function DiscoverPage() {
               : visibleJobs.length > 0 ? `${visibleJobs.length} 个新机会`
               : "企业招聘官网 · 自动发现"}
           </p>
-          <HandwritingTitle as="h1">岗位发现工作台</HandwritingTitle>
+          <HandwritingTitle as="h1">岗位发现</HandwritingTitle>
         </div>
         <div className="flex items-center gap-2">
           <WarmButton variant="ghost" size="sm" onClick={() => setShowScanIntro(!showScanIntro)}>

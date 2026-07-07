@@ -758,6 +758,106 @@ function ReportSummaryCard({ payload, content }: { payload?: Record<string, unkn
   );
 }
 
+type OfferHandoffIntent = "negotiate" | "ask_hr" | "explain";
+
+function buildOfferAgentHandoffUrl(reportId: number, intent: OfferHandoffIntent): string {
+  const params = new URLSearchParams();
+  params.set("newSession", "1");
+  params.set("offerReportId", String(reportId));
+  params.set("intent", intent);
+  return `/agent?${params.toString()}`;
+}
+
+function offerVerdictLabel(verdict: string): string {
+  if (verdict === "accept") return "建议接受";
+  if (verdict === "accept_after_negotiation") return "谈判后接受";
+  if (verdict === "decline") return "建议拒绝";
+  return "谨慎推进";
+}
+
+function OfferResultCard({ payload, success }: { payload: Record<string, unknown>; success: boolean }) {
+  const reportId = Number(payload.reportId || payload.reportNum || 0);
+  const offerId = Number(payload.offerId || 0);
+  const company = textValue(payload.company) || "未知公司";
+  const role = textValue(payload.role) || "未知岗位";
+  const score = Number(payload.overallScore || 0);
+  const verdict = textValue(payload.verdict);
+  const type = textValue(payload.type);
+  const isReadBackVerified = payload.readBackVerified === true;
+  const redFlags = Array.isArray(payload.redFlags) ? payload.redFlags.map(textValue).filter(Boolean).slice(0, 3) : [];
+  const missingInfo = Array.isArray(payload.missingInfo) ? payload.missingInfo.map(textValue).filter(Boolean).slice(0, 3) : [];
+  const cardTitle = type === "offer_report" ? "Offer 报告已读取" : "Offer 评估完成";
+
+  return (
+    <div className="max-w-[94%] min-w-0">
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-divider)] bg-[var(--color-surface)]"
+      >
+        <div className="flex flex-wrap items-center gap-2 border-b border-[var(--color-divider)] bg-[var(--color-bg)] px-4 py-3">
+          {success ? <CheckCircle size={16} className="text-emerald-500" /> : <X size={16} className="text-red-500" />}
+          <span className="text-sm font-medium text-[var(--color-text)]">{cardTitle}</span>
+          {reportId > 0 && <span className="rounded-[var(--radius-sm)] bg-[var(--color-surface)] px-2 py-0.5 text-[11px] text-[var(--color-muted)]">报告 #{reportId}</span>}
+          {offerId > 0 && <span className="rounded-[var(--radius-sm)] bg-[var(--color-surface)] px-2 py-0.5 text-[11px] text-[var(--color-muted)]">Offer #{offerId}</span>}
+          <span className={`ml-auto text-xs ${success ? "text-emerald-600" : "text-red-500"}`}>{success ? "完成" : "失败"}</span>
+        </div>
+
+        <div className="space-y-3 px-4 py-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="min-w-0 break-words text-sm font-medium text-[var(--color-text)]">{company} — {role}</span>
+            {score > 0 && <ScoreBadge score={score} size="sm" />}
+            {verdict && <span className="rounded-[var(--radius-sm)] bg-[var(--color-primary-muted)] px-2 py-0.5 text-xs text-[var(--color-primary)]">{offerVerdictLabel(verdict)}</span>}
+          </div>
+
+          {(redFlags.length > 0 || missingInfo.length > 0 || isReadBackVerified) && (
+            <div className="grid gap-2 md:grid-cols-2">
+              <div className="rounded-[var(--radius-sm)] border border-[var(--color-divider)] bg-[var(--color-bg)] px-3 py-2">
+                <div className="mb-1 text-[11px] font-medium text-[var(--color-muted)]">主要风险</div>
+                <div className="space-y-1 text-xs text-[var(--color-text-soft)]">
+                  {redFlags.length ? redFlags.map((item, index) => <div key={`offer-red-${index}`} className="break-words">- {item}</div>) : <div>暂无明显风险</div>}
+                </div>
+              </div>
+              <div className="rounded-[var(--radius-sm)] border border-[var(--color-divider)] bg-[var(--color-bg)] px-3 py-2">
+                <div className="mb-1 text-[11px] font-medium text-[var(--color-muted)]">待确认信息</div>
+                <div className="space-y-1 text-xs text-[var(--color-text-soft)]">
+                  {missingInfo.length ? missingInfo.map((item, index) => <div key={`offer-missing-${index}`} className="break-words">- {item}</div>) : <div>{isReadBackVerified ? "报告已保存并校验" : "暂无补充项"}</div>}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {reportId > 0 && (
+            <div className="flex flex-wrap gap-2">
+              <a
+                href={buildOfferAgentHandoffUrl(reportId, "explain")}
+                className="inline-flex items-center gap-1 rounded-[var(--radius-sm)] border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-text)] hover:bg-[var(--color-surface-hover)]"
+              >
+                <BookOpen size={13} />
+                <span>解释报告</span>
+              </a>
+              <a
+                href={buildOfferAgentHandoffUrl(reportId, "negotiate")}
+                className="inline-flex items-center gap-1 rounded-[var(--radius-sm)] bg-[var(--color-primary-muted)] px-3 py-1.5 text-xs font-medium text-[var(--color-primary)] hover:opacity-90"
+              >
+                <FileText size={13} />
+                <span>谈判策略</span>
+              </a>
+              <a
+                href={buildOfferAgentHandoffUrl(reportId, "ask_hr")}
+                className="inline-flex items-center gap-1 rounded-[var(--radius-sm)] bg-[var(--color-primary)] px-3 py-1.5 text-xs font-medium text-white hover:opacity-90"
+              >
+                <User size={13} />
+                <span>HR 问询</span>
+              </a>
+            </div>
+          )}
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
 const ASSISTANT_PROCESS_PATTERNS = [
   /(^|\n)\s*好的[，,。]?\s*(?:我先|先|我会先|这就|现在先)[^。！？\n]*(?:[。！？]|\n)/g,
   /(^|\n)\s*好的[，,。]?\s*(?:你的简历刚才被截断|简历被截断)[^。！？\n]*(?:[。！？]|\n)/g,
@@ -1217,7 +1317,6 @@ function JobDiscoveryRunCard({
   useEffect(() => {
     if (!scanId) return;
     let canceled = false;
-    let interval: ReturnType<typeof setInterval> | undefined;
 
     const loadJobs = async () => {
       try {
@@ -1251,8 +1350,8 @@ function JobDiscoveryRunCard({
       }
     };
 
+    const interval = setInterval(refresh, 3000);
     refresh();
-    interval = setInterval(refresh, 3000);
     return () => {
       canceled = true;
       if (interval) clearInterval(interval);
@@ -1285,7 +1384,7 @@ function JobDiscoveryRunCard({
             {pollError && <div className="text-xs text-amber-600">{pollError}</div>}
             <a href={scanId ? `/discover?scanId=${encodeURIComponent(scanId)}` : "/discover"}
               className="inline-flex items-center gap-1 text-xs text-[var(--color-primary)] hover:underline">
-              去岗位发现工作台查看全部
+              去岗位发现查看全部
               <ExternalLink size={12} />
             </a>
           </div>
@@ -1543,7 +1642,7 @@ function JobDiscoveryBatchCard({ payload }: { payload: Record<string, unknown> }
           {visible.map((job, index) => <JobDiscoveryCard key={`${textValue(job.id)}-${index}`} job={job} />)}
           {remaining > 0 && (
             <a href="/discover" className="inline-flex items-center gap-1 text-xs text-[var(--color-primary)] hover:underline">
-              还有 {remaining} 个结果，去岗位发现工作台查看全部
+              还有 {remaining} 个结果，去岗位发现查看全部
               <ExternalLink size={12} />
             </a>
           )}
@@ -1683,6 +1782,9 @@ function MessageBubble({
     }
     if (uiPayload?.type === "job_discovery_error") {
       return <JobDiscoveryErrorCard payload={uiPayload} />;
+    }
+    if (uiPayload?.type === "offer_evaluation" || uiPayload?.type === "offer_report") {
+      return <OfferResultCard payload={uiPayload} success={toolSuccess} />;
     }
 
     // Report blocks: uiPayload or legacy text

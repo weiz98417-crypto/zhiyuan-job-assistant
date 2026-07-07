@@ -274,17 +274,43 @@ describe("Offer Agent routing and tool contracts", () => {
 
   it("Offer workspace source keeps report, stale badge, and Agent handoff boundaries", () => {
     const source = readFileSync(path.join(process.cwd(), "src/app/compare/page.tsx"), "utf-8");
+    const agentPage = readFileSync(path.join(process.cwd(), "src/app/agent/page.tsx"), "utf-8");
 
     expect(source).toContain("/api/offers");
     expect(source).toContain("/api/offer-reports");
-    expect(source).toContain("intent=evaluate");
-    expect(source).toContain("intent=negotiate");
-    expect(source).toContain("intent=ask_hr");
+    expect(source).toContain("createOfferAgentSession");
+    expect(source).toContain("createSession([], { title })");
+    expect(source).toContain('newSession: "1"');
+    expect(source).toContain("sessionId: String(sessionId)");
+    expect(source).toContain('intent: "evaluate"');
+    expect(source).toContain('intent: "negotiate"');
+    expect(source).toContain('intent: "ask_hr"');
+    expect(agentPage).toContain("createdHandoffSessionIdRef");
+    expect(agentPage).toContain('searchParams.get("newSession") === "1"');
+    expect(agentPage).toContain('forcedAgentId: "offer"');
+    expect(agentPage).toContain("HANDOFF_CONSUMED_STORAGE_KEY");
+    expect(agentPage).toContain("hasConsumedHandoff(handoffKey)");
+    expect(agentPage).toContain("markHandoffConsumed(handoffKey)");
+    expect(agentPage).toContain("router.replace(nextUrl, { scroll: false })");
     expect(source).toContain("stale");
     expect(source).toContain("statusForOffer");
     expect(source).toContain("reportForOffer");
     expect(source).toContain("offerForComparison");
     expect(source).toContain("编辑 Offer");
     expect(source).toContain("method: editingOfferId ? \"PUT\" : \"POST\"");
+  });
+
+  it("Offer result cards hand off follow-up actions to a fresh Offer Agent session", () => {
+    const source = readFileSync(path.join(process.cwd(), "src/components/agent/AgentChat.tsx"), "utf-8");
+
+    expect(source).toContain("function buildOfferAgentHandoffUrl");
+    expect(source).toContain("function OfferResultCard");
+    expect(source).toContain('uiPayload?.type === "offer_evaluation" || uiPayload?.type === "offer_report"');
+    expect(source).toContain('params.set("newSession", "1")');
+    expect(source).toContain('params.set("offerReportId", String(reportId))');
+    expect(source).toContain('buildOfferAgentHandoffUrl(reportId, "negotiate")');
+    expect(source).toContain('buildOfferAgentHandoffUrl(reportId, "ask_hr")');
+    expect(source).toContain(">谈判策略<");
+    expect(source).toContain(">HR 问询<");
   });
 });

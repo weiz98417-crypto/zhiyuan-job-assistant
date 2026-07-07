@@ -111,11 +111,13 @@ describe("job discovery agent evals - baseline", () => {
     const route = source("src/app/api/scan/jobs/[id]/jd/route.ts");
     const discover = source("src/app/discover/page.tsx");
     const chat = source("src/components/agent/AgentChat.tsx");
+    const helper = source("src/lib/job-discovery.ts");
 
     expect(route).toContain("attachJdToScanJobForUser");
     expect(route).toContain('body.evaluate ? "evaluating" : "saved"');
     expect(discover).toContain("getAgentEvaluationUrl(jdId)");
     expect(chat).toContain("getAgentEvaluationUrl(result.jdId)");
+    expect(helper).toContain("&newSession=1");
   });
 
   it("B7 fallback includes BOSS and domestic search-index leads", () => {

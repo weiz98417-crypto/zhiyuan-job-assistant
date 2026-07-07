@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Bot, CheckSquare, FileText, HelpCircle, Pencil, Plus, Scale, X } from "lucide-react";
 import { HandwritingTitle, PaperCard, ScoreBadge, WarmButton } from "@/components/design";
+import { createSession } from "@/lib/agent/sessions";
 import type { Offer, OfferEvaluationModule, OfferVerdict } from "@/types";
 
 type OfferReportRow = {
@@ -298,22 +299,43 @@ export default function ComparePage() {
     });
   }
 
-  function goEvaluate(offer: Offer) {
+  async function createOfferAgentSession(title: string, params: Record<string, string | number | undefined>) {
+    const sessionId = await createSession([], { title });
+    const search = new URLSearchParams({ sessionId: String(sessionId), newSession: "1" });
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== "") search.set(key, String(value));
+    }
+    window.location.assign(`/agent?${search.toString()}`);
+  }
+
+  async function goEvaluate(offer: Offer) {
     if (offer.id && offer.id > 0) {
-      window.location.href = `/agent?offerId=${offer.id}&intent=evaluate`;
+      await createOfferAgentSession(`Offer评估：${offer.company} ${offer.role}`, {
+        offerId: offer.id,
+        intent: "evaluate",
+      });
       return;
     }
     if (offer.latestReportId) {
-      window.location.href = `/agent?offerReportId=${offer.latestReportId}&intent=explain`;
+      await createOfferAgentSession(`Offer解读：${offer.company} ${offer.role}`, {
+        offerReportId: offer.latestReportId,
+        intent: "explain",
+      });
     }
   }
 
-  function goNegotiation(reportId: number) {
-    window.location.href = `/agent?offerReportId=${reportId}&intent=negotiate`;
+  async function goNegotiation(reportId: number) {
+    await createOfferAgentSession(`Offer谈判：报告 #${reportId}`, {
+      offerReportId: reportId,
+      intent: "negotiate",
+    });
   }
 
-  function goHrQuestions(reportId: number) {
-    window.location.href = `/agent?offerReportId=${reportId}&intent=ask_hr`;
+  async function goHrQuestions(reportId: number) {
+    await createOfferAgentSession(`Offer HR问题：报告 #${reportId}`, {
+      offerReportId: reportId,
+      intent: "ask_hr",
+    });
   }
 
   function startAddOffer() {
