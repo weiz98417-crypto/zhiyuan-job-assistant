@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { vi } from "vitest";
 import {
   createAgentTaskContract,
   inferCompletedCriteriaFromToolResult,
@@ -15,7 +16,8 @@ import {
   resolveToolEffectForCall,
 } from "@/lib/agent/tool-governance";
 import { requiresReadBackVerification } from "@/lib/agent/tools/readback-verification";
-import { getAllTools } from "@/lib/agent/tools";
+import { enforceReadBackSuccessGate } from "@/lib/agent/tools/readback-verification";
+import { executeTool, getAllTools } from "@/lib/agent/tools";
 
 describe("agent tool governance", () => {
   it("classifies every registered tool with governance metadata", () => {
@@ -70,6 +72,70 @@ describe("agent tool governance", () => {
     for (const toolName of governedReadBackTools) {
       expect(requiresReadBackVerification(toolName)).toBe(true);
     }
+  });
+
+  it("does not gate interview score delivery on optional memory write-back", () => {
+    expect(getToolGovernance("score_interview_answer")).toMatchObject({
+      effect: "guide",
+      requiresReadBack: false,
+    });
+    expect(requiresReadBackVerification("score_interview_answer")).toBe(false);
+
+    const result = enforceReadBackSuccessGate("score_interview_answer", {
+      success: true,
+      data: {
+        overall: 2,
+        dimensions: { structure: 1.5, specificity: 1.5 },
+        suggestions: ["Use a structured example before answering."],
+      },
+      errorCategory: "ok",
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.error).toBeUndefined();
+  });
+
+  it("allows the interview score tool to return a score when memory write-back is unavailable", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/api/agent/memory-context")) {
+        return new Response(JSON.stringify({ success: true, data: { llmSummary: "" } }), { status: 200 });
+      }
+      if (url.includes("/api/agent/coach/score-answer")) {
+        return new Response(JSON.stringify({
+          success: true,
+          data: {
+            overall: 1.2,
+            dimensions: { structure: 1, specificity: 1, highlight: 1, timing: 2 },
+            suggestions: ["When you do not know, state assumptions and outline a task chain."],
+          },
+        }), { status: 200 });
+      }
+      if (url.includes("/api/agent/memory-writeback")) {
+        return new Response(JSON.stringify({ success: false, error: "Unauthorized" }), { status: 401 });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    const result = await executeTool("score_interview_answer", {
+      question: "How would you structure a vague AI analysis request?",
+      answer: "I do not know.",
+      mode: "technical",
+      context: "JD asks for demand structuring.",
+    });
+
+    expect(fetchMock).toHaveBeenCalled();
+    expect(result.success).toBe(true);
+    expect(result.error).toBeUndefined();
+    expect(result.data).toMatchObject({
+      overall: 1.2,
+      memoryWriteback: { success: false, readBackVerified: false },
+      readBackVerified: false,
+    });
+    expect(result.uiPayload).toMatchObject({
+      type: "interview_score",
+      readBackVerified: false,
+    });
   });
 
   it("maps self-positioning to guidance instead of profile write", () => {

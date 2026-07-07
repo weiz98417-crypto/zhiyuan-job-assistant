@@ -190,10 +190,10 @@ export const ACTION_TOOL_RISK_AUDIT: ActionToolRiskRecord[] = [
   },
   {
     toolName: "score_interview_answer",
-    risk: "high-risk-write",
-    targets: ["memory"],
-    summary: "Scores an answer and writes candidate interview observations to memory.",
-    requiresVerifiedWrite: true,
+    risk: "read-only",
+    targets: [],
+    summary: "Scores an interview answer; optional candidate memory writeback is best-effort and self-verifying.",
+    requiresVerifiedWrite: false,
   },
   {
     toolName: "self_positioning",

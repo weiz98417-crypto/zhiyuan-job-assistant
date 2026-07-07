@@ -556,13 +556,13 @@ export const TOOL_GOVERNANCE_REGISTRY: Record<string, ToolGovernance> = {
   }),
   score_interview_answer: meta({
     name: "score_interview_answer",
-    effect: "high_risk_write",
+    effect: "guide",
     allowedTaskTypes: ["interview_coaching"],
     agentAllowlist: ["interview"],
     documentTypes: ["session", "memory"],
     requiresUserConfirmation: false,
-    requiresReadBack: true,
-    successContract: "Score answer against active session and verify stored observation if persisted.",
+    requiresReadBack: false,
+    successContract: "Score answer against active session; optional memory writeback must not block score delivery.",
     userVisibleNameZh: "面试回答评分",
   }),
   search_applications: meta({

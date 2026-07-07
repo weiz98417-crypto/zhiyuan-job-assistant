@@ -133,7 +133,7 @@ async function scoreHandler(params: Record<string, unknown>): Promise<ToolResult
     }
 
     const score = json.data as AnswerScore;
-    await writeCandidateAgentMemory({
+    const memoryWriteback = await writeCandidateAgentMemory({
       memoryType: "interview_observation",
       canonicalText: `Interview answer scored ${score.overall || 0}/5 for question: ${question.slice(0, 120)}.`,
       sourceType: "interview_answer",
@@ -145,7 +145,22 @@ async function scoreHandler(params: Record<string, unknown>): Promise<ToolResult
       metadata: { question, mode, suggestions: score.suggestions || [] },
     });
 
-    return { success: true, data: { ...score, memoryContext } };
+    return {
+      success: true,
+      data: {
+        ...score,
+        memoryContext,
+        memoryWriteback,
+        readBackVerified: memoryWriteback.readBackVerified === true,
+      },
+      uiPayload: {
+        type: "interview_score",
+        ...score,
+        memoryWriteback,
+        readBackVerified: memoryWriteback.readBackVerified === true,
+      },
+      rawData: { score, memoryContext, memoryWriteback },
+    };
   } catch (err) {
     return { success: false, data: null, error: `评分失败: ${err instanceof Error ? err.message : "未知错误"}` };
   }
