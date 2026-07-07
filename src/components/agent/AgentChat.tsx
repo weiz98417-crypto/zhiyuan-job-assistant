@@ -1397,6 +1397,9 @@ function JobDiscoveryCard({ job }: { job: Record<string, unknown> }) {
   const location = textValue(job.location);
   const url = textValue(job.url);
   const snippet = textValue(job.jdSnippet || job.jd_snippet || job.snippet);
+  const sourceName = textValue(job.sourceName || job.source_name);
+  const verificationStatus = textValue(job.verificationStatus || job.verification_status);
+  const matchConfidence = textValue(job.matchConfidence || job.match_confidence);
   const [open, setOpen] = useState(false);
   const [manualBody, setManualBody] = useState(snippet);
   const [detailError, setDetailError] = useState("");
@@ -1459,7 +1462,13 @@ function JobDiscoveryCard({ job }: { job: Record<string, unknown> }) {
       <div className="min-w-0">
         <div className="text-[11px] font-medium uppercase text-[var(--color-muted)]">{company}</div>
         <div className="mt-1 line-clamp-2 text-sm font-medium text-[var(--color-text)]">{title}</div>
-        {location && <div className="mt-1 inline-flex items-center gap-1 text-xs text-[var(--color-muted)]"><MapPin size={11} />{location}</div>}
+        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-[var(--color-muted)]">
+          {location && <span className="inline-flex items-center gap-1"><MapPin size={11} />{location}</span>}
+          {sourceName && <span className="rounded-full border border-sky-100 bg-sky-50 px-2 py-0.5 text-sky-700">来源：{sourceName}</span>}
+          {verificationStatus === "lead" && <span className="rounded-full border border-amber-100 bg-amber-50 px-2 py-0.5 text-amber-700">待校验线索</span>}
+          {verificationStatus === "blocked_detail" && <span className="rounded-full border border-red-100 bg-red-50 px-2 py-0.5 text-red-700">详情受阻</span>}
+          {matchConfidence && matchConfidence !== "medium" && <span className="rounded-full border border-[var(--color-divider)] bg-[var(--color-surface)] px-2 py-0.5">匹配：{matchConfidence}</span>}
+        </div>
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <button type="button" onClick={openJD}

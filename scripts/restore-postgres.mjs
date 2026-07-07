@@ -32,6 +32,7 @@ const PREFERRED_RESTORE_ORDER = [
   "memory_status_transitions",
   "memory_chunks",
   "scan_queue",
+  "scan_source_runs",
   "scan_jobs",
   "news_cache",
 ];

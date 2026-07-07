@@ -38,6 +38,10 @@ interface JobItem {
   department: string;
   jd_id?: number;
   last_error?: string;
+  source_name?: string;
+  source_type?: string;
+  verification_status?: string;
+  match_confidence?: string;
   status: "new" | "viewed" | "saved" | "evaluating" | "evaluated" | "dismissed";
   discovered_at: string;
 }
@@ -49,7 +53,19 @@ interface ScanStatus {
   companiesTotal: number;
   jobsFound: number;
   jobsNew: number;
-  companies: { name: string; status: string; jobsFound: number; error?: string; level?: string | null }[];
+  companies: {
+    name: string;
+    status: string;
+    sourceType?: string;
+    jobsFound: number;
+    attempted?: number;
+    parsed?: number;
+    matched?: number;
+    inserted?: number;
+    deduped?: number;
+    error?: string;
+    level?: string | null;
+  }[];
   titleFilter?: { positive: string[]; negative: string[] };
   locationFilter?: string;
   maxResults?: number;
@@ -678,6 +694,26 @@ export default function DiscoverPage() {
                         {job.location && <span className="flex items-center gap-1"><MapPin size={11} />{job.location}</span>}
                         {job.department && <span className="flex items-center gap-1"><Building2 size={11} />{job.department}</span>}
                         <span className="flex items-center gap-1"><Clock size={11} />{timeAgo(job.discovered_at)}</span>
+                        {job.source_name && (
+                          <span className="rounded-full bg-sky-50 px-2 py-0.5 text-sky-700 border border-sky-100">
+                            来源：{job.source_name}
+                          </span>
+                        )}
+                        {job.verification_status === "lead" && (
+                          <span className="rounded-full bg-amber-50 px-2 py-0.5 text-amber-700 border border-amber-100">
+                            待校验线索
+                          </span>
+                        )}
+                        {job.verification_status === "blocked_detail" && (
+                          <span className="rounded-full bg-red-50 px-2 py-0.5 text-red-700 border border-red-100">
+                            详情受阻
+                          </span>
+                        )}
+                        {job.match_confidence && job.match_confidence !== "medium" && (
+                          <span className="rounded-full bg-[var(--color-bg)] px-2 py-0.5 text-[var(--color-muted)] border border-[var(--color-border)]">
+                            匹配：{job.match_confidence}
+                          </span>
+                        )}
                         {(weakDuplicateHintCounts.get(jobFingerprint(job)) || 0) > 0 && (
                           <span className="rounded-full bg-amber-50 px-2 py-0.5 text-amber-700 border border-amber-100">
                             可能重复 +{weakDuplicateHintCounts.get(jobFingerprint(job))}
@@ -722,6 +758,35 @@ export default function DiscoverPage() {
       {/* ── Tab: Sources ────────────────────────────────────────── */}
       {activeTab === "sources" && (
         <div className="space-y-3">
+          {scanStatus?.companies?.length ? (
+            <div className="grid gap-2 sm:grid-cols-2">
+              {scanStatus.companies.map((source) => (
+                <PaperCard key={`${source.name}-${source.sourceType || ""}`} padding="sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-[var(--color-text)] truncate">{source.name}</p>
+                      <p className="text-xs text-[var(--color-muted)]">{source.sourceType || "source"} · {source.status}</p>
+                    </div>
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${
+                      source.status === "done" ? "bg-emerald-50 text-emerald-700 border border-emerald-100" :
+                      source.status === "blocked" ? "bg-amber-50 text-amber-700 border border-amber-100" :
+                      source.status === "failed" ? "bg-red-50 text-red-700 border border-red-100" :
+                      "bg-[var(--color-bg)] text-[var(--color-muted)] border border-[var(--color-border)]"
+                    }`}>
+                      {source.status}
+                    </span>
+                  </div>
+                  <div className="mt-2 grid grid-cols-4 gap-1 text-center text-xs">
+                    <div className="rounded bg-[var(--color-bg)] py-1"><p className="font-medium">{source.parsed ?? 0}</p><p className="text-[var(--color-muted)]">解析</p></div>
+                    <div className="rounded bg-[var(--color-bg)] py-1"><p className="font-medium">{source.matched ?? source.jobsFound ?? 0}</p><p className="text-[var(--color-muted)]">匹配</p></div>
+                    <div className="rounded bg-[var(--color-bg)] py-1"><p className="font-medium">{source.inserted ?? source.jobsFound ?? 0}</p><p className="text-[var(--color-muted)]">新增</p></div>
+                    <div className="rounded bg-[var(--color-bg)] py-1"><p className="font-medium">{source.deduped ?? 0}</p><p className="text-[var(--color-muted)]">去重</p></div>
+                  </div>
+                  {source.error && <p className="mt-2 text-xs text-amber-700">{source.error}</p>}
+                </PaperCard>
+              ))}
+            </div>
+          ) : null}
           <p className="text-sm text-[var(--color-muted)]">国内目标公司 · 官网优先 · 平台补扫</p>
           <div className="grid gap-2 sm:grid-cols-2">
             {[

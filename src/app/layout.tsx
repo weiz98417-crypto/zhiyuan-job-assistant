@@ -1,15 +1,7 @@
 import type { Metadata } from "next";
-import { Noto_Sans_SC } from "next/font/google";
 import { ThemeProvider } from "@/components/providers/ThemeProvider";
 import AuthGate from "@/components/shell/AuthGate";
 import "./globals.css";
-
-const notoSansSC = Noto_Sans_SC({
-  weight: ["400", "500", "700"],
-  subsets: ["latin", "latin-ext"],
-  display: "swap",
-  variable: "--font-body",
-});
 
 export const metadata: Metadata = {
   title: "筝筝纸鸢 — AI 求职助手",
@@ -24,7 +16,7 @@ export default function RootLayout({
   return (
     <html
       lang="zh-CN"
-      className={`${notoSansSC.variable} h-full antialiased`}
+      className="h-full antialiased"
       suppressHydrationWarning
     >
       <head>

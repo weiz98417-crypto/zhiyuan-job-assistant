@@ -17,7 +17,7 @@
 import Database from 'better-sqlite3';
 import pg from 'pg';
 import { randomUUID } from 'crypto';
-import { mkdirSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { chromium } from 'playwright';
@@ -25,6 +25,7 @@ import { chromium } from 'playwright';
 import { getAdapter } from '../lib/scan/adapters/router.mjs';
 import { loadPortals, loadTitleFilter, applyTitleFilter, applyLocationFilter, applyDomesticLocationGuard, makeDedupKey } from '../lib/scan/orchestrator.mjs';
 import { scanJobBoards } from '../lib/scan/job-board-fallback.mjs';
+import { classifyJobMatch } from '../lib/scan/query-expansion.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '..');
@@ -41,6 +42,21 @@ const COMPANY_FILTER = (() => {
 })();
 const COMPANY_TIMEOUT_MS = Number(process.env.SCAN_COMPANY_TIMEOUT_MS || 20_000);
 const SCAN_MIN_RESULTS_BEFORE_FALLBACK = Math.min(Math.max(Number(process.env.SCAN_MIN_RESULTS_BEFORE_FALLBACK || 3), 0), 50);
+const SCAN_BROWSER_STORAGE_STATE = (process.env.SCAN_BROWSER_STORAGE_STATE || '').trim();
+const SCAN_BROWSER_COOKIES_JSON = (process.env.SCAN_BROWSER_COOKIES_JSON || '').trim();
+
+const HANGZHOU_SEED_COMPANIES = [
+  { name: '同花顺', careers_url: 'https://job.10jqka.com.cn/', ats_type: 'custom', limits: { max_jobs: 80 } },
+  { name: '恒生电子', careers_url: 'https://www.hundsun.com/about/join', ats_type: 'custom', limits: { max_jobs: 80 } },
+  { name: '海康威视', careers_url: 'https://campus.hikvision.com/society', ats_type: 'custom', limits: { max_jobs: 80 } },
+  { name: '大华股份', careers_url: 'https://job.dahuatech.com/', ats_type: 'custom', limits: { max_jobs: 80 } },
+  { name: '涂鸦智能', careers_url: 'https://www.tuya.com/cn/careers', ats_type: 'custom', limits: { max_jobs: 80 } },
+  { name: '群核科技', careers_url: 'https://www.kujiale.com/about/job', ats_type: 'custom', limits: { max_jobs: 80 } },
+  { name: '宇树科技', careers_url: 'https://www.unitree.com/cn/careers', ats_type: 'custom', limits: { max_jobs: 80 } },
+  { name: 'Rokid', careers_url: 'https://www.rokid.com/career', ats_type: 'custom', limits: { max_jobs: 80 } },
+  { name: 'PingPong', careers_url: 'https://www.pingpongx.com/careers', ats_type: 'custom', limits: { max_jobs: 80 } },
+  { name: '连连数字', careers_url: 'https://www.lianlian.com/cn/careers', ats_type: 'custom', limits: { max_jobs: 80 } },
+];
 
 function log(msg) {
   const ts = new Date().toISOString();
@@ -71,6 +87,140 @@ function parseJsonArray(value) {
   }
 }
 
+function resolveBrowserStorageState() {
+  if (!SCAN_BROWSER_STORAGE_STATE) return undefined;
+  const storagePath = path.isAbsolute(SCAN_BROWSER_STORAGE_STATE)
+    ? SCAN_BROWSER_STORAGE_STATE
+    : path.join(PROJECT_ROOT, SCAN_BROWSER_STORAGE_STATE);
+  if (!existsSync(storagePath)) {
+    log(`WARNING: SCAN_BROWSER_STORAGE_STATE not found: ${storagePath}`);
+    return undefined;
+  }
+  return storagePath;
+}
+
+function parseBrowserCookies() {
+  if (!SCAN_BROWSER_COOKIES_JSON) return [];
+  try {
+    const parsed = JSON.parse(SCAN_BROWSER_COOKIES_JSON);
+    if (!Array.isArray(parsed)) {
+      log('WARNING: SCAN_BROWSER_COOKIES_JSON must be a Playwright cookie array');
+      return [];
+    }
+    return parsed.filter((cookie) => cookie && typeof cookie === 'object' && cookie.name && cookie.value && (cookie.domain || cookie.url));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    log(`WARNING: failed to parse SCAN_BROWSER_COOKIES_JSON: ${message}`);
+    return [];
+  }
+}
+
+function isHangzhouScope(scanScope) {
+  return String(scanScope?.location || '').includes('杭州');
+}
+
+function withHangzhouSeeds(companies, scanScope) {
+  if (!isHangzhouScope(scanScope)) return companies;
+  const existing = new Set(companies.map((company) => company.name));
+  const seeds = HANGZHOU_SEED_COMPANIES.filter((company) => !existing.has(company.name));
+  return [...companies, ...seeds];
+}
+
+function sourceNameForJob(job, fallback) {
+  return job.source_name || fallback || job.company || 'unknown';
+}
+
+function sourceTypeForCompany(company) {
+  return company.ats_type && company.ats_type !== 'custom' ? `ats_${company.ats_type}` : 'company_portal';
+}
+
+function isBlockedMessage(message) {
+  return /验证码|安全验证|访问异常|访问过于频繁|行为异常|blocked_by_captcha|captcha|verify|robot|CF_APP_WAF/i.test(String(message || ''));
+}
+
+function verificationStatusForJob(job) {
+  return job.verification_status || (isBlockedMessage(job.jd_snippet) ? 'blocked_detail' : 'verified_jd');
+}
+
+function cleanSnippet(job) {
+  return isBlockedMessage(job.jd_snippet) ? '' : (job.jd_snippet || '');
+}
+
+function metadataJson(value) {
+  try { return JSON.stringify(value || {}); } catch { return '{}'; }
+}
+
+function ensureSqliteColumns(db, table, migrations) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((col) => col.name);
+  for (const [name, sql] of migrations) {
+    if (!cols.includes(name)) db.exec(sql);
+  }
+}
+
+function ensureSqliteScanObservability(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS scan_source_runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      scan_id TEXT NOT NULL REFERENCES scan_queue(id),
+      user_id TEXT NOT NULL REFERENCES users(id),
+      source_name TEXT NOT NULL,
+      source_type TEXT NOT NULL DEFAULT 'company_portal',
+      status TEXT NOT NULL DEFAULT 'pending',
+      attempted INTEGER NOT NULL DEFAULT 0,
+      parsed INTEGER NOT NULL DEFAULT 0,
+      matched INTEGER NOT NULL DEFAULT 0,
+      inserted INTEGER NOT NULL DEFAULT 0,
+      deduped INTEGER NOT NULL DEFAULT 0,
+      blocked_reason TEXT NOT NULL DEFAULT '',
+      error TEXT NOT NULL DEFAULT '',
+      metrics_json TEXT NOT NULL DEFAULT '{}',
+      started_at TEXT DEFAULT (datetime('now')),
+      finished_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_scan_source_runs_scan ON scan_source_runs(scan_id, source_name);
+    CREATE INDEX IF NOT EXISTS idx_scan_source_runs_user ON scan_source_runs(user_id, status);
+  `);
+  ensureSqliteColumns(db, 'scan_jobs', [
+    ['source_name', "ALTER TABLE scan_jobs ADD COLUMN source_name TEXT NOT NULL DEFAULT ''"],
+    ['source_type', "ALTER TABLE scan_jobs ADD COLUMN source_type TEXT NOT NULL DEFAULT ''"],
+    ['source_url', "ALTER TABLE scan_jobs ADD COLUMN source_url TEXT NOT NULL DEFAULT ''"],
+    ['verification_status', "ALTER TABLE scan_jobs ADD COLUMN verification_status TEXT NOT NULL DEFAULT 'verified_jd'"],
+    ['match_confidence', "ALTER TABLE scan_jobs ADD COLUMN match_confidence TEXT NOT NULL DEFAULT 'medium'"],
+    ['source_metadata_json', "ALTER TABLE scan_jobs ADD COLUMN source_metadata_json TEXT NOT NULL DEFAULT '{}'"],
+  ]);
+}
+
+async function ensurePostgresScanObservability(pool) {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS scan_source_runs (
+      id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+      scan_id TEXT NOT NULL REFERENCES scan_queue(id),
+      user_id TEXT NOT NULL REFERENCES users(id),
+      source_name TEXT NOT NULL,
+      source_type TEXT NOT NULL DEFAULT 'company_portal',
+      status TEXT NOT NULL DEFAULT 'pending',
+      attempted INTEGER NOT NULL DEFAULT 0,
+      parsed INTEGER NOT NULL DEFAULT 0,
+      matched INTEGER NOT NULL DEFAULT 0,
+      inserted INTEGER NOT NULL DEFAULT 0,
+      deduped INTEGER NOT NULL DEFAULT 0,
+      blocked_reason TEXT NOT NULL DEFAULT '',
+      error TEXT NOT NULL DEFAULT '',
+      metrics_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      started_at TIMESTAMPTZ DEFAULT now(),
+      finished_at TIMESTAMPTZ
+    );
+    CREATE INDEX IF NOT EXISTS idx_scan_source_runs_scan ON scan_source_runs(scan_id, source_name);
+    CREATE INDEX IF NOT EXISTS idx_scan_source_runs_user ON scan_source_runs(user_id, status);
+    ALTER TABLE scan_jobs ADD COLUMN IF NOT EXISTS source_name TEXT NOT NULL DEFAULT '';
+    ALTER TABLE scan_jobs ADD COLUMN IF NOT EXISTS source_type TEXT NOT NULL DEFAULT '';
+    ALTER TABLE scan_jobs ADD COLUMN IF NOT EXISTS source_url TEXT NOT NULL DEFAULT '';
+    ALTER TABLE scan_jobs ADD COLUMN IF NOT EXISTS verification_status TEXT NOT NULL DEFAULT 'verified_jd';
+    ALTER TABLE scan_jobs ADD COLUMN IF NOT EXISTS match_confidence TEXT NOT NULL DEFAULT 'medium';
+    ALTER TABLE scan_jobs ADD COLUMN IF NOT EXISTS source_metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb;
+  `);
+}
+
 function buildZeroResultStrategyIssue(titleFilter, scanScope) {
   const keywords = (titleFilter.positive || []).join('、') || '岗位关键词';
   const location = scanScope.location || '不限城市';
@@ -94,11 +244,13 @@ function createSqliteScanStore() {
   const db = new Database(DB_PATH);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
+  ensureSqliteScanObservability(db);
 
   const insertStmt = db.prepare(`
     INSERT OR IGNORE INTO scan_jobs
-      (scan_id, user_id, company, title, url, location, department, jd_snippet, status, dedup_key)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'new', ?)
+      (scan_id, user_id, company, title, url, location, department, jd_snippet, status, dedup_key,
+       source_name, source_type, source_url, verification_status, match_confidence, source_metadata_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, ?, ?, ?, ?, ?)
   `);
 
   return {
@@ -138,10 +290,37 @@ function createSqliteScanStore() {
         job.url,
         job.location || '',
         job.department || '',
-        job.jd_snippet || '',
+        cleanSnippet(job),
         dedupKey,
+        sourceNameForJob(job, job.company || 'Job board'),
+        job.source_type || '',
+        job.source_url || job.url || '',
+        verificationStatusForJob(job),
+        job.match_confidence || classifyJobMatch(job).confidence || 'medium',
+        metadataJson(job.source_metadata),
       );
       return (result.changes || 0) > 0;
+    },
+    async recordSourceRun(scanId, userId, run) {
+      db.prepare(`
+        INSERT INTO scan_source_runs
+          (scan_id, user_id, source_name, source_type, status, attempted, parsed, matched, inserted, deduped, blocked_reason, error, metrics_json, finished_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      `).run(
+        scanId,
+        userId,
+        run.sourceName,
+        run.sourceType || 'company_portal',
+        run.status || 'done',
+        run.attempted || 0,
+        run.parsed || 0,
+        run.matched || 0,
+        run.inserted || 0,
+        run.deduped || 0,
+        run.blockedReason || '',
+        run.error || '',
+        metadataJson(run.metrics),
+      );
     },
     async updateProgress(scanId, progress) {
       db.prepare(`
@@ -156,6 +335,13 @@ function createSqliteScanStore() {
         SET jobs_found = ?, jobs_new = ?, error_log = ?, updated_at = datetime('now')
         WHERE id = ? AND status != 'canceled'
       `).run(progress.jobsFound, progress.jobsNew, JSON.stringify(progress.errorLog), scanId);
+    },
+    async updateCompaniesTotal(scanId, companiesTotal) {
+      db.prepare(`
+        UPDATE scan_queue
+        SET companies_total = ?, updated_at = datetime('now')
+        WHERE id = ? AND status != 'canceled'
+      `).run(companiesTotal, scanId);
     },
     async markDone(scanId, progress) {
       db.prepare(`
@@ -201,9 +387,11 @@ function createPostgresScanStore() {
     idleTimeoutMillis: 30_000,
     connectionTimeoutMillis: 10_000,
   });
+  const ready = ensurePostgresScanObservability(pool);
 
   return {
     async recoverStaleScans() {
+      await ready;
       const result = await pool.query(`
         UPDATE scan_queue
         SET status = 'failed',
@@ -214,10 +402,12 @@ function createPostgresScanStore() {
       return result.rowCount || 0;
     },
     async getScanRow(scanId) {
+      await ready;
       const result = await pool.query('SELECT * FROM scan_queue WHERE id = $1 LIMIT 1', [scanId]);
       return result.rows[0] || null;
     },
     async claimScan(scanId) {
+      await ready;
       const result = await pool.query(`
         UPDATE scan_queue SET status = 'running', updated_at = now()
         WHERE id = $1 AND status = 'pending'
@@ -225,18 +415,22 @@ function createPostgresScanStore() {
       return Boolean(result.rowCount);
     },
     async getScanConfig(scanId) {
+      await ready;
       const result = await pool.query('SELECT title_positive_json, title_negative_json, location_filter, max_results FROM scan_queue WHERE id = $1 LIMIT 1', [scanId]);
       return result.rows[0] || {};
     },
     async getScanUserId(scanId) {
+      await ready;
       const result = await pool.query('SELECT user_id FROM scan_queue WHERE id = $1 LIMIT 1', [scanId]);
       return result.rows[0]?.user_id || null;
     },
     async insertScanJob(scanId, userId, job, dedupKey) {
+      await ready;
       const result = await pool.query(`
         INSERT INTO scan_jobs
-          (scan_id, user_id, company, title, url, location, department, jd_snippet, status, dedup_key)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'new', $9)
+          (scan_id, user_id, company, title, url, location, department, jd_snippet, status, dedup_key,
+           source_name, source_type, source_url, verification_status, match_confidence, source_metadata_json)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'new', $9, $10, $11, $12, $13, $14, $15::jsonb)
         ON CONFLICT (dedup_key) DO NOTHING
       `, [
         scanId,
@@ -246,12 +440,41 @@ function createPostgresScanStore() {
         job.url,
         job.location || '',
         job.department || '',
-        job.jd_snippet || '',
+        cleanSnippet(job),
         dedupKey,
+        sourceNameForJob(job, job.company || 'Job board'),
+        job.source_type || '',
+        job.source_url || job.url || '',
+        verificationStatusForJob(job),
+        job.match_confidence || classifyJobMatch(job).confidence || 'medium',
+        metadataJson(job.source_metadata),
       ]);
       return Boolean(result.rowCount);
     },
+    async recordSourceRun(scanId, userId, run) {
+      await ready;
+      await pool.query(`
+        INSERT INTO scan_source_runs
+          (scan_id, user_id, source_name, source_type, status, attempted, parsed, matched, inserted, deduped, blocked_reason, error, metrics_json, finished_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, now())
+      `, [
+        scanId,
+        userId,
+        run.sourceName,
+        run.sourceType || 'company_portal',
+        run.status || 'done',
+        run.attempted || 0,
+        run.parsed || 0,
+        run.matched || 0,
+        run.inserted || 0,
+        run.deduped || 0,
+        run.blockedReason || '',
+        run.error || '',
+        metadataJson(run.metrics),
+      ]);
+    },
     async updateProgress(scanId, progress) {
+      await ready;
       await pool.query(`
         UPDATE scan_queue
         SET companies_done = $1, jobs_found = $2, jobs_new = $3, error_log = $4::jsonb, updated_at = now()
@@ -259,13 +482,23 @@ function createPostgresScanStore() {
       `, [progress.companiesDone, progress.jobsFound, progress.jobsNew, JSON.stringify(progress.errorLog), scanId]);
     },
     async updateTotals(scanId, progress) {
+      await ready;
       await pool.query(`
         UPDATE scan_queue
         SET jobs_found = $1, jobs_new = $2, error_log = $3::jsonb, updated_at = now()
         WHERE id = $4 AND status != 'canceled'
       `, [progress.jobsFound, progress.jobsNew, JSON.stringify(progress.errorLog), scanId]);
     },
+    async updateCompaniesTotal(scanId, companiesTotal) {
+      await ready;
+      await pool.query(`
+        UPDATE scan_queue
+        SET companies_total = $1, updated_at = now()
+        WHERE id = $2 AND status != 'canceled'
+      `, [companiesTotal, scanId]);
+    },
     async markDone(scanId, progress) {
+      await ready;
       await pool.query(`
         UPDATE scan_queue
         SET status = 'done', companies_done = $1, jobs_found = $2, jobs_new = $3, error_log = $4::jsonb, updated_at = now()
@@ -273,14 +506,17 @@ function createPostgresScanStore() {
       `, [progress.companiesDone, progress.jobsFound, progress.jobsNew, JSON.stringify(progress.errorLog), scanId]);
     },
     async getNextPendingScan() {
+      await ready;
       const result = await pool.query("SELECT id FROM scan_queue WHERE status = 'pending' ORDER BY created_at ASC LIMIT 1");
       return result.rows[0] || null;
     },
     async getAnyUser() {
+      await ready;
       const result = await pool.query('SELECT id FROM users LIMIT 1');
       return result.rows[0] || null;
     },
     async createScan(scanId, userId, companiesTotal) {
+      await ready;
       await pool.query(`
         INSERT INTO scan_queue
           (id, user_id, status, title_positive_json, title_negative_json, location_filter, max_results, companies_total)
@@ -288,6 +524,7 @@ function createPostgresScanStore() {
       `, [scanId, userId, companiesTotal]);
     },
     async failRunningScans(error) {
+      await ready;
       await pool.query(`
         UPDATE scan_queue
         SET status = 'failed',
@@ -355,7 +592,6 @@ async function executeScan(scanId) {
   }
 
   const scanConfig = await store.getScanConfig(scanId);
-  const companies = await loadPortals(PROJECT_ROOT);
   const fallbackTitleFilter = await loadTitleFilter(PROJECT_ROOT);
   const titleFilter = {
     positive: parseJsonArray(scanConfig.title_positive_json),
@@ -368,7 +604,9 @@ async function executeScan(scanId) {
     location: scanConfig.location_filter || '',
     maxResults: Math.min(Math.max(Number(scanConfig.max_results || 50), 1), 200),
   };
+  const companies = withHangzhouSeeds(await loadPortals(PROJECT_ROOT), scanScope);
   const filtered = COMPANY_FILTER ? companies.filter((c) => c.name === COMPANY_FILTER) : companies;
+  await store.updateCompaniesTotal(scanId, filtered.length);
 
   log(`total: ${filtered.length} companies (filter: +${titleFilter.positive.join(',') || 'none'} / -${titleFilter.negative.join(',') || 'none'}; location: ${scanScope.location || 'any'}; max: ${scanScope.maxResults})`);
 
@@ -380,6 +618,7 @@ async function executeScan(scanId) {
 
   const progress = () => ({ companiesDone, jobsFound, jobsNew, errorLog });
   const insertJobs = async (scanUserId, jobsToInsert) => {
+    const stats = { inserted: 0, deduped: 0 };
     for (const job of jobsToInsert) {
       if (jobsNew >= scanScope.maxResults) break;
       if (!job.url || !job.title) continue;
@@ -387,8 +626,12 @@ async function executeScan(scanId) {
       if (inserted) {
         jobsFound++;
         jobsNew++;
+        stats.inserted++;
+      } else {
+        stats.deduped++;
       }
     }
+    return stats;
   };
 
   try {
@@ -397,9 +640,18 @@ async function executeScan(scanId) {
       args: ['--disable-dev-shm-usage', '--no-sandbox'],
     });
 
+    const storageState = resolveBrowserStorageState();
     const context = await browser.newContext({
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+      ...(storageState ? { storageState } : {}),
     });
+    const injectedCookies = parseBrowserCookies();
+    if (injectedCookies.length > 0) {
+      await context.addCookies(injectedCookies);
+      log(`browser auth: injected ${injectedCookies.length} cookie(s) from SCAN_BROWSER_COOKIES_JSON`);
+    } else if (storageState) {
+      log(`browser auth: using storage state ${storageState}`);
+    }
 
     const userId = await store.getScanUserId(scanId);
     if (!userId) throw new Error(`scan ${scanId} has no user_id`);
@@ -419,6 +671,18 @@ async function executeScan(scanId) {
 
         if (error) {
           errorLog.push({ company: company.name, error, level: 'ERROR' });
+          await store.recordSourceRun(scanId, userId, {
+            sourceName: company.name,
+            sourceType: sourceTypeForCompany(company),
+            status: isBlockedMessage(error) ? 'blocked' : 'failed',
+            attempted: 1,
+            parsed: 0,
+            matched: 0,
+            inserted: 0,
+            deduped: 0,
+            blockedReason: isBlockedMessage(error) ? error : '',
+            error,
+          });
           companiesDone++;
           await store.updateProgress(scanId, progress());
           continue;
@@ -436,7 +700,30 @@ async function executeScan(scanId) {
           errorLog.push({ company: company.name, error: 'zero results', level: 'INFO' });
         }
 
-        await insertJobs(userId, locationFilteredJobs);
+        const stats = await insertJobs(userId, locationFilteredJobs.map((job) => ({
+          ...job,
+          source_name: job.source_name || company.name,
+          source_type: job.source_type || sourceTypeForCompany(company),
+          source_url: job.source_url || company.careers_url || job.url,
+          verification_status: job.verification_status || 'verified_jd',
+          source_metadata: { ...(job.source_metadata || {}), source_company: company.name, ats_type: company.ats_type || 'custom' },
+        })));
+        await store.recordSourceRun(scanId, userId, {
+          sourceName: company.name,
+          sourceType: sourceTypeForCompany(company),
+          status: locationFilteredJobs.length > 0 ? 'done' : 'empty',
+          attempted: 1,
+          parsed: jobs.length,
+          matched: locationFilteredJobs.length,
+          inserted: stats.inserted,
+          deduped: stats.deduped,
+          metrics: {
+            titleMatched: filteredJobs.length,
+            domesticMatched: domesticJobs.length,
+            locationMatched: locationFilteredJobs.length,
+            atsType: company.ats_type || 'custom',
+          },
+        });
         companiesDone++;
         await store.updateProgress(scanId, progress());
 
@@ -457,7 +744,44 @@ async function executeScan(scanId) {
       if (filteredBoardJobs.length === 0) {
         errorLog.push({ company: 'Job board', error: 'fallback job boards and search-index leads returned zero matching results', level: 'INFO' });
       }
-      await insertJobs(userId, filteredBoardJobs);
+      const bySource = new Map();
+      for (const job of filteredBoardJobs) {
+        const key = sourceNameForJob(job, 'Job board');
+        const bucket = bySource.get(key) || [];
+        bucket.push(job);
+        bySource.set(key, bucket);
+      }
+      for (const [sourceName, sourceJobs] of bySource.entries()) {
+        const stats = await insertJobs(userId, sourceJobs);
+        await store.recordSourceRun(scanId, userId, {
+          sourceName,
+          sourceType: sourceJobs[0]?.source_type || 'job_board',
+          status: sourceJobs.some((job) => verificationStatusForJob(job) === 'blocked_detail') ? 'blocked' : 'done',
+          attempted: 1,
+          parsed: sourceJobs.length,
+          matched: sourceJobs.length,
+          inserted: stats.inserted,
+          deduped: stats.deduped,
+          blockedReason: sourceJobs.some((job) => verificationStatusForJob(job) === 'blocked_detail') ? 'detail blocked by WAF text' : '',
+          metrics: { fallback: true },
+        });
+      }
+      for (const err of errors) {
+        if (bySource.has(err.company)) continue;
+        await store.recordSourceRun(scanId, userId, {
+          sourceName: err.company || 'Job board',
+          sourceType: err.company === '搜索索引线索' ? 'search_index' : 'job_board',
+          status: err.level === 'WARN' ? 'blocked' : (err.level === 'INFO' ? 'empty' : 'failed'),
+          attempted: 1,
+          parsed: 0,
+          matched: 0,
+          inserted: 0,
+          deduped: 0,
+          blockedReason: err.level === 'WARN' ? err.error : '',
+          error: err.level === 'ERROR' ? err.error : '',
+          metrics: { fallback: true },
+        });
+      }
       if (jobsNew === 0 && !errorLog.some((entry) => entry.company === 'zero_result_strategy')) {
         errorLog.push(buildZeroResultStrategyIssue(titleFilter, scanScope));
       }

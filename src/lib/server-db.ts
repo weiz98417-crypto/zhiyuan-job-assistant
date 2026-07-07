@@ -121,10 +121,30 @@ export function getDb(): Database.Database {
         last_interaction_at TEXT,
         discovered_at TEXT DEFAULT (datetime('now'))
       );
+      CREATE TABLE IF NOT EXISTS scan_source_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        scan_id TEXT NOT NULL REFERENCES scan_queue(id),
+        user_id TEXT NOT NULL REFERENCES users(id),
+        source_name TEXT NOT NULL,
+        source_type TEXT NOT NULL DEFAULT 'company_portal',
+        status TEXT NOT NULL DEFAULT 'pending',
+        attempted INTEGER NOT NULL DEFAULT 0,
+        parsed INTEGER NOT NULL DEFAULT 0,
+        matched INTEGER NOT NULL DEFAULT 0,
+        inserted INTEGER NOT NULL DEFAULT 0,
+        deduped INTEGER NOT NULL DEFAULT 0,
+        blocked_reason TEXT NOT NULL DEFAULT '',
+        error TEXT NOT NULL DEFAULT '',
+        metrics_json TEXT NOT NULL DEFAULT '{}',
+        started_at TEXT DEFAULT (datetime('now')),
+        finished_at TEXT
+      );
       CREATE INDEX IF NOT EXISTS idx_scan_jobs_user_status ON scan_jobs(user_id, status);
       CREATE INDEX IF NOT EXISTS idx_scan_jobs_scan ON scan_jobs(scan_id);
       CREATE INDEX IF NOT EXISTS idx_scan_jobs_jd ON scan_jobs(jd_id);
       CREATE INDEX IF NOT EXISTS idx_scan_queue_user ON scan_queue(user_id, status);
+      CREATE INDEX IF NOT EXISTS idx_scan_source_runs_scan ON scan_source_runs(scan_id, source_name);
+      CREATE INDEX IF NOT EXISTS idx_scan_source_runs_user ON scan_source_runs(user_id, status);
     `);
 
     const scanQueueCols = _db.prepare("PRAGMA table_info(scan_queue)").all() as { name: string }[];
@@ -147,6 +167,17 @@ export function getDb(): Database.Database {
     }
     if (!scanJobCols.some((c) => c.name === "last_error")) {
       _db.exec("ALTER TABLE scan_jobs ADD COLUMN last_error TEXT DEFAULT ''");
+    }
+    const scanJobMigrations = [
+      ["source_name", "ALTER TABLE scan_jobs ADD COLUMN source_name TEXT NOT NULL DEFAULT ''"],
+      ["source_type", "ALTER TABLE scan_jobs ADD COLUMN source_type TEXT NOT NULL DEFAULT ''"],
+      ["source_url", "ALTER TABLE scan_jobs ADD COLUMN source_url TEXT NOT NULL DEFAULT ''"],
+      ["verification_status", "ALTER TABLE scan_jobs ADD COLUMN verification_status TEXT NOT NULL DEFAULT 'verified_jd'"],
+      ["match_confidence", "ALTER TABLE scan_jobs ADD COLUMN match_confidence TEXT NOT NULL DEFAULT 'medium'"],
+      ["source_metadata_json", "ALTER TABLE scan_jobs ADD COLUMN source_metadata_json TEXT NOT NULL DEFAULT '{}'"],
+    ];
+    for (const [name, sql] of scanJobMigrations) {
+      if (!scanJobCols.some((c) => c.name === name)) _db.exec(sql);
     }
     _db.exec("CREATE INDEX IF NOT EXISTS idx_scan_jobs_jd ON scan_jobs(jd_id)");
 

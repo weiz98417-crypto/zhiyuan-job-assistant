@@ -15,6 +15,19 @@ import {
 
 type AnyRow = Record<string, unknown>;
 type ScanIssue = { company?: string; error?: string; level?: string };
+type ScanSourceRun = {
+  source_name?: string;
+  source_type?: string;
+  status?: string;
+  attempted?: number;
+  parsed?: number;
+  matched?: number;
+  inserted?: number;
+  deduped?: number;
+  blocked_reason?: string;
+  error?: string;
+  metrics_json?: unknown;
+};
 type ScanCompany = { name: string; careers_url?: string; ats_type?: string; [key: string]: unknown };
 type ScanJobFilters = {
   status?: string;
@@ -186,12 +199,18 @@ export async function getScanStatusForUser(scanId: string, userId: string) {
     const scan = scanResult.rows[0];
     if (!scan) return null;
 
-    const companies = await client.query(`
-      SELECT company, COUNT(*)::int AS jobs_found
+    const [companies, sourceRuns] = await Promise.all([
+      client.query(`
+      SELECT COALESCE(NULLIF(source_name, ''), company) AS company, COUNT(*)::int AS jobs_found
       FROM scan_jobs WHERE scan_id = $1
-      GROUP BY company
-    `, [scanId]);
-    return formatScanStatus(scan, companies.rows);
+      GROUP BY COALESCE(NULLIF(source_name, ''), company)
+    `, [scanId]),
+      client.query(`
+      SELECT source_name, source_type, status, attempted, parsed, matched, inserted, deduped, blocked_reason, error, metrics_json
+      FROM scan_source_runs WHERE scan_id = $1 ORDER BY id ASC
+    `, [scanId]),
+    ]);
+    return formatScanStatus(scan, companies.rows, sourceRuns.rows);
   });
 }
 
@@ -206,12 +225,18 @@ export async function getActiveScanForUser(userId: string) {
     const scanId = result.rows[0]?.id;
     if (!scanId) return null;
     const scanResult = await client.query("SELECT * FROM scan_queue WHERE id = $1 AND user_id = $2 LIMIT 1", [scanId, userId]);
-    const companies = await client.query(`
-      SELECT company, COUNT(*)::int AS jobs_found
+    const [companies, sourceRuns] = await Promise.all([
+      client.query(`
+      SELECT COALESCE(NULLIF(source_name, ''), company) AS company, COUNT(*)::int AS jobs_found
       FROM scan_jobs WHERE scan_id = $1
-      GROUP BY company
-    `, [scanId]);
-    return formatScanStatus(scanResult.rows[0], companies.rows);
+      GROUP BY COALESCE(NULLIF(source_name, ''), company)
+    `, [scanId]),
+      client.query(`
+      SELECT source_name, source_type, status, attempted, parsed, matched, inserted, deduped, blocked_reason, error, metrics_json
+      FROM scan_source_runs WHERE scan_id = $1 ORDER BY id ASC
+    `, [scanId]),
+    ]);
+    return formatScanStatus(scanResult.rows[0], companies.rows, sourceRuns.rows);
   });
 }
 
@@ -277,10 +302,24 @@ export async function getScanHistoryForUser(userId: string, opts: { page?: numbe
   });
 }
 
-function formatScanStatus(scan: AnyRow, companies: AnyRow[]) {
+function formatScanStatus(scan: AnyRow, companies: AnyRow[], sourceRuns: ScanSourceRun[] = []) {
   const errorLog = parseArray<ScanIssue>(scan.error_log);
   const issueMap = new Map(errorLog.map((entry) => [entry.company, entry]));
-  const companyStatus = companies.map((company) => {
+  const sourceStatus = sourceRuns.map((run) => ({
+    name: String(run.source_name || ""),
+    sourceType: String(run.source_type || ""),
+    status: String(run.status || "done"),
+    jobsFound: Number(run.inserted || 0),
+    attempted: Number(run.attempted || 0),
+    parsed: Number(run.parsed || 0),
+    matched: Number(run.matched || 0),
+    inserted: Number(run.inserted || 0),
+    deduped: Number(run.deduped || 0),
+    error: run.error || run.blocked_reason || null,
+    level: run.status === "blocked" ? "WARN" : run.status === "failed" ? "ERROR" : run.status === "empty" ? "INFO" : null,
+    metrics: typeof run.metrics_json === "string" ? parseObject(run.metrics_json) : run.metrics_json || {},
+  }));
+  const companyStatus = sourceStatus.length ? sourceStatus : companies.map((company) => {
     const name = String(company.company || "");
     const issue = issueMap.get(name);
     return {
@@ -349,6 +388,17 @@ function parseArray<T = unknown>(value: unknown): T[] {
     return Array.isArray(parsed) ? parsed as T[] : [];
   } catch {
     return [];
+  }
+}
+
+function parseObject(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
+  if (!value) return {};
+  try {
+    const parsed = JSON.parse(String(value));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
   }
 }
 

@@ -12,6 +12,7 @@ Start here when you need to understand, run, or change Zhiyuan.
 | [SETUP.md](SETUP.md) | Local setup, LAN testing, auth, OCR, PostgreSQL, and embeddings. |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Runtime architecture, Agent loop, data layer, image intake, and memory. |
 | [SCRIPTS.md](SCRIPTS.md) | npm scripts and operational commands. |
+| [feature-system/evals/README.md](feature-system/evals/README.md) | Per-feature baseline, boundary, and regression eval specs for feature-system docs. |
 
 ## Operations
 

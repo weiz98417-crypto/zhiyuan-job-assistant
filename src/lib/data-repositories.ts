@@ -85,6 +85,7 @@ const USER_PRIVATE_TABLES = [
   "memory_status_transitions",
   "memory_chunks",
   "memory_items",
+  "scan_source_runs",
   "scan_jobs",
   "scan_queue",
 ];

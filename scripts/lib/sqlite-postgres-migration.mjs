@@ -60,7 +60,8 @@ export const MIGRATION_TABLES = [
   table("agent_preferences", { userOwned: true, uniqueChecks: [["user_id", "entity_type", "entity_key"]] }),
   table("session_memory", { userOwned: true }),
   table("scan_queue", { userOwned: true, jsonColumns: ["title_positive_json", "title_negative_json", "error_log"] }),
-  table("scan_jobs", { userOwned: true, uniqueChecks: [["dedup_key"]] }),
+  table("scan_source_runs", { userOwned: true, jsonColumns: ["metrics_json"] }),
+  table("scan_jobs", { userOwned: true, jsonColumns: ["source_metadata_json"], uniqueChecks: [["dedup_key"]] }),
   table("news_cache", { conflictColumns: ["id"], volatile: true }),
 ];
 
