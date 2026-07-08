@@ -91,6 +91,12 @@ function nonSemanticClarificationQuestion(content: string, taskLabel: string): s
   return `我只看到“${content.trim()}”，还不能判断你的具体意图。你是想继续「${taskLabel}」、补充材料，还是做别的操作？请直接说明。`;
 }
 
+function isSavedOfferReportAssistIntent(content: string): boolean {
+  const text = content.trim();
+  if (!/\bofferReportId\s*=/.test(text)) return false;
+  return /\b(generate_offer_hr_question_list|generate_offer_negotiation_strategy|read_offer_report)\b/.test(text);
+}
+
 export function inferAgentTaskType(input: {
   agentId: string;
   content: string;
@@ -189,6 +195,13 @@ export function routeAgentTask(input: {
   }
 
   const documentType = imageIntake?.documentType || preferredDocumentType;
+
+  if (agentId === "offer" && isSavedOfferReportAssistIntent(content)) {
+    return buildRouteDecision({
+      taskType: null,
+      auditSummary: "agent:offer:saved_report_assist",
+    });
+  }
 
   if (nonSemanticInput && (agentId === "evaluate" || documentType === "jd")) {
     return buildRouteDecision({

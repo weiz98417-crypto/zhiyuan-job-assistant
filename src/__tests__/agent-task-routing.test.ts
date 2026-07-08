@@ -165,6 +165,28 @@ describe("agent task routing", () => {
     expect(decision.allowedTools).toContain("evaluate_offer");
   });
 
+  it("does not create an Offer evaluation contract for saved-report HR question handoff", () => {
+    const decision = routeAgentTask({
+      agentId: "offer",
+      content: "Please use offerReportId=12 and call generate_offer_hr_question_list. Do not re-evaluate the Offer.",
+    });
+
+    expect(decision.taskType).toBeNull();
+    expect(decision.contractPolicy).toBeNull();
+    expect(decision.auditSummary).toBe("agent:offer:saved_report_assist");
+  });
+
+  it("does not create an Offer evaluation contract for saved-report negotiation handoff", () => {
+    const decision = routeAgentTask({
+      agentId: "offer",
+      content: "Please use offerReportId=12 and call generate_offer_negotiation_strategy. Do not re-evaluate the Offer.",
+    });
+
+    expect(decision.taskType).toBeNull();
+    expect(decision.contractPolicy).toBeNull();
+    expect(decision.auditSummary).toBe("agent:offer:saved_report_assist");
+  });
+
   it("routes resume screenshots to read-only resume handling instead of JD or Offer evaluation when no edit is requested", () => {
     const imageIntake: ImageIntakeResult = {
       documentType: "resume",
