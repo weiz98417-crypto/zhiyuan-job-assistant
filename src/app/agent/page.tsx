@@ -548,6 +548,7 @@ function AgentPageInner() {
   const handoffKeyRef = useRef<string>("");
   const handoffSessionCreateKeyRef = useRef<string>("");
   const createdHandoffSessionIdRef = useRef<number | null>(null);
+  const manualSessionSwitchRef = useRef<number | null>(null);
 
   const rafRef = useRef<number>(0);
 
@@ -627,6 +628,10 @@ function AgentPageInner() {
     if (!requestedSessionId) return;
     const id = Number(requestedSessionId);
     if (!Number.isFinite(id)) return;
+    if (manualSessionSwitchRef.current === currentSessionId) {
+      manualSessionSwitchRef.current = null;
+      return;
+    }
     if (currentSessionId === id) return;
 
     getSession(id).then((session) => {
@@ -743,6 +748,19 @@ function AgentPageInner() {
     window.history.replaceState(null, "", nextUrl);
     router.replace(nextUrl, { scroll: false });
     createdHandoffSessionIdRef.current = null;
+  }, [router]);
+
+  const replaceUrlForSelectedSession = useCallback((sessionId: number) => {
+    const url = new URL(window.location.href);
+    url.searchParams.set("sessionId", String(sessionId));
+    for (const key of ["jdId", "offerId", "offerReportId", "applicationId", "reportNum", "company", "role", "intent", "newSession"]) {
+      url.searchParams.delete(key);
+    }
+    const nextUrl = `${url.pathname}${url.search}${url.hash}`;
+    window.history.replaceState(null, "", nextUrl);
+    router.replace(nextUrl, { scroll: false });
+    createdHandoffSessionIdRef.current = null;
+    handoffSessionCreateKeyRef.current = "";
   }, [router]);
 
   const handleResumeActiveRun = useCallback(async () => {
@@ -2103,13 +2121,15 @@ Rules:
     setActiveAgent(null);
 
     const id = await createSession([WELCOME]);
+    manualSessionSwitchRef.current = id;
+    replaceUrlForSelectedSession(id);
     setCurrentSessionId(id);
     setMessages([WELCOME]);
     setStreamText("");
     setThinkingContent("");
     streamContentRef.current = "";
     setSessions(await listSessions());
-  }, [currentSessionId, messages]);
+  }, [currentSessionId, messages, replaceUrlForSelectedSession]);
 
   useEffect(() => {
     if (!mounted || streaming || !currentSessionId) return;
@@ -2260,13 +2280,15 @@ Rules:
     // Load selected session
     const session = await getSession(id);
     if (session) {
+      manualSessionSwitchRef.current = id;
+      replaceUrlForSelectedSession(id);
       setCurrentSessionId(id);
       setMessages(session.messages);
       setStreamText("");
       setThinkingContent("");
       streamContentRef.current = "";
     }
-  }, [currentSessionId, messages]);
+  }, [currentSessionId, messages, replaceUrlForSelectedSession]);
 
   const handleDeleteSession = useCallback(async (id: number) => {
     const session = await getSession(id);
@@ -2281,16 +2303,21 @@ Rules:
     if (id === currentSessionId) {
       const remaining = await listSessions();
       if (remaining.length > 0) {
-        setCurrentSessionId(remaining[0].id!);
+        const nextId = remaining[0].id!;
+        manualSessionSwitchRef.current = nextId;
+        replaceUrlForSelectedSession(nextId);
+        setCurrentSessionId(nextId);
         setMessages(remaining[0].messages);
       } else {
         const newId = await createSession([WELCOME]);
+        manualSessionSwitchRef.current = newId;
+        replaceUrlForSelectedSession(newId);
         setCurrentSessionId(newId);
         setMessages([WELCOME]);
       }
     }
     setSessions(await listSessions());
-  }, [currentSessionId]);
+  }, [currentSessionId, replaceUrlForSelectedSession]);
 
   const handleUndoDelete = useCallback(async (id: number) => {
     await undoDeleteSession(id);
@@ -2300,11 +2327,13 @@ Rules:
     if (!currentSessionId) {
       const session = await getSession(id);
       if (session) {
+        manualSessionSwitchRef.current = id;
+        replaceUrlForSelectedSession(id);
         setCurrentSessionId(id);
         setMessages(session.messages);
       }
     }
-  }, [currentSessionId]);
+  }, [currentSessionId, replaceUrlForSelectedSession]);
 
   const handlePinSession = useCallback(async (id: number, pinned: boolean) => {
     await pinSession(id, pinned);
