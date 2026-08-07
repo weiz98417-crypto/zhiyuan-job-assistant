@@ -52,6 +52,7 @@
 - [x] 7.2 Add Nginx trusted-header, HTTPS, HSTS, loopback binding, and firewall runbook steps.
 - [x] 7.3 Add secret-rotation and SSH key-only operator runbook steps without committing secrets.
 - [x] 7.4 Add deployment preflight checks for HTTPS, Redis, secure cookies, current schema, and active superadmin count.
+- [x] 7.5 Provision a project-owned PostgreSQL/pgvector service with an independent user, volume, secret, and loopback-only binding.
 
 ## 8. Verification And Rollout
 
@@ -59,10 +60,13 @@
 - [ ] 8.2 Run the full Vitest suite and production build.
 - [x] 8.3 Run OpenSpec validation.
 - [x] 8.4 Smoke-test login, self-change, forced change, member reset, admin reset denial, role change, audit view, throttling, and CSRF on a non-production database.
-- [ ] 8.5 Back up production PostgreSQL, deploy additive schema, promote the current administrator, deploy runtime, and verify read-back.
+- [x] 8.5 Back up production PostgreSQL, deploy additive schema, promote the current administrator, deploy runtime, and verify read-back.
 - [ ] 8.6 Rotate production credentials and verify old JWTs, SSH password login, old database credentials, and weak admin passwords no longer work.
 
 ### Verification notes
 
 - 2026-08-07: The production build passed and a disposable `pgvector/pgvector:pg16` database, dedicated Redis instance, and loopback-only Next.js server passed all 8.4 HTTP flows. The smoke run read back 20 append-only security events and removed every temporary process and container afterward.
 - 2026-08-07: The full Vitest baseline remains at 586/589 tests. The three failures are in unchanged agent quality, job discovery fixture, and JD eval partial-check paths, so 8.2 remains open rather than reporting a false green result.
+- 2026-08-07: Production data was found in a `zhiyuan_job_assistant` logical database hosted by another project's PostgreSQL container. A native dump was restored into the project-owned `zhiyuan-job-assistant-postgres` pgvector container with the independent `zhiyuan_app` user, loopback-only port `55432`, and a dedicated volume and secret. All 32 public table counts, all sequence values, 893 total rows, the administrator ID, and the password-hash digest matched before cutover.
+- 2026-08-07: Release `98e0d40` was deployed under PM2 and read back the dedicated PostgreSQL database and auth Redis successfully. The existing `admin` account retained its ID and password hash, changed from `admin` to `superadmin`, incremented `token_version` from 2 to 3, and produced a successful append-only `role_change` event. A real login and `/api/users/me` read-back both returned `superadmin`.
+- 2026-08-07: The server does not yet provide a verified HTTPS reverse-proxy entry point for Zhiyuan, so the existing direct HTTP `:3100` exposure remains temporarily in place and 8.6 remains open. Do not report the production security rollout as complete until TLS, secure cookies, credential rotation, and SSH hardening are verified.

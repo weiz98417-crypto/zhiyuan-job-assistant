@@ -1,4 +1,27 @@
 services:
+  application-postgres:
+    image: pgvector/pgvector:pg16
+    container_name: zhiyuan-job-assistant-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: zhiyuan_job_assistant
+      POSTGRES_USER: zhiyuan_app
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    ports:
+      - "127.0.0.1:${POSTGRES_BIND_PORT:-55432}:5432"
+    volumes:
+      - application-postgres-data:/var/lib/postgresql/data
+    secrets:
+      - postgres_password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zhiyuan_app -d zhiyuan_job_assistant"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+
   auth-security-redis:
     image: redis:7.4-alpine
     container_name: zhiyuan-auth-security-redis
@@ -23,8 +46,11 @@ services:
       - no-new-privileges:true
 
 secrets:
+  postgres_password:
+    file: ./secrets/postgres_password
   redis_password:
     file: ./secrets/redis_password
 
 volumes:
+  application-postgres-data:
   auth-security-redis-data:

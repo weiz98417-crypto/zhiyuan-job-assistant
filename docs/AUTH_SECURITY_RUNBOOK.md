@@ -6,13 +6,14 @@ This runbook applies to the Zhiyuan production deployment. Never place real pass
 
 ```text
 Internet -> 443/Nginx -> 127.0.0.1:3000/Next.js
-                         |-> PostgreSQL/pgvector
+                         |-> 127.0.0.1:55432/dedicated PostgreSQL/pgvector
                          |-> 127.0.0.1:6380/dedicated auth Redis
                          |-> HTTPS security alert webhook
 ```
 
 - Nginx is the only public HTTP entry point.
 - Next.js binds to `127.0.0.1`; port 3000 is not open in the cloud security group or host firewall.
+- PostgreSQL/pgvector runs in the project-owned `zhiyuan-job-assistant-postgres` container with its own user, database, volume, and password. Do not place the Zhiyuan database in another project's PostgreSQL container.
 - The authentication Redis instance is not shared with queues, caches, or model workers. Its host port is loopback-only and AOF is enabled.
 - Nginx overwrites `X-Real-IP`, `X-Forwarded-For`, and `X-Forwarded-Proto`. It never passes client-supplied forwarding headers unchanged.
 
@@ -20,25 +21,28 @@ Internet -> 443/Nginx -> 127.0.0.1:3000/Next.js
 
 Generate independent random values for `JWT_SECRET`, `CSRF_SECRET`, `AUTH_RATE_LIMIT_SECRET`, the Redis password, database credential, and webhook bearer token. Each application secret must contain at least 32 random characters.
 
-Create the Redis Docker secret directly on the server:
+Create the database and Redis Docker secrets directly on the server:
 
 ```bash
 install -d -m 700 deploy/auth-security/secrets
+openssl rand -base64 48 > deploy/auth-security/secrets/postgres_password
 openssl rand -base64 48 > deploy/auth-security/secrets/redis_password
-chmod 600 deploy/auth-security/secrets/redis_password
+chmod 600 deploy/auth-security/secrets/postgres_password deploy/auth-security/secrets/redis_password
 docker compose -f deploy/auth-security/docker-compose.yml up -d
 ```
 
 Set `.env.local` permissions to `600`. Construct `REDIS_URL` from the server-side password without printing it into logs. Use `redis://:<password>@127.0.0.1:6380/0`.
 If loopback port `6380` is already allocated, set `AUTH_REDIS_BIND_PORT` before starting Compose and use the same port in `REDIS_URL`. Do not reuse the service already occupying that port.
+Construct `DATABASE_URL` from the independent database password and use `postgresql://zhiyuan_app:<password>@127.0.0.1:55432/zhiyuan_job_assistant`. If port `55432` is occupied, set `POSTGRES_BIND_PORT` before starting Compose and use the same port in `DATABASE_URL`.
 
 ## Database and superadmin migration
 
 1. Stop application writes.
-2. Back up PostgreSQL and verify the backup exists and is non-empty.
-3. Apply the additive schema in `src/lib/postgres-schema.sql`.
-4. Dry-run the sole-admin promotion against the expected account.
-5. Apply it once and verify the role and security ledger.
+2. Back up PostgreSQL and verify the backup exists, is non-empty, and has a recorded SHA-256 digest.
+3. When migrating from a shared PostgreSQL instance, restore the dump into the dedicated container and compare every public table's row count before changing `DATABASE_URL`.
+4. Apply the additive schema in `src/lib/postgres-schema.sql`.
+5. Dry-run the sole-admin promotion against the expected account.
+6. Apply it once and verify the role and security ledger.
 
 ```bash
 npm run backup:postgres -- --output data/backups/auth-hardening-before.json
