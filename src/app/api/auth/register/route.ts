@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { hashPassword } from '@/lib/auth';
 import { getDataRepositories } from '@/lib/data-repositories';
+import { validatePassword } from '@/lib/security/password-policy';
 
 export async function POST(request: NextRequest) {
   try {
@@ -12,11 +13,20 @@ export async function POST(request: NextRequest) {
     }
 
     const normalizedUsername = String(username).trim();
+    const normalizedEmail = String(email || '').trim();
     if (!/^[a-zA-Z][a-zA-Z0-9_-]{3,19}$/.test(normalizedUsername)) {
       return NextResponse.json({ error: '用户名需以字母开头，长度 4-20 位' }, { status: 400 });
     }
-    if (String(password).length < 6) {
-      return NextResponse.json({ error: '密码至少 6 位' }, { status: 400 });
+    const rawPassword = String(password);
+    const passwordPolicy = validatePassword(rawPassword, {
+      username: normalizedUsername,
+      email: normalizedEmail,
+    });
+    if (!passwordPolicy.ok) {
+      return NextResponse.json(
+        { error: passwordPolicy.message, code: passwordPolicy.code },
+        { status: 400 },
+      );
     }
 
     const repos = getDataRepositories();
@@ -30,13 +40,27 @@ export async function POST(request: NextRequest) {
     const activeAdminCount = await repos.users.countActiveAdmins();
     const isFirstAdmin = activeAdminCount === 0;
 
+    if (isFirstAdmin) {
+      const adminPasswordPolicy = validatePassword(rawPassword, {
+        username: normalizedUsername,
+        email: normalizedEmail,
+        role: 'superadmin',
+      });
+      if (!adminPasswordPolicy.ok) {
+        return NextResponse.json(
+          { error: adminPasswordPolicy.message, code: adminPasswordPolicy.code },
+          { status: 400 },
+        );
+      }
+    }
+
     await repos.users.create({
       id: crypto.randomUUID(),
       username: normalizedUsername,
-      passwordHash: await hashPassword(String(password)),
+      passwordHash: await hashPassword(rawPassword),
       displayName: String(displayName).trim(),
-      email: String(email || '').trim(),
-      role: isFirstAdmin ? 'admin' : 'member',
+      email: normalizedEmail,
+      role: isFirstAdmin ? 'superadmin' : 'member',
       status: isFirstAdmin ? 'active' : 'pending',
     });
 

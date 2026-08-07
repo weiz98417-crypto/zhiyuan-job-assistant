@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCurrentUser, verifyTokenVersion } from "@/lib/auth";
+import { requireAdmin } from "@/lib/security/auth-guards";
 import {
   isAgentRunLedgerAvailable,
   listRecentAgentRuns,
@@ -96,11 +96,7 @@ function toRunSummary(run: AgentRunDebugRecord) {
 
 export async function GET(request: NextRequest) {
   try {
-    const payload = await getCurrentUser();
-    if (payload.role !== "admin") {
-      return NextResponse.json({ success: false, error: "Forbidden" }, { status: 403 });
-    }
-    await verifyTokenVersion(payload);
+    await requireAdmin();
 
     if (!isAgentRunLedgerAvailable()) {
       return NextResponse.json({ success: true, enabled: false, data: [] });
@@ -120,6 +116,14 @@ export async function GET(request: NextRequest) {
       data,
     });
   } catch (err) {
+    const authError = err as { status?: unknown; code?: unknown };
+    if (authError.status === 401 || authError.status === 403) {
+      return NextResponse.json({
+        success: false,
+        error: authError.status === 401 ? "Unauthorized" : "Forbidden",
+        code: typeof authError.code === "string" ? authError.code : undefined,
+      }, { status: authError.status });
+    }
     const message = err instanceof Error ? err.message : String(err);
     if (
       message === "Not authenticated" ||

@@ -1,17 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCurrentUser, verifyTokenVersion } from "@/lib/auth";
 import { isAgentRunLedgerAvailable } from "@/lib/agent/run-ledger";
 import { getAgentRunReviewSummary } from "@/lib/agent/run-review";
-
-async function ensureAdmin() {
-  const payload = await getCurrentUser();
-  if (payload.role !== "admin") throw new Error("Forbidden");
-  await verifyTokenVersion(payload);
-}
+import { requireAdmin } from "@/lib/security/auth-guards";
 
 export async function GET(request: NextRequest) {
   try {
-    await ensureAdmin();
+    await requireAdmin();
     if (!isAgentRunLedgerAvailable()) {
       return NextResponse.json({ success: true, enabled: false, data: null });
     }

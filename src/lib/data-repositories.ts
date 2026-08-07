@@ -33,6 +33,7 @@ import type {
   SignalRow,
 } from "@/lib/server-db";
 import { normalizeApplicationStatus } from "@/lib/application-status";
+import { sanitizeAuditMetadata } from "@/lib/security/audit-metadata";
 
 type AnyRow = Record<string, unknown>;
 
@@ -102,7 +103,57 @@ export interface UserRecord extends AnyRow {
   role: string;
   status: string;
   token_version: number;
+  password_changed_at?: string | null;
+  password_changed_by?: string | null;
+  must_change_password?: number | boolean;
+  last_security_event_at?: string | null;
 }
+
+export interface AuthSecurityEventInput {
+  id: string;
+  eventType: string;
+  actorUserId?: string;
+  targetUserId?: string;
+  actorRole?: string;
+  outcome: string;
+  reasonCode?: string;
+  requestId: string;
+  sourceIp?: string;
+  userAgent?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface AuthSecurityEventRecord {
+  id: string;
+  eventType: string;
+  actorUserId?: string;
+  targetUserId?: string;
+  actorRole?: string;
+  outcome: string;
+  reasonCode?: string;
+  requestId: string;
+  sourceIp?: string;
+  userAgent?: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface AuthSecurityEventFilters {
+  eventType?: string;
+  outcome?: string;
+  actorUserId?: string;
+  targetUserId?: string;
+  limit: number;
+  offset: number;
+}
+
+export type SecureUserMutationResult =
+  | { ok: true; user: UserRecord }
+  | { ok: false; reason: 'LAST_ACTIVE_SUPERADMIN' | 'TARGET_NOT_FOUND' };
+
+export type SecureUserDeleteResult =
+  | { ok: true; username: string }
+  | { ok: false; reason: 'LAST_ACTIVE_SUPERADMIN' | 'TARGET_NOT_FOUND' };
 
 export interface DataRepositories {
   driver: DatabaseDriver;
@@ -125,9 +176,43 @@ export interface DataRepositories {
     activateFirstAdmin(id: string): Promise<void>;
     verifyTokenVersion(userId: string, tokenVersion: number): Promise<boolean>;
     updateStatus(id: string, status: string, approvedBy: string): Promise<UserRecord | undefined>;
+    updateStatusWithAudit(input: {
+      userId: string;
+      status: 'pending' | 'active' | 'rejected';
+      approvedBy: string;
+      event: AuthSecurityEventInput;
+    }): Promise<SecureUserMutationResult>;
     updateRole(id: string, role: string): Promise<UserRecord | undefined>;
+    updateRoleWithAudit(input: {
+      userId: string;
+      role: 'member' | 'admin' | 'superadmin';
+      event: AuthSecurityEventInput;
+    }): Promise<SecureUserMutationResult>;
     resetPassword(id: string, passwordHash: string): Promise<boolean>;
+    resetPasswordWithAudit(input: {
+      userId: string;
+      passwordHash: string;
+      changedBy: string;
+      event: AuthSecurityEventInput;
+    }): Promise<boolean>;
+    changeOwnPassword(input: {
+      userId: string;
+      passwordHash: string;
+      changedBy: string;
+      event: AuthSecurityEventInput;
+    }): Promise<boolean>;
+    deleteWithAudit(input: {
+      userId: string;
+      event: AuthSecurityEventInput;
+    }): Promise<SecureUserDeleteResult>;
     deleteCascade(id: string): Promise<boolean>;
+  };
+  securityEvents: {
+    append(event: AuthSecurityEventInput): Promise<void>;
+    list(filters: AuthSecurityEventFilters): Promise<{
+      events: AuthSecurityEventRecord[];
+      total: number;
+    }>;
   };
   cv: {
     get(userId: string): Promise<{ data_json: string } | undefined>;
@@ -246,6 +331,81 @@ export interface DataRepositories {
   };
 }
 
+function insertSqliteAuthSecurityEvent(
+  db: ReturnType<typeof getDb>,
+  event: AuthSecurityEventInput,
+): void {
+  db.prepare(`
+    INSERT INTO auth_security_events (
+      id, event_type, actor_user_id, target_user_id, actor_role, outcome,
+      reason_code, request_id, source_ip, user_agent, metadata_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    event.id,
+    event.eventType,
+    event.actorUserId || null,
+    event.targetUserId || null,
+    event.actorRole || null,
+    event.outcome,
+    event.reasonCode || null,
+    event.requestId,
+    event.sourceIp || null,
+    event.userAgent || null,
+    JSON.stringify(sanitizeAuditMetadata(event.metadata)),
+  );
+}
+
+function mapAuthSecurityEventRow(row: AnyRow): AuthSecurityEventRecord {
+  let metadata: Record<string, unknown> = {};
+  if (typeof row.metadata_json === 'string') {
+    try {
+      const parsed = JSON.parse(row.metadata_json);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) metadata = parsed;
+    } catch { /* malformed legacy metadata is presented as empty */ }
+  } else if (row.metadata_json && typeof row.metadata_json === 'object' && !Array.isArray(row.metadata_json)) {
+    metadata = row.metadata_json as Record<string, unknown>;
+  }
+
+  return {
+    id: String(row.id),
+    eventType: String(row.event_type),
+    actorUserId: row.actor_user_id ? String(row.actor_user_id) : undefined,
+    targetUserId: row.target_user_id ? String(row.target_user_id) : undefined,
+    actorRole: row.actor_role ? String(row.actor_role) : undefined,
+    outcome: String(row.outcome),
+    reasonCode: row.reason_code ? String(row.reason_code) : undefined,
+    requestId: String(row.request_id),
+    sourceIp: row.source_ip ? String(row.source_ip) : undefined,
+    userAgent: row.user_agent ? String(row.user_agent) : undefined,
+    metadata,
+    createdAt: String(row.created_at),
+  };
+}
+
+async function insertPostgresAuthSecurityEvent(
+  client: PoolClient,
+  event: AuthSecurityEventInput,
+): Promise<void> {
+  await client.query(`
+    INSERT INTO auth_security_events (
+      id, event_type, actor_user_id, target_user_id, actor_role, outcome,
+      reason_code, request_id, source_ip, user_agent, metadata_json
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
+  `, [
+    event.id,
+    event.eventType,
+    event.actorUserId || null,
+    event.targetUserId || null,
+    event.actorRole || null,
+    event.outcome,
+    event.reasonCode || null,
+    event.requestId,
+    event.sourceIp || null,
+    event.userAgent || null,
+    JSON.stringify(sanitizeAuditMetadata(event.metadata)),
+  ]);
+}
+
 export function getDataRepositories(): DataRepositories {
   const driver = getDatabaseDriver();
   return driver === "postgres" ? createPostgresRepositories() : createSqliteRepositories();
@@ -274,7 +434,7 @@ function createSqliteRepositories(): DataRepositories {
         return rows as UserRecord[];
       },
       async countActiveAdmins() {
-        return Number((getDb().prepare("SELECT COUNT(*) as cnt FROM users WHERE status = 'active' AND role = 'admin'").get() as { cnt: number }).cnt);
+        return Number((getDb().prepare("SELECT COUNT(*) as cnt FROM users WHERE status = 'active' AND role IN ('admin', 'superadmin')").get() as { cnt: number }).cnt);
       },
       async create(input) {
         getDb().prepare(`
@@ -286,7 +446,7 @@ function createSqliteRepositories(): DataRepositories {
         getDb().prepare("UPDATE users SET last_login_at = datetime('now') WHERE id = ?").run(id);
       },
       async activateFirstAdmin(id) {
-        getDb().prepare("UPDATE users SET role = 'admin', status = 'active' WHERE id = ?").run(id);
+        getDb().prepare("UPDATE users SET role = 'superadmin', status = 'active' WHERE id = ?").run(id);
       },
       async verifyTokenVersion(userId, tokenVersion) {
         const user = getDb().prepare("SELECT token_version FROM users WHERE id = ?").get(userId) as { token_version: number } | undefined;
@@ -300,12 +460,172 @@ function createSqliteRepositories(): DataRepositories {
         `).run(status, approvedBy, id);
         return this.findById(id);
       },
+      async updateStatusWithAudit(input) {
+        const db = getDb();
+        const update = db.transaction((): SecureUserMutationResult => {
+          const target = db.prepare("SELECT * FROM users WHERE id = ?").get(input.userId) as UserRecord | undefined;
+          if (!target) {
+            insertSqliteAuthSecurityEvent(db, {
+              ...input.event, outcome: 'failure', reasonCode: 'TARGET_NOT_FOUND',
+            });
+            return { ok: false, reason: 'TARGET_NOT_FOUND' };
+          }
+          if (
+            target.role === 'superadmin' &&
+            target.status === 'active' &&
+            input.status !== 'active'
+          ) {
+            const count = Number((db.prepare(`
+              SELECT COUNT(*) AS count FROM users
+              WHERE role = 'superadmin' AND status = 'active'
+            `).get() as { count: number }).count);
+            if (count <= 1) {
+              insertSqliteAuthSecurityEvent(db, {
+                ...input.event, outcome: 'failure', reasonCode: 'LAST_ACTIVE_SUPERADMIN',
+              });
+              db.prepare("UPDATE users SET last_security_event_at = datetime('now') WHERE id = ?").run(input.userId);
+              return { ok: false, reason: 'LAST_ACTIVE_SUPERADMIN' };
+            }
+          }
+          db.prepare(`
+            UPDATE users
+            SET status = ?, token_version = token_version + 1,
+                approved_at = datetime('now'), approved_by = ?,
+                last_security_event_at = datetime('now')
+            WHERE id = ?
+          `).run(input.status, input.approvedBy, input.userId);
+          insertSqliteAuthSecurityEvent(db, input.event);
+          const user = db.prepare("SELECT * FROM users WHERE id = ?").get(input.userId) as UserRecord;
+          return { ok: true, user };
+        });
+        return update();
+      },
       async updateRole(id, role) {
         getDb().prepare("UPDATE users SET role = ?, token_version = token_version + 1 WHERE id = ?").run(role, id);
         return this.findById(id);
       },
+      async updateRoleWithAudit(input) {
+        const db = getDb();
+        const update = db.transaction((): SecureUserMutationResult => {
+          const target = db.prepare(
+            "SELECT * FROM users WHERE id = ?",
+          ).get(input.userId) as UserRecord | undefined;
+          if (!target) {
+            insertSqliteAuthSecurityEvent(db, {
+              ...input.event,
+              outcome: 'failure',
+              reasonCode: 'TARGET_NOT_FOUND',
+            });
+            return { ok: false, reason: 'TARGET_NOT_FOUND' };
+          }
+
+          if (
+            target.role === 'superadmin' &&
+            target.status === 'active' &&
+            input.role !== 'superadmin'
+          ) {
+            const count = Number((db.prepare(`
+              SELECT COUNT(*) AS count
+              FROM users
+              WHERE role = 'superadmin' AND status = 'active'
+            `).get() as { count: number }).count);
+            if (count <= 1) {
+              insertSqliteAuthSecurityEvent(db, {
+                ...input.event,
+                outcome: 'failure',
+                reasonCode: 'LAST_ACTIVE_SUPERADMIN',
+              });
+              db.prepare(
+                "UPDATE users SET last_security_event_at = datetime('now') WHERE id = ?",
+              ).run(input.userId);
+              return { ok: false, reason: 'LAST_ACTIVE_SUPERADMIN' };
+            }
+          }
+
+          db.prepare(`
+            UPDATE users
+            SET role = ?, token_version = token_version + 1,
+                last_security_event_at = datetime('now')
+            WHERE id = ?
+          `).run(input.role, input.userId);
+          insertSqliteAuthSecurityEvent(db, input.event);
+          const user = db.prepare("SELECT * FROM users WHERE id = ?").get(input.userId) as UserRecord;
+          return { ok: true, user };
+        });
+        return update();
+      },
       async resetPassword(id, passwordHash) {
         return getDb().prepare("UPDATE users SET password_hash = ?, token_version = token_version + 1 WHERE id = ?").run(passwordHash, id).changes > 0;
+      },
+      async resetPasswordWithAudit(input) {
+        const db = getDb();
+        const reset = db.transaction(() => {
+          const result = db.prepare(`
+            UPDATE users
+            SET password_hash = ?,
+                token_version = token_version + 1,
+                password_changed_at = datetime('now'),
+                password_changed_by = ?,
+                must_change_password = 1,
+                last_security_event_at = datetime('now')
+            WHERE id = ?
+          `).run(input.passwordHash, input.changedBy, input.userId);
+          if (result.changes === 0) return false;
+          insertSqliteAuthSecurityEvent(db, input.event);
+          return true;
+        });
+        return reset();
+      },
+      async changeOwnPassword(input) {
+        const db = getDb();
+        const change = db.transaction(() => {
+          const result = db.prepare(`
+            UPDATE users
+            SET password_hash = ?,
+                token_version = token_version + 1,
+                password_changed_at = datetime('now'),
+                password_changed_by = ?,
+                must_change_password = 0,
+                last_security_event_at = datetime('now')
+            WHERE id = ?
+          `).run(input.passwordHash, input.changedBy, input.userId);
+          if (result.changes === 0) return false;
+          insertSqliteAuthSecurityEvent(db, input.event);
+          return true;
+        });
+        return change();
+      },
+      async deleteWithAudit(input) {
+        const db = getDb();
+        const remove = db.transaction((): SecureUserDeleteResult => {
+          const target = db.prepare("SELECT * FROM users WHERE id = ?").get(input.userId) as UserRecord | undefined;
+          if (!target) {
+            insertSqliteAuthSecurityEvent(db, {
+              ...input.event, outcome: 'failure', reasonCode: 'TARGET_NOT_FOUND',
+            });
+            return { ok: false, reason: 'TARGET_NOT_FOUND' };
+          }
+          if (target.role === 'superadmin' && target.status === 'active') {
+            const count = Number((db.prepare(`
+              SELECT COUNT(*) AS count FROM users
+              WHERE role = 'superadmin' AND status = 'active'
+            `).get() as { count: number }).count);
+            if (count <= 1) {
+              insertSqliteAuthSecurityEvent(db, {
+                ...input.event, outcome: 'failure', reasonCode: 'LAST_ACTIVE_SUPERADMIN',
+              });
+              db.prepare("UPDATE users SET last_security_event_at = datetime('now') WHERE id = ?").run(input.userId);
+              return { ok: false, reason: 'LAST_ACTIVE_SUPERADMIN' };
+            }
+          }
+          for (const table of USER_PRIVATE_TABLES) {
+            try { db.prepare(`DELETE FROM ${table} WHERE user_id = ?`).run(input.userId); } catch { /* old databases may omit tables */ }
+          }
+          insertSqliteAuthSecurityEvent(db, input.event);
+          db.prepare("DELETE FROM users WHERE id = ?").run(input.userId);
+          return { ok: true, username: target.username };
+        });
+        return remove();
       },
       async deleteCascade(id) {
         const db = getDb();
@@ -316,6 +636,45 @@ function createSqliteRepositories(): DataRepositories {
           return db.prepare("DELETE FROM users WHERE id = ?").run(id).changes > 0;
         });
         return tx();
+      },
+    },
+    securityEvents: {
+      async append(event) {
+        const db = getDb();
+        const append = db.transaction(() => {
+          insertSqliteAuthSecurityEvent(db, event);
+          const userId = event.targetUserId || event.actorUserId;
+          if (userId) {
+            db.prepare(
+              "UPDATE users SET last_security_event_at = datetime('now') WHERE id = ?",
+            ).run(userId);
+          }
+        });
+        append();
+      },
+      async list(filters) {
+        const where: string[] = [];
+        const params: unknown[] = [];
+        const add = (column: string, value?: string) => {
+          if (!value) return;
+          where.push(`${column} = ?`);
+          params.push(value);
+        };
+        add('event_type', filters.eventType);
+        add('outcome', filters.outcome);
+        add('actor_user_id', filters.actorUserId);
+        add('target_user_id', filters.targetUserId);
+        const clause = where.length ? ` WHERE ${where.join(' AND ')}` : '';
+        const db = getDb();
+        const total = Number((db.prepare(
+          `SELECT COUNT(*) AS count FROM auth_security_events${clause}`,
+        ).get(...params) as { count: number }).count);
+        const rows = db.prepare(`
+          SELECT * FROM auth_security_events${clause}
+          ORDER BY created_at DESC, id DESC
+          LIMIT ? OFFSET ?
+        `).all(...params, filters.limit, filters.offset) as AnyRow[];
+        return { events: rows.map(mapAuthSecurityEventRow), total };
       },
     },
     cv: {
@@ -500,6 +859,7 @@ function createPostgresRepositories(): DataRepositories {
       await bootstrapPostgresSchema();
     },
     users: createPostgresUserRepository(),
+    securityEvents: createPostgresSecurityEventRepository(),
     cv: createPostgresCvRepository(),
     resumeEditProposals: createPostgresResumeEditProposalRepository(),
     applications: createPostgresApplicationRepository(),
@@ -551,7 +911,7 @@ function createPostgresUserRepository(): DataRepositories["users"] {
       });
     },
     async countActiveAdmins() {
-      return withPostgresClient(async (client) => Number((await client.query("SELECT COUNT(*) AS cnt FROM users WHERE status = 'active' AND role = 'admin'")).rows[0].cnt));
+      return withPostgresClient(async (client) => Number((await client.query("SELECT COUNT(*) AS cnt FROM users WHERE status = 'active' AND role IN ('admin', 'superadmin')")).rows[0].cnt));
     },
     async create(input) {
       await withPostgresClient((client) => client.query(`
@@ -563,7 +923,7 @@ function createPostgresUserRepository(): DataRepositories["users"] {
       await withPostgresClient((client) => client.query("UPDATE users SET last_login_at = now() WHERE id = $1", [id]));
     },
     async activateFirstAdmin(id) {
-      await withPostgresClient((client) => client.query("UPDATE users SET role = 'admin', status = 'active' WHERE id = $1", [id]));
+      await withPostgresClient((client) => client.query("UPDATE users SET role = 'superadmin', status = 'active' WHERE id = $1", [id]));
     },
     async verifyTokenVersion(userId, tokenVersion) {
       const row = await withPostgresClient(async (client) => one<{ token_version: number }>(await client.query("SELECT token_version FROM users WHERE id = $1", [userId])));
@@ -577,11 +937,218 @@ function createPostgresUserRepository(): DataRepositories["users"] {
         RETURNING *
       `, [status, approvedBy, id])));
     },
+    async updateStatusWithAudit(input) {
+      return withPostgresClient(async (client) => {
+        await client.query("BEGIN");
+        try {
+          const target = one<UserRecord>(await client.query(
+            "SELECT * FROM users WHERE id = $1 FOR UPDATE",
+            [input.userId],
+          ));
+          if (!target) {
+            await insertPostgresAuthSecurityEvent(client, {
+              ...input.event, outcome: 'failure', reasonCode: 'TARGET_NOT_FOUND',
+            });
+            await client.query("COMMIT");
+            return { ok: false, reason: 'TARGET_NOT_FOUND' } as const;
+          }
+          if (
+            target.role === 'superadmin' &&
+            target.status === 'active' &&
+            input.status !== 'active'
+          ) {
+            const superadmins = await client.query(`
+              SELECT id FROM users
+              WHERE role = 'superadmin' AND status = 'active'
+              FOR UPDATE
+            `);
+            if (superadmins.rowCount !== null && superadmins.rowCount <= 1) {
+              await insertPostgresAuthSecurityEvent(client, {
+                ...input.event, outcome: 'failure', reasonCode: 'LAST_ACTIVE_SUPERADMIN',
+              });
+              await client.query("UPDATE users SET last_security_event_at = now() WHERE id = $1", [input.userId]);
+              await client.query("COMMIT");
+              return { ok: false, reason: 'LAST_ACTIVE_SUPERADMIN' } as const;
+            }
+          }
+          const updated = one<UserRecord>(await client.query(`
+            UPDATE users
+            SET status = $1, token_version = token_version + 1,
+                approved_at = now(), approved_by = $2,
+                last_security_event_at = now()
+            WHERE id = $3
+            RETURNING *
+          `, [input.status, input.approvedBy, input.userId])) as UserRecord;
+          await insertPostgresAuthSecurityEvent(client, input.event);
+          await client.query("COMMIT");
+          return { ok: true, user: updated } as const;
+        } catch (error) {
+          await client.query("ROLLBACK");
+          throw error;
+        }
+      });
+    },
     async updateRole(id, role) {
       return withPostgresClient(async (client) => one<UserRecord>(await client.query("UPDATE users SET role = $1, token_version = token_version + 1 WHERE id = $2 RETURNING *", [role, id])));
     },
+    async updateRoleWithAudit(input) {
+      return withPostgresClient(async (client) => {
+        await client.query("BEGIN");
+        try {
+          const target = one<UserRecord>(await client.query(
+            "SELECT * FROM users WHERE id = $1 FOR UPDATE",
+            [input.userId],
+          ));
+          if (!target) {
+            await insertPostgresAuthSecurityEvent(client, {
+              ...input.event,
+              outcome: 'failure',
+              reasonCode: 'TARGET_NOT_FOUND',
+            });
+            await client.query("COMMIT");
+            return { ok: false, reason: 'TARGET_NOT_FOUND' } as const;
+          }
+
+          if (
+            target.role === 'superadmin' &&
+            target.status === 'active' &&
+            input.role !== 'superadmin'
+          ) {
+            const superadmins = await client.query(`
+              SELECT id FROM users
+              WHERE role = 'superadmin' AND status = 'active'
+              FOR UPDATE
+            `);
+            if (superadmins.rowCount !== null && superadmins.rowCount <= 1) {
+              await insertPostgresAuthSecurityEvent(client, {
+                ...input.event,
+                outcome: 'failure',
+                reasonCode: 'LAST_ACTIVE_SUPERADMIN',
+              });
+              await client.query(
+                "UPDATE users SET last_security_event_at = now() WHERE id = $1",
+                [input.userId],
+              );
+              await client.query("COMMIT");
+              return { ok: false, reason: 'LAST_ACTIVE_SUPERADMIN' } as const;
+            }
+          }
+
+          const updated = one<UserRecord>(await client.query(`
+            UPDATE users
+            SET role = $1, token_version = token_version + 1,
+                last_security_event_at = now()
+            WHERE id = $2
+            RETURNING *
+          `, [input.role, input.userId])) as UserRecord;
+          await insertPostgresAuthSecurityEvent(client, input.event);
+          await client.query("COMMIT");
+          return { ok: true, user: updated } as const;
+        } catch (error) {
+          await client.query("ROLLBACK");
+          throw error;
+        }
+      });
+    },
     async resetPassword(id, passwordHash) {
       return withPostgresClient(async (client) => Boolean((await client.query("UPDATE users SET password_hash = $1, token_version = token_version + 1 WHERE id = $2", [passwordHash, id])).rowCount));
+    },
+    async resetPasswordWithAudit(input) {
+      return withPostgresClient(async (client) => {
+        await client.query("BEGIN");
+        try {
+          const result = await client.query(`
+            UPDATE users
+            SET password_hash = $1,
+                token_version = token_version + 1,
+                password_changed_at = now(),
+                password_changed_by = $2,
+                must_change_password = TRUE,
+                last_security_event_at = now()
+            WHERE id = $3
+          `, [input.passwordHash, input.changedBy, input.userId]);
+          if (!result.rowCount) {
+            await client.query("ROLLBACK");
+            return false;
+          }
+          await insertPostgresAuthSecurityEvent(client, input.event);
+          await client.query("COMMIT");
+          return true;
+        } catch (error) {
+          await client.query("ROLLBACK");
+          throw error;
+        }
+      });
+    },
+    async changeOwnPassword(input) {
+      return withPostgresClient(async (client) => {
+        await client.query("BEGIN");
+        try {
+          const result = await client.query(`
+            UPDATE users
+            SET password_hash = $1,
+                token_version = token_version + 1,
+                password_changed_at = now(),
+                password_changed_by = $2,
+                must_change_password = FALSE,
+                last_security_event_at = now()
+            WHERE id = $3
+          `, [input.passwordHash, input.changedBy, input.userId]);
+          if (!result.rowCount) {
+            await client.query("ROLLBACK");
+            return false;
+          }
+          await insertPostgresAuthSecurityEvent(client, input.event);
+          await client.query("COMMIT");
+          return true;
+        } catch (error) {
+          await client.query("ROLLBACK");
+          throw error;
+        }
+      });
+    },
+    async deleteWithAudit(input) {
+      return withPostgresClient(async (client) => {
+        await client.query("BEGIN");
+        try {
+          const target = one<UserRecord>(await client.query(
+            "SELECT * FROM users WHERE id = $1 FOR UPDATE",
+            [input.userId],
+          ));
+          if (!target) {
+            await insertPostgresAuthSecurityEvent(client, {
+              ...input.event, outcome: 'failure', reasonCode: 'TARGET_NOT_FOUND',
+            });
+            await client.query("COMMIT");
+            return { ok: false, reason: 'TARGET_NOT_FOUND' } as const;
+          }
+          if (target.role === 'superadmin' && target.status === 'active') {
+            const superadmins = await client.query(`
+              SELECT id FROM users
+              WHERE role = 'superadmin' AND status = 'active'
+              FOR UPDATE
+            `);
+            if (superadmins.rowCount !== null && superadmins.rowCount <= 1) {
+              await insertPostgresAuthSecurityEvent(client, {
+                ...input.event, outcome: 'failure', reasonCode: 'LAST_ACTIVE_SUPERADMIN',
+              });
+              await client.query("UPDATE users SET last_security_event_at = now() WHERE id = $1", [input.userId]);
+              await client.query("COMMIT");
+              return { ok: false, reason: 'LAST_ACTIVE_SUPERADMIN' } as const;
+            }
+          }
+          for (const table of USER_PRIVATE_TABLES) {
+            await client.query(`DELETE FROM ${pgIdent(table)} WHERE user_id = $1`, [input.userId]);
+          }
+          await insertPostgresAuthSecurityEvent(client, input.event);
+          await client.query("DELETE FROM users WHERE id = $1", [input.userId]);
+          await client.query("COMMIT");
+          return { ok: true, username: target.username } as const;
+        } catch (error) {
+          await client.query("ROLLBACK");
+          throw error;
+        }
+      });
     },
     async deleteCascade(id) {
       return withPostgresClient(async (client) => {
@@ -595,6 +1162,60 @@ function createPostgresUserRepository(): DataRepositories["users"] {
           await client.query("ROLLBACK");
           throw error;
         }
+      });
+    },
+  };
+}
+
+function createPostgresSecurityEventRepository(): DataRepositories["securityEvents"] {
+  return {
+    async append(event) {
+      await withPostgresClient(async (client) => {
+        await client.query("BEGIN");
+        try {
+          await insertPostgresAuthSecurityEvent(client, event);
+          const userId = event.targetUserId || event.actorUserId;
+          if (userId) {
+            await client.query(
+              "UPDATE users SET last_security_event_at = now() WHERE id = $1",
+              [userId],
+            );
+          }
+          await client.query("COMMIT");
+        } catch (error) {
+          await client.query("ROLLBACK");
+          throw error;
+        }
+      });
+    },
+    async list(filters) {
+      return withPostgresClient(async (client) => {
+        const where: string[] = [];
+        const params: unknown[] = [];
+        const add = (column: string, value?: string) => {
+          if (!value) return;
+          params.push(value);
+          where.push(`${column} = $${params.length}`);
+        };
+        add('event_type', filters.eventType);
+        add('outcome', filters.outcome);
+        add('actor_user_id', filters.actorUserId);
+        add('target_user_id', filters.targetUserId);
+        const clause = where.length ? ` WHERE ${where.join(' AND ')}` : '';
+        const countResult = await client.query(
+          `SELECT COUNT(*)::int AS count FROM auth_security_events${clause}`,
+          params,
+        );
+        params.push(filters.limit, filters.offset);
+        const rows = await client.query(`
+          SELECT * FROM auth_security_events${clause}
+          ORDER BY created_at DESC, id DESC
+          LIMIT $${params.length - 1} OFFSET $${params.length}
+        `, params);
+        return {
+          events: rows.rows.map(mapAuthSecurityEventRow),
+          total: Number(countResult.rows[0]?.count || 0),
+        };
       });
     },
   };

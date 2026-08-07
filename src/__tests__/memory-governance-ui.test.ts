@@ -10,8 +10,8 @@ describe("memory governance admin boundaries", () => {
   it("requires admin access before any governance action can run", () => {
     const route = source("src/app/api/admin/memory/route.ts");
 
-    expect(route).toContain('payload.role !== "admin"');
-    expect(route).toContain("verifyTokenVersion(payload)");
+    expect(route).toContain('import { requireAdmin } from "@/lib/security/auth-guards"');
+    expect(route.match(/requireAdmin\(\)/g)?.length).toBe(2);
     expect(route).toContain("approve_reference");
     expect(route).toContain("reject_reference");
     expect(route).toContain("disable_reference");

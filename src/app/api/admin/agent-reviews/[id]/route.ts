@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getCurrentUser, verifyTokenVersion } from "@/lib/auth";
+import { requireAdmin } from "@/lib/security/auth-guards";
 import { isAgentRunLedgerAvailable } from "@/lib/agent/run-ledger";
 import {
   getAgentRunReviewDetail,
@@ -8,18 +8,12 @@ import {
 } from "@/lib/agent/run-review";
 import type { AgentRunStepRecord } from "@/lib/agent/run-ledger";
 
-async function ensureAdmin() {
-  const payload = await getCurrentUser();
-  if (payload.role !== "admin") throw new Error("Forbidden");
-  await verifyTokenVersion(payload);
-}
-
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    await ensureAdmin();
+    await requireAdmin();
     if (!isAgentRunLedgerAvailable()) {
       return NextResponse.json({ success: true, enabled: false, data: null });
     }

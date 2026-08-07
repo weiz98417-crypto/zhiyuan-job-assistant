@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCurrentUser, verifyTokenVersion } from "@/lib/auth";
 import { getDataRepositories } from "@/lib/data-repositories";
+import { requireAdmin } from "@/lib/security/auth-guards";
 import {
   deleteMemoryItem,
   deleteReferenceResumePreferDisable,
@@ -12,16 +12,9 @@ import {
   reindexReferenceResumeRecord,
 } from "@/lib/reference-resume-vector";
 
-async function ensureAdmin() {
-  const payload = await getCurrentUser();
-  if (payload.role !== "admin") throw new Error("Forbidden");
-  await verifyTokenVersion(payload);
-  return payload;
-}
-
 export async function GET(request: NextRequest) {
   try {
-    await ensureAdmin();
+    await requireAdmin();
     const { searchParams } = new URL(request.url);
     const overview = await listMemoryGovernanceOverview({
       roleCategory: cleanFilter(searchParams.get("roleCategory")),
@@ -38,7 +31,7 @@ export async function GET(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
-    const admin = await ensureAdmin();
+    const admin = await requireAdmin();
     const body = await request.json().catch(() => ({}));
     const id = Number(body.id);
     const action = String(body.action || "");

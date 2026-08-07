@@ -36,6 +36,9 @@ All commands below are exposed through `package.json`.
 | `npm run restore:postgres` | `scripts/restore-postgres.mjs` | Dry-run or apply a JSON backup restore into PostgreSQL. |
 | `npm run migrate:postgres` | `scripts/migrate-sqlite-to-postgres.mjs` | Dry-run or apply SQLite to PostgreSQL migration. |
 | `npm run check:postgres-migration` | `scripts/check-postgres-migration.mjs` | Compare source/target counts, samples, and user isolation after migration. |
+| `npm run security:promote-superadmin` | `scripts/promote-sole-admin.mjs` | Safely dry-run or apply the sole-admin to superadmin migration. |
+| `npm run security:preflight` | `scripts/check-auth-security-preflight.mjs` | Fail deployment unless auth secrets, HTTPS, Postgres schema, superadmin, Redis persistence, and HSTS are ready. |
+| `npm run security:retry-alerts` | `scripts/retry-security-alerts.mjs` | Retry due webhook alert failures once under a PostgreSQL advisory lock. |
 
 Common sequence:
 

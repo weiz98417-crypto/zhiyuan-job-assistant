@@ -28,6 +28,17 @@ export function getDb(): Database.Database {
     const schema = fs.readFileSync(SCHEMA_PATH, "utf-8");
     _db.exec(schema);
 
+    const userColumns = _db.prepare("PRAGMA table_info(users)").all() as { name: string }[];
+    const userSecurityMigrations = [
+      ["password_changed_at", "ALTER TABLE users ADD COLUMN password_changed_at TEXT"],
+      ["password_changed_by", "ALTER TABLE users ADD COLUMN password_changed_by TEXT"],
+      ["must_change_password", "ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0"],
+      ["last_security_event_at", "ALTER TABLE users ADD COLUMN last_security_event_at TEXT"],
+    ];
+    for (const [name, sql] of userSecurityMigrations) {
+      if (!userColumns.some((column) => column.name === name)) _db.exec(sql);
+    }
+
     // Migration: jds.report_id stores the public report_num used by the UI,
     // not the internal reports.id primary key.
     const jdForeignKeys = _db.prepare("PRAGMA foreign_key_list(jds)").all() as { from: string; table: string; to: string }[];

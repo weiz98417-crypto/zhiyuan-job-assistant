@@ -14,8 +14,48 @@ CREATE TABLE IF NOT EXISTS users (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   approved_at TEXT,
   approved_by TEXT,
-  last_login_at TEXT
+  last_login_at TEXT,
+  password_changed_at TEXT,
+  password_changed_by TEXT,
+  must_change_password INTEGER NOT NULL DEFAULT 0,
+  last_security_event_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS auth_security_events (
+  id TEXT PRIMARY KEY,
+  event_type TEXT NOT NULL,
+  actor_user_id TEXT,
+  target_user_id TEXT,
+  actor_role TEXT,
+  outcome TEXT NOT NULL,
+  reason_code TEXT,
+  request_id TEXT NOT NULL,
+  source_ip TEXT,
+  user_agent TEXT,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_auth_security_events_type
+  ON auth_security_events(event_type, created_at);
+CREATE INDEX IF NOT EXISTS idx_auth_security_events_actor
+  ON auth_security_events(actor_user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_auth_security_events_target
+  ON auth_security_events(target_user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_auth_security_events_request
+  ON auth_security_events(request_id);
+
+CREATE TRIGGER IF NOT EXISTS auth_security_events_no_update
+BEFORE UPDATE ON auth_security_events
+BEGIN
+  SELECT RAISE(ABORT, 'auth_security_events is append-only');
+END;
+
+CREATE TRIGGER IF NOT EXISTS auth_security_events_no_delete
+BEFORE DELETE ON auth_security_events
+BEGIN
+  SELECT RAISE(ABORT, 'auth_security_events is append-only');
+END;
 
 CREATE TABLE IF NOT EXISTS applications (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

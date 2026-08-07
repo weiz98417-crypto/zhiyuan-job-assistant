@@ -48,7 +48,7 @@ Open [http://localhost:3000](http://localhost:3000).
 ## First Admin And LAN Users
 
 1. Register the first account from `/register`.
-2. The first account becomes `admin` automatically if there is no active admin.
+2. The first account becomes `superadmin` automatically if there is no active privileged account.
 3. Later users register as `pending`.
 4. Admin approves or rejects users from `/admin/users`.
 
@@ -174,6 +174,8 @@ DB_DRIVER=sqlite
 ```
 
 See [POSTGRES_MIGRATION.md](POSTGRES_MIGRATION.md) for backup, rollback, and excluded-table details.
+
+For hardened production authentication, follow [AUTH_SECURITY_RUNBOOK.md](AUTH_SECURITY_RUNBOOK.md) and require `npm run security:preflight` to pass before traffic is enabled.
 
 ## Embeddings
 

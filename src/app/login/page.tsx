@@ -38,7 +38,7 @@ export default function LoginPage() {
         setLoading(false);
         return;
       }
-      window.location.assign('/');
+      window.location.assign(data.mustChangePassword ? '/change-password' : '/');
     } catch (err) {
       setError(err instanceof DOMException && err.name === 'AbortError'
         ? '登录请求超时，请刷新页面后重试'

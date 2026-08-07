@@ -1,0 +1,30 @@
+services:
+  auth-security-redis:
+    image: redis:7.4-alpine
+    container_name: zhiyuan-auth-security-redis
+    restart: unless-stopped
+    command:
+      - /bin/sh
+      - -ec
+      - exec redis-server --appendonly yes --appendfsync everysec --requirepass "$$(cat /run/secrets/redis_password)"
+    ports:
+      - "127.0.0.1:${AUTH_REDIS_BIND_PORT:-6380}:6379"
+    volumes:
+      - auth-security-redis-data:/data
+    secrets:
+      - redis_password
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=$$(cat /run/secrets/redis_password) redis-cli ping | grep PONG"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+
+secrets:
+  redis_password:
+    file: ./secrets/redis_password
+
+volumes:
+  auth-security-redis-data:

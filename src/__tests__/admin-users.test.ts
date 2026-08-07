@@ -18,14 +18,16 @@ beforeAll(() => {
   );
   db.exec(schema);
 
-  // Run the user_id migration (mirrors server-db.ts getDb())
   const userTables = [
     'profiles', 'profile_signals', 'sessions', 'stories', 'cv_data',
     'applications', 'agent_preferences', 'session_memory',
     'optimization_preferences',
   ];
   for (const table of userTables) {
-    db.exec(`ALTER TABLE ${table} ADD COLUMN user_id TEXT REFERENCES users(id)`);
+    const columns = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+    if (!columns.some((column) => column.name === 'user_id')) {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN user_id TEXT REFERENCES users(id)`);
+    }
   }
 });
 
