@@ -57,6 +57,24 @@ BEGIN
   SELECT RAISE(ABORT, 'auth_security_events is append-only');
 END;
 
+CREATE TABLE IF NOT EXISTS password_recovery_requests (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'pending',
+  source_ip TEXT,
+  user_agent TEXT,
+  requested_at TEXT NOT NULL DEFAULT (datetime('now')),
+  resolved_at TEXT,
+  resolved_by TEXT,
+  resolution TEXT,
+  CHECK (status IN ('pending', 'completed', 'dismissed'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_password_recovery_one_pending_per_user
+  ON password_recovery_requests(user_id) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_password_recovery_pending
+  ON password_recovery_requests(status, requested_at);
+
 CREATE TABLE IF NOT EXISTS applications (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id TEXT REFERENCES users(id),

@@ -9,8 +9,10 @@ const JWT_SECRET = new TextEncoder().encode(
 const PUBLIC_PATHS = [
   '/login',
   '/register',
+  '/forgot-password',
   '/api/auth/login',
   '/api/auth/register',
+  '/api/auth/password/recovery-request',
 ];
 
 const FORCED_PASSWORD_CHANGE_PATHS = [
@@ -21,7 +23,11 @@ const FORCED_PASSWORD_CHANGE_PATHS = [
 ];
 
 const MUTATION_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
-const ORIGIN_ONLY_AUTH_PATHS = new Set(['/api/auth/login', '/api/auth/register']);
+const ORIGIN_ONLY_AUTH_PATHS = new Set([
+  '/api/auth/login',
+  '/api/auth/register',
+  '/api/auth/password/recovery-request',
+]);
 
 function csrfError(code: string, status = 403) {
   const error = code.startsWith('ORIGIN') ? 'Request origin is not allowed' : 'CSRF validation failed';

@@ -4,26 +4,42 @@ import { requireAdmin } from '@/lib/security/auth-guards';
 
 export async function GET(request: NextRequest) {
   try {
-    await requireAdmin();
+    const actor = await requireAdmin();
 
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status');
 
-    const users = await getDataRepositories().users.list(
+    const repos = getDataRepositories();
+    const users = await repos.users.list(
       status && ['pending', 'active', 'rejected'].includes(status) ? status : undefined,
+    );
+    const recoveryRequests = actor.role === 'superadmin'
+      ? await repos.passwordRecoveryRequests.listPending()
+      : [];
+    const recoveryByUserId = new Map(
+      recoveryRequests.map((recovery) => [recovery.userId, recovery]),
     );
 
     return NextResponse.json({
-      users: users.map((u) => ({
-        id: u.id,
-        username: u.username,
-        displayName: u.display_name,
-        email: u.email,
-        role: u.role,
-        status: u.status,
-        createdAt: u.created_at,
-        lastLoginAt: u.last_login_at,
-      })),
+      users: users.map((u) => {
+        const recovery = recoveryByUserId.get(u.id);
+        return {
+          id: u.id,
+          username: u.username,
+          displayName: u.display_name,
+          email: u.email,
+          role: u.role,
+          status: u.status,
+          createdAt: u.created_at,
+          lastLoginAt: u.last_login_at,
+          ...(recovery ? {
+            passwordRecovery: {
+              id: recovery.id,
+              requestedAt: recovery.requestedAt,
+            },
+          } : {}),
+        };
+      }),
     });
   } catch (err) {
     const authError = err as { status?: unknown; code?: unknown; message?: unknown };

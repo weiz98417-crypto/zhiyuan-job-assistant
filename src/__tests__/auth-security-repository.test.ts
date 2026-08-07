@@ -255,4 +255,115 @@ describe('authentication security repository', () => {
     expect(result.events.some((event) => event.id === 'event-list-success')).toBe(false);
     expect(result.events[0]).not.toHaveProperty('metadata_json');
   });
+
+  it('completes a recovery request atomically with password replacement and audit', async () => {
+    const submitted = await repositories.passwordRecoveryRequests.submitForUser({
+      id: 'recovery-1',
+      userId: 'user-1',
+      sourceIp: '203.0.113.10',
+      userAgent: 'vitest-browser',
+      event: {
+        id: 'event-recovery-request',
+        eventType: 'password_recovery_request',
+        targetUserId: 'user-1',
+        outcome: 'pending',
+        requestId: 'public-request-1',
+        metadata: {},
+      },
+    });
+
+    expect(submitted).toMatchObject({
+      id: 'recovery-1',
+      userId: 'user-1',
+      status: 'pending',
+    });
+    await expect(repositories.passwordRecoveryRequests.listPending()).resolves.toEqual([
+      expect.objectContaining({ id: 'recovery-1', userId: 'user-1' }),
+    ]);
+
+    const completed = await repositories.passwordRecoveryRequests.completeWithPasswordReset({
+      requestId: 'recovery-1',
+      userId: 'user-1',
+      passwordHash: 'temporary-hash',
+      changedBy: 'owner-1',
+      event: {
+        id: 'event-recovery-completed',
+        eventType: 'admin_password_reset',
+        actorUserId: 'owner-1',
+        targetUserId: 'user-1',
+        actorRole: 'superadmin',
+        outcome: 'success',
+        requestId: 'admin-request-1',
+        metadata: { recoveryRequestId: 'recovery-1' },
+      },
+    });
+
+    expect(completed).toBe(true);
+    await expect(repositories.passwordRecoveryRequests.listPending()).resolves.toEqual([]);
+    await expect(repositories.users.findById('user-1')).resolves.toMatchObject({
+      password_hash: 'temporary-hash',
+      must_change_password: 1,
+      password_changed_by: 'owner-1',
+    });
+    expect(database.prepare(
+      'SELECT status, resolved_by, resolution FROM password_recovery_requests WHERE id = ?',
+    ).get('recovery-1')).toMatchObject({
+      status: 'completed',
+      resolved_by: 'owner-1',
+      resolution: 'temporary_password_issued',
+    });
+    expect(database.prepare(
+      'SELECT event_type, outcome FROM auth_security_events WHERE id = ?',
+    ).get('event-recovery-completed')).toEqual({
+      event_type: 'admin_password_reset',
+      outcome: 'success',
+    });
+  });
+
+  it('does not replace a password when the recovery request does not match the user', async () => {
+    const before = await repositories.users.findById('user-1');
+
+    const completed = await repositories.passwordRecoveryRequests.completeWithPasswordReset({
+      requestId: 'missing-recovery',
+      userId: 'user-1',
+      passwordHash: 'must-not-commit',
+      changedBy: 'owner-1',
+      event: {
+        id: 'event-missing-recovery',
+        eventType: 'admin_password_reset',
+        actorUserId: 'owner-1',
+        targetUserId: 'user-1',
+        actorRole: 'superadmin',
+        outcome: 'success',
+        requestId: 'admin-request-2',
+        metadata: {},
+      },
+    });
+
+    expect(completed).toBe(false);
+    await expect(repositories.users.findById('user-1')).resolves.toMatchObject({
+      password_hash: before?.password_hash,
+      token_version: before?.token_version,
+    });
+    expect(database.prepare(
+      'SELECT id FROM auth_security_events WHERE id = ?',
+    ).get('event-missing-recovery')).toBeUndefined();
+  });
+
+  it('does not resolve an ambiguous unverified email to an arbitrary account', async () => {
+    await repositories.users.create({
+      id: 'user-2',
+      username: 'membertwo',
+      passwordHash: 'old-hash-2',
+      displayName: 'Member Two',
+      email: 'member@example.com',
+      role: 'member',
+      status: 'active',
+    });
+
+    await expect(repositories.users.findByUsernameOrEmail('memberone')).resolves.toMatchObject({
+      id: 'user-1',
+    });
+    await expect(repositories.users.findByUsernameOrEmail('member@example.com')).resolves.toBeUndefined();
+  });
 });

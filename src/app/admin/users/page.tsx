@@ -17,6 +17,10 @@ interface UserItem {
   status: UserStatus;
   createdAt: string;
   lastLoginAt: string | null;
+  passwordRecovery?: {
+    id: string;
+    requestedAt: string;
+  };
 }
 
 interface CurrentUser {
@@ -122,7 +126,11 @@ export default function AdminUsersPage() {
 
   function openSecureAction(action: SecureAction) {
     setCurrentPassword('');
-    setActionReason('');
+    setActionReason(
+      action.kind === 'reset' && action.target.passwordRecovery
+        ? '用户提交密码找回申请，已完成身份核验'
+        : '',
+    );
     setSecureAction(action);
   }
 
@@ -159,7 +167,12 @@ export default function AdminUsersPage() {
         init = {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ reason: actionReason.trim() }),
+          body: JSON.stringify({
+            reason: actionReason.trim(),
+            ...(target.passwordRecovery
+              ? { recoveryRequestId: target.passwordRecovery.id }
+              : {}),
+          }),
         };
       } else if (secureAction.kind === 'role') {
         init = {
@@ -348,6 +361,11 @@ export default function AdminUsersPage() {
                   <td className="px-4 py-3">
                     <div className="font-medium text-[var(--color-text)]">{user.displayName}</div>
                     <div className="text-xs text-[var(--color-muted)]">{user.username}{isSelf ? ' · 当前账号' : ''}</div>
+                    {user.passwordRecovery && (
+                      <div className="mt-1 text-xs font-medium text-amber-700">
+                        密码找回申请 · {formatDate(user.passwordRecovery.requestedAt)}
+                      </div>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-[var(--color-text-soft)]">{user.email || '—'}</td>
                   <td className="px-4 py-3"><Badge>{roleLabel[user.role]}</Badge></td>
@@ -368,7 +386,7 @@ export default function AdminUsersPage() {
                       )}
                       {user.status === 'active' && !isSelf && (
                         <ActionButton onClick={() => openSecureAction({ kind: 'reset', target: user })} loading={actionLoading === user.id}>
-                          <KeyRound size={13} />重置密码
+                          <KeyRound size={13} />{user.passwordRecovery ? '处理找回' : '重置密码'}
                         </ActionButton>
                       )}
                       {currentUser?.role === 'superadmin' && !isSelf && user.role === 'member' && (
@@ -410,7 +428,11 @@ export default function AdminUsersPage() {
 }
 
 function secureActionTitle(action: SecureAction) {
-  if (action.kind === 'reset') return '生成临时密码并强制用户下次登录改密';
+  if (action.kind === 'reset') {
+    return action.target.passwordRecovery
+      ? '核验找回申请并生成一次性临时密码'
+      : '生成临时密码并强制用户下次登录改密';
+  }
   if (action.kind === 'delete') return '永久删除特权账户及其数据';
   if (action.kind === 'status') return `将账户状态改为“${statusLabel[action.status]}”`;
   return `将角色改为“${roleLabel[action.role]}”`;

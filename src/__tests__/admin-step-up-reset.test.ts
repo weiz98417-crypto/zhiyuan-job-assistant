@@ -13,6 +13,9 @@ const users = vi.hoisted(() => ({
   resetPasswordWithAudit: vi.fn(),
 }));
 const securityEvents = vi.hoisted(() => ({ append: vi.fn() }));
+const passwordRecoveryRequests = vi.hoisted(() => ({
+  completeWithPasswordReset: vi.fn(),
+}));
 const stepUpStore = vi.hoisted(() => ({
   issue: vi.fn(),
   consume: vi.fn(),
@@ -30,7 +33,7 @@ vi.mock('@/lib/security/step-up-failure-tracker', () => ({
   getStepUpFailureTracker: () => stepUpFailures,
 }));
 vi.mock('@/lib/data-repositories', () => ({
-  getDataRepositories: () => ({ users, securityEvents }),
+  getDataRepositories: () => ({ users, securityEvents, passwordRecoveryRequests }),
 }));
 vi.mock('@/lib/security/security-alerts', () => alerts);
 
@@ -86,6 +89,7 @@ describe('administrative step-up and password reset', () => {
       shouldAlert: false,
     });
     users.resetPasswordWithAudit.mockResolvedValue(true);
+    passwordRecoveryRequests.completeWithPasswordReset.mockResolvedValue(true);
   });
 
   it('alerts after the fifth failed step-up password verification', async () => {
@@ -314,5 +318,44 @@ describe('administrative step-up and password reset', () => {
       outcome: 'success',
     }));
     expect(JSON.stringify(alerts.sendSecurityAlert.mock.calls)).not.toContain(body.temporaryPassword);
+  });
+
+  it('completes a linked recovery request through the atomic recovery transaction', async () => {
+    guards.requireAdmin.mockResolvedValue({ ...admin, userId: 'owner-1', role: 'superadmin' });
+
+    const response = await resetPassword(post(
+      'https://example.test/api/admin/users/member-1/password-reset',
+      {
+        reason: 'Identity verified through support ticket',
+        recoveryRequestId: 'recovery-1',
+      },
+      'auth_step_up=opaque-token',
+    ), context);
+
+    expect(response.status).toBe(200);
+    expect(passwordRecoveryRequests.completeWithPasswordReset).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: 'recovery-1',
+        userId: member.id,
+        changedBy: 'owner-1',
+      }),
+    );
+    expect(users.resetPasswordWithAudit).not.toHaveBeenCalled();
+  });
+
+  it('requires a superadmin to complete a user-submitted recovery request', async () => {
+    const response = await resetPassword(post(
+      'https://example.test/api/admin/users/member-1/password-reset',
+      {
+        reason: 'Identity verified through support ticket',
+        recoveryRequestId: 'recovery-1',
+      },
+      'auth_step_up=opaque-token',
+    ), context);
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ code: 'SUPERADMIN_REQUIRED' });
+    expect(passwordRecoveryRequests.completeWithPasswordReset).not.toHaveBeenCalled();
+    expect(users.resetPasswordWithAudit).not.toHaveBeenCalled();
   });
 });

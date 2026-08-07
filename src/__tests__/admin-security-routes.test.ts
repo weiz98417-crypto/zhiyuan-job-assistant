@@ -14,6 +14,7 @@ const stepUpStore = vi.hoisted(() => ({ consume: vi.fn() }));
 const stepUpFailures = vi.hoisted(() => ({ recordFailure: vi.fn() }));
 const alerts = vi.hoisted(() => ({ sendSecurityAlert: vi.fn() }));
 const securityEvents = vi.hoisted(() => ({ append: vi.fn() }));
+const passwordRecoveryRequests = vi.hoisted(() => ({ listPending: vi.fn() }));
 const users = vi.hoisted(() => ({
   list: vi.fn(),
   findById: vi.fn(),
@@ -35,7 +36,7 @@ vi.mock('@/lib/security/step-up-failure-tracker', () => ({
   getStepUpFailureTracker: () => stepUpFailures,
 }));
 vi.mock('@/lib/data-repositories', () => ({
-  getDataRepositories: () => ({ users, securityEvents }),
+  getDataRepositories: () => ({ users, securityEvents, passwordRecoveryRequests }),
 }));
 vi.mock('@/lib/security/security-alerts', () => alerts);
 
@@ -63,6 +64,7 @@ describe('administrative user security boundaries', () => {
     users.findById.mockResolvedValue({
       id: 'member-1', username: 'member', role: 'member', status: 'active',
     });
+    passwordRecoveryRequests.listPending.mockResolvedValue([]);
     stepUpStore.consume.mockResolvedValue({ ok: true });
     stepUpFailures.recordFailure.mockResolvedValue({
       count: 1,

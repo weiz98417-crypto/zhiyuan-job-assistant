@@ -49,6 +49,9 @@ export async function POST(
     const { id } = await params;
     const body = await request.json();
     const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 500) : '';
+    const recoveryRequestId = typeof body.recoveryRequestId === 'string'
+      ? body.recoveryRequestId.trim().slice(0, 100)
+      : '';
     if (reason.length < 3) {
       return NextResponse.json(
         { error: 'A reset reason is required', code: 'RESET_REASON_REQUIRED' },
@@ -66,6 +69,22 @@ export async function POST(
       return NextResponse.json(
         { error: 'Use self-service password change', code: 'SELF_RESET_FORBIDDEN' },
         { status: 400 },
+      );
+    }
+    if (recoveryRequestId && actor.role !== 'superadmin') {
+      await recordDeniedPasswordReset({
+        request,
+        actor,
+        targetUserId: id,
+        reasonCode: 'SUPERADMIN_REQUIRED',
+        metadata: { purpose: 'password_recovery_completion' },
+      });
+      return NextResponse.json(
+        {
+          error: 'Superadmin is required to complete password recovery',
+          code: 'SUPERADMIN_REQUIRED',
+        },
+        { status: 403 },
       );
     }
 
@@ -139,18 +158,39 @@ export async function POST(
       requestId: crypto.randomUUID(),
       sourceIp: getTrustedSourceIp(request),
       userAgent: request.headers.get('user-agent') || undefined,
-      metadata: { reason, targetRole: target.role },
+      metadata: {
+        reason,
+        targetRole: target.role,
+        ...(recoveryRequestId ? { recoveryRequestId } : {}),
+      },
     };
-    const reset = await repos.users.resetPasswordWithAudit({
-      userId: id,
-      passwordHash: await hashPassword(generatedPassword),
-      changedBy: actor.userId,
-      event: auditEvent,
-    });
+    const passwordHash = await hashPassword(generatedPassword);
+    const reset = recoveryRequestId
+      ? await repos.passwordRecoveryRequests.completeWithPasswordReset({
+          requestId: recoveryRequestId,
+          userId: id,
+          passwordHash,
+          changedBy: actor.userId,
+          event: auditEvent,
+        })
+      : await repos.users.resetPasswordWithAudit({
+          userId: id,
+          passwordHash,
+          changedBy: actor.userId,
+          event: auditEvent,
+        });
     if (!reset) {
-      return NextResponse.json({ error: 'User not found', code: 'TARGET_NOT_FOUND' }, { status: 404 });
+      return recoveryRequestId
+        ? NextResponse.json(
+            { error: 'Recovery request is no longer pending', code: 'RECOVERY_REQUEST_INVALID' },
+            { status: 409 },
+          )
+        : NextResponse.json(
+            { error: 'User not found', code: 'TARGET_NOT_FOUND' },
+            { status: 404 },
+          );
     }
-    if (target.role === 'admin' || target.role === 'superadmin') {
+    if (recoveryRequestId || target.role === 'admin' || target.role === 'superadmin') {
       await sendSecurityAlert(auditEvent);
     }
 

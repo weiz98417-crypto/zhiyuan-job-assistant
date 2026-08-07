@@ -134,13 +134,26 @@ export default function LoginPage() {
             </div>
 
             <div style={{ marginBottom: 24 }}>
-              <label style={{
-                display: 'block',
-                fontSize: '0.8rem',
-                fontWeight: 500,
-                color: 'var(--color-text)',
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 12,
                 marginBottom: 7,
-              }}>密码</label>
+              }}>
+                <label style={{
+                  display: 'block',
+                  fontSize: '0.8rem',
+                  fontWeight: 500,
+                  color: 'var(--color-text)',
+                }}>密码</label>
+                <a href="/forgot-password" style={{
+                  color: 'var(--color-primary)',
+                  textDecoration: 'none',
+                  fontSize: '0.78rem',
+                  fontWeight: 500,
+                }}>忘记密码</a>
+              </div>
               <input
                 type="password"
                 value={password}

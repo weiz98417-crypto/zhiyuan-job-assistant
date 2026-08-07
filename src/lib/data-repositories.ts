@@ -147,6 +147,18 @@ export interface AuthSecurityEventFilters {
   offset: number;
 }
 
+export interface PasswordRecoveryRequestRecord {
+  id: string;
+  userId: string;
+  status: 'pending' | 'completed' | 'dismissed';
+  sourceIp?: string;
+  userAgent?: string;
+  requestedAt: string;
+  resolvedAt?: string;
+  resolvedBy?: string;
+  resolution?: string;
+}
+
 export type SecureUserMutationResult =
   | { ok: true; user: UserRecord }
   | { ok: false; reason: 'LAST_ACTIVE_SUPERADMIN' | 'TARGET_NOT_FOUND' };
@@ -160,6 +172,7 @@ export interface DataRepositories {
   assertReady(): Promise<void>;
   users: {
     findByUsername(username: string): Promise<UserRecord | undefined>;
+    findByUsernameOrEmail(identifier: string): Promise<UserRecord | undefined>;
     findById(id: string): Promise<UserRecord | undefined>;
     list(status?: string): Promise<UserRecord[]>;
     countActiveAdmins(): Promise<number>;
@@ -213,6 +226,23 @@ export interface DataRepositories {
       events: AuthSecurityEventRecord[];
       total: number;
     }>;
+  };
+  passwordRecoveryRequests: {
+    submitForUser(input: {
+      id: string;
+      userId: string;
+      sourceIp?: string;
+      userAgent?: string;
+      event: AuthSecurityEventInput;
+    }): Promise<PasswordRecoveryRequestRecord>;
+    listPending(): Promise<PasswordRecoveryRequestRecord[]>;
+    completeWithPasswordReset(input: {
+      requestId: string;
+      userId: string;
+      passwordHash: string;
+      changedBy: string;
+      event: AuthSecurityEventInput;
+    }): Promise<boolean>;
   };
   cv: {
     get(userId: string): Promise<{ data_json: string } | undefined>;
@@ -382,6 +412,20 @@ function mapAuthSecurityEventRow(row: AnyRow): AuthSecurityEventRecord {
   };
 }
 
+function mapPasswordRecoveryRequestRow(row: AnyRow): PasswordRecoveryRequestRecord {
+  return {
+    id: String(row.id),
+    userId: String(row.user_id),
+    status: String(row.status) as PasswordRecoveryRequestRecord['status'],
+    sourceIp: row.source_ip ? String(row.source_ip) : undefined,
+    userAgent: row.user_agent ? String(row.user_agent) : undefined,
+    requestedAt: String(row.requested_at),
+    resolvedAt: row.resolved_at ? String(row.resolved_at) : undefined,
+    resolvedBy: row.resolved_by ? String(row.resolved_by) : undefined,
+    resolution: row.resolution ? String(row.resolution) : undefined,
+  };
+}
+
 async function insertPostgresAuthSecurityEvent(
   client: PoolClient,
   event: AuthSecurityEventInput,
@@ -424,6 +468,19 @@ function createSqliteRepositories(): DataRepositories {
     users: {
       async findByUsername(username) {
         return getDb().prepare("SELECT * FROM users WHERE username = ?").get(username) as UserRecord | undefined;
+      },
+      async findByUsernameOrEmail(identifier) {
+        const db = getDb();
+        const username = db.prepare(`
+          SELECT * FROM users WHERE lower(username) = lower(?) LIMIT 1
+        `).get(identifier) as UserRecord | undefined;
+        if (username) return username;
+        const emailMatches = db.prepare(`
+          SELECT * FROM users
+          WHERE email <> '' AND lower(email) = lower(?)
+          LIMIT 2
+        `).all(identifier) as UserRecord[];
+        return emailMatches.length === 1 ? emailMatches[0] : undefined;
       },
       async findById(id) {
         return getDb().prepare("SELECT * FROM users WHERE id = ?").get(id) as UserRecord | undefined;
@@ -677,6 +734,7 @@ function createSqliteRepositories(): DataRepositories {
         return { events: rows.map(mapAuthSecurityEventRow), total };
       },
     },
+    passwordRecoveryRequests: createSqlitePasswordRecoveryRepository(),
     cv: {
       async get(userId) {
         return getDb().prepare("SELECT data_json FROM cv_data WHERE user_id = ?").get(userId) as { data_json: string } | undefined;
@@ -860,6 +918,7 @@ function createPostgresRepositories(): DataRepositories {
     },
     users: createPostgresUserRepository(),
     securityEvents: createPostgresSecurityEventRepository(),
+    passwordRecoveryRequests: createPostgresPasswordRecoveryRepository(),
     cv: createPostgresCvRepository(),
     resumeEditProposals: createPostgresResumeEditProposalRepository(),
     applications: createPostgresApplicationRepository(),
@@ -898,6 +957,22 @@ function createPostgresUserRepository(): DataRepositories["users"] {
   return {
     async findByUsername(username) {
       return withPostgresClient(async (client) => one<UserRecord>(await client.query("SELECT * FROM users WHERE username = $1", [username])));
+    },
+    async findByUsernameOrEmail(identifier) {
+      return withPostgresClient(async (client) => {
+        const username = one<UserRecord>(await client.query(`
+          SELECT * FROM users WHERE lower(username) = lower($1) LIMIT 1
+        `, [identifier]));
+        if (username) return username;
+        const emailMatches = await client.query(`
+          SELECT * FROM users
+          WHERE email <> '' AND lower(email) = lower($1)
+          LIMIT 2
+        `, [identifier]);
+        return emailMatches.rows.length === 1
+          ? emailMatches.rows[0] as UserRecord
+          : undefined;
+      });
     },
     async findById(id) {
       return withPostgresClient(async (client) => one<UserRecord>(await client.query("SELECT * FROM users WHERE id = $1", [id])));
@@ -1216,6 +1291,159 @@ function createPostgresSecurityEventRepository(): DataRepositories["securityEven
           events: rows.rows.map(mapAuthSecurityEventRow),
           total: Number(countResult.rows[0]?.count || 0),
         };
+      });
+    },
+  };
+}
+
+function createSqlitePasswordRecoveryRepository(): DataRepositories['passwordRecoveryRequests'] {
+  return {
+    async submitForUser(input) {
+      const db = getDb();
+      const submit = db.transaction(() => {
+        const existing = db.prepare(`
+          SELECT * FROM password_recovery_requests
+          WHERE user_id = ? AND status = 'pending'
+        `).get(input.userId) as AnyRow | undefined;
+        if (existing) {
+          db.prepare(`
+            UPDATE password_recovery_requests
+            SET source_ip = ?, user_agent = ?, requested_at = datetime('now')
+            WHERE id = ?
+          `).run(input.sourceIp || null, input.userAgent || null, existing.id);
+        } else {
+          db.prepare(`
+            INSERT INTO password_recovery_requests (
+              id, user_id, status, source_ip, user_agent
+            ) VALUES (?, ?, 'pending', ?, ?)
+          `).run(input.id, input.userId, input.sourceIp || null, input.userAgent || null);
+        }
+        insertSqliteAuthSecurityEvent(db, input.event);
+        db.prepare(
+          "UPDATE users SET last_security_event_at = datetime('now') WHERE id = ?",
+        ).run(input.userId);
+        const row = db.prepare(`
+          SELECT * FROM password_recovery_requests
+          WHERE user_id = ? AND status = 'pending'
+        `).get(input.userId) as AnyRow;
+        return mapPasswordRecoveryRequestRow(row);
+      });
+      return submit();
+    },
+    async listPending() {
+      const rows = getDb().prepare(`
+        SELECT * FROM password_recovery_requests
+        WHERE status = 'pending'
+        ORDER BY requested_at DESC
+      `).all() as AnyRow[];
+      return rows.map(mapPasswordRecoveryRequestRow);
+    },
+    async completeWithPasswordReset(input) {
+      const db = getDb();
+      const complete = db.transaction(() => {
+        const request = db.prepare(`
+          SELECT id FROM password_recovery_requests
+          WHERE id = ? AND user_id = ? AND status = 'pending'
+        `).get(input.requestId, input.userId);
+        if (!request) return false;
+        const user = db.prepare(`
+          UPDATE users
+          SET password_hash = ?, token_version = token_version + 1,
+              password_changed_at = datetime('now'), password_changed_by = ?,
+              must_change_password = 1, last_security_event_at = datetime('now')
+          WHERE id = ?
+        `).run(input.passwordHash, input.changedBy, input.userId);
+        if (user.changes === 0) return false;
+        db.prepare(`
+          UPDATE password_recovery_requests
+          SET status = 'completed', resolved_at = datetime('now'),
+              resolved_by = ?, resolution = 'temporary_password_issued'
+          WHERE id = ?
+        `).run(input.changedBy, input.requestId);
+        insertSqliteAuthSecurityEvent(db, input.event);
+        return true;
+      });
+      return complete();
+    },
+  };
+}
+
+function createPostgresPasswordRecoveryRepository(): DataRepositories['passwordRecoveryRequests'] {
+  return {
+    async submitForUser(input) {
+      return withPostgresClient(async (client) => {
+        await client.query('BEGIN');
+        try {
+          const result = await client.query(`
+            INSERT INTO password_recovery_requests (
+              id, user_id, status, source_ip, user_agent
+            ) VALUES ($1, $2, 'pending', $3, $4)
+            ON CONFLICT (user_id) WHERE status = 'pending'
+            DO UPDATE SET source_ip = EXCLUDED.source_ip,
+                          user_agent = EXCLUDED.user_agent,
+                          requested_at = now()
+            RETURNING *
+          `, [input.id, input.userId, input.sourceIp || null, input.userAgent || null]);
+          await insertPostgresAuthSecurityEvent(client, input.event);
+          await client.query(
+            'UPDATE users SET last_security_event_at = now() WHERE id = $1',
+            [input.userId],
+          );
+          await client.query('COMMIT');
+          return mapPasswordRecoveryRequestRow(result.rows[0]);
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        }
+      });
+    },
+    async listPending() {
+      return withPostgresClient(async (client) => {
+        const result = await client.query(`
+          SELECT * FROM password_recovery_requests
+          WHERE status = 'pending'
+          ORDER BY requested_at DESC
+        `);
+        return result.rows.map(mapPasswordRecoveryRequestRow);
+      });
+    },
+    async completeWithPasswordReset(input) {
+      return withPostgresClient(async (client) => {
+        await client.query('BEGIN');
+        try {
+          const recovery = await client.query(`
+            SELECT id FROM password_recovery_requests
+            WHERE id = $1 AND user_id = $2 AND status = 'pending'
+            FOR UPDATE
+          `, [input.requestId, input.userId]);
+          if (!recovery.rowCount) {
+            await client.query('ROLLBACK');
+            return false;
+          }
+          const user = await client.query(`
+            UPDATE users
+            SET password_hash = $1, token_version = token_version + 1,
+                password_changed_at = now(), password_changed_by = $2,
+                must_change_password = TRUE, last_security_event_at = now()
+            WHERE id = $3
+          `, [input.passwordHash, input.changedBy, input.userId]);
+          if (!user.rowCount) {
+            await client.query('ROLLBACK');
+            return false;
+          }
+          await client.query(`
+            UPDATE password_recovery_requests
+            SET status = 'completed', resolved_at = now(), resolved_by = $1,
+                resolution = 'temporary_password_issued'
+            WHERE id = $2
+          `, [input.changedBy, input.requestId]);
+          await insertPostgresAuthSecurityEvent(client, input.event);
+          await client.query('COMMIT');
+          return true;
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        }
       });
     },
   };
