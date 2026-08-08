@@ -15,9 +15,12 @@ const AUTH_PAGES = new Set([
 export default function AuthGate({ children }: { children: ReactNode }) {
   installCsrfFetch();
   const pathname = usePathname();
+  const normalizedPathname = pathname.length > 1
+    ? pathname.replace(/\/+$/, '')
+    : pathname;
 
   // Auth pages render without AppShell (full-screen split layout)
-  if (AUTH_PAGES.has(pathname)) {
+  if (AUTH_PAGES.has(normalizedPathname)) {
     return <>{children}</>;
   }
 

@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import { ArrowLeft, KeyRound } from 'lucide-react';
-import AuthHero from '@/components/auth/AuthHero';
 
 export default function ForgotPasswordPage() {
   const [account, setAccount] = useState('');
@@ -35,10 +34,18 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <div className="grid min-h-screen lg:grid-cols-2">
-      <AuthHero subtitle="找回账户，继续你的求职记录" />
-      <main className="flex items-center justify-center bg-[var(--color-bg)] p-6 lg:p-12">
-        <section className="w-full max-w-[400px]">
+    <main className="flex min-h-screen items-center justify-center bg-[var(--color-bg)] px-6 py-12">
+      <div className="w-full max-w-[420px]">
+        <header className="mb-10 text-center">
+          <p className="text-[11px] font-semibold uppercase text-[var(--color-muted)]">
+            AI &times; Career Journal
+          </p>
+          <p className="mt-2 font-[family-name:var(--font-display)] text-2xl font-bold text-[var(--color-text)]">
+            筝筝<span className="text-[var(--color-primary)]">纸鸢</span>
+          </p>
+        </header>
+
+        <section>
           <a
             href="/login"
             className="mb-8 inline-flex items-center gap-1.5 text-sm font-medium text-[var(--color-primary)] no-underline"
@@ -96,7 +103,7 @@ export default function ForgotPasswordPage() {
             </form>
           )}
         </section>
-      </main>
-    </div>
+      </div>
+    </main>
   );
 }

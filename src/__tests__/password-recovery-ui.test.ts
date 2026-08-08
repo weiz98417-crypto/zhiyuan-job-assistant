@@ -31,6 +31,15 @@ describe('password recovery and password change entry points', () => {
 
     expect(authGate).toContain("'/forgot-password'");
     expect(authGate).toContain("'/change-password'");
-    expect(authGate).toContain('AUTH_PAGES.has(pathname)');
+    expect(authGate).toContain("pathname.replace(/\\/+$/, '')");
+    expect(authGate).toContain('AUTH_PAGES.has(normalizedPathname)');
+  });
+
+  it('keeps password recovery focused and free of the promotional side panel', () => {
+    const recoveryPage = source('src/app/forgot-password/page.tsx');
+
+    expect(recoveryPage).not.toContain('AuthHero');
+    expect(recoveryPage).not.toContain('lg:grid-cols-2');
+    expect(recoveryPage).toContain('max-w-[420px]');
   });
 });
