@@ -1,11 +1,27 @@
 import { NextResponse } from 'next/server';
-import { getCurrentUser } from '@/lib/auth';
 import { getDataRepositories } from '@/lib/data-repositories';
+import { requireAuthenticated } from '@/lib/security/auth-guards';
 
 export async function GET() {
+  let payload;
   try {
-    const payload = await getCurrentUser();
+    payload = await requireAuthenticated();
+  } catch (error) {
+    const candidate = error as { status?: unknown; code?: unknown; message?: unknown };
+    if (candidate.status === 401 || candidate.status === 403) {
+      return NextResponse.json(
+        { error: candidate.message, code: candidate.code },
+        { status: candidate.status },
+      );
+    }
+    console.error('[users/me] session validation failed', error);
+    return NextResponse.json(
+      { error: 'Authentication subsystem unavailable', code: 'AUTH_UNAVAILABLE' },
+      { status: 503 },
+    );
+  }
 
+  try {
     const user = await getDataRepositories().users.findById(payload.userId);
 
     if (!user) {
@@ -24,10 +40,11 @@ export async function GET() {
       status: user.status,
       tokenVersion: user.token_version,
     });
-  } catch {
+  } catch (error) {
+    console.error('[users/me] unable to read current user', error);
     return NextResponse.json(
-      { error: 'Unauthorized' },
-      { status: 401 }
+      { error: 'Unable to read current user', code: 'USER_LOOKUP_UNAVAILABLE' },
+      { status: 503 },
     );
   }
 }

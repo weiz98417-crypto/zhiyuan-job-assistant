@@ -38,4 +38,23 @@ describe('logout audit', () => {
     expect(cookies).toContain('csrf_token=');
     expect(cookies).toContain('Max-Age=0');
   });
+
+  it('still expires cookies when the presented session has already been revoked', async () => {
+    guards.requireAuthenticated.mockRejectedValue({
+      status: 401,
+      code: 'UNAUTHORIZED',
+      message: 'Token has been revoked',
+    });
+
+    const response = await POST(new NextRequest('https://app.example/api/auth/logout', {
+      method: 'POST',
+    }));
+
+    expect(response.status).toBe(200);
+    expect(securityEvents.append).not.toHaveBeenCalled();
+    const cookies = response.headers.get('set-cookie') || '';
+    expect(cookies).toContain('auth_token=');
+    expect(cookies).toContain('csrf_token=');
+    expect(cookies).toContain('Max-Age=0');
+  });
 });

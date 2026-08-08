@@ -12,6 +12,7 @@ const PUBLIC_PATHS = [
   '/forgot-password',
   '/api/auth/login',
   '/api/auth/register',
+  '/api/auth/logout',
   '/api/auth/password/recovery-request',
 ];
 
@@ -26,6 +27,7 @@ const MUTATION_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const ORIGIN_ONLY_AUTH_PATHS = new Set([
   '/api/auth/login',
   '/api/auth/register',
+  '/api/auth/logout',
   '/api/auth/password/recovery-request',
 ]);
 

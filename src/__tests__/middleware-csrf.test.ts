@@ -74,4 +74,24 @@ describe('middleware CSRF enforcement', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('x-middleware-next')).toBe('1');
   });
+
+  it('allows a same-origin logout without a valid session or CSRF token', async () => {
+    const response = await middleware(new NextRequest('https://app.example/api/auth/logout', {
+      method: 'POST',
+      headers: { origin: 'https://app.example' },
+    }));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-middleware-next')).toBe('1');
+  });
+
+  it('rejects a cross-origin logout attempt', async () => {
+    const response = await middleware(new NextRequest('https://app.example/api/auth/logout', {
+      method: 'POST',
+      headers: { origin: 'https://evil.example' },
+    }));
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ code: 'ORIGIN_FORBIDDEN' });
+  });
 });

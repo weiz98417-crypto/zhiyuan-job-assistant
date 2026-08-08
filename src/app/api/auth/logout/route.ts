@@ -20,9 +20,12 @@ export async function POST(request: NextRequest) {
       userAgent: request.headers.get('user-agent') || undefined,
       metadata: {},
     });
-  } catch {
-    // Logout remains available even if the append-only audit store is degraded.
-    console.error('[auth/logout] unable to append logout audit event');
+  } catch (error) {
+    // A revoked or expired session is an expected reason to use this recovery path.
+    const candidate = error as { status?: unknown };
+    if (candidate.status !== 401) {
+      console.error('[auth/logout] unable to append logout audit event');
+    }
   }
 
   const response = NextResponse.json({ message: '已退出' });
