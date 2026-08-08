@@ -8,7 +8,7 @@
 - [x] 3.1 Add `/forgot-password` and the login-page entry.
 - [x] 3.2 Add the personal-settings password-change entry.
 - [x] 4.1 Run focused authentication tests, full test suite, lint, and production build.
-- [ ] 4.2 Deploy behind the existing `121.43.198.13:38084` Nginx entry and verify the workflow.
+- [x] 4.2 Deploy behind the existing `121.43.198.13:38084` Nginx entry and verify the workflow.
 
 ## Verification notes
 
@@ -19,3 +19,6 @@
 - Changed-file ESLint: 0 errors; existing Hook warnings remain in pre-existing page code.
 - Full-suite baseline remains red for unrelated pre-existing issues: a missing job-discovery OpenSpec file, an invalid JD test file, agent tool-risk audit drift, and a missing SQLite archive fixture.
 - Full-repository ESLint remains red with 31 pre-existing errors outside this change.
+- 2026-08-08: Deployed commit `7ddc8e0` as release `20260807-password-recovery-7ddc8e0` behind the existing `121.43.198.13:38084 -> 127.0.0.1:3100` Nginx route. The pre-migration PostgreSQL dump was validated with `pg_restore -l` and SHA-256 before the additive schema was applied to the dedicated `zhiyuan-job-assistant-postgres` container.
+- Production read-back confirmed the recovery table, its pending-request indexes, the `/forgot-password` page, the generic `202 RECOVERY_REQUEST_ACCEPTED` response, and zero writes for an unknown account.
+- A disposable production member completed the full flow: activation, initial login, recovery request projection to superadmin, step-up authentication, atomic temporary-password reset, pending-request completion, old-token rejection, forced `/change-password` redirect, password replacement, and normal login. The disposable account was deleted after verification.
