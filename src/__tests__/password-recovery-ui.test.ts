@@ -25,4 +25,12 @@ describe('password recovery and password change entry points', () => {
     expect(usersPage).toContain('passwordRecovery');
     expect(usersPage).toContain('处理找回');
   });
+
+  it('renders recovery and forced password change without the authenticated app shell', () => {
+    const authGate = source('src/components/shell/AuthGate.tsx');
+
+    expect(authGate).toContain("'/forgot-password'");
+    expect(authGate).toContain("'/change-password'");
+    expect(authGate).toContain('AUTH_PAGES.has(pathname)');
+  });
 });
