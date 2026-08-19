@@ -6,11 +6,18 @@
  */
 import type { ToolDefinition, ToolResult } from "../types";
 
+function isCurrentResumeResource(path: string): boolean {
+  const normalized = path.trim().replace(/[“”"'`]/g, "");
+  if (/我的简历|当前简历|上传的简历|个人画像|我的\s*CV/i.test(normalized)) return true;
+  return /^(?!.*参考)(?:[\p{Script=Han}A-Za-z·•\s]{2,30})的(?:个人)?简历$/u.test(normalized);
+}
+
 async function handler(params: Record<string, unknown>): Promise<ToolResult> {
   const rawPath = String(params.path || params.file || "");
   const offset = Number(params.offset) || 0;
   const limit = Number(params.limit) || 0;
   const sectionFilter = String(params.section || "").trim();
+  const projection = String(params.projection || params.view || "structured").toLowerCase();
 
   // Helper: apply offset/limit + position indicator
   function sliceWithIndicator(text: string): string {
@@ -62,16 +69,14 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
             const sections = detailJson.data.sections || [] as Array<{ id: string; title: string; content: string }>;
             const parts: string[] = [];
             let total = 0;
-            const MAX_CHARS = 2000;
             for (const s of sections) {
-              if (s.content?.trim() && total < MAX_CHARS) {
-                const capped = s.content.length > 800 ? s.content.slice(0, 800) + "…(已截断)" : s.content;
-                parts.push(`### ${s.title || s.id}\n${capped}`);
-                total += capped.length;
+              if (s.content?.trim()) {
+                parts.push(`### ${s.title || s.id}\n${s.content}`);
+                total += s.content.length;
               }
             }
             const content = parts.join("\n\n");
-            const llmText = `参考简历: ${detailJson.data.name}\n来源: ${detailJson.data.source || "upload"}\n\n${content.slice(0, 1800)}`;
+            const llmText = `参考简历: ${detailJson.data.name}\n来源: ${detailJson.data.source || "upload"}\n\n${content}`;
 
             return {
               success: true,
@@ -84,7 +89,7 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
                 sections: sections.map((s: { id: string; title: string; content: string }) => ({ title: s.title || s.id, content: s.content, preview: s.content?.slice(0, 500) || "" })),
               },
               rawData: detailJson.data,
-              data: { content: content.slice(0, MAX_CHARS), truncated: content.length > MAX_CHARS, source: "db" },
+              data: { content, truncated: false, source: "db", totalChars: total },
             };
           }
         }
@@ -111,12 +116,24 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
   }
 
   // ── Route 2: "我的简历" → full CV sections ──
-  if (/我的简历|个人画像|我的CV/.test(p)) {
+  if (isCurrentResumeResource(p)) {
     try {
-      const cvRes = await fetch("/api/cv/data");
-      const cvJson = await cvRes.json();
+      const includeSource = projection === "source" || projection === "raw" || projection === "原文";
+      const cvRes = await fetch(includeSource ? "/api/cv/data?includeSource=1" : "/api/cv/data");
+      const cvJson = await cvRes.json().catch(() => ({}));
+      if (!cvRes.ok || cvJson?.success === false) {
+        return {
+          success: false,
+          data: null,
+          error: cvJson?.error || `简历数据读取失败: HTTP ${cvRes.status}`,
+          errorCategory: cvRes.status === 401 ? "need_user_input" : cvRes.status >= 500 ? "transient" : "permanent",
+        };
+      }
       if (cvJson?.data?.versions) {
         const cv = cvJson.data as Record<string, unknown>;
+        const resumeDocument = cv.resumeDocument && typeof cv.resumeDocument === "object"
+          ? cv.resumeDocument as Record<string, unknown>
+          : null;
         const versions = cv.versions as Record<string, { sections?: Array<{ id: string; title: string; content: string }> }>;
         const activeVer = (cv.activeVersion as string) || Object.keys(versions)[0];
         const sections = versions[activeVer]?.sections || [];
@@ -131,37 +148,50 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
         const effectiveSections = targetSections.length > 0 ? targetSections : sections;
 
         const parts: string[] = [];
-        let total = 0;
-        const MAX_CHARS = 8000;
-        const PER_SECTION_CAP = 3000;
-        for (const s of effectiveSections) {
-          cvSections[s.id] = s.content?.trim() || "";
-          if (s.content?.trim() && total < MAX_CHARS) {
-            const capped = s.content.length > PER_SECTION_CAP ? s.content.slice(0, PER_SECTION_CAP) : s.content;
-            parts.push(`### ${s.title}\n${capped}`);
-            total += capped.length;
+        if (includeSource && typeof resumeDocument?.sourceText === "string") {
+          parts.push(resumeDocument.sourceText || "（没有可读取的原文工件）");
+        } else {
+          for (const s of effectiveSections) {
+            cvSections[s.id] = s.content?.trim() || "";
+            if (s.content?.trim()) {
+              parts.push(`### ${s.title}\n${s.content}`);
+            }
           }
         }
         if (parts.length === 0) parts.push("（简历尚未填写）");
         const fullContent = parts.join("\n\n");
-        const content = fullContent.length > MAX_CHARS
-          ? fullContent.slice(0, MAX_CHARS) + `\n\n[已截断，共 ${fullContent.length} 字。续读: read_file(path='我的简历', offset=${MAX_CHARS})]`
-          : fullContent;
+        const pageSize = limit > 0 ? limit : 16000;
+        const pageStart = Math.min(offset, fullContent.length);
+        const pageEnd = Math.min(pageStart + pageSize, fullContent.length);
+        const page = fullContent.slice(pageStart, pageEnd);
+        const content = offset > 0 || limit > 0 || fullContent.length > pageSize
+          ? `[第 ${pageStart + 1}-${pageEnd} 字，共 ${fullContent.length} 字]\n\n${page}`
+          : page;
+        const nextOffset = pageEnd;
+        const hasMore = nextOffset < fullContent.length;
+        const continuation = hasMore
+          ? `\n\n[继续读取: read_file(path='我的简历', offset=${nextOffset}, limit=${limit || 8000})]`
+          : "";
+        const llmContent = `${content}${continuation}`;
 
         return {
           success: true,
           errorCategory: "ok",
-          llmSummary: sliceWithIndicator(content),
+          llmSummary: llmContent,
           uiPayload: {
-            type: "file_content",
+            type: "resume_document",
             path: p,
-            content,
-            truncated: content.length > MAX_CHARS || (offset > 0 || limit > 0),
+            truncated: hasMore,
             source: "cv",
-            cvSections,
+            activeVersion: activeVer,
+            section: sectionFilter || "",
+            projection: includeSource ? "source" : "structured",
+            integrity: resumeDocument?.integrity || null,
+            totalChars: fullContent.length,
+            nextOffset: hasMore ? nextOffset : null,
           },
-          rawData: { cvSections },
-          data: { content, truncated: content.length > MAX_CHARS || (offset > 0 || limit > 0), source: "cv" },
+          rawData: { cvSections, content: fullContent, resumeDocument },
+          data: { truncated: hasMore, source: "cv", projection: includeSource ? "source" : "structured", activeVersion: activeVer, totalChars: fullContent.length, nextOffset: hasMore ? nextOffset : null },
         };
       }
       return {
@@ -171,8 +201,13 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
         uiPayload: { type: "file_content", path: p, content: "（简历尚未填写）", truncated: false, source: "cv" },
         data: { content: "（简历尚未填写）", truncated: false, source: "cv" },
       };
-    } catch {
-      // fall through to filesystem
+    } catch (error) {
+      return {
+        success: false,
+        data: null,
+        error: `简历数据读取失败: ${error instanceof Error ? error.message : "未知错误"}`,
+        errorCategory: "transient",
+      };
     }
   }
 
@@ -236,7 +271,9 @@ function formatResult(result: ToolResult): string {
                    "读取失败(可重试)";
     return `${prefix}: ${result.error || "未知错误"}`;
   }
-  return result.llmSummary || ((result.data as { content?: string })?.content) || "文件为空";
+  const data = result.data as { source?: string; totalChars?: number } | null;
+  if (data?.source === "cv") return `已读取当前简历，共 ${data.totalChars || 0} 字。完整内容请查看简历卡片。`;
+  return result.llmSummary || "文件为空";
 }
 
 export const readFile: ToolDefinition = {
@@ -246,12 +283,13 @@ export const readFile: ToolDefinition = {
     " 文件路径→服务端读取。支持 offset/limit 续读和 section 定向读。",
   matchHints: ["简历", "我的简历", "参考简历", "上传的简历", "参考", "文件", "cv", "打开", "读"],
   category: "query",
-  toolCtxCap: 8000,
+  toolCtxCap: 30000,
   parameters: {
     path: { type: "string", required: true, description: "文件路径或资源名，如 'cv.md'、'参考简历/张雯茜'、'我的简历'" },
     offset: { type: "number", required: false, description: "起始位置。读简历时=字符位置(0-based)，读文件时=行号(1-based)。续读时使用" },
     limit: { type: "number", required: false, description: "读取上限。读简历时=字符数，读文件时=行数。不传则读全部" },
     section: { type: "string", required: false, description: "仅对'我的简历'路径生效。指定板块: summary/experience/projects/education/skills 或中文名" },
+    projection: { type: "string", required: false, description: "structured=结构化简历；source=原文工件。完整性待确认或需要核对遗漏时读取 source" },
   },
   handler,
   formatResult,

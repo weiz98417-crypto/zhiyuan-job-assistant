@@ -8,6 +8,7 @@ export interface ResumeSavePlan {
   section: ResumeSectionId;
   content: string;
   reason: "direct-pasted-revision" | "recent-optimization-result" | "recent-assistant-proposal";
+  draftId?: string;
 }
 
 export type ResumeEditProposalAction = "apply" | "discard" | "rollback";
@@ -22,10 +23,11 @@ export interface ResumeSectionValidation {
   reason?: string;
 }
 
-const SAVE_INTENT_RE = /(应用|保存|写入|确认|采用|用这个|就这个|直接改|帮我改|替我改|改了|没改|没有保存|没保存|落到简历|同步到简历)/i;
+const SAVE_INTENT_RE = /(应用|保存|写入|确认|采用|选择|选用|用这个|就这个|直接改|帮我改|替我改|改了|没改|没有保存|没保存|落到简历|同步到简历)/i;
 const REFERENCE_RESUME_RE = /(优秀|参考|标杆|样例|范例).{0,12}(简历|CV|履历)|(简历|CV|履历).{0,12}(优秀|参考|标杆|样例|范例)/i;
 const SAVE_CLAIM_RE = /(已|已经|成功).{0,8}(保存|写入|更新|同步).{0,12}(简历|CV|技能|技能清单|板块)|已更新「.+」板块到 CV/i;
 const PROPOSAL_ID_RE = /\brep[_-][A-Za-z0-9._-]+\b/g;
+const DRAFT_ID_RE = /\bdraft_[A-Za-z0-9._-]+\b/g;
 const PROPOSAL_CONTEXT_RE = /(简历修改提案|修改提案|提案|proposal|rep[_-][A-Za-z0-9._-]+)/i;
 const PROPOSAL_APPLY_RE = /(应用|保存|写入|确认|采用|用这个|就这个|同意)/i;
 const PROPOSAL_DISCARD_RE = /(废弃|丢弃|拒绝|不要|不用|取消|算了)/i;
@@ -153,6 +155,21 @@ export function buildResumeSavePlan(messages: ResumeSaveGuardMessage[], toolWhit
   const userText = latestUser?.content || "";
   if (!SAVE_INTENT_RE.test(userText)) return null;
   if (REFERENCE_RESUME_RE.test(userText)) return null;
+
+  const explicitDraftId = Array.from(userText.matchAll(DRAFT_ID_RE)).at(-1)?.[0];
+  for (const message of recentMessages(messages).reverse()) {
+    if (message === latestUser) continue;
+    const draftIds = Array.from((message.content || "").matchAll(DRAFT_ID_RE)).map((match) => match[0]);
+    const selectedDraftId = explicitDraftId || draftIds[Math.min(requestedVariantIndex(userText), Math.max(0, draftIds.length - 1))];
+    if (selectedDraftId) {
+      return {
+        section: inferSectionId(userText, message.content),
+        content: "",
+        reason: "recent-optimization-result",
+        draftId: selectedDraftId,
+      };
+    }
+  }
 
   const pasted = extractAfterRevisionMarker(userText);
   if (pasted) {

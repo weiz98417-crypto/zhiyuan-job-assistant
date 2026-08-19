@@ -250,7 +250,7 @@ export function buildGuidedSessionRuntimeDirective(input: {
   const activeTask = input.activeTask;
   if (!activeTask) return "";
   const sourceExcerpt = activeTask.sourceText?.trim()
-    ? `\n- 已识别材料摘录：\n${activeTask.sourceText.slice(0, 1800)}`
+    ? `\n- 已识别材料全文：\n${activeTask.sourceText.slice(0, 50000)}`
     : "";
   const switchLine = input.requiresSwitchConfirmation
     ? `\n- 用户这轮疑似要切换任务。你必须先问一个确认问题，不要调用新任务工具。确认问题：${input.clarificationQuestion || "你要暂停当前任务并切换吗？"}`
@@ -363,6 +363,7 @@ function defaultGuidedPhase(taskType: AgentTaskType): string {
   if (taskType === "career_positioning_guidance") return "career_direction_discovery";
   if (taskType === "interview_coaching") return "one_question_loop";
   if (taskType === "reference_resume_save") return "role_category_confirmation";
+  if (taskType === "resume_edit") return "resume_optimization";
   if (taskType === "job_search") return "job_discovery_confirmation";
   return "active";
 }
@@ -371,6 +372,7 @@ function defaultExpectedInput(taskType: AgentTaskType): string {
   if (taskType === "career_positioning_guidance") return "回答当前自我定位问题，或明确取消/切换任务";
   if (taskType === "interview_coaching") return "回答当前面试题、要求示范回答，或进入下一题";
   if (taskType === "reference_resume_save") return "确认优秀简历要保存到哪个岗位类别";
+  if (taskType === "resume_edit") return "选择优化方案、确认创建修改提案，或说明要继续调整的地方";
   if (taskType === "job_search") return "确认岗位发现条件，或补充岗位关键词、城市和数量上限";
   return "继续当前任务";
 }
@@ -379,6 +381,7 @@ function defaultExitConditions(taskType: AgentTaskType): string[] {
   if (taskType === "career_positioning_guidance") return ["用户确认定位卡并写入画像", "用户明确取消", "用户确认切换任务"];
   if (taskType === "interview_coaching") return ["用户要求结束面试", "面试复盘完成", "用户确认切换任务"];
   if (taskType === "reference_resume_save") return ["优秀简历保存并读回校验完成", "用户取消保存", "用户确认切换任务"];
+  if (taskType === "resume_edit") return ["修改提案应用并读回校验完成", "用户取消修改", "用户确认切换任务"];
   if (taskType === "job_search") return ["岗位发现条件已确认", "scan 创建并读回校验完成", "用户取消岗位发现"];
   return ["任务完成", "用户取消", "用户确认切换任务"];
 }

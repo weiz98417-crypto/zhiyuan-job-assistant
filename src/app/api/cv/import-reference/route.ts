@@ -56,7 +56,7 @@ title 字段使用中文：个人概述、工作经历、项目经历、技能�
       model: MODEL,
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: rawText.slice(0, 16000) },
+        { role: "user", content: rawText },
       ],
       temperature: 0.1,
       max_tokens: 16000,

@@ -20,9 +20,18 @@ export const importResume: ToolDefinition = {
       required: false,
       description: "语言: zh/en，默认 zh",
     },
+    originalImages: {
+      type: "array",
+      required: false,
+      description: "Agent Chat 图片简历确认链携带的原始 data URI；普通调用不要填写",
+    },
   },
   async handler(params: Record<string, unknown>) {
     const text = String(params.text || "");
+    const source = String(params.source || "paste");
+    const originalImages = Array.isArray(params.originalImages)
+      ? params.originalImages.filter((image): image is string => typeof image === "string" && image.startsWith("data:image/"))
+      : [];
     if (!text.trim()) {
       return { success: false, data: null, error: "请提供简历文本内容" };
     }
@@ -30,13 +39,26 @@ export const importResume: ToolDefinition = {
       const res = await fetch("/api/cv/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: text }),
+        body: JSON.stringify({ text, source, originalImages }),
       });
       const data = await res.json();
-      if (!data.success) {
+      if (!res.ok || !data.success || !data.data?.persisted?.cvData) {
         return { success: false, data: null, error: data.error || "解析失败" };
       }
-      return { success: true, data: data.data };
+      const persisted = data.data.persisted as Record<string, unknown>;
+      return {
+        success: true,
+        data: data.data,
+        llmSummary: persisted.status === "pending"
+          ? `简历已完整保存为待确认导入版本 ${persisted.versionId}，没有覆盖当前版本。请让用户查看完整简历卡片并到简历页确认。`
+          : `简历已保存并读回验证，当前版本为 ${persisted.versionId}。`,
+        uiPayload: {
+          type: "resume_document",
+          versionId: persisted.versionId,
+          status: persisted.status,
+          integrity: persisted.integrity,
+        },
+      };
     } catch (err) {
       return {
         success: false,

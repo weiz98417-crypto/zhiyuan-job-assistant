@@ -1,7 +1,7 @@
 import { SignJWT, jwtVerify } from 'jose';
 import bcrypt from 'bcryptjs';
 import { cookies } from 'next/headers';
-import { getDataRepositories } from './data-repositories';
+import { assertSelectedDatabaseReady, getDataRepositories } from './data-repositories';
 
 // ── JWT Secret (lazy — defers validation to runtime, not build-time) ──
 let _jwtSecret: Uint8Array | null = null;
@@ -80,6 +80,7 @@ export async function getCurrentUser(): Promise<JWTPayload> {
   if (!token) throw new Error('Not authenticated');
   const payload = await verifyToken(token);
   if (!payload) throw new Error('Invalid or expired token');
+  await assertSelectedDatabaseReady();
   return payload;
 }
 

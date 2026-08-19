@@ -28,24 +28,9 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
   const { section, instruction, operation = "full", effort = 3, referenceIds } = params as OptimizeParams & { referenceIds?: number[] };
   const sectionId = resolveSection(section);
 
-  // Read CV from localStorage (cache) or SQLite (canonical)
-  let fullCV: Record<string, string> = {};
+  // Read the server document first. localStorage is only a compatibility cache.
+  const fullCV: Record<string, string> = {};
   let sectionContent = "";
-  const raw = localStorage.getItem("zhiyuan-cv");
-  if (raw) {
-    try {
-      const cv = JSON.parse(raw);
-      if (cv?.versions && cv?.activeVersion) {
-        const sections = cv.versions[cv.activeVersion]?.sections || [];
-        for (const s of sections) {
-          fullCV[s.id] = s.content || "";
-          if (s.id === sectionId) sectionContent = s.content || "";
-        }
-      }
-    } catch { /* ignore */ }
-  }
-
-  // Fallback to SQLite if localStorage is empty
   if (!sectionContent) {
     try {
       const cvRes = await fetch("/api/cv/data");
@@ -64,6 +49,23 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
         }
       }
     } catch { /* ignore */ }
+  }
+
+  // Cache fallback is only used when the authoritative read is unavailable.
+  if (!sectionContent && typeof localStorage !== "undefined") {
+    const raw = localStorage.getItem("zhiyuan-cv");
+    if (raw) {
+      try {
+        const cv = JSON.parse(raw);
+        if (cv?.versions && cv?.activeVersion) {
+          const sections = cv.versions[cv.activeVersion]?.sections || [];
+          for (const s of sections) {
+            fullCV[s.id] = s.content || "";
+            if (s.id === sectionId) sectionContent = s.content || "";
+          }
+        }
+      } catch { /* ignore */ }
+    }
   }
 
   if (!sectionContent || sectionContent.trim().length < 20) {
@@ -109,32 +111,51 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
     return { success: false, data: null, error: optimizeJson.error || "优化失败", recoverable: true, retryHint: "优化服务返回错误，请尝试其他操作类型或降低 effort 参数" };
   }
 
+  const variants = optimizeJson.data?.variants || [];
+  const draftRes = await fetch("/api/cv/drafts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sectionId, variants }),
+  });
+  const draftJson = await draftRes.json().catch(() => ({}));
+  if (!draftRes.ok || !draftJson.success || !draftJson.data?.artifactId) {
+    return {
+      success: false,
+      data: { sectionId, variants },
+      error: draftJson.error || "优化方案未能持久化，已阻止把临时聊天文本当作可应用草稿",
+      errorCategory: draftRes.status >= 500 ? "transient" : "permanent",
+    };
+  }
+
   return {
     success: true,
     data: {
       sectionId,
-      original: sectionContent,
-      variants: optimizeJson.data?.variants || [],
-      fullCV,
-      memoryContext,
+      artifactId: draftJson.data.artifactId,
+      draftIds: draftJson.data.variants.map((draft: { id: string }) => draft.id),
+      readBackVerified: true,
     },
+    llmSummary: `已为 ${sectionId} 生成并持久化 ${draftJson.data.variants.length} 个简历草稿。artifactId=${draftJson.data.artifactId}。可选草稿：${draftJson.data.variants.map((draft: { id: string; label?: string }) => `${draft.label || "方案"}:${draft.id}`).join("；")}。等待用户选择后，调用 create_resume_edit_proposal(draftId=所选ID)，不要从 Markdown 重建正文。`,
+    uiPayload: {
+      type: "resume_draft",
+      artifactId: draftJson.data.artifactId,
+      sectionId,
+      variants: draftJson.data.variants.map((draft: { id: string; variantId?: string; label?: string; title?: string; approach?: string }) => ({
+        id: draft.id,
+        variantId: draft.variantId,
+        label: draft.label || draft.title,
+        approach: draft.approach,
+      })),
+      readBackVerified: draftJson.data.readBackVerified === true,
+    },
+    rawData: draftJson.data,
   };
 }
 
 function formatResult(result: ToolResult): string {
   if (!result.success) return `优化失败: ${result.error}`;
-  const d = result.data as { sectionId: string; original: string; variants: Array<{ label: string; content: string; approach?: string }> };
-
-  const sectionLabel: Record<string, string> = { summary: "个人概述", experience: "工作经历", projects: "项目经验", education: "教育背景", skills: "技能" };
-
-  let out = `## ✨ ${sectionLabel[d.sectionId] || d.sectionId} 优化方案\n\n`;
-  for (const v of d.variants) {
-    out += `### ${v.label || "改写"}\n${v.content}\n`;
-    if (v.approach) out += `*策略: ${v.approach}*\n`;
-    out += "\n";
-  }
-  out += "---\n⚠️ 请选择一个方案，回复「应用方案1」「用第一个」「第一个不错」等。**在我确认前不会写入简历**，等你选择后再保存。";
-  return out;
+  const d = result.data as { sectionId?: string; artifactId?: string; draftIds?: string[] };
+  return `已生成 ${d.sectionId || "简历"} 优化草稿 ${d.artifactId || ""}，共 ${d.draftIds?.length || 0} 个方案，等待用户在草稿卡中选择。`;
 }
 
 export const optimizeResumeSection: ToolDefinition = {

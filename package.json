@@ -30,6 +30,7 @@
     "check:postgres-migration": "node scripts/check-postgres-migration.mjs",
     "backfill:memory": "node scripts/backfill-memory.mjs",
     "eval:memory": "vitest run src/__tests__/memory-eval-harness.test.ts",
+    "eval:agent-runtime": "vitest run src/__tests__/agent-runtime-regressions.eval.test.ts",
     "smoke:embedding": "node scripts/smoke-embedding.mjs",
     "cleanup:profile-signals": "node scripts/cleanup-profile-signals.mjs",
     "scan": "node scan.mjs",

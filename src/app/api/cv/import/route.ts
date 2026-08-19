@@ -5,6 +5,17 @@ import {
   type DocumentExtractionDiagnostics,
 } from "@/lib/server/document-extraction";
 import { ZHIPU_API_URL, ZHIPU_VISION_MODEL } from "@/lib/zhipu";
+import { getCurrentUser } from "@/lib/auth";
+import { getDataRepositories } from "@/lib/data-repositories";
+import {
+  buildResumeIntegrityEvidence,
+  chunkResumeText,
+  createResumeIntake,
+  mergeParsedResumeChunks,
+  normalizeResumeSections as normalizeCanonicalResumeSections,
+  resumeSectionsToText,
+  type ParsedResumeChunk,
+} from "@/lib/resume/document";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
@@ -213,7 +224,7 @@ async function parseViaDeepSeek(rawText: string): Promise<Record<string, string>
 - 不要自己总结"毕业于XX大学" → 照抄原文
 
 自检后再输出JSON：检查experience中是否还有项目块；如果有，先迁移到projects再输出。复制原文完整段落，禁止压缩成一句。原文没有的填空字符串""。` },
-        { role: "user", content: rawText.slice(0, 16000) },
+        { role: "user", content: rawText },
       ],
       temperature: 0,
       max_tokens: 16000,
@@ -244,8 +255,17 @@ function getExt(filename: string): string {
 
 export async function POST(request: Request) {
   try {
+    const user = await getCurrentUser();
+    const repositories = getDataRepositories();
     const contentType = request.headers.get("content-type") || "";
     let sections: Record<string, string>;
+    let rawText = "";
+    let sourceType = "paste";
+    let filename = "";
+    let mimeType = "text/plain";
+    let originalBase64 = "";
+    let parsedChunks: ParsedResumeChunk[] = [];
+    let verificationMode: "source_text" | "model_reconstructed" = "source_text";
     let extractionDiagnostics: DocumentExtractionDiagnostics | undefined;
 
     if (contentType.includes("multipart/form-data")) {
@@ -255,6 +275,10 @@ export async function POST(request: Request) {
 
       const ext = getExt(file.name);
       const buffer = Buffer.from(await file.arrayBuffer());
+      filename = file.name;
+      mimeType = file.type || `application/${ext}`;
+      originalBase64 = buffer.toString("base64");
+      sourceType = "upload";
       if (buffer.length > MAX_FILE_SIZE) {
         return NextResponse.json({ success: false, error: "文件大小不能超过 10MB" }, { status: 400 });
       }
@@ -262,12 +286,20 @@ export async function POST(request: Request) {
       if (["pdf", "doc", "docx", "txt", "md"].includes(ext)) {
         const extraction = await extractResumeDocument({ buffer, filename: file.name, ext });
         extractionDiagnostics = extraction.diagnostics;
-        sections = await parseViaDeepSeek(extraction.text);
+        rawText = extraction.text;
+        if (!rawText.trim()) {
+          return NextResponse.json({ success: false, error: "未能从文件中提取到可解析的简历文本" }, { status: 422 });
+        }
+        const parsed = await parseResumeInChunks(rawText);
+        sections = parsed.sections;
+        parsedChunks = parsed.chunks;
       } else if (["png", "jpg", "jpeg", "webp"].includes(ext)) {
         // Image → Zhipu vision model → direct JSON
         const mimeType = ext === "jpg" || ext === "jpeg" ? "image/jpeg" : `image/${ext}`;
         const dataUri = `data:${mimeType};base64,${buffer.toString("base64")}`;
         sections = await parseViaZhipu(dataUri);
+        rawText = resumeSectionsToText(normalizeCanonicalResumeSections(sections));
+        verificationMode = "model_reconstructed";
       } else {
         return NextResponse.json({
           success: false,
@@ -276,15 +308,78 @@ export async function POST(request: Request) {
       }
     } else if (contentType.includes("application/json")) {
       const body = await request.json().catch(() => ({}));
-      const rawText = (body.text as string) || "";
-      if (!rawText.trim()) return NextResponse.json({ success: false, error: "请提供简历文本" }, { status: 400 });
-      sections = await parseViaDeepSeek(rawText);
+      const bodyRawText = (body.text as string) || "";
+      if (!bodyRawText.trim()) return NextResponse.json({ success: false, error: "请提供简历文本" }, { status: 400 });
+      sourceType = String(body.source || "paste");
+      if (/image|ocr|screenshot|截图|图片/i.test(sourceType)) {
+        verificationMode = "model_reconstructed";
+        const originalImages = Array.isArray(body.originalImages)
+          ? body.originalImages.filter((image: unknown): image is string => typeof image === "string" && image.startsWith("data:image/"))
+          : [];
+        if (originalImages.length) {
+          filename = "agent-chat-resume-images.json";
+          mimeType = "application/x-resume-image-set+json";
+          originalBase64 = JSON.stringify(originalImages);
+        }
+      }
+      rawText = bodyRawText;
+      const parsed = await parseResumeInChunks(bodyRawText);
+      sections = parsed.sections;
+      parsedChunks = parsed.chunks;
     } else {
       return NextResponse.json({ success: false, error: "请上传文件或粘贴简历文本" }, { status: 400 });
     }
 
-    return NextResponse.json({ success: true, data: { sections, extraction: extractionDiagnostics } });
+    const canonicalSections = normalizeCanonicalResumeSections(sections);
+    if (!parsedChunks.length) {
+      const chunks = chunkResumeText(rawText || resumeSectionsToText(canonicalSections));
+      parsedChunks = chunks.map((chunk) => ({ ...chunk, sections: canonicalSections }));
+    }
+    const integrity = buildResumeIntegrityEvidence(
+      rawText || resumeSectionsToText(canonicalSections),
+      canonicalSections,
+      parsedChunks.length,
+      { verificationMode },
+    );
+    const cvRow = await repositories.cv.get(user.userId);
+    const existingCvData = normalizeExistingCvData(cvRow?.data_json);
+    const intake = createResumeIntake({
+      userId: user.userId,
+      existingCvData,
+      sections: canonicalSections,
+      rawText: rawText || resumeSectionsToText(canonicalSections),
+      sourceType,
+      filename,
+      mimeType,
+      originalBase64,
+      extraction: extractionDiagnostics,
+      chunks: parsedChunks,
+      integrity,
+    });
+    const document = await repositories.resumeDocuments.createIntake(intake, user.userId);
+    const readBack = await repositories.cv.get(user.userId);
+    if (!readBack?.data_json) throw new Error("简历摄取完成后未能从云端读回 CV 数据");
+    const persisted = {
+      documentId: document.id,
+      versionId: document.version_id,
+      status: document.status,
+      integrity,
+      cvData: JSON.parse(readBack.data_json),
+    };
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        sections: canonicalSections,
+        extraction: extractionDiagnostics,
+        integrity,
+        persisted,
+      },
+    });
   } catch (err) {
+    if (err instanceof Error && (err.message === "Not authenticated" || err.message === "Invalid or expired token")) {
+      return NextResponse.json({ success: false, error: "未登录或登录已失效，请重新登录后导入" }, { status: 401 });
+    }
     console.error("CV import error:", err);
     if (err instanceof DocumentExtractionError) {
       return NextResponse.json(
@@ -302,4 +397,28 @@ export async function POST(request: Request) {
       { status: 500 },
     );
   }
+}
+
+async function parseResumeInChunks(rawText: string): Promise<{ sections: ResumeSections; chunks: ParsedResumeChunk[] }> {
+  const chunks = chunkResumeText(rawText);
+  if (!chunks.length) throw new Error("简历原文为空，无法解析");
+  if (chunks.length <= 1) {
+    const sections = normalizeCanonicalResumeSections(await parseViaDeepSeek(rawText));
+    return { sections, chunks: [{ ...chunks[0], sections }] };
+  }
+  const parsed: ParsedResumeChunk[] = [];
+  for (const chunk of chunks) {
+    const chunkSections = await parseViaDeepSeek(chunk.text);
+    parsed.push({ ...chunk, sections: normalizeCanonicalResumeSections(chunkSections) });
+  }
+  return { sections: mergeParsedResumeChunks(parsed), chunks: parsed };
+}
+
+function normalizeExistingCvData(raw: string | undefined): import("@/types").CVData {
+  if (!raw) return { activeVersion: "v1", versions: {} };
+  try {
+    const parsed = JSON.parse(raw) as import("@/types").CVData;
+    if (parsed && typeof parsed === "object" && parsed.versions && typeof parsed.versions === "object") return parsed;
+  } catch { /* fall through */ }
+  return { activeVersion: "v1", versions: {} };
 }

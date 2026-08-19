@@ -31,6 +31,7 @@ interface AgentLoopRuntimeContext {
   interviewRebindAction?: InterviewRebindAction;
   pendingReferenceResumeSave?: PendingReferenceResumeSaveAction;
   taskContract?: AgentTaskContract | null;
+  resumeImageSourceText?: string;
 }
 
 /* ── Result quality check ── */
@@ -115,6 +116,64 @@ function injectLatestImagesForImageTool(
 /* ── Tool call handling (native function calling) ── */
 
 type NativeToolCall = { id: string; name: string; arguments: string };
+
+export function buildConfirmedImageResumeImportToolCall(input: {
+  userText: string;
+  sourceText?: string;
+  images?: string[];
+  allowedTools?: string[];
+}): NativeToolCall | null {
+  const sourceText = input.sourceText?.trim() || "";
+  if (!sourceText || !/(保存|写入|导入|确认|应用|就这样|用这个)/i.test(input.userText)) return null;
+  if (input.allowedTools?.length && !input.allowedTools.includes("import_resume")) return null;
+  return {
+    id: `forced-import-image-resume-${Date.now()}`,
+    name: "import_resume",
+    arguments: JSON.stringify({
+      text: sourceText,
+      source: "image_ocr",
+      originalImages: (input.images || []).filter((image) => image.startsWith("data:image/")),
+    }),
+  };
+}
+
+function inferResumeOptimizationSection(text: string): string {
+  if (/个人概述|个人总结|简介|summary/i.test(text)) return "summary";
+  if (/项目经验|项目经历|项目|projects?/i.test(text)) return "projects";
+  if (/技能|技术栈|skills?/i.test(text)) return "skills";
+  if (/教育背景|教育经历|学历|education/i.test(text)) return "education";
+  return "experience";
+}
+
+export function buildRequiredResumeDraftToolCall(input: {
+  contract?: AgentTaskContract | null;
+  userText: string;
+  successfulTools: Iterable<string>;
+  allowedTools?: string[];
+}): NativeToolCall | null {
+  if (input.contract?.taskType !== "resume_edit") return null;
+  const instruction = input.contract.target.trim() || input.userText.trim();
+  const successful = new Set(input.successfulTools);
+  if (!successful.has("read_file")) return null;
+  if ([
+    "optimize_resume_section",
+    "create_resume_edit_proposal",
+    "apply_resume_edit_proposal",
+    "save_resume_section",
+  ].some((toolName) => successful.has(toolName))) return null;
+  if (input.allowedTools?.length && !input.allowedTools.includes("optimize_resume_section")) return null;
+
+  return {
+    id: `forced-optimize-resume-section-${Date.now()}`,
+    name: "optimize_resume_section",
+    arguments: JSON.stringify({
+      section: inferResumeOptimizationSection(instruction),
+      instruction,
+      operation: "full",
+      effort: 3,
+    }),
+  };
+}
 
 /* ── Context helpers ── */
 
@@ -571,6 +630,7 @@ export async function* agentLoopClient(
   const recentCalls: { name: string; params: string; result: string }[] = [];
   // LangChain intermediate_steps pattern: accumulate structured step records for debugging & graceful degradation
   const intermediateSteps: { tool: string; params: string; category: ErrorCategory; summary: string }[] = [];
+  const successfulTools = new Set<string>();
   let forcedImageToolConsumed = false;
   let forcedToolCall: NativeToolCall | null = null;
 
@@ -640,8 +700,18 @@ export async function* agentLoopClient(
     }
 
     if (firstIteration && !forcedToolCall) {
+      const resumeImageSources = [...ctx].reverse().find((message) => message.images?.length)?.images;
+      forcedToolCall = buildConfirmedImageResumeImportToolCall({
+        userText: latestUserText(ctx),
+        sourceText: runtimeContext?.resumeImageSourceText,
+        images: resumeImageSources,
+        allowedTools: toolWhitelist,
+      });
+    }
+
+    if (firstIteration && !forcedToolCall) {
       const resumeSavePlan = buildResumeSavePlan(ctx, toolWhitelist);
-      if (resumeSavePlan) {
+      if (resumeSavePlan && (!resumeSavePlan.draftId || isToolAllowedInMode("create_resume_edit_proposal", toolWhitelist))) {
         const proposalToolName = isToolAllowedInMode("create_resume_edit_proposal", toolWhitelist)
           ? "create_resume_edit_proposal"
           : "save_resume_section";
@@ -654,6 +724,7 @@ export async function* agentLoopClient(
             proposedContent: resumeSavePlan.content,
             reason: resumeSavePlan.reason,
             riskFlags: ["agent_generated", resumeSavePlan.reason],
+            draftId: resumeSavePlan.draftId,
           }),
         };
       }
@@ -776,11 +847,27 @@ export async function* agentLoopClient(
     // Backward compat: if finish_reason is missing (old think proxy), fall back to toolCalls.length
     const shouldContinue = finishReason === "tool_calls" || (toolCalls.length > 0 && !finishReason);
     if (!shouldContinue) {
+      const requiredResumeDraftCall = buildRequiredResumeDraftToolCall({
+        contract: runtimeContext?.taskContract,
+        userText: runtimeContext?.taskContract?.target || latestUserText(ctx),
+        successfulTools,
+        allowedTools: toolWhitelist,
+      });
+      if (requiredResumeDraftCall) {
+        forcedToolCall = requiredResumeDraftCall;
+        ctx.push({
+          role: "user",
+          content: "<!-- system:resume-draft-required -->当前是简历优化任务。已读取简历但尚未生成可确认草稿，请先生成优化方案，再等待用户选择；不要直接结束任务。",
+        });
+        state.contextSize = estimateTokens(ctx);
+        firstIteration = false;
+        continue;
+      }
       // ── Model says stop → Respond ──
       state.phase = "responding";
       yield { type: "phase", phase: "responding" };
 
-      let responseText = thinkText.trim();
+      const responseText = thinkText.trim();
       if (!responseText) {
         yield { type: "text", content: "操作完成。" };
       }
@@ -842,6 +929,7 @@ export async function* agentLoopClient(
         const params = parallelParams[i].params;
         const paramsKey = JSON.stringify(params);
         const toolResult = parallelResults[i];
+        if (toolResult.success) successfulTools.add(tc.name);
         const formatted = formatToolResult(toolResult, tc.name);
 
         yield { type: "tool_result", name: tc.name, result: formatted, success: toolResult.success, data: toolResult.data, uiPayload: (toolResult as ToolResult).uiPayload, verifiedAction: (toolResult as ToolResult).verifiedAction };
@@ -1264,6 +1352,8 @@ ${followupInstruction}`,
 
       if (!toolResult.success) {
         yield { type: "tool_error", name: tc.name, error: toolResult.error || "未知错误", recoverable: toolResult.recoverable !== false };
+      } else {
+        successfulTools.add(tc.name);
       }
 
       state.phase = "verifying";

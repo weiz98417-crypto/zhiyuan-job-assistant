@@ -225,6 +225,83 @@ CREATE TABLE IF NOT EXISTS cv_data (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS resume_documents (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  version_id TEXT NOT NULL,
+  label TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'pending',
+  source_type TEXT NOT NULL DEFAULT 'paste',
+  source_artifact_id TEXT NOT NULL DEFAULT '',
+  content_hash TEXT NOT NULL DEFAULT '',
+  sections_json TEXT NOT NULL DEFAULT '[]',
+  integrity_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  activated_at TEXT,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(user_id, version_id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_resume_documents_active_user
+  ON resume_documents(user_id) WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_resume_documents_user_created
+  ON resume_documents(user_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS resume_source_artifacts (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  document_id TEXT NOT NULL REFERENCES resume_documents(id) ON DELETE CASCADE,
+  source_type TEXT NOT NULL DEFAULT 'paste',
+  filename TEXT NOT NULL DEFAULT '',
+  mime_type TEXT NOT NULL DEFAULT 'text/plain',
+  raw_text TEXT NOT NULL DEFAULT '',
+  original_base64 TEXT NOT NULL DEFAULT '',
+  extraction_json TEXT NOT NULL DEFAULT '{}',
+  source_hash TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_resume_source_artifacts_document
+  ON resume_source_artifacts(user_id, document_id);
+
+CREATE TABLE IF NOT EXISTS resume_chunks (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  document_id TEXT NOT NULL REFERENCES resume_documents(id) ON DELETE CASCADE,
+  chunk_index INTEGER NOT NULL,
+  start_offset INTEGER NOT NULL DEFAULT 0,
+  end_offset INTEGER NOT NULL DEFAULT 0,
+  content TEXT NOT NULL DEFAULT '',
+  sections_json TEXT NOT NULL DEFAULT '[]',
+  content_hash TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(document_id, chunk_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_resume_chunks_document
+  ON resume_chunks(user_id, document_id, chunk_index);
+
+CREATE TABLE IF NOT EXISTS resume_drafts (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  document_id TEXT REFERENCES resume_documents(id) ON DELETE SET NULL,
+  artifact_id TEXT NOT NULL,
+  variant_id TEXT NOT NULL,
+  title TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'draft',
+  base_version TEXT NOT NULL DEFAULT '',
+  base_hash TEXT NOT NULL DEFAULT '',
+  patches_json TEXT NOT NULL DEFAULT '[]',
+  content_json TEXT NOT NULL DEFAULT '{}',
+  integrity_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(user_id, artifact_id, variant_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_resume_drafts_user_artifact
+  ON resume_drafts(user_id, artifact_id, created_at DESC);
+
 -- Offers (P2: offer comparison data)
 CREATE TABLE IF NOT EXISTS offers (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

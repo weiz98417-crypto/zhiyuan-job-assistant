@@ -25,12 +25,13 @@ function riskFlagsFromParams(value: unknown): string[] {
 }
 
 async function handler(params: Record<string, unknown>): Promise<ToolResult> {
+  const draftId = String(params.draftId || "");
   const sectionId = resolveSection(params.section || params.sectionId);
   const proposedContent = String(params.proposedContent || params.content || "");
   const reason = String(params.reason || "").slice(0, 1200);
   const riskFlags = riskFlagsFromParams(params.riskFlags);
 
-  const validation = validateResumeSectionContent(sectionId, proposedContent);
+  const validation = draftId ? { valid: true } : validateResumeSectionContent(sectionId, proposedContent);
   if (!validation.valid) {
     const error = validation.reason || "提案内容未通过校验";
     return {
@@ -50,7 +51,7 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
   const res = await fetch("/api/cv/edit-proposals", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ sectionId, proposedContent, reason, riskFlags }),
+    body: JSON.stringify({ draftId: draftId || undefined, sectionId, proposedContent, reason, riskFlags }),
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok || !json.success || !json.data?.id) {
@@ -70,6 +71,8 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
   }
 
   const proposal = json.data as Record<string, unknown>;
+  const effectiveSectionId = resolveSection(proposal.sectionId || sectionId);
+  const effectiveProposedContent = String(proposal.proposedContent || proposedContent);
   let readBack: Record<string, unknown> | null = null;
   let readBackError = "";
   try {
@@ -84,9 +87,9 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
     readBackError = error instanceof Error ? error.message : "proposal read-back failed";
   }
 
-  const documentValidation = validateDocumentFieldContent(proposedContent, {
+  const documentValidation = validateDocumentFieldContent(effectiveProposedContent, {
     minCompactLength: 1,
-    targetLabel: sectionId,
+    targetLabel: effectiveSectionId,
   });
   const readBackContent = typeof readBack?.proposedContent === "string" ? readBack.proposedContent : "";
   const verifiedAction = readBack
@@ -94,11 +97,11 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
         action: "create_resume_edit_proposal",
         targetType: "cv",
         targetId: String(proposal.id),
-        targetField: sectionId,
+        targetField: effectiveSectionId,
         baseHash: String(proposal.baseHash || ""),
         versionId: String(proposal.baseVersion || ""),
         data: proposal,
-        expectedContent: proposedContent,
+        expectedContent: effectiveProposedContent,
         readBackContent,
         checks: [
           ...documentValidation.checks,
@@ -114,7 +117,7 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
         action: "create_resume_edit_proposal",
         targetType: "cv",
         targetId: String(proposal.id || ""),
-        targetField: sectionId,
+        targetField: effectiveSectionId,
         baseHash: String(proposal.baseHash || ""),
         versionId: String(proposal.baseVersion || ""),
         error: readBackError || "proposal read-back failed",
@@ -131,12 +134,12 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
     };
   }
 
-  const data = { ...proposal, readBackVerified: true, proposedHash: proposal.proposedHash || stableContentHash(proposedContent) };
+  const data = { ...proposal, readBackVerified: true, proposedHash: proposal.proposedHash || stableContentHash(effectiveProposedContent) };
   return {
     success: true,
     data,
     errorCategory: "ok",
-    llmSummary: `已创建简历修改提案 ${proposal.id}，板块 ${sectionId}，等待用户审批后才会写入 CV。`,
+    llmSummary: `已创建简历修改提案 ${proposal.id}，板块 ${effectiveSectionId}，等待用户审批后才会写入 CV。`,
     uiPayload: { type: "resume_edit_proposal", ...data },
     rawData: data,
     verifiedAction,
@@ -153,10 +156,11 @@ export const createResumeEditProposal: ToolDefinition = {
   name: "create_resume_edit_proposal",
   description: "创建简历修改提案，只保存为待审批草稿，不直接写入 CV。用于用户确认前的安全简历改写流程。",
   parameters: {
-    section: { type: "string", required: true, description: "板块名称：工作经历/项目经验/技能/个人概述/教育背景" },
-    proposedContent: { type: "string", required: true, description: "提案中的完整板块新内容" },
+    section: { type: "string", required: false, description: "板块名称：工作经历/项目经验/技能/个人概述/教育背景。使用 draftId 时可省略" },
+    proposedContent: { type: "string", required: false, description: "提案中的完整板块新内容。使用 draftId 时由服务端从持久化草稿读取" },
     reason: { type: "string", required: false, description: "为什么建议这样修改，简短说明" },
     riskFlags: { type: "array", required: false, description: "风险标记，如 content_rewrite、large_change、jd_tailored" },
+    draftId: { type: "string", required: false, description: "已持久化的简历草稿 ID。用户从草稿卡选择方案时优先传此 ID，不要从聊天正文重建内容" },
   },
   category: "action",
   handler,

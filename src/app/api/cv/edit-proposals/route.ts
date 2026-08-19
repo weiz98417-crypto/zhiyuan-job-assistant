@@ -52,12 +52,20 @@ export async function POST(request: Request) {
   try {
     const user = await getCurrentUser();
     const body = await request.json().catch(() => ({}));
-    const sectionId = String(body.sectionId || body.section || "") as ResumeSectionId;
-    const proposedContent = String(body.proposedContent || body.content || "");
-    const reason = String(body.reason || "").slice(0, 1200);
-    const riskFlags = parseRiskFlags(body.riskFlags);
-    const expectedBaseHash = typeof body.baseHash === "string" ? body.baseHash : typeof body.expectedBaseHash === "string" ? body.expectedBaseHash : "";
-    const expectedBaseVersion = typeof body.baseVersion === "string" ? body.baseVersion : typeof body.expectedBaseVersion === "string" ? body.expectedBaseVersion : "";
+    const repositories = getDataRepositories();
+    const draftId = String(body.draftId || "");
+    const draft = draftId ? await repositories.resumeDrafts.get(draftId, user.userId) : undefined;
+    const draftContent = draft ? parseDraftContent(draft.content_json, draft.patches_json) : null;
+    const sectionId = String(draftContent?.sectionId || body.sectionId || body.section || "") as ResumeSectionId;
+    const proposedContent = String(draftContent?.content || body.proposedContent || body.content || "");
+    const reason = String(body.reason || (draft ? `selected_resume_draft:${draft.id}` : "")).slice(0, 1200);
+    const riskFlags = [...parseRiskFlags(body.riskFlags), ...(draft ? ["persistent_draft"] : [])];
+    const expectedBaseHash = draft?.base_hash || (typeof body.baseHash === "string" ? body.baseHash : typeof body.expectedBaseHash === "string" ? body.expectedBaseHash : "");
+    const expectedBaseVersion = draft?.base_version || (typeof body.baseVersion === "string" ? body.baseVersion : typeof body.expectedBaseVersion === "string" ? body.expectedBaseVersion : "");
+
+    if (draftId && !draft) {
+      return NextResponse.json({ success: false, error: "简历草稿不存在或不属于当前用户" }, { status: 404 });
+    }
 
     if (!SECTION_IDS.has(sectionId)) {
       return NextResponse.json({ success: false, error: "无效的简历板块" }, { status: 400 });
@@ -68,7 +76,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: validation.reason || "提案内容未通过校验" }, { status: 400 });
     }
 
-    const cvRow = await getDataRepositories().cv.get(user.userId);
+    const cvRow = await repositories.cv.get(user.userId);
     const cvData = cvRow?.data_json ? JSON.parse(cvRow.data_json) as Record<string, unknown> : {};
     const activeVersion = getActiveVersion(cvData);
     if (!activeVersion) {
@@ -97,7 +105,7 @@ export async function POST(request: Request) {
       }, { status: 409 });
     }
 
-    const row = await getDataRepositories().resumeEditProposals.create({
+    const row = await repositories.resumeEditProposals.create({
       sectionId,
       baseVersion: activeVersion.activeVersion,
       baseHash: currentBaseHash,
@@ -107,11 +115,30 @@ export async function POST(request: Request) {
       riskFlags,
     }, user.userId);
 
-    return NextResponse.json({ success: true, data: resumeEditProposalToDTO(row) });
+    if (draft) await repositories.resumeDrafts.updateStatus(draft.id, "selected", user.userId);
+
+    return NextResponse.json({ success: true, data: { ...resumeEditProposalToDTO(row), draftId: draft?.id, artifactId: draft?.artifact_id } });
   } catch (err) {
     if (err instanceof Error && err.message === "Not authenticated") {
       return NextResponse.json({ success: false, error: "未登录" }, { status: 401 });
     }
     return NextResponse.json({ success: false, error: String(err) }, { status: 500 });
   }
+}
+
+function parseDraftContent(contentJson: string, patchesJson: string): { sectionId: string; content: string } | null {
+  try {
+    const content = JSON.parse(contentJson || "{}") as Record<string, unknown>;
+    if (typeof content.sectionId === "string" && typeof content.content === "string") {
+      return { sectionId: content.sectionId, content: content.content };
+    }
+  } catch { /* use patch fallback */ }
+  try {
+    const patches = JSON.parse(patchesJson || "[]") as Array<Record<string, unknown>>;
+    const patch = patches[0];
+    if (typeof patch?.sectionId === "string" && typeof patch?.proposedContent === "string") {
+      return { sectionId: patch.sectionId, content: patch.proposedContent };
+    }
+  } catch { /* invalid draft */ }
+  return null;
 }

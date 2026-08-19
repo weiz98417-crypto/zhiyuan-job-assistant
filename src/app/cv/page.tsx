@@ -33,11 +33,11 @@ import db from "@/lib/db";
 import {
   loadCVData,
   loadCVDataFromServer,
-  saveCVData,
   createVersion,
   deleteVersion,
   switchVersion,
   renameVersion,
+  saveCVData,
   computeSectionsHash,
 } from "@/lib/cv-storage";
 import OptimizePanel from "./optimize-panel";
@@ -194,6 +194,7 @@ export default function CVPage() {
   // ── Import own CV from file ──
   const [cvImportLoading, setCvImportLoading] = useState(false);
   const [cvImportError, setCvImportError] = useState<string | null>(null);
+  const [pendingImport, setPendingImport] = useState<{ versionId: string; coverageRatio: number | null } | null>(null);
   const cvFileInputRef = useRef<HTMLInputElement>(null);
 
   const handleImportCV = async (file: File) => {
@@ -204,15 +205,20 @@ export default function CVPage() {
       formData.append("file", file);
       const res = await fetch("/api/cv/import", { method: "POST", body: formData });
       const data = await res.json();
-      if (!data.success) throw new Error(data.error || "导入失败");
-      // Fill sections with parsed data
-      const parsed = data.data.sections as Record<string, string>;
-      setSections((prev) =>
-        prev.map((s) => ({
-          ...s,
-          content: parsed[s.id] || s.content,
-        })),
-      );
+      if (!res.ok || !data.success) throw new Error(data.error || "导入失败");
+      if (!data.data?.persisted?.cvData) throw new Error("导入内容没有写入云端，已阻止只更新当前页面");
+      if (data.data?.persisted?.cvData) {
+        const persisted = data.data.persisted.cvData;
+        setCVData(persisted);
+        localStorage.setItem("zhiyuan-cv", JSON.stringify(persisted));
+        if (data.data.persisted.status === "pending") {
+          setPendingImport({
+            versionId: String(data.data.persisted.versionId),
+            coverageRatio: Number(data.data.persisted.integrity?.coverageRatio || 0),
+          });
+          return;
+        }
+      }
     } catch (err: unknown) {
       setCvImportError(err instanceof Error ? err.message : "导入失败");
     } finally {
@@ -387,7 +393,13 @@ export default function CVPage() {
       ]);
       setApplications(apps);
       setReports(reps);
-      if (serverCV) setCVData(serverCV);
+      if (serverCV) {
+        setCVData(serverCV);
+        const latestPending = Object.values(serverCV.versions)
+          .filter((version) => version.id !== serverCV.activeVersion && version.source === "imported" && version.integrityStatus === "needs_review")
+          .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+        if (latestPending) setPendingImport({ versionId: latestPending.id, coverageRatio: null });
+      }
       setMounted(true);
     }
     load();
@@ -439,18 +451,30 @@ export default function CVPage() {
   const doSave = useCallback(() => {
     const currentVersion = cvData.versions[cvData.activeVersion];
     if (!currentVersion) return;
-    const updated = { ...cvData };
-    updated.versions[cvData.activeVersion] = {
-      ...currentVersion,
-      sections: sections.map((s) => ({ ...s })),
-      source: optimizedRef.current ? "optimized" as const : currentVersion.source,
+    const updated = {
+      ...cvData,
+      versions: {
+        ...cvData.versions,
+        [cvData.activeVersion]: {
+          ...currentVersion,
+          sections: sections.map((s) => ({ ...s })),
+          source: optimizedRef.current ? "optimized" as const : currentVersion.source,
+        },
+      },
     };
-    saveCVData(updated);
-    setCVData(updated);
-    setSavedHash(computeSectionsHash(sections));
-    setSaveFeedback(true);
-    optimizedRef.current = false;
-    setTimeout(() => setSaveFeedback(false), 1500);
+    void (async () => {
+      try {
+        const persisted = await saveCVData(updated, cvData);
+        setCVData(persisted);
+        const persistedSections = persisted.versions[persisted.activeVersion]?.sections || sections;
+        setSavedHash(computeSectionsHash(persistedSections));
+        setSaveFeedback(true);
+        optimizedRef.current = false;
+        setTimeout(() => setSaveFeedback(false), 1500);
+      } catch (error) {
+        setCvImportError(error instanceof Error ? error.message : "简历保存失败");
+      }
+    })();
   }, [sections, cvData]);
 
   const confirmAction = (action: () => void) => {
@@ -463,39 +487,51 @@ export default function CVPage() {
   };
 
   const handleSwitchVersion = (versionId: string) => {
-    confirmAction(() => {
-      const result = switchVersion(versionId);
-      if (result) {
-        setCVData(result);
-        setShowVersionMenu(false);
+    confirmAction(async () => {
+      try {
+        const result = await switchVersion(versionId);
+        if (result) {
+          setCVData(result);
+          setShowVersionMenu(false);
+        }
+      } catch (error) {
+        setCvImportError(error instanceof Error ? error.message : "版本切换失败");
       }
     });
   };
 
-  const handleCreateVersion = () => {
+  const handleCreateVersion = async () => {
     const name = newVersionName.trim() || "新版本";
-    const result = createVersion(name);
-    setCVData(result);
-    setShowNewVersionInput(false);
-    setNewVersionName("");
-    setShowVersionMenu(false);
-  };
-
-  const handleDeleteVersion = (versionId: string) => {
-    const result = deleteVersion(versionId);
-    setCVData(result);
-    if (Object.keys(result.versions).length <= 1) {
-      setShowVersionMenu(false);
-    }
-  };
-
-  const handleRenameVersion = (versionId: string) => {
-    if (!editVersionName.trim()) return;
-    const result = renameVersion(versionId, editVersionName.trim());
-    if (result) {
+    try {
+      const result = await createVersion(name);
       setCVData(result);
+      setShowNewVersionInput(false);
+      setNewVersionName("");
+      setShowVersionMenu(false);
+    } catch (error) {
+      setCvImportError(error instanceof Error ? error.message : "版本创建失败");
     }
-    setEditingVersionId(null);
+  };
+
+  const handleDeleteVersion = async (versionId: string) => {
+    try {
+      const result = await deleteVersion(versionId);
+      setCVData(result);
+      if (Object.keys(result.versions).length <= 1) setShowVersionMenu(false);
+    } catch (error) {
+      setCvImportError(error instanceof Error ? error.message : "版本删除失败");
+    }
+  };
+
+  const handleRenameVersion = async (versionId: string) => {
+    if (!editVersionName.trim()) return;
+    try {
+      const result = await renameVersion(versionId, editVersionName.trim());
+      if (result) setCVData(result);
+      setEditingVersionId(null);
+    } catch (error) {
+      setCvImportError(error instanceof Error ? error.message : "版本重命名失败");
+    }
   };
 
   const updateSection = (id: string, content: string) => {
@@ -531,7 +567,7 @@ export default function CVPage() {
 
     // Fallback: generate keywords from role + archetype if JD data is unavailable
     let effectiveKeywords = jdKeywords;
-    let effectiveJdText = jdText;
+    const effectiveJdText = jdText;
     if (jdKeywords.length === 0 && !jdText) {
       const fallbackTerms = [report.role, report.archetype].filter(Boolean)
         .flatMap(t => (t || "").split(/[/\-\s]+/))
@@ -701,6 +737,30 @@ export default function CVPage() {
           <X size={14} />
           {cvImportError}
           <button onClick={() => setCvImportError(null)} className="ml-auto text-red-400 hover:text-red-600">×</button>
+        </div>
+      )}
+
+      {pendingImport && (
+        <div className="flex flex-wrap items-center gap-2 rounded-[var(--radius-sm)] border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-950/20">
+          <Gauge size={14} />
+          <span>
+            导入内容已完整保存为待确认版本
+            {pendingImport.coverageRatio === null ? "，完整性需要人工确认" : `，自动覆盖率 ${Math.round(pendingImport.coverageRatio * 100)}%`}
+            。系统没有静默替换当前简历。
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              void switchVersion(pendingImport.versionId).then((result) => {
+                if (result) setCVData(result);
+                setPendingImport(null);
+              }).catch((error) => setCvImportError(error instanceof Error ? error.message : "确认导入版本失败"));
+            }}
+            className="ml-auto rounded-[var(--radius-sm)] bg-amber-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-800"
+          >
+            确认设为当前版本
+          </button>
+          <button type="button" onClick={() => setPendingImport(null)} className="text-amber-700 hover:text-amber-900">稍后处理</button>
         </div>
       )}
 
@@ -893,9 +953,10 @@ export default function CVPage() {
               versionLabels={Object.fromEntries(versionIds.map((vid) => [vid, cvData.versions[vid]?.label || vid]))}
               onSwitchVersion={(oldId, newId) => setDiffMode({ oldId, newId })}
               onSetCurrent={(versionId) => {
-                const result = switchVersion(versionId);
-                if (result) setCVData(result);
-                setDiffMode(null);
+                void switchVersion(versionId).then((result) => {
+                  if (result) setCVData(result);
+                  setDiffMode(null);
+                }).catch((error) => setCvImportError(error instanceof Error ? error.message : "版本切换失败"));
               }}
               onBack={() => setDiffMode(null)}
             />

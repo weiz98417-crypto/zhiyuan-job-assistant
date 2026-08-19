@@ -333,7 +333,9 @@ export interface CVersion {
   label: string;
   createdAt: string;
   sections: CVSection[];
-  source: "manual" | "optimized";
+  source: "manual" | "optimized" | "imported";
+  documentId?: string;
+  integrityStatus?: "valid" | "needs_review";
 }
 
 export interface CVData {

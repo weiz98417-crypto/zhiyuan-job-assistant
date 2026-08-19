@@ -57,6 +57,13 @@ export interface TaskContractGateResult {
   safeMessage?: string;
 }
 
+export interface TaskContractRunOutcome {
+  status: "succeeded" | "waiting_user" | "failed";
+  gate: TaskContractGateResult;
+  replaceAssistantMessage: boolean;
+  safeMessage?: string;
+}
+
 const DEFAULT_SUCCESS_CRITERIA: Record<AgentTaskType, string[]> = {
   career_positioning_guidance: [
     "guidance framework loaded",
@@ -379,5 +386,56 @@ export function evaluateTaskContractCompletion(
     completedCriteria: deduped.filter((criterion) => contract.successCriteria.includes(criterion)),
     unmetCriteria,
     safeMessage: canClaimSuccess ? undefined : buildContractUnmetAssistantMessage(contract, unmetCriteria),
+  };
+}
+
+export function resolveTaskContractRunOutcome(
+  contract: AgentTaskContract,
+  completedCriteria: string[],
+  options: {
+    requiresClarification?: boolean;
+    hasAssistantResponse?: boolean;
+    lastToolSuccess?: boolean;
+  } = {},
+): TaskContractRunOutcome {
+  const gate = evaluateTaskContractCompletion(contract, completedCriteria);
+
+  if (options.requiresClarification) {
+    return {
+      status: "waiting_user",
+      gate,
+      replaceAssistantMessage: false,
+    };
+  }
+
+  if (gate.canClaimSuccess) {
+    return {
+      status: "succeeded",
+      gate,
+      replaceAssistantMessage: false,
+    };
+  }
+
+  const draftReadyForApproval =
+    contract.taskType === "resume_edit" &&
+    gate.completedCriteria.includes("draft generated") &&
+    gate.unmetCriteria.includes("user approved draft");
+
+  if (draftReadyForApproval) {
+    return {
+      status: "waiting_user",
+      gate,
+      replaceAssistantMessage: false,
+      safeMessage: options.hasAssistantResponse
+        ? undefined
+        : "简历优化草稿已经生成，尚未写入当前简历。请查看方案后确认应用、继续调整或取消。",
+    };
+  }
+
+  return {
+    status: "failed",
+    gate,
+    replaceAssistantMessage: true,
+    safeMessage: gate.safeMessage,
   };
 }

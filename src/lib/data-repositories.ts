@@ -33,8 +33,32 @@ import type {
   SignalRow,
 } from "@/lib/server-db";
 import { normalizeApplicationStatus } from "@/lib/application-status";
+import type {
+  ResumeChunkRecord,
+  ResumeDocumentRecord,
+  ResumeDraftRecord,
+  ResumeIntakeInput,
+  ResumeSourceArtifactRecord,
+} from "@/lib/resume/document";
+import { invalidateResumeIntegrityEvidence, resumeDocumentProjectionFromCvData } from "@/lib/resume/document";
+import { stableContentHash } from "@/lib/agent/verified-action";
 
 type AnyRow = Record<string, unknown>;
+
+export interface CvWriteExpectation {
+  activeVersion: string;
+  baseHash: string;
+}
+
+export class CvWriteConflictError extends Error {
+  constructor(
+    public readonly currentVersion: string,
+    public readonly currentHash: string,
+  ) {
+    super("CV changed after the browser snapshot was loaded.");
+    this.name = "CvWriteConflictError";
+  }
+}
 
 const JSON_COLUMNS = new Set([
   "blocks_json",
@@ -64,9 +88,16 @@ const JSON_COLUMNS = new Set([
   "title_positive_json",
   "title_negative_json",
   "error_log",
+  "extraction_json",
+  "integrity_json",
+  "patches_json",
 ]);
 
 const USER_PRIVATE_TABLES = [
+  "resume_drafts",
+  "resume_chunks",
+  "resume_source_artifacts",
+  "resume_documents",
   "profiles",
   "profile_signals",
   "sessions",
@@ -132,6 +163,21 @@ export interface DataRepositories {
   cv: {
     get(userId: string): Promise<{ data_json: string } | undefined>;
     upsert(userId: string, data: unknown): Promise<void>;
+    upsertIfCurrent(userId: string, data: unknown, expectation: CvWriteExpectation): Promise<void>;
+  };
+  resumeDocuments: {
+    createIntake(input: ResumeIntakeInput, userId: string): Promise<ResumeDocumentRecord>;
+    getActive(userId: string): Promise<ResumeDocumentRecord | undefined>;
+    get(id: string, userId: string): Promise<ResumeDocumentRecord | undefined>;
+    list(userId: string): Promise<ResumeDocumentRecord[]>;
+    getArtifact(documentId: string, userId: string): Promise<ResumeSourceArtifactRecord | undefined>;
+    listChunks(documentId: string, userId: string): Promise<ResumeChunkRecord[]>;
+  };
+  resumeDrafts: {
+    createArtifact(inputs: ResumeDraftRecord[], userId: string): Promise<ResumeDraftRecord[]>;
+    get(id: string, userId: string): Promise<ResumeDraftRecord | undefined>;
+    listByArtifact(artifactId: string, userId: string): Promise<ResumeDraftRecord[]>;
+    updateStatus(id: string, status: ResumeDraftRecord["status"], userId: string): Promise<ResumeDraftRecord | undefined>;
   };
   resumeEditProposals: {
     create(input: ResumeEditProposalInput, userId: string): Promise<ResumeEditProposalRecord>;
@@ -251,8 +297,18 @@ export function getDataRepositories(): DataRepositories {
   return driver === "postgres" ? createPostgresRepositories() : createSqliteRepositories();
 }
 
+let selectedDatabaseReady: { driver: DatabaseDriver; promise: Promise<void> } | null = null;
+
 export async function assertSelectedDatabaseReady(): Promise<void> {
-  await getDataRepositories().assertReady();
+  const driver = getDatabaseDriver();
+  if (!selectedDatabaseReady || selectedDatabaseReady.driver !== driver) {
+    const promise = getDataRepositories().assertReady().catch((error) => {
+      if (selectedDatabaseReady?.promise === promise) selectedDatabaseReady = null;
+      throw error;
+    });
+    selectedDatabaseReady = { driver, promise };
+  }
+  await selectedDatabaseReady.promise;
 }
 
 function createSqliteRepositories(): DataRepositories {
@@ -324,11 +380,28 @@ function createSqliteRepositories(): DataRepositories {
       },
       async upsert(userId, data) {
         const dataJson = JSON.stringify(data || {});
-        const existing = getDb().prepare("SELECT id FROM cv_data WHERE user_id = ?").get(userId);
-        if (existing) getDb().prepare("UPDATE cv_data SET data_json = ?, updated_at = datetime('now') WHERE user_id = ?").run(dataJson, userId);
-        else getDb().prepare("INSERT INTO cv_data (user_id, data_json, updated_at) VALUES (?, ?, datetime('now'))").run(userId, dataJson);
+        const db = getDb();
+        db.transaction(() => {
+          const existing = db.prepare("SELECT id FROM cv_data WHERE user_id = ?").get(userId);
+          if (existing) db.prepare("UPDATE cv_data SET data_json = ?, updated_at = datetime('now') WHERE user_id = ?").run(dataJson, userId);
+          else db.prepare("INSERT INTO cv_data (user_id, data_json, updated_at) VALUES (?, ?, datetime('now'))").run(userId, dataJson);
+          syncSqliteResumeDocumentProjection(db, userId, data);
+        })();
+      },
+      async upsertIfCurrent(userId, data, expectation) {
+        const dataJson = JSON.stringify(data || {});
+        const db = getDb();
+        db.transaction(() => {
+          const current = db.prepare("SELECT data_json FROM cv_data WHERE user_id = ?").get(userId) as { data_json?: string } | undefined;
+          assertCvWriteExpectation(current?.data_json, expectation);
+          if (current) db.prepare("UPDATE cv_data SET data_json = ?, updated_at = datetime('now') WHERE user_id = ?").run(dataJson, userId);
+          else db.prepare("INSERT INTO cv_data (user_id, data_json, updated_at) VALUES (?, ?, datetime('now'))").run(userId, dataJson);
+          syncSqliteResumeDocumentProjection(db, userId, data);
+        })();
       },
     },
+    resumeDocuments: createSqliteResumeDocumentRepository(),
+    resumeDrafts: createSqliteResumeDraftRepository(),
     resumeEditProposals: createSqliteResumeEditProposalRepository(),
     applications: {
       async list(filters, userId) {
@@ -501,6 +574,8 @@ function createPostgresRepositories(): DataRepositories {
     },
     users: createPostgresUserRepository(),
     cv: createPostgresCvRepository(),
+    resumeDocuments: createPostgresResumeDocumentRepository(),
+    resumeDrafts: createPostgresResumeDraftRepository(),
     resumeEditProposals: createPostgresResumeEditProposalRepository(),
     applications: createPostgresApplicationRepository(),
     reports: createPostgresReportRepository(),
@@ -606,11 +681,350 @@ function createPostgresCvRepository(): DataRepositories["cv"] {
       return withPostgresClient(async (client) => one<{ data_json: string }>(await client.query("SELECT data_json FROM cv_data WHERE user_id = $1", [userId])));
     },
     async upsert(userId, data) {
-      await withPostgresClient((client) => client.query(`
-        INSERT INTO cv_data (user_id, data_json, updated_at)
-        VALUES ($1, $2::jsonb, now())
-        ON CONFLICT (user_id) DO UPDATE SET data_json = EXCLUDED.data_json, updated_at = now()
-      `, [userId, JSON.stringify(data || {})]));
+      await withPostgresClient(async (client) => {
+        await client.query("BEGIN");
+        try {
+          await client.query(`
+            INSERT INTO cv_data (user_id, data_json, updated_at)
+            VALUES ($1, $2::jsonb, now())
+            ON CONFLICT (user_id) DO UPDATE SET data_json = EXCLUDED.data_json, updated_at = now()
+          `, [userId, JSON.stringify(data || {})]);
+          await syncPostgresResumeDocumentProjection(client, userId, data);
+          await client.query("COMMIT");
+        } catch (error) {
+          await client.query("ROLLBACK");
+          throw error;
+        }
+      });
+    },
+    async upsertIfCurrent(userId, data, expectation) {
+      await withPostgresClient(async (client) => {
+        await client.query("BEGIN");
+        try {
+          const current = one<{ data_json: unknown }>(await client.query(
+            "SELECT data_json FROM cv_data WHERE user_id = $1 FOR UPDATE",
+            [userId],
+          ));
+          assertCvWriteExpectation(current?.data_json, expectation);
+          await client.query(`
+            INSERT INTO cv_data (user_id, data_json, updated_at)
+            VALUES ($1, $2::jsonb, now())
+            ON CONFLICT (user_id) DO UPDATE SET data_json = EXCLUDED.data_json, updated_at = now()
+          `, [userId, JSON.stringify(data || {})]);
+          await syncPostgresResumeDocumentProjection(client, userId, data);
+          await client.query("COMMIT");
+        } catch (error) {
+          await client.query("ROLLBACK");
+          throw error;
+        }
+      });
+    },
+  };
+}
+
+function createSqliteResumeDocumentRepository(): DataRepositories["resumeDocuments"] {
+  return {
+    async createIntake(input, userId) {
+      const db = getDb();
+      const transaction = db.transaction(() => {
+        if (input.activate) {
+          db.prepare(`
+            UPDATE resume_documents
+            SET status = 'archived', updated_at = datetime('now')
+            WHERE user_id = ? AND status = 'active'
+          `).run(userId);
+        }
+        db.prepare(`
+          INSERT INTO resume_documents (
+            id, user_id, version_id, label, status, source_type, source_artifact_id,
+            content_hash, sections_json, integrity_json, activated_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        `).run(
+          input.document.id,
+          userId,
+          input.document.version_id,
+          input.document.label,
+          input.document.status,
+          input.document.source_type,
+          input.document.source_artifact_id,
+          input.document.content_hash,
+          input.document.sections_json,
+          input.document.integrity_json,
+          input.document.activated_at || null,
+        );
+        db.prepare(`
+          INSERT INTO resume_source_artifacts (
+            id, user_id, document_id, source_type, filename, mime_type, raw_text,
+            original_base64, extraction_json, source_hash
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          input.artifact.id,
+          userId,
+          input.artifact.document_id,
+          input.artifact.source_type,
+          input.artifact.filename,
+          input.artifact.mime_type,
+          input.artifact.raw_text,
+          input.artifact.original_base64,
+          input.artifact.extraction_json,
+          input.artifact.source_hash,
+        );
+        const insertChunk = db.prepare(`
+          INSERT INTO resume_chunks (
+            id, user_id, document_id, chunk_index, start_offset, end_offset,
+            content, sections_json, content_hash
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        for (const chunk of input.chunks) {
+          insertChunk.run(
+            chunk.id,
+            userId,
+            chunk.document_id,
+            chunk.chunk_index,
+            chunk.start_offset,
+            chunk.end_offset,
+            chunk.content,
+            chunk.sections_json,
+            chunk.content_hash,
+          );
+        }
+        const dataJson = JSON.stringify(input.cvData);
+        const existing = db.prepare("SELECT id FROM cv_data WHERE user_id = ?").get(userId);
+        if (existing) db.prepare("UPDATE cv_data SET data_json = ?, updated_at = datetime('now') WHERE user_id = ?").run(dataJson, userId);
+        else db.prepare("INSERT INTO cv_data (user_id, data_json, updated_at) VALUES (?, ?, datetime('now'))").run(userId, dataJson);
+        return db.prepare("SELECT * FROM resume_documents WHERE id = ? AND user_id = ?").get(input.document.id, userId) as ResumeDocumentRecord;
+      });
+      return transaction();
+    },
+    async getActive(userId) {
+      return getDb().prepare(`
+        SELECT * FROM resume_documents
+        WHERE user_id = ? AND status = 'active'
+        ORDER BY activated_at DESC, created_at DESC LIMIT 1
+      `).get(userId) as ResumeDocumentRecord | undefined;
+    },
+    async get(id, userId) {
+      return getDb().prepare("SELECT * FROM resume_documents WHERE id = ? AND user_id = ?").get(id, userId) as ResumeDocumentRecord | undefined;
+    },
+    async list(userId) {
+      return getDb().prepare("SELECT * FROM resume_documents WHERE user_id = ? ORDER BY created_at DESC").all(userId) as ResumeDocumentRecord[];
+    },
+    async getArtifact(documentId, userId) {
+      return getDb().prepare("SELECT * FROM resume_source_artifacts WHERE document_id = ? AND user_id = ?").get(documentId, userId) as ResumeSourceArtifactRecord | undefined;
+    },
+    async listChunks(documentId, userId) {
+      return getDb().prepare(`
+        SELECT * FROM resume_chunks WHERE document_id = ? AND user_id = ? ORDER BY chunk_index ASC
+      `).all(documentId, userId) as ResumeChunkRecord[];
+    },
+  };
+}
+
+function createPostgresResumeDocumentRepository(): DataRepositories["resumeDocuments"] {
+  return {
+    async createIntake(input, userId) {
+      return withPostgresClient(async (client) => {
+        await client.query("BEGIN");
+        try {
+          if (input.activate) {
+            await client.query(`
+              UPDATE resume_documents SET status = 'archived', updated_at = now()
+              WHERE user_id = $1 AND status = 'active'
+            `, [userId]);
+          }
+          const document = one<ResumeDocumentRecord>(await client.query(`
+            INSERT INTO resume_documents (
+              id, user_id, version_id, label, status, source_type, source_artifact_id,
+              content_hash, sections_json, integrity_json, activated_at, updated_at
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,now())
+            RETURNING *
+          `, [
+            input.document.id,
+            userId,
+            input.document.version_id,
+            input.document.label,
+            input.document.status,
+            input.document.source_type,
+            input.document.source_artifact_id,
+            input.document.content_hash,
+            input.document.sections_json,
+            input.document.integrity_json,
+            input.document.activated_at || null,
+          ]));
+          await client.query(`
+            INSERT INTO resume_source_artifacts (
+              id, user_id, document_id, source_type, filename, mime_type, raw_text,
+              original_base64, extraction_json, source_hash
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10)
+          `, [
+            input.artifact.id,
+            userId,
+            input.artifact.document_id,
+            input.artifact.source_type,
+            input.artifact.filename,
+            input.artifact.mime_type,
+            input.artifact.raw_text,
+            input.artifact.original_base64,
+            input.artifact.extraction_json,
+            input.artifact.source_hash,
+          ]);
+          for (const chunk of input.chunks) {
+            await client.query(`
+              INSERT INTO resume_chunks (
+                id, user_id, document_id, chunk_index, start_offset, end_offset,
+                content, sections_json, content_hash
+              ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9)
+            `, [
+              chunk.id,
+              userId,
+              chunk.document_id,
+              chunk.chunk_index,
+              chunk.start_offset,
+              chunk.end_offset,
+              chunk.content,
+              chunk.sections_json,
+              chunk.content_hash,
+            ]);
+          }
+          await client.query(`
+            INSERT INTO cv_data (user_id, data_json, updated_at)
+            VALUES ($1, $2::jsonb, now())
+            ON CONFLICT (user_id) DO UPDATE SET data_json = EXCLUDED.data_json, updated_at = now()
+          `, [userId, JSON.stringify(input.cvData)]);
+          await client.query("COMMIT");
+          if (!document) throw new Error("Resume document insert did not return a row");
+          return document;
+        } catch (error) {
+          await client.query("ROLLBACK");
+          throw error;
+        }
+      });
+    },
+    async getActive(userId) {
+      return withPostgresClient(async (client) => one<ResumeDocumentRecord>(await client.query(`
+        SELECT * FROM resume_documents
+        WHERE user_id = $1 AND status = 'active'
+        ORDER BY activated_at DESC NULLS LAST, created_at DESC LIMIT 1
+      `, [userId])));
+    },
+    async get(id, userId) {
+      return withPostgresClient(async (client) => one<ResumeDocumentRecord>(await client.query("SELECT * FROM resume_documents WHERE id = $1 AND user_id = $2", [id, userId])));
+    },
+    async list(userId) {
+      return withPostgresClient(async (client) => rows<ResumeDocumentRecord>((await client.query("SELECT * FROM resume_documents WHERE user_id = $1 ORDER BY created_at DESC", [userId])).rows));
+    },
+    async getArtifact(documentId, userId) {
+      return withPostgresClient(async (client) => one<ResumeSourceArtifactRecord>(await client.query("SELECT * FROM resume_source_artifacts WHERE document_id = $1 AND user_id = $2", [documentId, userId])));
+    },
+    async listChunks(documentId, userId) {
+      return withPostgresClient(async (client) => rows<ResumeChunkRecord>((await client.query(`
+        SELECT * FROM resume_chunks WHERE document_id = $1 AND user_id = $2 ORDER BY chunk_index ASC
+      `, [documentId, userId])).rows));
+    },
+  };
+}
+
+function createSqliteResumeDraftRepository(): DataRepositories["resumeDrafts"] {
+  return {
+    async createArtifact(inputs, userId) {
+      const db = getDb();
+      const transaction = db.transaction(() => {
+        const insert = db.prepare(`
+          INSERT INTO resume_drafts (
+            id, user_id, document_id, artifact_id, variant_id, title, status,
+            base_version, base_hash, patches_json, content_json, integrity_json, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        `);
+        for (const input of inputs) {
+          insert.run(
+            input.id,
+            userId,
+            input.document_id || null,
+            input.artifact_id,
+            input.variant_id,
+            input.title,
+            input.status,
+            input.base_version,
+            input.base_hash,
+            input.patches_json,
+            input.content_json,
+            input.integrity_json,
+          );
+        }
+        if (!inputs.length) return [];
+        return db.prepare(`
+          SELECT * FROM resume_drafts WHERE artifact_id = ? AND user_id = ? ORDER BY created_at ASC
+        `).all(inputs[0].artifact_id, userId) as ResumeDraftRecord[];
+      });
+      return transaction();
+    },
+    async get(id, userId) {
+      return getDb().prepare("SELECT * FROM resume_drafts WHERE id = ? AND user_id = ?").get(id, userId) as ResumeDraftRecord | undefined;
+    },
+    async listByArtifact(artifactId, userId) {
+      return getDb().prepare(`
+        SELECT * FROM resume_drafts WHERE artifact_id = ? AND user_id = ? ORDER BY created_at ASC
+      `).all(artifactId, userId) as ResumeDraftRecord[];
+    },
+    async updateStatus(id, status, userId) {
+      getDb().prepare("UPDATE resume_drafts SET status = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?").run(status, id, userId);
+      return this.get(id, userId);
+    },
+  };
+}
+
+function createPostgresResumeDraftRepository(): DataRepositories["resumeDrafts"] {
+  return {
+    async createArtifact(inputs, userId) {
+      return withPostgresClient(async (client) => {
+        await client.query("BEGIN");
+        try {
+          const created: ResumeDraftRecord[] = [];
+          for (const input of inputs) {
+            const result = await client.query(`
+              INSERT INTO resume_drafts (
+                id, user_id, document_id, artifact_id, variant_id, title, status,
+                base_version, base_hash, patches_json, content_json, integrity_json, updated_at
+              ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12::jsonb,now())
+              RETURNING *
+            `, [
+              input.id,
+              userId,
+              input.document_id || null,
+              input.artifact_id,
+              input.variant_id,
+              input.title,
+              input.status,
+              input.base_version,
+              input.base_hash,
+              input.patches_json,
+              input.content_json,
+              input.integrity_json,
+            ]);
+            const row = one<ResumeDraftRecord>(result);
+            if (!row) throw new Error("Resume draft insert did not return a row");
+            created.push(normalizeRow(result.rows[0]) as unknown as ResumeDraftRecord);
+          }
+          await client.query("COMMIT");
+          return created;
+        } catch (error) {
+          await client.query("ROLLBACK");
+          throw error;
+        }
+      });
+    },
+    async get(id, userId) {
+      return withPostgresClient(async (client) => one<ResumeDraftRecord>(await client.query("SELECT * FROM resume_drafts WHERE id = $1 AND user_id = $2", [id, userId])));
+    },
+    async listByArtifact(artifactId, userId) {
+      return withPostgresClient(async (client) => rows<ResumeDraftRecord>((await client.query(`
+        SELECT * FROM resume_drafts WHERE artifact_id = $1 AND user_id = $2 ORDER BY created_at ASC
+      `, [artifactId, userId])).rows));
+    },
+    async updateStatus(id, status, userId) {
+      return withPostgresClient(async (client) => one<ResumeDraftRecord>(await client.query(`
+        UPDATE resume_drafts SET status = $1, updated_at = now() WHERE id = $2 AND user_id = $3 RETURNING *
+      `, [status, id, userId])));
     },
   };
 }
@@ -683,6 +1097,7 @@ function createSqliteResumeEditProposalRepository(): DataRepositories["resumeEdi
 
         const result = db.prepare("UPDATE cv_data SET data_json = ?, updated_at = datetime('now') WHERE user_id = ?").run(JSON.stringify(applied.cvData), userId);
         if (result.changes === 0) throw new ResumeEditProposalApplyError("cv_missing", "CV data row was not found.");
+        syncSqliteResumeDocumentProjection(db, userId, applied.cvData);
 
         db.prepare("UPDATE resume_edit_proposals SET status = 'applied', updated_at = datetime('now') WHERE id = ? AND user_id = ?").run(id, userId);
         const updatedProposal = db.prepare("SELECT * FROM resume_edit_proposals WHERE id = ? AND user_id = ?").get(id, userId) as ResumeEditProposalRecord | undefined;
@@ -713,6 +1128,7 @@ function createSqliteResumeEditProposalRepository(): DataRepositories["resumeEdi
 
         const result = db.prepare("UPDATE cv_data SET data_json = ?, updated_at = datetime('now') WHERE user_id = ?").run(JSON.stringify(rollback.cvData), userId);
         if (result.changes === 0) throw new ResumeEditProposalApplyError("cv_missing", "CV data row was not found.");
+        syncSqliteResumeDocumentProjection(db, userId, rollback.cvData);
 
         db.prepare("UPDATE resume_edit_proposals SET status = 'rolled_back', updated_at = datetime('now') WHERE id = ? AND user_id = ?").run(id, userId);
         const updated = db.prepare("SELECT * FROM resume_edit_proposals WHERE id = ? AND user_id = ?").get(id, userId) as ResumeEditProposalRecord | undefined;
@@ -791,6 +1207,7 @@ function createPostgresResumeEditProposalRepository(): DataRepositories["resumeE
             [JSON.stringify(applied.cvData), userId],
           );
           if (!writeResult.rowCount) throw new ResumeEditProposalApplyError("cv_missing", "CV data row was not found.");
+          await syncPostgresResumeDocumentProjection(client, userId, applied.cvData);
 
           const updateResult = await client.query(
             "UPDATE resume_edit_proposals SET status = 'applied', updated_at = now() WHERE id = $1 AND user_id = $2 RETURNING *",
@@ -847,6 +1264,7 @@ function createPostgresResumeEditProposalRepository(): DataRepositories["resumeE
             [JSON.stringify(rollback.cvData), userId],
           );
           if (!writeResult.rowCount) throw new ResumeEditProposalApplyError("cv_missing", "CV data row was not found.");
+          await syncPostgresResumeDocumentProjection(client, userId, rollback.cvData);
 
           const updateResult = await client.query(
             "UPDATE resume_edit_proposals SET status = 'rolled_back', updated_at = now() WHERE id = $1 AND user_id = $2 RETURNING *",
@@ -2068,4 +2486,66 @@ function jsonString(value: unknown, fallback: unknown): string {
 
 function pgIdent(value: string): string {
   return `"${value.replace(/"/g, '""')}"`;
+}
+
+function assertCvWriteExpectation(currentValue: unknown, expectation: CvWriteExpectation): void {
+  if (!currentValue) return;
+  let current: Record<string, unknown> = {};
+  try {
+    const parsed = typeof currentValue === "string" ? JSON.parse(currentValue) : currentValue;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) current = parsed as Record<string, unknown>;
+  } catch { /* conflict below uses empty current state */ }
+  const currentVersion = typeof current.activeVersion === "string" ? current.activeVersion : "";
+  const versions = current.versions && typeof current.versions === "object" && !Array.isArray(current.versions)
+    ? current.versions as Record<string, unknown>
+    : {};
+  const currentHash = stableContentHash(versions[currentVersion] || null);
+  if (expectation.activeVersion !== currentVersion || expectation.baseHash !== currentHash) {
+    throw new CvWriteConflictError(currentVersion, currentHash);
+  }
+}
+
+function syncSqliteResumeDocumentProjection(db: ReturnType<typeof getDb>, userId: string, cvData: unknown): void {
+  const projection = resumeDocumentProjectionFromCvData(cvData);
+  if (!projection) return;
+  const target = db.prepare("SELECT id, content_hash, integrity_json FROM resume_documents WHERE user_id = ? AND version_id = ?")
+    .get(userId, projection.versionId) as { id: string; content_hash: string; integrity_json: string } | undefined;
+  if (!target) return;
+  const integrityJson = target.content_hash === projection.contentHash
+    ? target.integrity_json
+    : invalidateResumeIntegrityEvidence(target.integrity_json, target.content_hash, projection.contentHash);
+  db.prepare(`
+    UPDATE resume_documents SET status = 'archived', updated_at = datetime('now')
+    WHERE user_id = ? AND status = 'active' AND version_id <> ?
+  `).run(userId, projection.versionId);
+  db.prepare(`
+    UPDATE resume_documents
+    SET status = 'active', sections_json = ?, content_hash = ?, integrity_json = ?,
+        activated_at = COALESCE(activated_at, datetime('now')), updated_at = datetime('now')
+    WHERE user_id = ? AND version_id = ?
+  `).run(projection.sectionsJson, projection.contentHash, integrityJson, userId, projection.versionId);
+}
+
+async function syncPostgresResumeDocumentProjection(client: PoolClient, userId: string, cvData: unknown): Promise<void> {
+  const projection = resumeDocumentProjectionFromCvData(cvData);
+  if (!projection) return;
+  const target = await client.query<{ id: string; content_hash: string; integrity_json: unknown }>(
+    "SELECT id, content_hash, integrity_json FROM resume_documents WHERE user_id = $1 AND version_id = $2",
+    [userId, projection.versionId],
+  );
+  if (!target.rowCount) return;
+  const targetRow = target.rows[0];
+  const integrityJson = targetRow.content_hash === projection.contentHash
+    ? jsonString(targetRow.integrity_json, {})
+    : invalidateResumeIntegrityEvidence(targetRow.integrity_json, targetRow.content_hash, projection.contentHash);
+  await client.query(`
+    UPDATE resume_documents SET status = 'archived', updated_at = now()
+    WHERE user_id = $1 AND status = 'active' AND version_id <> $2
+  `, [userId, projection.versionId]);
+  await client.query(`
+    UPDATE resume_documents
+    SET status = 'active', sections_json = $1::jsonb, content_hash = $2, integrity_json = $3::jsonb,
+        activated_at = COALESCE(activated_at, now()), updated_at = now()
+    WHERE user_id = $4 AND version_id = $5
+  `, [projection.sectionsJson, projection.contentHash, integrityJson, userId, projection.versionId]);
 }

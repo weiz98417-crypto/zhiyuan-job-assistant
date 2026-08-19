@@ -1,4 +1,5 @@
-import type { CVSection, CVersion, CVData } from "@/types";
+import type { CVSection, CVData } from "@/types";
+import { stableContentHash } from "@/lib/agent/verified-action";
 
 const STORAGE_KEY = "zhiyuan-cv";
 
@@ -89,14 +90,26 @@ export async function loadCVDataFromServer(): Promise<CVData | null> {
   }
 }
 
-export function saveCVData(data: CVData): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  // Also sync to server (fire-and-forget)
-  fetch("/api/cv/data", {
+export async function saveCVData(data: CVData, baseData?: CVData): Promise<CVData> {
+  const baseVersion = baseData?.activeVersion || "";
+  const baseHash = baseVersion ? stableContentHash(baseData?.versions[baseVersion] || null) : "";
+  const response = await fetch("/api/cv/data", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  }).catch(() => {});
+    body: JSON.stringify({
+      data,
+      expectedActiveVersion: baseVersion || undefined,
+      expectedBaseHash: baseHash || undefined,
+    }),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || !result.success) throw new Error(result.error || "简历保存失败");
+  const readBackResponse = await fetch("/api/cv/data", { cache: "no-store" });
+  const readBack = await readBackResponse.json().catch(() => ({}));
+  if (!readBackResponse.ok || !readBack.success || !readBack.data) throw new Error(readBack.error || "简历保存后读回失败");
+  const persisted = normalizeCVData(readBack.data);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(persisted));
+  return persisted;
 }
 
 export function getActiveSections(): CVSection[] {
@@ -105,9 +118,10 @@ export function getActiveSections(): CVSection[] {
   return active?.sections ?? DEFAULT_SECTIONS.map((s) => ({ ...s }));
 }
 
-export function createVersion(label: string): CVData {
-  const data = loadCVData();
-  const active = data.versions[data.activeVersion];
+export async function createVersion(label: string): Promise<CVData> {
+  const baseData = loadCVData();
+  const data = cloneCVData(baseData);
+  const active = baseData.versions[baseData.activeVersion];
   const ids = Object.keys(data.versions)
     .map((k) => parseInt(k.replace("v", ""), 10))
     .filter((n) => !isNaN(n));
@@ -121,12 +135,12 @@ export function createVersion(label: string): CVData {
     source: "manual",
   };
   data.activeVersion = nextId;
-  saveCVData(data);
-  return data;
+  return saveCVData(data, baseData);
 }
 
-export function deleteVersion(versionId: string): CVData {
-  const data = loadCVData();
+export async function deleteVersion(versionId: string): Promise<CVData> {
+  const baseData = loadCVData();
+  const data = cloneCVData(baseData);
   const ids = Object.keys(data.versions);
   if (ids.length <= 1) return data;
 
@@ -137,24 +151,27 @@ export function deleteVersion(versionId: string): CVData {
     data.activeVersion = remaining[remaining.length - 1];
   }
 
-  saveCVData(data);
-  return data;
+  return saveCVData(data, baseData);
 }
 
-export function switchVersion(versionId: string): CVData | null {
-  const data = loadCVData();
+export async function switchVersion(versionId: string): Promise<CVData | null> {
+  const baseData = loadCVData();
+  const data = cloneCVData(baseData);
   if (!data.versions[versionId]) return null;
   data.activeVersion = versionId;
-  saveCVData(data);
-  return data;
+  return saveCVData(data, baseData);
 }
 
-export function renameVersion(versionId: string, newLabel: string): CVData | null {
-  const data = loadCVData();
+export async function renameVersion(versionId: string, newLabel: string): Promise<CVData | null> {
+  const baseData = loadCVData();
+  const data = cloneCVData(baseData);
   if (!data.versions[versionId]) return null;
   data.versions[versionId].label = newLabel;
-  saveCVData(data);
-  return data;
+  return saveCVData(data, baseData);
+}
+
+function cloneCVData(data: CVData): CVData {
+  return JSON.parse(JSON.stringify(data)) as CVData;
 }
 
 export function getCVFullText(): string {

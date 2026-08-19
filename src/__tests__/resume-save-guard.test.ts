@@ -77,6 +77,23 @@ SQL / 数据分析
     expect(plan?.content).not.toContain("策略");
   });
 
+  it("selects a persisted draft id instead of reconstructing proposal content", () => {
+    const plan = buildResumeSavePlan([
+      {
+        role: "tool",
+        content: "技能草稿已持久化：方案一 draft_complete_1；方案二 draft_focused_2",
+      },
+      { role: "user", content: "选择第二版保存到技能清单" },
+    ]);
+
+    expect(plan).toEqual({
+      section: "skills",
+      content: "",
+      reason: "recent-optimization-result",
+      draftId: "draft_focused_2",
+    });
+  });
+
   it("does not hijack excellent reference resume save requests", () => {
     const plan = buildResumeSavePlan([
       { role: "assistant", content: "这是一份优秀简历。" },

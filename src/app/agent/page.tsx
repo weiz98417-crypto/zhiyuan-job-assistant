@@ -22,8 +22,8 @@ import type { AgentDefinition } from "@/lib/agent/registry/types";
 import {
   createAgentTaskContract,
   createResumeBaseSnapshot,
-  evaluateTaskContractCompletion,
   inferCompletedCriteriaFromToolResult,
+  resolveTaskContractRunOutcome,
   type AgentTaskBaseSnapshot,
   type AgentTaskContract,
 } from "@/lib/agent/task-contract";
@@ -1456,6 +1456,7 @@ Rules:
         };
 
         let toolResultInfo: LastToolResultInfo | null = null;
+        const toolResultHistory: LastToolResultInfo[] = [];
         let assistantText = "";
         let nextOfferState = agentState?.offer;
         let resumeSectionSaveSucceeded = false;
@@ -1480,6 +1481,9 @@ Rules:
             interviewRebindAction: rebindResolution?.action,
             pendingReferenceResumeSave: pendingReferenceResumeSaveForRun,
             taskContract: activeTaskContract,
+            resumeImageSourceText: activeGuidedSessionForRun?.source === "image_clarification" && activeGuidedSessionForRun.documentType === "resume"
+              ? activeGuidedSessionForRun.sourceText
+              : undefined,
           },
         )) {
           if (firstEvent) { setStartTime(Date.now()); firstEvent = false; }
@@ -1506,6 +1510,7 @@ Rules:
               const uiPayload = (event as { uiPayload?: Record<string, unknown> }).uiPayload;
               const verifiedAction = (event as { verifiedAction?: VerifiedActionResult }).verifiedAction;
               toolResultInfo = { name: event.name, result: event.result, success: event.success, data: event.data, uiPayload, verifiedAction };
+              toolResultHistory.push(toolResultInfo);
               const readBackRequirement = getReadBackRequirementStatus(event.name, {
                 success: event.success,
                 data: event.data,
@@ -1747,10 +1752,15 @@ Rules:
           if (interviewState?.planSnapshot) addContractCriteria(["JD/resume context bound"]);
           addContractCriteria(["one question generated", "session state updated without losing context"]);
         }
-        const contractGateResult = activeTaskContract && toolResultInfo && toolResultInfo.success !== false
-          ? evaluateTaskContractCompletion(activeTaskContract, Array.from(completedContractCriteria))
+        const contractRunOutcome = activeTaskContract
+          ? resolveTaskContractRunOutcome(activeTaskContract, Array.from(completedContractCriteria), {
+              requiresClarification: routeDecision.requiresClarification,
+              hasAssistantResponse: Boolean(assistantText.trim()),
+              lastToolSuccess: toolResultInfo?.success,
+            })
           : null;
-        const contractGateFailed = Boolean(contractGateResult && !contractGateResult.canClaimSuccess);
+        const contractGateResult = contractRunOutcome?.gate || null;
+        const contractGateFailed = contractRunOutcome?.status === "failed";
         if (contractGateFailed && activeTaskContract && contractGateResult) {
           recordRunStep({
             phase: "verifying",
@@ -1765,12 +1775,17 @@ Rules:
             },
           });
         }
+        const fallbackAssistantContent = contractRunOutcome?.status === "waiting_user"
+          ? contractRunOutcome.safeMessage || toolResultInfo?.result || "已生成待确认内容，请确认下一步。"
+          : toolResultInfo && !toolResultInfo.success
+            ? toolResultInfo.result || "操作未能完成，请稍后重试。"
+            : "操作完成。";
         let finalAssistantContent = sanitizeUnsupportedResumeSaveClaim(
-          careerPositioningFallback || assistantText || "操作完成。",
+          careerPositioningFallback || assistantText || fallbackAssistantContent,
           resumeSectionSaveSucceeded && !contractGateFailed,
         );
-        if (contractGateFailed && contractGateResult?.safeMessage) {
-          finalAssistantContent = contractGateResult.safeMessage;
+        if (contractRunOutcome?.replaceAssistantMessage && contractRunOutcome.safeMessage) {
+          finalAssistantContent = contractRunOutcome.safeMessage;
         }
         const shouldAwaitCareerPositioningConfirmation = Boolean(
           activeTaskContract?.taskType === "career_positioning_guidance" &&
@@ -1779,14 +1794,12 @@ Rules:
           /(定位卡|定位假设|目标方向|阶段性结果)/.test(finalAssistantContent) &&
           /(确认|认可|保存|写入求职画像)/.test(finalAssistantContent),
         );
-        const finalRunStatus: AgentRunStatus =
-          routeDecision.requiresClarification
+        const finalRunStatus: AgentRunStatus = contractRunOutcome?.status
+          || (routeDecision.requiresClarification
             ? "waiting_user"
             : toolResultInfo && !toolResultInfo.success
-            ? "failed"
-            : contractGateFailed
               ? "failed"
-              : "succeeded";
+              : "succeeded");
         streamContentRef.current = finalAssistantContent;
         setStreamText(finalAssistantContent);
         setPhase(null);
@@ -1829,22 +1842,19 @@ Rules:
                   agent_id: agent.id !== "general" ? agent.id : undefined,
                 });
               }
-              let persistedToolMessage: AgentMessage | undefined;
-              if (toolResultInfo) {
-                persistedToolMessage = {
+              const persistedToolMessages: AgentMessage[] = toolResultHistory.map((result) => ({
                   role: "tool",
-                  content: toolResultInfo.result,
-                  toolName: toolResultInfo.name,
-                  toolResult: toolResultInfo.uiPayload
-                    ? { uiPayload: toolResultInfo.uiPayload, data: toolResultInfo.data, success: toolResultInfo.success }
-                    : toolResultInfo.name === "get_profile" && toolResultInfo.data
-                      ? { data: toolResultInfo.data, success: toolResultInfo.success }
-                      : { success: toolResultInfo.success, result: toolResultInfo.result, data: toolResultInfo.data },
+                  content: result.result,
+                  toolName: result.name,
+                  toolResult: result.uiPayload
+                    ? { uiPayload: result.uiPayload, data: result.data, success: result.success }
+                    : result.name === "get_profile" && result.data
+                      ? { data: result.data, success: result.success }
+                      : { success: result.success, result: result.result, data: result.data },
                   agent_id: agent.id !== "general" ? agent.id : undefined,
                   timestamp: new Date().toISOString(),
-                };
-                fullMessages.push(persistedToolMessage);
-              }
+                }));
+              fullMessages.push(...persistedToolMessages);
               const taggedAssistant = agent.id !== "general"
                 ? { ...finalAssistant, agent_id: agent.id }
                 : finalAssistant;
@@ -1857,10 +1867,11 @@ Rules:
                     taggedUserMsg,
                     taggedAssistant,
                   );
-              if (nextInterviewState && persistedToolMessage) {
-                nextInterviewState = updateInterviewStateWithToolResult(nextInterviewState, persistedToolMessage);
-              } else if (persistedToolMessage) {
-                nextInterviewState = updateInterviewStateWithToolResult(currentSession.interviewState, persistedToolMessage);
+              for (const persistedToolMessage of persistedToolMessages) {
+                nextInterviewState = updateInterviewStateWithToolResult(
+                  nextInterviewState || currentSession.interviewState,
+                  persistedToolMessage,
+                );
               }
               if (nextInterviewState && !hideUserMessage && shouldPersistInterviewRecap(taggedUserMsg.content)) {
                 nextInterviewState = persistInterviewRecap(nextInterviewState, taggedAssistant.content);
@@ -1917,23 +1928,23 @@ Rules:
                           ? routeDecision.taskType || "resume_query"
                           : taskType)
                   : taskType;
-              const completedImageBusinessTask =
+              const completedGuidedBusinessTask =
                 (taskType === "jd_evaluation" && toolResultInfo?.name === "evaluate_jd_full" && toolResultInfo.success === true && !contractGateFailed) ||
                 (taskType === "offer_evaluation" && toolResultInfo?.name === "evaluate_offer" && toolResultInfo.success === true && !contractGateFailed) ||
                 (taskType === "resume_edit" && (resumeEditAppliedSucceeded || resumeEditRolledBackSucceeded));
               if (
                 completedReferenceResumeSave ||
-                completedImageBusinessTask ||
+                completedGuidedBusinessTask ||
                 (cancelledActiveGuidedTask && !shouldKeepLockForSwitchConfirmation) ||
                 confirmedSwitchAway
               ) {
                 nextGuidedSession = finishGuidedSession(
                   activeGuidedSession || nextGuidedSession,
-                  completedReferenceResumeSave ? "completed" : "cancelled",
+                  completedReferenceResumeSave || completedGuidedBusinessTask ? "completed" : "cancelled",
                   completedReferenceResumeSave
                     ? "优秀简历已保存并完成读回校验"
-                    : completedImageBusinessTask
-                      ? "图片业务任务已完成"
+                    : completedGuidedBusinessTask
+                      ? `${taskLabelZh(taskType)}已完成并通过校验`
                       : "用户结束或切换了当前引导任务",
                 );
               } else if (shouldKeepImageClarification && imageClarificationTaskType && isGuidedTaskType(imageClarificationTaskType)) {
@@ -1949,7 +1960,7 @@ Rules:
                   imageRoute: imageDecisionForState?.route,
                   imageQuality: imageDecisionForState?.quality,
                   imageConfidence: imageDecisionForState?.confidence,
-                  sourceText: imageIntake?.extractedText?.slice(0, 4000),
+                  sourceText: imageIntake?.extractedText,
                   source: "image_clarification",
                 });
               } else if (shouldAwaitCareerPositioningConfirmation && careerPositioningArtifact) {
@@ -1974,11 +1985,18 @@ Rules:
                     ? "career_direction_discovery"
                     : taskType === "interview_coaching"
                       ? "one_question_loop"
-                      : "role_category_confirmation",
-              summary: taskLabelZh(taskType),
-              source: activeGuidedSessionForRun?.source || "agent_state",
-              sourceText: activeGuidedSessionForRun?.sourceText,
-            });
+                      : taskType === "resume_edit"
+                        ? contractRunOutcome?.status === "waiting_user" ? "awaiting_resume_draft_confirmation" : "resume_optimization"
+                        : "role_category_confirmation",
+                  expectedInput: taskType === "resume_edit" && contractRunOutcome?.status === "waiting_user"
+                    ? "选择一个优化方案并确认创建修改提案，或说明需要继续调整的地方"
+                    : undefined,
+                  summary: taskType === "resume_edit" && contractRunOutcome?.status === "waiting_user"
+                    ? "等待确认简历优化草稿"
+                    : taskLabelZh(taskType),
+                  source: activeGuidedSessionForRun?.source || "agent_state",
+                  sourceText: activeGuidedSessionForRun?.sourceText,
+                });
               } else if (activeGuidedSessionForRun && !routeDecision.requiresClarification) {
                 nextGuidedSession = activeGuidedSessionForRun;
               }

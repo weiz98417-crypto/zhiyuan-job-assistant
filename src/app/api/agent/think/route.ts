@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { ZHIPU_API_URL, ZHIPU_FALLBACK_MODEL } from "@/lib/zhipu";
 
-const MAX_MESSAGES = 10;
-const MAX_MSG_LEN = 2000;
-const MAX_TOTAL_CHARS = 15000;
+const MAX_MESSAGES = 30;
+const MAX_MSG_LEN = 50000;
+const MAX_TOTAL_CHARS = 160000;
 
 function sse(event: { type: string } & Record<string, unknown>): string {
   return `data: ${JSON.stringify(event)}\n\n`;
