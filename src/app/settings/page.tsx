@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { Download, Upload, Trash2, User, Target, Banknote, Loader2, Database, Sparkles, Wrench, Heart, AlertTriangle, FileText, BellRing, Plus, X, LogOut } from "lucide-react";
+import { Download, Upload, Trash2, User, Target, Banknote, Loader2, Database, Sparkles, Wrench, Heart, AlertTriangle, FileText, BellRing, Plus, X, LogOut, KeyRound } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { HandwritingTitle, WarmButton, PaperCard } from "@/components/design";
 import Skeleton from "@/components/design/Skeleton";
@@ -482,12 +482,17 @@ export default function SettingsPage() {
       <section className="space-y-4">
         <h2 className="flex items-center gap-2 text-sm font-medium text-[var(--color-muted)]"><User size={16} /> 账户</h2>
         <PaperCard>
-          <WarmButton variant="ghost" size="sm" onClick={async () => {
-            await fetch('/api/auth/logout', { method: 'POST' });
-            router.push('/login');
-          }}>
-            <LogOut size={16} className="mr-1.5" />退出登录
-          </WarmButton>
+          <div className="flex flex-wrap gap-3">
+            <WarmButton variant="soft" size="sm" onClick={() => router.push('/change-password')}>
+              <KeyRound size={16} className="mr-1.5" />修改密码
+            </WarmButton>
+            <WarmButton variant="ghost" size="sm" onClick={async () => {
+              await fetch('/api/auth/logout', { method: 'POST' });
+              router.push('/login');
+            }}>
+              <LogOut size={16} className="mr-1.5" />退出登录
+            </WarmButton>
+          </div>
         </PaperCard>
       </section>
 

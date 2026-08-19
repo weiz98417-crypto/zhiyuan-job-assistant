@@ -1,41 +1,56 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getCurrentUser, verifyTokenVersion } from '@/lib/auth';
 import { getDataRepositories } from '@/lib/data-repositories';
+import { requireAdmin } from '@/lib/security/auth-guards';
 
 export async function GET(request: NextRequest) {
   try {
-    const payload = await getCurrentUser();
-    if (payload.role !== 'admin') {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-    }
-    await verifyTokenVersion(payload);
+    const actor = await requireAdmin();
 
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status');
 
-    const users = await getDataRepositories().users.list(
+    const repos = getDataRepositories();
+    const users = await repos.users.list(
       status && ['pending', 'active', 'rejected'].includes(status) ? status : undefined,
+    );
+    const recoveryRequests = actor.role === 'superadmin'
+      ? await repos.passwordRecoveryRequests.listPending()
+      : [];
+    const recoveryByUserId = new Map(
+      recoveryRequests.map((recovery) => [recovery.userId, recovery]),
     );
 
     return NextResponse.json({
-      users: users.map((u) => ({
-        id: u.id,
-        username: u.username,
-        displayName: u.display_name,
-        email: u.email,
-        role: u.role,
-        status: u.status,
-        createdAt: u.created_at,
-        lastLoginAt: u.last_login_at,
-      })),
+      users: users.map((u) => {
+        const recovery = recoveryByUserId.get(u.id);
+        return {
+          id: u.id,
+          username: u.username,
+          displayName: u.display_name,
+          email: u.email,
+          role: u.role,
+          status: u.status,
+          createdAt: u.created_at,
+          lastLoginAt: u.last_login_at,
+          ...(recovery ? {
+            passwordRecovery: {
+              id: recovery.id,
+              requestedAt: recovery.requestedAt,
+            },
+          } : {}),
+        };
+      }),
     });
   } catch (err) {
-    if (
-      (err as Error).message === 'Not authenticated' ||
-      (err as Error).message === 'Invalid or expired token' ||
-      (err as Error).message === 'Token has been revoked'
-    ) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const authError = err as { status?: unknown; code?: unknown; message?: unknown };
+    if (authError.status === 401 || authError.status === 403) {
+      return NextResponse.json(
+        {
+          error: typeof authError.message === 'string' ? authError.message : 'Unauthorized',
+          code: typeof authError.code === 'string' ? authError.code : 'UNAUTHORIZED',
+        },
+        { status: authError.status },
+      );
     }
     console.error('[admin/users]', err);
     return NextResponse.json({ error: 'Internal error' }, { status: 500 });

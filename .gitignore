@@ -63,6 +63,7 @@ MinerU-master/outputs/
 MinerU-master/models/
 MinerU-master/.cache/
 mineru.json
+/deploy/auth-security/secrets/
 
 # Openspec archive
 openspec/changes/archive/
@@ -122,5 +123,7 @@ openspec/changes/*
 !openspec/changes/harden-profile-signal-quality-gate/**
 !openspec/changes/wire-agents-to-long-term-memory/
 !openspec/changes/wire-agents-to-long-term-memory/**
+!openspec/changes/harden-authentication-and-admin-security/
+!openspec/changes/harden-authentication-and-admin-security/**
 /auth
 /auth-wal

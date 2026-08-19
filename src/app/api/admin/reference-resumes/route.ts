@@ -1,21 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCurrentUser, verifyTokenVersion } from "@/lib/auth";
 import { getDataRepositories } from "@/lib/data-repositories";
+import { requireAdmin } from "@/lib/security/auth-guards";
 import {
   redactReferenceResumeText,
   reindexReferenceResumeRecord,
 } from "@/lib/reference-resume-vector";
 
-async function ensureAdmin() {
-  const payload = await getCurrentUser();
-  if (payload.role !== "admin") throw new Error("Forbidden");
-  await verifyTokenVersion(payload);
-  return payload;
-}
-
 export async function GET() {
   try {
-    await ensureAdmin();
+    await requireAdmin();
     const resumes = await getDataRepositories().referenceResumes.list();
     const pending = resumes.filter((resume) => resume.visibility === "team_pending" || resume.status === "pending");
     const team = resumes.filter((resume) => resume.visibility === "team" && resume.status !== "disabled");
@@ -55,7 +48,7 @@ export async function GET() {
 
 export async function PATCH(request: NextRequest) {
   try {
-    const admin = await ensureAdmin();
+    const admin = await requireAdmin();
     const body = await request.json().catch(() => ({}));
     const id = Number(body.id);
     const action = String(body.action || "");

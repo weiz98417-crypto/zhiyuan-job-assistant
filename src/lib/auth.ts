@@ -26,11 +26,18 @@ function getJwtSecret(): Uint8Array {
 const JWT_EXPIRES_IN = '24h';
 
 // ── Types ──
+export type UserRole = 'member' | 'admin' | 'superadmin';
+
 export interface JWTPayload {
   userId: string;
   username: string;
-  role: 'admin' | 'member';
+  role: UserRole;
   tokenVersion: number;
+  mustChangePassword: boolean;
+}
+
+export function isUserRole(value: unknown): value is UserRole {
+  return value === 'member' || value === 'admin' || value === 'superadmin';
 }
 
 // ── JWT ──
@@ -39,12 +46,15 @@ export async function signToken(user: {
   username: string;
   role: string;
   tokenVersion: number;
+  mustChangePassword?: boolean;
 }): Promise<string> {
+  if (!isUserRole(user.role)) throw new Error('Invalid user role');
   return new SignJWT({
     userId: user.id,
     username: user.username,
-    role: user.role as 'admin' | 'member',
+    role: user.role,
     tokenVersion: user.tokenVersion,
+    mustChangePassword: Boolean(user.mustChangePassword),
   })
     .setProtectedHeader({ alg: 'HS256' })
     .setExpirationTime(JWT_EXPIRES_IN)
@@ -55,7 +65,21 @@ export async function signToken(user: {
 export async function verifyToken(token: string): Promise<JWTPayload | null> {
   try {
     const { payload } = await jwtVerify(token, getJwtSecret());
-    return payload as unknown as JWTPayload;
+    if (
+      typeof payload.userId !== 'string' ||
+      typeof payload.username !== 'string' ||
+      !isUserRole(payload.role) ||
+      typeof payload.tokenVersion !== 'number'
+    ) {
+      return null;
+    }
+    return {
+      userId: payload.userId,
+      username: payload.username,
+      role: payload.role,
+      tokenVersion: payload.tokenVersion,
+      mustChangePassword: payload.mustChangePassword === true,
+    };
   } catch {
     return null;
   }

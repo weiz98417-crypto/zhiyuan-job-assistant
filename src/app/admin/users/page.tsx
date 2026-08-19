@@ -1,31 +1,66 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Check, Copy, KeyRound, ShieldCheck, Trash2, X } from 'lucide-react';
 import { useToast } from '@/lib/use-toast';
+
+type UserRole = 'member' | 'admin' | 'superadmin';
+type UserStatus = 'pending' | 'active' | 'rejected';
 
 interface UserItem {
   id: string;
   username: string;
   displayName: string;
   email: string;
-  role: 'admin' | 'member';
-  status: 'pending' | 'active' | 'rejected';
+  role: UserRole;
+  status: UserStatus;
   createdAt: string;
   lastLoginAt: string | null;
+  passwordRecovery?: {
+    id: string;
+    requestedAt: string;
+  };
 }
+
+interface CurrentUser {
+  id: string;
+  role: UserRole;
+}
+
+type SecureAction =
+  | { kind: 'reset'; target: UserItem }
+  | { kind: 'role'; target: UserItem; role: UserRole }
+  | { kind: 'status'; target: UserItem; status: UserStatus }
+  | { kind: 'delete'; target: UserItem };
+
+const statusLabel: Record<UserStatus, string> = {
+  pending: '待审批', active: '已通过', rejected: '已拒绝',
+};
+const roleLabel: Record<UserRole, string> = {
+  admin: '管理员', member: '成员', superadmin: '超级管理员',
+};
 
 export default function AdminUsersPage() {
   const router = useRouter();
+  const { showToast } = useToast();
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [users, setUsers] = useState<UserItem[]>([]);
-  const [filter, setFilter] = useState<string>('all');
+  const [filter, setFilter] = useState('all');
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<UserItem | null>(null);
-  const { showToast } = useToast();
+  const [secureAction, setSecureAction] = useState<SecureAction | null>(null);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [actionReason, setActionReason] = useState('');
+  const [temporaryPassword, setTemporaryPassword] = useState('');
 
   useEffect(() => {
-    loadUsers();
+    void loadUsers();
+    fetch('/api/users/me')
+      .then((response) => response.ok ? response.json() : null)
+      .then((data) => data && setCurrentUser({ id: data.id, role: data.role }))
+      .catch(() => {});
   }, []);
 
   async function handleUnauthorized() {
@@ -35,376 +70,356 @@ export default function AdminUsersPage() {
     router.refresh();
   }
 
-  async function readError(res: Response, fallback: string) {
-    const data = await res.json().catch(() => ({}));
-    return typeof data.error === 'string' ? data.error : fallback;
+  async function responseData(response: Response): Promise<Record<string, unknown>> {
+    return response.json().catch(() => ({}));
   }
 
   async function loadUsers(statusFilter?: string) {
     setLoading(true);
     try {
-      const url = statusFilter
-        ? `/api/admin/users?status=${statusFilter}`
-        : '/api/admin/users';
-      const res = await fetch(url);
-      if (res.status === 401) {
-        await handleUnauthorized();
-        return;
+      const query = statusFilter ? `?status=${encodeURIComponent(statusFilter)}` : '';
+      const response = await fetch(`/api/admin/users${query}`, { cache: 'no-store' });
+      if (response.status === 401) return void await handleUnauthorized();
+      const data = await responseData(response);
+      if (response.ok && Array.isArray(data.users)) setUsers(data.users as UserItem[]);
+      else showToast(typeof data.error === 'string' ? data.error : '加载用户失败', 'error');
+    } catch {
+      showToast('网络异常，未能刷新用户列表', 'error');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function refreshUsers() {
+    return loadUsers(filter === 'all' ? undefined : filter);
+  }
+
+  async function mutateUser(target: UserItem, init: RequestInit) {
+    setActionLoading(target.id);
+    try {
+      const response = await fetch(`/api/admin/users/${target.id}`, init);
+      if (response.status === 401) return void await handleUnauthorized();
+      const data = await responseData(response);
+      if (!response.ok) throw new Error(typeof data.error === 'string' ? data.error : '操作失败');
+      await refreshUsers();
+      return data;
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : '操作失败', 'error');
+      return null;
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  async function changeStatus(target: UserItem, status: UserStatus) {
+    if (target.role !== 'member') {
+      setSecureAction({ kind: 'status', target, status });
+      return;
+    }
+    const data = await mutateUser(target, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    });
+    if (data) showToast(status === 'active' ? '审批通过' : '账户状态已更新');
+  }
+
+  function openSecureAction(action: SecureAction) {
+    setCurrentPassword('');
+    setActionReason(
+      action.kind === 'reset' && action.target.passwordRecovery
+        ? '用户提交密码找回申请，已完成身份核验'
+        : '',
+    );
+    setSecureAction(action);
+  }
+
+  async function submitSecureAction() {
+    if (!secureAction || !currentPassword) {
+      showToast('请输入当前登录账号的密码', 'error');
+      return;
+    }
+    if (actionReason.trim().length < 3) {
+      showToast('请填写至少 3 个字的操作原因', 'error');
+      return;
+    }
+
+    const target = secureAction.target;
+    setActionLoading(target.id);
+    try {
+      const purpose = secureAction.kind === 'reset'
+        ? 'admin_password_reset'
+        : 'admin_user_management';
+      const stepUpResponse = await fetch('/api/auth/step-up', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: currentPassword, purpose }),
+      });
+      const stepUpData = await responseData(stepUpResponse);
+      if (!stepUpResponse.ok) {
+        throw new Error(typeof stepUpData.error === 'string' ? stepUpData.error : '二次认证失败');
       }
-      if (res.ok) {
-        const data = await res.json();
-        setUsers(data.users);
+
+      let url = `/api/admin/users/${target.id}`;
+      let init: RequestInit;
+      if (secureAction.kind === 'reset') {
+        url = `/api/admin/users/${target.id}/password-reset`;
+        init = {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            reason: actionReason.trim(),
+            ...(target.passwordRecovery
+              ? { recoveryRequestId: target.passwordRecovery.id }
+              : {}),
+          }),
+        };
+      } else if (secureAction.kind === 'role') {
+        init = {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role: secureAction.role, reason: actionReason.trim() }),
+        };
+      } else if (secureAction.kind === 'status') {
+        init = {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: secureAction.status, reason: actionReason.trim() }),
+        };
       } else {
-        showToast(await readError(res, '加载用户失败'), 'error');
+        init = { method: 'DELETE' };
       }
-    } catch { /* network error — retain old list */ }
-    setLoading(false);
-  }
 
-  function handleFilter(f: string) {
-    setFilter(f);
-    loadUsers(f === 'all' ? undefined : f);
-  }
+      const response = await fetch(url, init);
+      if (response.status === 401) return void await handleUnauthorized();
+      const data = await responseData(response);
+      if (!response.ok) throw new Error(typeof data.error === 'string' ? data.error : '操作失败');
 
-  async function approve(id: string) {
-    setActionLoading(id);
-    const res = await fetch(`/api/admin/users/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'active' }),
-    });
-    if (res.status === 401) {
-      await handleUnauthorized();
+      if (secureAction.kind === 'reset' && typeof data.temporaryPassword === 'string') {
+        setTemporaryPassword(data.temporaryPassword);
+      } else {
+        showToast('安全操作已完成');
+      }
+      setSecureAction(null);
+      setCurrentPassword('');
+      setActionReason('');
+      await refreshUsers();
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : '操作失败', 'error');
+    } finally {
       setActionLoading(null);
-      return;
     }
-    if (res.ok) showToast('审批通过');
-    else showToast(await readError(res, '操作失败'), 'error');
-    setActionLoading(null);
-    loadUsers(filter === 'all' ? undefined : filter);
   }
 
-  async function reject(id: string) {
-    setActionLoading(id);
-    const res = await fetch(`/api/admin/users/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'rejected' }),
-    });
-    if (res.status === 401) {
-      await handleUnauthorized();
-      setActionLoading(null);
-      return;
-    }
-    if (res.ok) showToast('已拒绝');
-    else showToast(await readError(res, '操作失败'), 'error');
-    setActionLoading(null);
-    loadUsers(filter === 'all' ? undefined : filter);
-  }
-
-  async function resetPassword(id: string) {
-    const pw = prompt('输入新密码（至少6位）：');
-    if (!pw) return;
-    if (pw.length < 6) { showToast('密码至少6位', 'error'); return; }
-    setActionLoading(id);
-    const res = await fetch(`/api/admin/users/${id}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ newPassword: pw }),
-    });
-    if (res.status === 401) {
-      await handleUnauthorized();
-      setActionLoading(null);
-      return;
-    }
-    if (res.ok) showToast('密码已重置');
-    else showToast(await readError(res, '操作失败'), 'error');
-    setActionLoading(null);
-  }
-
-  async function toggleRole(id: string, currentRole: string) {
-    const newRole = currentRole === 'admin' ? 'member' : 'admin';
-    setActionLoading(id);
-    const res = await fetch(`/api/admin/users/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ role: newRole }),
-    });
-    if (res.status === 401) {
-      await handleUnauthorized();
-      setActionLoading(null);
-      return;
-    }
-    if (res.ok) showToast(`已改为${newRole === 'admin' ? '管理员' : '成员'}`);
-    else showToast(await readError(res, '操作失败'), 'error');
-    setActionLoading(null);
-    loadUsers(filter === 'all' ? undefined : filter);
-  }
-
-  async function deleteUser(id: string) {
-    setActionLoading(id);
-    const res = await fetch(`/api/admin/users/${id}`, { method: 'DELETE' });
-    if (res.status === 401) {
-      await handleUnauthorized();
-      setActionLoading(null);
-      return;
-    } else if (res.ok) {
+  async function deleteMember(target: UserItem) {
+    const data = await mutateUser(target, { method: 'DELETE' });
+    if (data) {
       showToast('用户已删除');
       setDeleteTarget(null);
-      loadUsers(filter === 'all' ? undefined : filter);
-    } else {
-      showToast(await readError(res, '删除失败'), 'error');
     }
-    setActionLoading(null);
   }
 
-  const pendingCount = users.filter((u) => u.status === 'pending').length;
-  const activeCount = filter === 'all' ? users.filter((u) => u.status === 'active').length : 0;
-  const rejectedCount = filter === 'all' ? users.filter((u) => u.status === 'rejected').length : 0;
-
-  const statusLabel: Record<string, string> = { pending: '待审批', active: '已通过', rejected: '已拒绝' };
-  const roleLabel: Record<string, string> = { admin: '管理员', member: '成员' };
+  const pendingCount = users.filter((user) => user.status === 'pending').length;
+  const activeCount = users.filter((user) => user.status === 'active').length;
+  const rejectedCount = users.filter((user) => user.status === 'rejected').length;
 
   return (
-    <div>
-      {/* Delete confirmation modal */}
-      {deleteTarget && (
-        <div style={{
-          position: 'fixed', inset: 0, zIndex: 99,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          background: 'rgba(0,0,0,0.25)',
-        }} onClick={() => setDeleteTarget(null)}>
-          <div style={{
-            background: 'var(--color-surface)',
-            borderRadius: 'var(--radius-md)',
-            padding: 24, maxWidth: 380, width: '90%',
-            boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
-          }} onClick={(e) => e.stopPropagation()}>
-            <h3 style={{
-              fontFamily: 'var(--font-display)', fontSize: '1.1rem',
-              fontWeight: 700, color: 'var(--color-text)', marginBottom: 8,
-            }}>确认删除用户</h3>
-            <p style={{ fontSize: '0.82rem', color: 'var(--color-text-soft)', lineHeight: 1.6 }}>
-              将删除 <strong>{deleteTarget.displayName}</strong>（{deleteTarget.username}）及其所有数据，包括：
-            </p>
-            <ul style={{ fontSize: '0.78rem', color: 'var(--color-muted)', margin: '8px 0 16px', paddingLeft: 18 }}>
-              <li>个人画像 & 求职目标</li>
-              <li>评估记录 & JD 报告</li>
-              <li>对话历史</li>
-              <li>简历数据 & 偏好设置</li>
-            </ul>
-            <p style={{ fontSize: '0.78rem', color: '#A85454', marginBottom: 18 }}>
-              此操作不可撤销。
-            </p>
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-              <button
-                onClick={() => setDeleteTarget(null)}
-                disabled={actionLoading === deleteTarget.id}
-                style={{
-                  padding: '8px 18px', borderRadius: 'var(--radius-sm)',
-                  fontSize: '0.82rem', border: '1px solid var(--color-border)',
-                  background: 'var(--color-surface)', color: 'var(--color-text-soft)',
-                  cursor: 'pointer', fontFamily: 'inherit',
-                }}
-              >取消</button>
-              <button
-                onClick={() => deleteUser(deleteTarget.id)}
-                disabled={actionLoading === deleteTarget.id}
-                style={{
-                  padding: '8px 18px', borderRadius: 'var(--radius-sm)',
-                  fontSize: '0.82rem', fontWeight: 600,
-                  border: 'none', background: '#A85454', color: '#fff',
-                  cursor: actionLoading === deleteTarget.id ? 'not-allowed' : 'pointer',
-                  opacity: actionLoading === deleteTarget.id ? 0.6 : 1,
-                  fontFamily: 'inherit',
-                }}
-              >{actionLoading === deleteTarget.id ? '删除中...' : '确认删除'}</button>
-            </div>
+    <div className="space-y-5">
+      {secureAction && (
+        <Modal onClose={() => !actionLoading && setSecureAction(null)}>
+          <div className="flex items-center gap-2">
+            <ShieldCheck size={20} className="text-[var(--color-primary)]" />
+            <h3 className="text-base font-bold text-[var(--color-text)]">确认敏感操作</h3>
           </div>
-        </div>
+          <p className="mt-2 text-sm leading-6 text-[var(--color-text-soft)]">
+            {secureActionTitle(secureAction)}：{secureAction.target.displayName}（{secureAction.target.username}）
+          </p>
+          <label className="mt-4 block text-xs font-medium text-[var(--color-text-soft)]">
+            当前登录账号密码
+            <input
+              type="password"
+              autoComplete="current-password"
+              value={currentPassword}
+              onChange={(event) => setCurrentPassword(event.target.value)}
+              className="mt-1 w-full rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)]"
+            />
+          </label>
+          <label className="mt-3 block text-xs font-medium text-[var(--color-text-soft)]">
+            操作原因
+            <textarea
+              value={actionReason}
+              onChange={(event) => setActionReason(event.target.value)}
+              rows={3}
+              maxLength={500}
+              className="mt-1 w-full resize-none rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)]"
+            />
+          </label>
+          <div className="mt-5 flex justify-end gap-2">
+            <SecondaryButton onClick={() => setSecureAction(null)}>取消</SecondaryButton>
+            <PrimaryButton onClick={() => void submitSecureAction()} disabled={actionLoading === secureAction.target.id}>
+              <ShieldCheck size={15} />
+              {actionLoading === secureAction.target.id ? '处理中...' : '验证并执行'}
+            </PrimaryButton>
+          </div>
+        </Modal>
       )}
 
-      <div className="page-header">
-        <h2 style={{
-          fontFamily: 'var(--font-display)', fontSize: '1.5rem',
-          fontWeight: 700, color: 'var(--color-text)',
-        }}>用户管理</h2>
-        <p style={{
-          fontSize: '0.8rem', color: 'var(--color-muted)', marginTop: 4,
-        }}>管理所有注册用户，审批新注册申请</p>
-      </div>
+      {temporaryPassword && (
+        <Modal onClose={() => setTemporaryPassword('')}>
+          <div className="flex items-center gap-2">
+            <KeyRound size={20} className="text-[var(--color-primary)]" />
+            <h3 className="text-base font-bold text-[var(--color-text)]">一次性临时密码</h3>
+          </div>
+          <p className="mt-2 text-sm leading-6 text-[var(--color-text-soft)]">
+            该密码仅在此处显示一次。用户登录后必须立即设置自己的新密码。
+          </p>
+          <div className="mt-4 flex items-center gap-2 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
+            <code className="min-w-0 flex-1 break-all text-sm text-[var(--color-text)]">{temporaryPassword}</code>
+            <button
+              type="button"
+              title="复制临时密码"
+              onClick={() => void navigator.clipboard.writeText(temporaryPassword).then(() => showToast('已复制'))}
+              className="shrink-0 p-2 text-[var(--color-primary)]"
+            >
+              <Copy size={17} />
+            </button>
+          </div>
+          <div className="mt-5 flex justify-end">
+            <PrimaryButton onClick={() => setTemporaryPassword('')}>我已妥善记录</PrimaryButton>
+          </div>
+        </Modal>
+      )}
 
-      {/* Filter tabs */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+      {deleteTarget && (
+        <Modal onClose={() => !actionLoading && setDeleteTarget(null)}>
+          <div className="flex items-center gap-2">
+            <Trash2 size={20} className="text-red-600" />
+            <h3 className="text-base font-bold text-[var(--color-text)]">确认删除用户</h3>
+          </div>
+          <p className="mt-2 text-sm leading-6 text-[var(--color-text-soft)]">
+            将永久删除 {deleteTarget.displayName}（{deleteTarget.username}）及其画像、简历、评估和对话数据。此操作不可撤销。
+          </p>
+          <div className="mt-5 flex justify-end gap-2">
+            <SecondaryButton onClick={() => setDeleteTarget(null)}>取消</SecondaryButton>
+            <button
+              type="button"
+              onClick={() => void deleteMember(deleteTarget)}
+              disabled={actionLoading === deleteTarget.id}
+              className="inline-flex items-center gap-2 rounded-[var(--radius-sm)] bg-red-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              <Trash2 size={15} />
+              {actionLoading === deleteTarget.id ? '删除中...' : '确认删除'}
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      <header className="page-header">
+        <h2 className="font-[family-name:var(--font-display)] text-2xl font-bold text-[var(--color-text)]">用户管理</h2>
+        <p className="mt-1 text-sm text-[var(--color-muted)]">审批账户、管理角色并执行可审计的安全操作。</p>
+      </header>
+
+      <div className="flex flex-wrap gap-2" role="tablist" aria-label="账户状态筛选">
         {[
           ['all', `全部 · ${users.length}`],
-          ['pending', `待审批${pendingCount > 0 ? ' ' + pendingCount : ''}`],
+          ['pending', `待审批 · ${pendingCount}`],
           ['active', `已通过 · ${activeCount}`],
           ['rejected', `已拒绝 · ${rejectedCount}`],
         ].map(([key, label]) => (
           <button
             key={key}
-            onClick={() => handleFilter(key)}
-            style={{
-              padding: '6px 14px', borderRadius: 'var(--radius-sm)',
-              fontSize: '0.78rem', fontWeight: filter === key ? 600 : 500,
-              border: filter === key
-                ? '1px solid var(--color-primary)'
-                : '1px solid var(--color-border)',
-              background: filter === key
-                ? 'var(--color-primary-soft)'
-                : 'var(--color-surface)',
-              color: filter === key
-                ? 'var(--color-primary-hover)'
-                : 'var(--color-text-soft)',
-              cursor: 'pointer', fontFamily: 'inherit',
-              display: 'flex', alignItems: 'center', gap: 4,
-            }}
-          >
-            {label}
-            {key === 'pending' && pendingCount > 0 && (
-              <span style={{
-                minWidth: 18, height: 18, borderRadius: 999,
-                background: '#A85454', color: '#fff',
-                fontSize: '0.65rem', fontWeight: 700,
-                display: 'inline-flex', alignItems: 'center',
-                justifyContent: 'center', padding: '0 4px',
-              }}>{pendingCount}</span>
-            )}
-          </button>
+            type="button"
+            onClick={() => { setFilter(key); void loadUsers(key === 'all' ? undefined : key); }}
+            className={`rounded-[var(--radius-sm)] border px-3 py-1.5 text-xs font-medium ${
+              filter === key
+                ? 'border-[var(--color-primary)] bg-[var(--color-primary-soft)] text-[var(--color-primary)]'
+                : 'border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-soft)]'
+            }`}
+          >{label}</button>
         ))}
       </div>
 
-      {/* Table */}
-      <div style={{
-        background: 'var(--color-surface)',
-        border: '1px solid var(--color-border)',
-        borderRadius: 'var(--radius-md)',
-        overflow: 'hidden',
-      }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
+      <div className="overflow-x-auto border-y border-[var(--color-border)] bg-[var(--color-surface)]">
+        <table className="w-full min-w-[980px] border-collapse text-sm">
           <thead>
-            <tr>
-              {['用户名', '显示名', '邮箱', '角色', '状态', '注册时间', '最近登录', '操作'].map((h) => (
-                <th key={h} style={{
-                  textAlign: 'left', padding: '10px 14px',
-                  background: 'var(--color-bg)', fontWeight: 600,
-                  fontSize: '0.72rem', color: 'var(--color-muted)',
-                  textTransform: 'uppercase', letterSpacing: '0.05em',
-                  borderBottom: '2px solid var(--color-divider)',
-                }}>{h}</th>
+            <tr className="bg-[var(--color-bg)] text-left text-xs text-[var(--color-muted)]">
+              {['用户', '邮箱', '角色', '状态', '注册时间', '最近登录', '操作'].map((heading) => (
+                <th key={heading} className="border-b border-[var(--color-divider)] px-4 py-3 font-semibold">{heading}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={8} style={{
-                textAlign: 'center', padding: '2rem',
-                color: 'var(--color-muted)',
-              }}>加载中...</td></tr>
+              <tr><td colSpan={7} className="px-4 py-12 text-center text-[var(--color-muted)]">加载中...</td></tr>
             ) : users.length === 0 ? (
-              <tr><td colSpan={8} style={{
-                textAlign: 'center', padding: '2rem',
-                color: 'var(--color-muted)',
-              }}>暂无数据</td></tr>
-            ) : (
-              users.map((u) => (
-                <tr key={u.id} style={{ borderBottom: '1px solid var(--color-divider)' }}>
-                  <td style={{ padding: '10px 14px', fontWeight: 500, color: 'var(--color-text)' }}>
-                    {u.username}
+              <tr><td colSpan={7} className="px-4 py-12 text-center text-[var(--color-muted)]">暂无数据</td></tr>
+            ) : users.map((user) => {
+              const isSelf = user.id === currentUser?.id;
+              const privileged = user.role !== 'member';
+              return (
+                <tr key={user.id} className="border-b border-[var(--color-divider)] last:border-0">
+                  <td className="px-4 py-3">
+                    <div className="font-medium text-[var(--color-text)]">{user.displayName}</div>
+                    <div className="text-xs text-[var(--color-muted)]">{user.username}{isSelf ? ' · 当前账号' : ''}</div>
+                    {user.passwordRecovery && (
+                      <div className="mt-1 text-xs font-medium text-amber-700">
+                        密码找回申请 · {formatDate(user.passwordRecovery.requestedAt)}
+                      </div>
+                    )}
                   </td>
-                  <td style={{ padding: '10px 14px', color: 'var(--color-text-soft)' }}>
-                    {u.displayName}
-                  </td>
-                  <td style={{ padding: '10px 14px', fontSize: '0.75rem', color: 'var(--color-text-soft)' }}>
-                    {u.email || '—'}
-                  </td>
-                  <td style={{ padding: '10px 14px' }}>
-                    <span style={{
-                      display: 'inline-block', padding: '2px 8px',
-                      borderRadius: 999, fontSize: '0.68rem', fontWeight: 600,
-                      background: u.role === 'admin' ? 'var(--color-primary-muted)' : 'var(--color-bg)',
-                      color: u.role === 'admin' ? 'var(--color-primary-hover)' : 'var(--color-text-soft)',
-                    }}>{roleLabel[u.role]}</span>
-                  </td>
-                  <td style={{ padding: '10px 14px' }}>
-                    <span style={{
-                      display: 'inline-block', padding: '2px 8px',
-                      borderRadius: 999, fontSize: '0.68rem', fontWeight: 600,
-                      background: { pending: '#FFFBF0', active: '#EFF8F2', rejected: 'var(--color-bg)' }[u.status],
-                      color: { pending: '#B8863A', active: '#4A8C6A', rejected: 'var(--color-muted)' }[u.status],
-                    }}>{statusLabel[u.status]}</span>
-                  </td>
-                  <td style={{ padding: '10px 14px', fontSize: '0.72rem', color: 'var(--color-text-soft)' }}>
-                    {u.createdAt}
-                  </td>
-                  <td style={{ padding: '10px 14px', fontSize: '0.72rem', color: 'var(--color-text-soft)' }}>
-                    {u.lastLoginAt || '从未登录'}
-                  </td>
-                  <td style={{ padding: '10px 14px' }}>
-                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                      {u.status === 'pending' ? (
+                  <td className="px-4 py-3 text-[var(--color-text-soft)]">{user.email || '—'}</td>
+                  <td className="px-4 py-3"><Badge>{roleLabel[user.role]}</Badge></td>
+                  <td className="px-4 py-3"><Badge>{statusLabel[user.status]}</Badge></td>
+                  <td className="px-4 py-3 text-xs text-[var(--color-text-soft)]">{formatDate(user.createdAt)}</td>
+                  <td className="px-4 py-3 text-xs text-[var(--color-text-soft)]">{user.lastLoginAt ? formatDate(user.lastLoginAt) : '从未登录'}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap gap-1.5">
+                      {user.status !== 'active' && !isSelf && (
+                        <ActionButton onClick={() => void changeStatus(user, 'active')} loading={actionLoading === user.id}>
+                          <Check size={13} />通过
+                        </ActionButton>
+                      )}
+                      {user.status !== 'rejected' && !isSelf && (
+                        <ActionButton onClick={() => void changeStatus(user, 'rejected')} loading={actionLoading === user.id} danger>
+                          <X size={13} />拒绝
+                        </ActionButton>
+                      )}
+                      {user.status === 'active' && !isSelf && (
+                        <ActionButton onClick={() => openSecureAction({ kind: 'reset', target: user })} loading={actionLoading === user.id}>
+                          <KeyRound size={13} />{user.passwordRecovery ? '处理找回' : '重置密码'}
+                        </ActionButton>
+                      )}
+                      {currentUser?.role === 'superadmin' && !isSelf && user.role === 'member' && (
                         <>
-                          <ActionBtn
-                            label="通过"
-                            onClick={() => approve(u.id)}
-                            loading={actionLoading === u.id}
-                            color="#4A8C6A"
-                            borderColor="#B7E4C7"
-                          />
-                          <ActionBtn
-                            label="拒绝"
-                            onClick={() => reject(u.id)}
-                            loading={actionLoading === u.id}
-                            color="#A85454"
-                            borderColor="#F5C6C6"
-                          />
+                          <ActionButton onClick={() => openSecureAction({ kind: 'role', target: user, role: 'admin' })} loading={actionLoading === user.id}>升为管理员</ActionButton>
+                          <ActionButton onClick={() => openSecureAction({ kind: 'role', target: user, role: 'superadmin' })} loading={actionLoading === user.id}>升为超级管理员</ActionButton>
                         </>
-                      ) : u.status === 'active' ? (
+                      )}
+                      {currentUser?.role === 'superadmin' && !isSelf && user.role === 'admin' && (
                         <>
-                          <ActionBtn
-                            label="重置密码"
-                            onClick={() => resetPassword(u.id)}
-                            loading={actionLoading === u.id}
-                          />
-                          <ActionBtn
-                            label={u.role === 'admin' ? '降为成员' : '升为管理'}
-                            onClick={() => toggleRole(u.id, u.role)}
-                            loading={actionLoading === u.id}
-                          />
-                          {u.role !== 'admin' && (
-                            <ActionBtn
-                              label="删除"
-                              onClick={() => setDeleteTarget(u)}
-                              loading={actionLoading === u.id}
-                              color="#A85454"
-                              borderColor="#F5C6C6"
-                            />
-                          )}
+                          <ActionButton onClick={() => openSecureAction({ kind: 'role', target: user, role: 'member' })} loading={actionLoading === user.id}>降为成员</ActionButton>
+                          <ActionButton onClick={() => openSecureAction({ kind: 'role', target: user, role: 'superadmin' })} loading={actionLoading === user.id}>升为超级管理员</ActionButton>
                         </>
-                      ) : (
-                        <>
-                          <ActionBtn
-                            label="重新通过"
-                            onClick={() => approve(u.id)}
-                            loading={actionLoading === u.id}
-                            color="#4A8C6A"
-                            borderColor="#B7E4C7"
-                          />
-                          <ActionBtn
-                            label="删除"
-                            onClick={() => setDeleteTarget(u)}
-                            loading={actionLoading === u.id}
-                            color="#A85454"
-                            borderColor="#F5C6C6"
-                          />
-                        </>
+                      )}
+                      {currentUser?.role === 'superadmin' && !isSelf && user.role === 'superadmin' && (
+                        <ActionButton onClick={() => openSecureAction({ kind: 'role', target: user, role: 'admin' })} loading={actionLoading === user.id}>降为管理员</ActionButton>
+                      )}
+                      {!isSelf && (
+                        <ActionButton
+                          onClick={() => privileged
+                            ? openSecureAction({ kind: 'delete', target: user })
+                            : setDeleteTarget(user)}
+                          loading={actionLoading === user.id}
+                          danger
+                        >
+                          <Trash2 size={13} />删除
+                        </ActionButton>
                       )}
                     </div>
                   </td>
                 </tr>
-              ))
-            )}
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -412,35 +427,64 @@ export default function AdminUsersPage() {
   );
 }
 
-/* ── Mini component: action button with loading spinner ── */
-function ActionBtn({
-  label, onClick, loading, color, borderColor,
-}: {
-  label: string;
+function secureActionTitle(action: SecureAction) {
+  if (action.kind === 'reset') {
+    return action.target.passwordRecovery
+      ? '核验找回申请并生成一次性临时密码'
+      : '生成临时密码并强制用户下次登录改密';
+  }
+  if (action.kind === 'delete') return '永久删除特权账户及其数据';
+  if (action.kind === 'status') return `将账户状态改为“${statusLabel[action.status]}”`;
+  return `将角色改为“${roleLabel[action.role]}”`;
+}
+
+function formatDate(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN');
+}
+
+function Modal({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
+      <div className="w-full max-w-md rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-xl" onClick={(event) => event.stopPropagation()}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function Badge({ children }: { children: React.ReactNode }) {
+  return <span className="inline-flex rounded-full bg-[var(--color-bg)] px-2 py-1 text-xs font-medium text-[var(--color-text-soft)]">{children}</span>;
+}
+
+function ActionButton({ children, onClick, loading, danger = false }: {
+  children: React.ReactNode;
   onClick: () => void;
-  loading?: boolean;
-  color?: string;
-  borderColor?: string;
+  loading: boolean;
+  danger?: boolean;
 }) {
-  const c = color || 'var(--color-text-soft)';
-  const bc = borderColor || 'var(--color-border)';
   return (
     <button
+      type="button"
       onClick={onClick}
       disabled={loading}
-      style={{
-        padding: '3px 8px', borderRadius: 'var(--radius-sm)',
-        fontSize: '0.7rem', fontWeight: 500,
-        border: `1px solid ${bc}`,
-        background: 'var(--color-surface)',
-        color: c,
-        cursor: loading ? 'not-allowed' : 'pointer',
-        opacity: loading ? 0.5 : 1,
-        fontFamily: 'inherit',
-        whiteSpace: 'nowrap',
-      }}
-    >
-      {loading ? '...' : label}
-    </button>
+      className={`inline-flex items-center gap-1 rounded-[var(--radius-sm)] border px-2 py-1 text-xs font-medium disabled:opacity-50 ${
+        danger
+          ? 'border-red-200 text-red-700'
+          : 'border-[var(--color-border)] text-[var(--color-text-soft)]'
+      }`}
+    >{loading ? '...' : children}</button>
   );
+}
+
+function PrimaryButton({ children, onClick, disabled = false }: {
+  children: React.ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return <button type="button" onClick={onClick} disabled={disabled} className="inline-flex items-center gap-2 rounded-[var(--radius-sm)] bg-[var(--color-primary)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{children}</button>;
+}
+
+function SecondaryButton({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
+  return <button type="button" onClick={onClick} className="rounded-[var(--radius-sm)] border border-[var(--color-border)] px-4 py-2 text-sm text-[var(--color-text-soft)]">{children}</button>;
 }

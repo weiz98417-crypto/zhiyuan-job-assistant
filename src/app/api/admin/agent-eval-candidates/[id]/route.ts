@@ -1,23 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCurrentUser, verifyTokenVersion } from "@/lib/auth";
+import { requireAdmin } from "@/lib/security/auth-guards";
 import { isAgentRunLedgerAvailable } from "@/lib/agent/run-ledger";
 import {
   transitionAgentEvalCandidate,
   type AgentEvalCandidateStatus,
 } from "@/lib/agent/run-review";
 
-async function ensureAdmin() {
-  const payload = await getCurrentUser();
-  if (payload.role !== "admin") throw new Error("Forbidden");
-  await verifyTokenVersion(payload);
-}
-
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    await ensureAdmin();
+    await requireAdmin();
     if (!isAgentRunLedgerAvailable()) {
       return NextResponse.json({ success: false, error: "Agent review ledger is disabled" }, { status: 503 });
     }

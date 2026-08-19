@@ -21,6 +21,7 @@ import {
   TrendingUp,
   Database,
   ClipboardCheck,
+  ScrollText,
 } from "lucide-react";
 import NavItem from "./NavItem";
 import { useTheme } from "@/components/providers/ThemeProvider";
@@ -31,7 +32,7 @@ interface UserInfo {
   id: string;
   username: string;
   displayName: string;
-  role: 'admin' | 'member';
+  role: 'admin' | 'member' | 'superadmin';
   status: string;
 }
 
@@ -144,13 +145,13 @@ export default function AppShell({ children }: { children: ReactNode }) {
                     {user.displayName}
                   </div>
                   <div className="text-[10px] text-[var(--color-muted)]">
-                    {user.role === 'admin' ? '管理员' : '成员'}
+                    {user.role === 'superadmin' ? '超级管理员' : user.role === 'admin' ? '管理员' : '成员'}
                   </div>
                 </div>
               </div>
 
               {/* Admin links */}
-              {user.role === 'admin' && (
+              {(user.role === 'admin' || user.role === 'superadmin') && (
                 <div className="mt-1 space-y-0.5">
                   <a href="/admin/agent-runs" className="flex items-center gap-2 px-2 py-1.5 rounded-[var(--radius-sm)] text-xs font-medium text-[var(--color-primary)] hover:bg-[var(--color-primary-muted)] transition-colors duration-[var(--duration-fast)] no-underline">
                     <Bot size={14} />
@@ -172,6 +173,12 @@ export default function AppShell({ children }: { children: ReactNode }) {
                     <Database size={14} />
                     记忆治理
                   </a>
+                  {user.role === 'superadmin' && (
+                    <a href="/admin/security-events" className="flex items-center gap-2 px-2 py-1.5 rounded-[var(--radius-sm)] text-xs font-medium text-[var(--color-primary)] hover:bg-[var(--color-primary-muted)] transition-colors duration-[var(--duration-fast)] no-underline">
+                      <ScrollText size={14} />
+                      安全审计
+                    </a>
+                  )}
                 </div>
               )}
 

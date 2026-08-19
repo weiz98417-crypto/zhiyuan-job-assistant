@@ -1025,8 +1025,9 @@ export interface ApiResponse<T> {
 export interface JWTPayload {
   userId: string;
   username: string;
-  role: 'admin' | 'member';
+  role: 'admin' | 'member' | 'superadmin';
   tokenVersion: number;
+  mustChangePassword: boolean;
 }
 
 export interface UserRecord {
@@ -1035,7 +1036,7 @@ export interface UserRecord {
   password_hash: string;
   display_name: string;
   email: string;
-  role: 'admin' | 'member';
+  role: 'admin' | 'member' | 'superadmin';
   status: 'pending' | 'active' | 'rejected';
   token_version: number;
   created_at: string;
@@ -1049,7 +1050,7 @@ export interface UserPublic {
   username: string;
   displayName: string;
   email: string;
-  role: 'admin' | 'member';
+  role: 'admin' | 'member' | 'superadmin';
   status: 'pending' | 'active' | 'rejected';
   createdAt: string;
   lastLoginAt: string | null;

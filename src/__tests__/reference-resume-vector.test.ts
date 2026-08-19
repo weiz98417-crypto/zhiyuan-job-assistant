@@ -146,11 +146,11 @@ describe("reference resume schema boundaries", () => {
     const adminRoute = fs.readFileSync(path.join(process.cwd(), "src/app/api/admin/reference-resumes/route.ts"), "utf8");
     const memoryRoute = fs.readFileSync(path.join(process.cwd(), "src/app/api/admin/memory/route.ts"), "utf8");
     const memoryPage = fs.readFileSync(path.join(process.cwd(), "src/app/admin/memory/page.tsx"), "utf8");
-    expect(adminRoute).toContain('payload.role !== "admin"');
+    expect(adminRoute).toContain('import { requireAdmin } from "@/lib/security/auth-guards"');
     expect(adminRoute).toContain('"approve"');
     expect(adminRoute).toContain('"reject"');
     expect(adminRoute).toContain('"disable"');
-    expect(memoryRoute).toContain('payload.role !== "admin"');
+    expect(memoryRoute).toContain('import { requireAdmin } from "@/lib/security/auth-guards"');
     expect(memoryRoute).toContain("approve_reference");
     expect(memoryRoute).toContain("reject_reference");
     expect(memoryRoute).toContain("disable_reference");
