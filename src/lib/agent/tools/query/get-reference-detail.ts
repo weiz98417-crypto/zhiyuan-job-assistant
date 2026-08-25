@@ -1,32 +1,48 @@
-import type { ToolDefinition, ToolResult } from "../types";
+import { getAgentReadService } from "@/lib/agent/runtime/agent-read-service";
+import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
 import { isGarbledText } from "../../loop/text-quality";
 
-async function handler(params: Record<string, unknown>): Promise<ToolResult> {
+async function handler(
+  params: Record<string, unknown>,
+  context?: ToolExecutionContext,
+): Promise<ToolResult> {
   const id = params.id || params.referenceId;
   try {
-    const res = await fetch(`/api/cv/references/${id}`);
-    const json = await res.json();
-    if (!json.success) {
+    let data: Record<string, unknown> | null = null;
+    let readError = "查询失败";
+    if (context) {
+      const referenceId = Number(id);
+      data = Number.isFinite(referenceId) && referenceId > 0
+        ? await getAgentReadService().getReferenceResume(context.principal, referenceId) as unknown as Record<string, unknown> | null
+        : null;
+      if (!data) readError = "参考简历不存在";
+    } else {
+      const response = await fetch(`/api/cv/references/${id}`);
+      const json = await response.json();
+      if (json.success) data = json.data as Record<string, unknown>;
+      else readError = json.error || "查询失败";
+    }
+    if (!data) {
       // Build helpful error with available references
-      let errMsg = json.error || "查询失败";
+      let errMsg = readError;
       try {
-        const listRes = await fetch("/api/cv/references");
-        const listJson = await listRes.json();
-        if (listJson.success && Array.isArray(listJson.data)) {
-          const refs = listJson.data as Array<{ id: number; name: string }>;
-          if (refs.length) {
-            errMsg += `。可用参考简历: ${refs.map(r => `#${r.id} ${r.name}`).join(", ")}。使用 get_reference_detail(id=N) 查询`;
-          }
+        const refs = context
+          ? await getAgentReadService().listReferenceResumes(context.principal)
+          : await fetch("/api/cv/references").then((response) => response.json()).then((json) => json.success && Array.isArray(json.data) ? json.data : []);
+        if (refs.length) {
+          errMsg += `。可用参考简历: ${refs.map((reference: { id: number; name: string }) => `#${reference.id} ${reference.name}`).join(", ")}。使用 get_reference_detail(id=N) 查询`;
         }
       } catch { /* non-blocking */ }
       return { success: false, data: null, error: errMsg, errorCategory: "permanent" };
     }
-    const d = json.data as Record<string, unknown>;
+    const d = data;
 
     // Parse sections
     let sections: Record<string, string> = {};
     try {
-      const raw = typeof d.sections_json === "string"
+      const raw = Array.isArray(d.sections)
+        ? d.sections
+        : typeof d.sections_json === "string"
         ? JSON.parse(d.sections_json)
         : (d.sections_json as unknown);
       if (Array.isArray(raw)) {

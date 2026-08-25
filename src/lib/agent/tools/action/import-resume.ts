@@ -1,4 +1,8 @@
-import type { ToolDefinition } from "@/lib/agent/tools/types";
+import type { ToolDefinition, ToolExecutionContext } from "@/lib/agent/tools/types";
+import {
+  importResumeTextForAgent,
+  ResumeImportInputError,
+} from "@/lib/server/resume-import-service";
 
 export const importResume: ToolDefinition = {
   name: "import_resume",
@@ -26,7 +30,7 @@ export const importResume: ToolDefinition = {
       description: "Agent Chat 图片简历确认链携带的原始 data URI；普通调用不要填写",
     },
   },
-  async handler(params: Record<string, unknown>) {
+  async handler(params: Record<string, unknown>, context?: ToolExecutionContext) {
     const text = String(params.text || "");
     const source = String(params.source || "paste");
     const originalImages = Array.isArray(params.originalImages)
@@ -34,6 +38,41 @@ export const importResume: ToolDefinition = {
       : [];
     if (!text.trim()) {
       return { success: false, data: null, error: "请提供简历文本内容" };
+    }
+    if (context) {
+      try {
+        const data = await importResumeTextForAgent(context.principal, {
+          text,
+          source,
+          originalImages,
+        }, { signal: context.signal });
+        const persisted = data.persisted;
+        return {
+          success: true,
+          data,
+          llmSummary: persisted.status === "pending"
+            ? `简历已完整保存为待确认导入版本 ${persisted.versionId}，没有覆盖当前版本。请让用户查看完整简历卡片并到简历页确认。`
+            : `简历已保存并读回验证，当前版本为 ${persisted.versionId}。`,
+          uiPayload: {
+            type: "resume_document",
+            versionId: persisted.versionId,
+            status: persisted.status,
+            integrity: data.integrity,
+            readBackVerified: persisted.readBackVerified,
+          },
+          rawData: data,
+          errorCategory: "ok",
+        };
+      } catch (error) {
+        const needsInput = error instanceof ResumeImportInputError;
+        return {
+          success: false,
+          data: null,
+          error: error instanceof Error ? error.message : "导入请求失败",
+          errorCategory: needsInput ? "need_user_input" : "transient",
+          recoverable: !needsInput,
+        };
+      }
     }
     try {
       const res = await fetch("/api/cv/import", {

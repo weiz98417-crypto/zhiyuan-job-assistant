@@ -1,6 +1,14 @@
+import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
+import { getCurrentUser } from "@/lib/auth";
 import { orchestrateGen } from "@/lib/agent/orchestrator";
+import { agentLoopServer } from "@/lib/agent/loop/server-runner";
 import type { SSEEvent } from "@/lib/agent/loop/types";
+import { getAgentById } from "@/lib/agent/registry";
+import registry from "@/lib/agent/tools";
+import type { AgentTaskContract } from "@/lib/agent/task-contract";
+import type { InterviewRebindAction } from "@/lib/agent/interview-rebind-policy";
+import type { InterviewSessionState } from "@/types";
 
 export const maxDuration = 180; // 3 minutes for complex agents
 
@@ -12,7 +20,7 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const { messages } = body as {
-      messages?: { role: string; content: string }[];
+      messages?: { role: string; content: string; images?: string[] }[];
     };
 
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
@@ -20,6 +28,20 @@ export async function POST(request: Request) {
     }
 
     const userMessage = messages[messages.length - 1]?.content || "";
+    const directInput = body as {
+      systemPrompt?: string;
+      agentId?: string;
+      runId?: string;
+      interviewState?: InterviewSessionState;
+      interviewRebindAction?: InterviewRebindAction;
+      taskContract?: AgentTaskContract | null;
+    };
+    const directAgent = directInput.agentId ? getAgentById(directInput.agentId) : undefined;
+    const directMode = Boolean(directInput.systemPrompt && directAgent);
+    const currentUser = directMode ? await currentUserOrNull() : null;
+    if (directMode && !currentUser) {
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+    }
 
     const encoder = new TextEncoder();
     let aborted = false;
@@ -29,12 +51,31 @@ export async function POST(request: Request) {
         request.signal.addEventListener("abort", () => { aborted = true; });
 
         try {
-          // orchestrateGen handles: intent classification → agent switch → delegate to sub-agent loop
-          const runner = orchestrateGen(userMessage, {
-            sessionId: null,
-            messages,
-            signal: request.signal,
-          });
+          const toolWhitelist = directAgent?.toolNames.length
+            ? directAgent.toolNames
+            : registry.toOpenAITools().map((tool) => tool.function.name);
+          const runner = directMode
+            ? agentLoopServer({
+                agent: directAgent,
+                systemPrompt: directInput.systemPrompt!,
+                messages,
+                tools: registry.toOpenAITools(toolWhitelist),
+                signal: request.signal,
+                interviewState: directInput.interviewState,
+                interviewRebindAction: directInput.interviewRebindAction,
+                taskContract: directInput.taskContract,
+                executionContext: {
+                  principal: { userId: currentUser!.userId },
+                  runId: directInput.runId || `legacy-${randomUUID()}`,
+                  allowlist: toolWhitelist,
+                  signal: request.signal,
+                },
+              })
+            : orchestrateGen(userMessage, {
+                sessionId: null,
+                messages,
+                signal: request.signal,
+              });
           for await (const event of runner) {
             if (aborted) break;
             controller.enqueue(encoder.encode(sse(event as SSEEvent)));
@@ -64,5 +105,13 @@ export async function POST(request: Request) {
   } catch (err) {
     const message = err instanceof Error ? err.message : "未知错误";
     return NextResponse.json({ success: false, error: `Agent 运行失败: ${message}` }, { status: 500 });
+  }
+}
+
+async function currentUserOrNull() {
+  try {
+    return await getCurrentUser();
+  } catch {
+    return null;
   }
 }

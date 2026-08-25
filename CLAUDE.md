@@ -288,3 +288,17 @@ Key routing rules:
 - Ship/deploy/PR → invoke /ship or /land-and-deploy
 - Save progress → invoke /context-save
 - Resume context → invoke /context-restore
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked in this repository's GitHub Issues; external PRs are not a triage request surface. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the canonical `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix` labels. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This is a single-context repository with root `CONTEXT.md` and system-wide ADRs in `docs/adr/`. See `docs/agents/domain.md`.

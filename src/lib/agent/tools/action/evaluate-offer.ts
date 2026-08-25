@@ -1,6 +1,11 @@
 import type { OfferEvaluationReport, OfferSnapshot } from "@/types";
 import { evaluateOfferSnapshot, normalizeOfferSnapshot } from "@/lib/offer-evaluation";
-import type { ToolDefinition, ToolResult } from "../types";
+import {
+  evaluateOfferForAgent,
+  OfferAgentInputError,
+  type OfferAgentEvaluationInput,
+} from "@/lib/server/offer-agent-service";
+import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
 import type { ImageIntakeResult } from "@/lib/agent/image-intake";
 import { fetchAgentMemoryContext, indexAgentMemorySource, writeCandidateAgentMemory } from "../memory-helpers";
 
@@ -277,7 +282,7 @@ async function verifyOfferReportReadBack(reportId: number | null): Promise<{ ok:
   }
 }
 
-async function handler(params: Record<string, unknown>): Promise<ToolResult> {
+async function legacyHandler(params: Record<string, unknown>): Promise<ToolResult> {
   const offerId = numberParam(params.offerId, 0);
   let offerText = String(params.offerText || "");
   const images = Array.isArray(params.images)
@@ -447,6 +452,52 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
     },
     rawData: { report: withId, memoryContext },
   };
+}
+
+async function handler(
+  params: Record<string, unknown>,
+  context?: ToolExecutionContext,
+): Promise<ToolResult> {
+  if (!context) return legacyHandler(params);
+  try {
+    const report = await evaluateOfferForAgent(
+      context.principal,
+      params as OfferAgentEvaluationInput,
+      { signal: context.signal },
+    );
+    return {
+      success: true,
+      data: report,
+      errorCategory: "ok",
+      llmSummary: `Offer 评估完成：${report.company} - ${report.role}，${report.summary}。报告编号：${report.id}。缺失信息：${report.missingInfo.slice(0, 3).join("、") || "暂无"}。`,
+      uiPayload: {
+        type: "offer_evaluation",
+        reportId: report.id,
+        offerId: report.offerId,
+        company: report.company,
+        role: report.role,
+        overallScore: report.overallScore,
+        verdict: report.verdict,
+        readBackVerified: report.readBackVerified,
+        redFlags: report.redFlags.slice(0, 5),
+        missingInfo: report.missingInfo.slice(0, 5),
+        memoryContext: report.memoryContext || null,
+      },
+      rawData: report,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Offer 评估失败";
+    const needsInput = error instanceof OfferAgentInputError;
+    return {
+      success: false,
+      data: null,
+      error: message,
+      errorCategory: needsInput ? "need_user_input" : "transient",
+      recoverable: !needsInput,
+      retryHint: needsInput ? undefined : "Runtime 将先对账已保存 Offer 与报告，再决定是否重试",
+      rawData: needsInput ? undefined : { dispatchState: "unknown" },
+    };
+  }
 }
 
 function formatResult(result: ToolResult): string {

@@ -1,7 +1,25 @@
-import type { ToolDefinition, ToolResult } from "../types";
+import { getAgentReadService } from "@/lib/agent/runtime/agent-read-service";
+import type { ApplicationListFilters } from "@/lib/data-repositories";
+import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
 
-async function handler(): Promise<ToolResult> {
+async function handler(
+  params: Record<string, unknown> = {},
+  context?: ToolExecutionContext,
+): Promise<ToolResult> {
   try {
+    if (context) {
+      const filters: ApplicationListFilters = {
+        status: typeof params.status === "string" ? params.status : undefined,
+        date_from: typeof params.date_from === "string" ? params.date_from : undefined,
+      };
+      const pipeline = await getAgentReadService().getPipelineStatus(context.principal, filters);
+      return {
+        success: true,
+        data: pipeline,
+        rawData: pipeline,
+        errorCategory: "ok",
+      };
+    }
     const res = await fetch("/api/data/applications");
     const json = await res.json();
     if (!json.success) return { success: false, data: null, error: json.error };
@@ -12,7 +30,12 @@ async function handler(): Promise<ToolResult> {
     const avgScore = total > 0 ? Math.round(apps.reduce((s, a) => s + a.score, 0) / total * 10) / 10 : 0;
     return { success: true, data: { total, byStatus, avgScore } };
   } catch (err) {
-    return { success: false, data: null, error: `${err instanceof Error ? err.message : "unknown"}` };
+    return {
+      success: false,
+      data: null,
+      error: `${err instanceof Error ? err.message : "unknown"}`,
+      errorCategory: "transient",
+    };
   }
 }
 function formatResult(result: ToolResult): string {

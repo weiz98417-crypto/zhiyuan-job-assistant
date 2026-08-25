@@ -1,9 +1,16 @@
-import type { ToolDefinition, ToolResult } from "./types";
+import type { ToolDefinition, ToolExecutionContext, ToolResult } from "./types";
 import type { InterviewQuestion, AnswerScore, CoachMode } from "@/types";
 import { COACH_MODES } from "@/types";
 import { fetchAgentMemoryContext, writeCandidateAgentMemory } from "./memory-helpers";
+import {
+  generateInterviewQuestionsForAgent,
+  scoreInterviewAnswerForAgent,
+} from "@/lib/server/interview-analysis-service";
 
-async function generateHandler(params: Record<string, unknown>): Promise<ToolResult> {
+async function generateHandler(
+  params: Record<string, unknown>,
+  executionContext?: ToolExecutionContext,
+): Promise<ToolResult> {
   const jdText = String(params.jdText || "");
   const cvText = String(params.cvText || "");
   const company = String(params.company || "");
@@ -11,6 +18,38 @@ async function generateHandler(params: Record<string, unknown>): Promise<ToolRes
   const mode = (params.mode || "behavioral") as CoachMode;
   const requestedCount = Number(params.count) || 1;
   const count = Math.max(1, Math.min(requestedCount, 1));
+
+  if (executionContext) {
+    try {
+      const result = await generateInterviewQuestionsForAgent(executionContext.principal, {
+        jdText,
+        cvText,
+        company,
+        role,
+        mode,
+        count,
+      }, { signal: executionContext.signal });
+      return {
+        success: true,
+        data: {
+          ...result,
+          count: result.questions.length,
+          planSnapshotSeed: { jdText, cvText, company, role, mode },
+        },
+        llmSummary: `已生成 ${result.questions.length} 道面试题，面向 ${company || "目标公司"} ${role || "目标岗位"}。真实模拟模式每轮只展示 1 道题，并等待用户回答。`,
+        uiPayload: { type: "interview_questions", ...result },
+        rawData: result,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        data: null,
+        error: `出题失败: ${error instanceof Error ? error.message : "未知错误"}`,
+        errorCategory: "transient",
+        recoverable: true,
+      };
+    }
+  }
 
   try {
     const memoryContext = await fetchAgentMemoryContext({
@@ -88,7 +127,10 @@ function generateFormat(result: ToolResult): string {
   return `${d.company || ""} ${d.role || ""}（${d.count || items.length} 道）\n\n${items.join("\n\n")}`;
 }
 
-async function scoreHandler(params: Record<string, unknown>): Promise<ToolResult> {
+async function scoreHandler(
+  params: Record<string, unknown>,
+  executionContext?: ToolExecutionContext,
+): Promise<ToolResult> {
   const question = String(params.question || "");
   const answer = String(params.answer || "");
   const mode = (params.mode || "behavioral") as CoachMode;
@@ -96,6 +138,41 @@ async function scoreHandler(params: Record<string, unknown>): Promise<ToolResult
 
   if (!question || !answer) {
     return { success: false, data: null, error: "请提供题目 question 和回答 answer" };
+  }
+
+  if (executionContext) {
+    try {
+      const result = await scoreInterviewAnswerForAgent(executionContext.principal, {
+        question,
+        answer,
+        mode,
+        context,
+      }, { signal: executionContext.signal });
+      return {
+        success: true,
+        data: {
+          ...result.score,
+          memoryContext: result.memoryContext,
+          memoryWriteback: result.memoryWriteback,
+          readBackVerified: result.memoryWriteback.readBackVerified,
+        },
+        uiPayload: {
+          type: "interview_score",
+          ...result.score,
+          memoryWriteback: result.memoryWriteback,
+          readBackVerified: result.memoryWriteback.readBackVerified,
+        },
+        rawData: result,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        data: null,
+        error: `评分失败: ${error instanceof Error ? error.message : "未知错误"}`,
+        errorCategory: "transient",
+        recoverable: true,
+      };
+    }
   }
 
   try {

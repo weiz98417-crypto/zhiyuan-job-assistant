@@ -4,7 +4,7 @@ import { mcpManager } from "@/lib/agent/mcp/tools";
 export async function POST(request: Request) {
   try {
     // Ensure MCP is initialized
-    await mcpManager.init();
+    await mcpManager.init(request.signal);
 
     const body = await request.json();
     const { server, tool, params } = body as {
@@ -20,7 +20,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const result = await mcpManager.callTool(server, tool, params || {});
+    const result = await mcpManager.callTool(server, tool, params || {}, request.signal);
 
     return NextResponse.json(result);
   } catch (error: unknown) {

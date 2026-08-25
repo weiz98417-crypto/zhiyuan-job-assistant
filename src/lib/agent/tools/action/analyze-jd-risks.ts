@@ -1,4 +1,5 @@
-import type { ToolDefinition, ToolResult } from "../types";
+import { scanJDRisks } from "@/lib/server/jd-risk-service";
+import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
 
 interface RiskSignal {
   signal: string;
@@ -8,10 +9,17 @@ interface RiskSignal {
 
 const SEVERITY_WEIGHT: Record<string, number> = { critical: 10, high: 4, medium: 2, low: 1 };
 
-async function handler(params: Record<string, unknown>): Promise<ToolResult> {
+async function handler(
+  params: Record<string, unknown>,
+  context?: ToolExecutionContext,
+): Promise<ToolResult> {
   const jdText = params.jd_text as string;
   if (!jdText || jdText.trim().length < 20) {
     return { success: false, data: null, error: "JD 文本不足 20 字符（无法分析风险）", recoverable: false, retryHint: "请提供完整的 JD 文本或 URL，至少 20 字符以上" };
+  }
+
+  if (context) {
+    return { success: true, data: scanJDRisks(jdText) };
   }
 
   const res = await fetch("/api/agent/scan-risks", {

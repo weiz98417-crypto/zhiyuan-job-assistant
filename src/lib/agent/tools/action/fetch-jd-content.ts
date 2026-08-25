@@ -1,9 +1,27 @@
-import type { ToolDefinition, ToolResult } from "../types";
+import { fetchJDTextFromUrl } from "@/lib/server/durable-jd-evaluation";
+import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
 
-async function handler(params: Record<string, unknown>): Promise<ToolResult> {
+async function handler(
+  params: Record<string, unknown>,
+  context?: ToolExecutionContext,
+): Promise<ToolResult> {
   const { url } = params;
   if (typeof url !== "string") {
     return { success: false, data: null, error: "url is required" };
+  }
+  if (context) {
+    try {
+      const text = await fetchJDTextFromUrl(url, context.signal);
+      return { success: true, data: { text }, errorCategory: "ok" };
+    } catch (error) {
+      return {
+        success: false,
+        data: null,
+        error: error instanceof Error ? error.message : "获取 JD 失败",
+        errorCategory: "transient",
+        recoverable: true,
+      };
+    }
   }
   const timeout = Number(params.timeout) || 30000;
   const retry = Number(params.retry) || 0;

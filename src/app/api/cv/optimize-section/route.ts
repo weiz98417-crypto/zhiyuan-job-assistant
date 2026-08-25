@@ -1,217 +1,85 @@
 import { NextResponse } from "next/server";
-import { buildJudgePrompt, getTemperatureByEffort } from "@/lib/judge-engine";
-import type { Operation } from "@/types";
 import { getCurrentUser } from "@/lib/auth";
-import { getDataRepositories } from "@/lib/data-repositories";
-import { retrieveReferenceResumeSnippets } from "@/lib/reference-resume-vector";
-import { retrieveExcellentResumePatternMemory } from "@/lib/excellent-resume-patterns";
+import {
+  optimizeResumeSectionForAgent,
+  ResumeOptimizationInputError,
+} from "@/lib/server/resume-optimization-service";
+import type { ResumeSectionId } from "@/lib/agent/resume-save-guard";
 
-const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
-const MODEL = "deepseek-v4-pro";
-const FAST_MODEL = "deepseek-v4-flash";
+const SECTION_IDS = new Set<ResumeSectionId>(["summary", "experience", "projects", "education", "skills"]);
 
 export async function POST(request: Request) {
   try {
     const user = await getCurrentUser();
-    const body = await request.json();
-    const {
-      sectionId,
-      sectionContent,
-      fullCV,
-      intent,
-      operation = "full",
-      effort = 3,
-      enablePlaceholders = true,
-      // enableQuestions governs frontend flow (call /ask vs direct), not used here
-      roleDirection = "auto",
-      questionAnswers,
-      targetJD,
-      userProfile,
-      referenceIds,
-      fast,
-    } = body as {
-      sectionId: string;
-      sectionContent: string;
-      fullCV: Record<string, string>;
+    const body = await request.json() as {
+      sectionId?: string;
       intent?: string;
-      operation: Operation;
-      effort: number;
-      enablePlaceholders: boolean;
-      enableQuestions: boolean;
-      roleDirection: string;
-      questionAnswers?: { question: string; answer: string }[];
-      targetJD?: { role: string; company: string; keywords: string[] };
-      userProfile?: { headline: string; superpowers: string[]; targetRoles: { name: string; fit: string }[] };
-      referenceIds?: number[];
+      operation?: string;
+      effort?: number;
+      enablePlaceholders?: boolean;
       fast?: boolean;
+      roleDirection?: string;
+      questionAnswers?: Array<{ question?: string; answer?: string }>;
+      targetJD?: { role?: string; company?: string; keywords?: string[]; text?: string };
+      userProfile?: Record<string, unknown>;
+      referenceIds?: number[];
+      jdText?: string;
+      requestKey?: string;
     };
-
-    if (!sectionContent || sectionContent.trim().length < 20) {
-      return NextResponse.json(
-        { success: false, error: "段落内容太少（至少20字），无法进行有意义的优化" },
-        { status: 400 }
-      );
+    const sectionId = String(body.sectionId || "") as ResumeSectionId;
+    if (!SECTION_IDS.has(sectionId)) {
+      return NextResponse.json({ success: false, error: "无效的简历板块" }, { status: 400 });
     }
-
-    const apiKey = process.env.DEEPSEEK_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json(
-        { success: false, error: "未配置 DEEPSEEK_API_KEY 环境变量" },
-        { status: 500 }
-      );
-    }
-
-    const effectiveRoleCategory = roleDirection && roleDirection !== "auto" && roleDirection !== "generic"
-      ? roleDirection
-      : targetJD?.role || userProfile?.targetRoles?.[0]?.name || "";
-
-    const repos = getDataRepositories();
-    const [explicitReferenceResumes, recentPreferences] = await Promise.all([
-      referenceIds?.length
-        ? Promise.all(
-            referenceIds.slice(0, 3).map((id) => repos.referenceResumes.get(id, user.userId)),
-          ).then((items) => items.filter(Boolean) as { name: string; sections_json: string }[])
-        : Promise.resolve([]),
-      repos.preferences.listRecent(user.userId, 10).catch(() => []),
-    ]);
-
-    const semanticReferenceSnippets = await retrieveReferenceResumeSnippets({
-      userId: user.userId,
-      query: [
-        intent || "",
-        roleDirection || "",
-        targetJD?.role || "",
-        targetJD?.company || "",
-        targetJD?.keywords?.join(" ") || "",
-        sectionContent,
-      ].filter(Boolean).join("\n"),
-      roleCategory: effectiveRoleCategory,
-      sectionType: sectionId,
-      limit: 4,
-    }).catch(() => []);
-    const patternMemory = await retrieveExcellentResumePatternMemory({
-      userId: user.userId,
-      roleCategory: effectiveRoleCategory,
-      limit: 6,
-    }).catch(() => []);
-
-    const model = fast && !semanticReferenceSnippets.length && !patternMemory.length ? FAST_MODEL : MODEL;
-
-    // Build prompt using judge-engine
-    const systemPrompt = buildJudgePrompt({
-      sectionId,
-      sectionContent,
-      fullCV,
-      operation,
-      effort,
-      enablePlaceholders,
-      targetJD,
-      referenceIds,
-      referenceResumes: explicitReferenceResumes,
-      intent,
-      userProfile,
-      roleDirection,
-      questionAnswers,
-      referenceSnippets: semanticReferenceSnippets,
-      patternMemory,
-      preferences: recentPreferences,
-    });
-
-    const temperature = getTemperatureByEffort(effort);
-
-    const response = await fetch(DEEPSEEK_API_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+    const instruction = [
+      body.intent,
+      body.roleDirection && body.roleDirection !== "auto" ? `岗位方向：${body.roleDirection}` : "",
+      body.questionAnswers?.map((item) => `${item.question || "补充问题"}：${item.answer || ""}`).join("\n"),
+      body.userProfile ? `用户画像：${JSON.stringify(body.userProfile).slice(0, 1200)}` : "",
+    ].filter(Boolean).join("\n\n");
+    const jdText = body.jdText || [
+      body.targetJD?.role ? `岗位：${body.targetJD.role}` : "",
+      body.targetJD?.company ? `公司：${body.targetJD.company}` : "",
+      body.targetJD?.keywords?.length ? `关键词：${body.targetJD.keywords.join("、")}` : "",
+      body.targetJD?.text || "",
+    ].filter(Boolean).join("\n");
+    const result = await optimizeResumeSectionForAgent(
+      { userId: user.userId },
+      {
+        sectionId,
+        instruction,
+        operation: body.operation,
+        effort: body.effort,
+        enablePlaceholders: body.enablePlaceholders,
+        fast: body.fast,
+        roleDirection: body.roleDirection,
+        questionAnswers: body.questionAnswers?.map((item) => ({
+          question: item.question || "补充问题",
+          answer: item.answer || "",
+        })),
+        targetJD: body.targetJD,
+        userProfile: body.userProfile as Parameters<typeof optimizeResumeSectionForAgent>[1]["userProfile"],
+        referenceIds: body.referenceIds,
+        jdText,
+        requestKey: body.requestKey || request.headers.get("Idempotency-Key") || undefined,
       },
-      signal: AbortSignal.timeout(180_000),
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: `请优化以下简历段落（${sectionId}），生成改写方案，以 JSON 格式输出。` },
-        ],
-        temperature,
-        max_tokens: 8000,
-        response_format: { type: "json_object" },
-      }),
-    });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      console.error("DeepSeek optimize API error:", response.status, errText);
-      return NextResponse.json(
-        { success: false, error: `AI 优化请求失败: ${response.status}` },
-        { status: 502 }
-      );
-    }
-
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content;
-
-    if (!content) {
-      return NextResponse.json(
-        { success: false, error: "AI 返回为空" },
-        { status: 500 }
-      );
-    }
-
-    let parsed;
-    try {
-      parsed = JSON.parse(content);
-    } catch {
-      const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-      if (jsonMatch) {
-        parsed = JSON.parse(jsonMatch[1]);
-      } else {
-        return NextResponse.json(
-          { success: false, error: "AI 返回格式解析失败" },
-          { status: 500 }
-        );
-      }
-    }
-
-    const variants = (parsed.variants || []).map((v: Record<string, unknown>) => ({
-      ...v,
-      placeholderCount: typeof v.content === "string"
-        ? (v.content.match(/\[XX(?::[^\]]*)?\]/g) || []).length
-        : 0,
-    }));
-
-    if (variants.length === 0) {
-      return NextResponse.json(
-        { success: false, error: "AI 未生成有效方案" },
-        { status: 500 }
-      );
-    }
-
+      { signal: request.signal },
+    );
     return NextResponse.json({
       success: true,
       data: {
-        variants,
-        referenceMemory: {
-          snippetIds: semanticReferenceSnippets.map((snippet) => snippet.id),
-          referenceResumeIds: [...new Set(semanticReferenceSnippets.map((snippet) => snippet.referenceResumeId))],
-          patternMemoryIds: patternMemory.map((pattern) => pattern.id),
-          ranking: semanticReferenceSnippets.map((snippet) => ({
-            snippetId: snippet.id,
-            referenceResumeId: snippet.referenceResumeId,
-            score: snippet.score,
-            ranking: snippet.ranking,
-          })),
-        },
+        ...result,
+        variants: result.variants.map((variant) => ({
+          ...variant,
+          placeholderCount: (variant.content.match(/\[XX(?::[^\]]*)?\]/g) || []).length,
+        })),
       },
     });
-  } catch (error: unknown) {
+  } catch (error) {
     const message = error instanceof Error ? error.message : "未知错误";
-    if (error instanceof Error && error.message === "Not authenticated") {
+    if (/auth|登录|token/i.test(message)) {
       return NextResponse.json({ success: false, error: "未登录" }, { status: 401 });
     }
-    console.error("Optimize section API error:", message);
-    return NextResponse.json(
-      { success: false, error: `优化失败: ${message}` },
-      { status: 500 }
-    );
+    const status = error instanceof ResumeOptimizationInputError ? 400 : 500;
+    return NextResponse.json({ success: false, error: `优化失败: ${message}` }, { status });
   }
 }

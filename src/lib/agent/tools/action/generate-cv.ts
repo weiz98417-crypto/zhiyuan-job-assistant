@@ -1,7 +1,42 @@
-import type { ToolDefinition, ToolResult } from "../types";
+import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
+import {
+  generateResumeDraftForAgent,
+  ResumeGenerationInputError,
+} from "@/lib/server/resume-generation-service";
 
-async function handler(params: Record<string, unknown>): Promise<ToolResult> {
+async function handler(
+  params: Record<string, unknown>,
+  context?: ToolExecutionContext,
+): Promise<ToolResult> {
   const { jdText, language, targetRole } = params;
+  if (context) {
+    try {
+      const data = await generateResumeDraftForAgent(context.principal, {
+        jdText: typeof jdText === "string" ? jdText : "",
+        language: typeof language === "string" ? language : undefined,
+        targetRole: typeof targetRole === "string" ? targetRole : undefined,
+        referenceIds: Array.isArray(params.referenceIds) ? params.referenceIds.map(Number) : undefined,
+        requestKey: context.requestId || `${context.runId}:generate_cv`,
+      }, { signal: context.signal });
+      return {
+        success: true,
+        data,
+        errorCategory: "ok",
+        llmSummary: `已生成并持久化 ${data.drafts.length} 个 JD 定制简历草稿，artifactId=${data.artifactId}。请选择草稿后创建简历修改提案。`,
+        uiPayload: { type: "resume_draft", ...data },
+        rawData: data,
+      };
+    } catch (error) {
+      const needsInput = error instanceof ResumeGenerationInputError;
+      return {
+        success: false,
+        data: null,
+        error: error instanceof Error ? error.message : "CV 生成失败",
+        errorCategory: needsInput ? "need_user_input" : "transient",
+        recoverable: !needsInput,
+      };
+    }
+  }
   try {
     const res = await fetch("/api/cv", {
       method: "POST",

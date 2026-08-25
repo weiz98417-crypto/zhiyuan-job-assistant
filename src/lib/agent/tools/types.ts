@@ -1,11 +1,48 @@
 import type { AgentToolParam } from "@/types";
 import type { VerifiedActionResult } from "@/lib/agent/verified-action";
 import type { ToolGovernance } from "@/lib/agent/tool-governance";
+import type { ExecutionPrincipal } from "@/lib/agent/runtime/durable-agent-run";
 
 export interface ToolParameter {
   type: "string" | "number" | "boolean" | "object" | "array";
   required: boolean;
   description: string;
+}
+
+export type ToolRisk = "low" | "medium" | "high" | "critical";
+export type ToolDeadlineClass = "foreground_read" | "verified_write" | "background";
+export type ToolCancellation = "cooperative" | "after_dispatch_reconcile" | "not_cancellable";
+export type ToolIdempotency = "none" | "request_key" | "natural_key";
+export type ToolReconciliation = "none" | "read_back" | "status_poll" | "manual";
+export type ToolVerification = "none" | "read_back" | "verified_action";
+export type ToolWorkerExecution = "server" | "background" | "legacy";
+
+export interface ToolCapability {
+  risk: ToolRisk;
+  deadlineClass: ToolDeadlineClass;
+  deadlineMs: number;
+  cancellation: ToolCancellation;
+  idempotency: ToolIdempotency;
+  reconciliation: ToolReconciliation;
+  verification: ToolVerification;
+  backgroundCapable: boolean;
+  workerExecution: ToolWorkerExecution;
+}
+
+export interface ToolExecutionContext {
+  principal: ExecutionPrincipal;
+  runId: string;
+  allowlist: readonly string[];
+  signal?: AbortSignal;
+  requestId?: string;
+  workerId?: string;
+  fencingToken?: number;
+}
+
+export interface ToolReconciliationOutcome {
+  state: "verified" | "not_executed" | "unknown";
+  summary: string;
+  result?: ToolResult;
 }
 
 /**
@@ -68,7 +105,12 @@ export interface ToolDefinition<TParams = Record<string, unknown>> {
   /** Keywords that hint this tool should be selected. Shown in LLM tool list as bias hints. */
   matchHints?: string[];
   parameters: Record<string, ToolParameter>;
-  handler: (params: TParams) => Promise<ToolResult>;
+  handler: (params: TParams, context?: ToolExecutionContext) => Promise<ToolResult>;
+  reconcile?: (
+    params: TParams,
+    context: ToolExecutionContext,
+    previousResult: ToolResult | null,
+  ) => Promise<ToolReconciliationOutcome>;
   /**
    * @deprecated Use llmSummary field in ToolResult instead.
    * Falls back to this during migration when llmSummary is absent.
@@ -83,6 +125,8 @@ export interface ToolDefinition<TParams = Record<string, unknown>> {
   toolCtxCap?: number;
   /** Centralized runtime governance metadata. Legacy tools may receive this from the governance registry. */
   governance?: ToolGovernance;
+  /** Durable execution contract. Missing metadata keeps the tool out of model exposure. */
+  capability?: ToolCapability;
 }
 
 // Re-export AgentToolParam for convenience (maps to ToolParameter)

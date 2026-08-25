@@ -9,17 +9,17 @@ function source(file: string): string {
 describe("CV optimization database boundary", () => {
   it("keeps judge-engine pure so PostgreSQL runtime does not touch SQLite getDb", () => {
     const judgeEngine = source("src/lib/judge-engine.ts");
-    const optimizeRoute = source("src/app/api/cv/optimize-section/route.ts");
+    const optimizeService = source("src/lib/server/resume-optimization-service.ts");
 
     expect(judgeEngine).not.toContain("@/lib/server-db");
     expect(judgeEngine).not.toContain("getReferenceResume(");
     expect(judgeEngine).not.toContain("getRecentPreferences(");
 
-    expect(optimizeRoute).toContain("getDataRepositories");
-    expect(optimizeRoute).toContain("referenceResumes.get");
-    expect(optimizeRoute).toContain("preferences.listRecent");
-    expect(optimizeRoute).toContain("referenceResumes: explicitReferenceResumes");
-    expect(optimizeRoute).toContain("preferences: recentPreferences");
+    expect(optimizeService).toContain("getDataRepositories");
+    expect(optimizeService).toContain("referenceResumes.get");
+    expect(optimizeService).toContain("preferences.listRecent");
+    expect(optimizeService).toContain("referenceResumes: explicitReferences");
+    expect(optimizeService).toContain("preferences");
   });
 
   it("exposes recent optimization preferences through both repository drivers", () => {

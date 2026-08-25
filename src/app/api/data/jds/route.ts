@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { type JDRow } from "@/lib/server-db";
 import { getCurrentUser } from "@/lib/auth";
 import { getDataRepositories } from "@/lib/data-repositories";
+import { getAgentReadService } from "@/lib/agent/runtime/agent-read-service";
 
 function toClientJD(jd: JDRow) {
   return {
@@ -39,14 +40,14 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const user = await getCurrentUser();
-    const repos = getDataRepositories();
+    const service = getAgentReadService();
     const id = Number(searchParams.get("id"));
     if (Number.isFinite(id) && id > 0) {
-      const jd = await repos.jds.get(id, user.userId);
+      const jd = await service.getJd({ userId: user.userId }, id);
       if (!jd) return NextResponse.json({ success: false, error: "JD not found" }, { status: 404 });
-      return NextResponse.json({ success: true, data: toClientJD(jd) });
+      return NextResponse.json({ success: true, data: jd });
     }
-    const data = (await repos.jds.list(user.userId)).map(toClientJD);
+    const data = await service.listJds({ userId: user.userId });
     return NextResponse.json({ success: true, data });
   } catch (err: unknown) {
     return NextResponse.json({ success: false, error: `读取失败: ${err instanceof Error ? err.message : "unknown"}` }, { status: 500 });

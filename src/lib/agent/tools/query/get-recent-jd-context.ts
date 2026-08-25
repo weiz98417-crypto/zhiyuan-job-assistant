@@ -1,4 +1,6 @@
-import type { ToolDefinition, ToolResult } from "../types";
+import { assembleAgentMemoryContext } from "@/lib/agent/memory-context";
+import { getAgentReadService } from "@/lib/agent/runtime/agent-read-service";
+import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
 import { fetchAgentMemoryContext } from "../memory-helpers";
 
 interface RecentJD {
@@ -14,19 +16,32 @@ function apiPath(path: string): string {
   return typeof window === "undefined" ? `http://localhost:3000${path}` : path;
 }
 
-async function handler(params: Record<string, unknown>): Promise<ToolResult> {
+async function handler(
+  params: Record<string, unknown>,
+  context?: ToolExecutionContext,
+): Promise<ToolResult> {
   const reportNum = Number(params.reportNum || params.reportId);
   const jdId = Number(params.jdId || params.jd_id);
 
   try {
-    const path = Number.isFinite(jdId) && jdId > 0 ? `/api/data/jds?id=${jdId}` : "/api/data/jds";
-    const res = await fetch(apiPath(path));
-    const json = await res.json();
-    if (!json.success) {
-      return { success: false, data: null, error: json.error || "读取 JD 失败", errorCategory: "transient" };
+    let jds: RecentJD[];
+    if (context) {
+      const service = getAgentReadService();
+      if (Number.isFinite(jdId) && jdId > 0) {
+        const jd = await service.getJd(context.principal, jdId);
+        jds = jd ? [jd] : [];
+      } else {
+        jds = await service.listJds(context.principal);
+      }
+    } else {
+      const path = Number.isFinite(jdId) && jdId > 0 ? `/api/data/jds?id=${jdId}` : "/api/data/jds";
+      const response = await fetch(apiPath(path));
+      const json = await response.json();
+      if (!json.success) {
+        return { success: false, data: null, error: json.error || "读取 JD 失败", errorCategory: "transient" };
+      }
+      jds = Array.isArray(json.data) ? json.data as RecentJD[] : [json.data as RecentJD];
     }
-
-    const jds = Array.isArray(json.data) ? json.data as RecentJD[] : [json.data as RecentJD];
     const jd = Number.isFinite(jdId) && jdId > 0
       ? jds[0]
       : Number.isFinite(reportNum) && reportNum > 0
@@ -45,13 +60,16 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
 
     const body = jd.body.trim();
     const short = body.length > 2500 ? `${body.slice(0, 2500)}\n\n[JD 已截断，仅供上下文使用]` : body;
-    const memoryContext = await fetchAgentMemoryContext({
+    const memoryInput = {
       task: "jd_evaluation",
       agentId: "evaluate",
       query: `${jd.company || ""} ${jd.role || ""}\n${body.slice(0, 900)}`,
       budgetChars: 900,
       semanticTopK: 4,
-    });
+    };
+    const memoryContext = context
+      ? await assembleAgentMemoryContext({ ...memoryInput, userId: context.principal.userId })
+      : await fetchAgentMemoryContext(memoryInput);
     const memorySummary = memoryContext?.llmSummary ? `\n\nLong-term memory:\n${memoryContext.llmSummary}` : "";
 
     return {

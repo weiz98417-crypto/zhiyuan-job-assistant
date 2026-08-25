@@ -9,7 +9,8 @@ export type DurableMutationTarget =
   | "memory"
   | "session"
   | "file"
-  | "scan";
+  | "scan"
+  | "application";
 
 export interface ActionToolRiskRecord {
   toolName: string;
@@ -207,6 +208,20 @@ export const ACTION_TOOL_RISK_AUDIT: ActionToolRiskRecord[] = [
     risk: "high-risk-write",
     targets: ["session"],
     summary: "Starts or updates durable interview session state.",
+    requiresVerifiedWrite: true,
+  },
+  {
+    toolName: "track_application",
+    risk: "high-risk-write",
+    targets: ["application"],
+    summary: "Creates or updates an application record and its workflow event with read-back evidence.",
+    requiresVerifiedWrite: true,
+  },
+  {
+    toolName: "update_application_status",
+    risk: "high-risk-write",
+    targets: ["application"],
+    summary: "Changes an application workflow state and must return the persisted record and event evidence.",
     requiresVerifiedWrite: true,
   },
   {

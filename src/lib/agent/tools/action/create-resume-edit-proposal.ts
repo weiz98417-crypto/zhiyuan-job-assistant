@@ -1,4 +1,4 @@
-import type { ToolDefinition, ToolResult } from "../types";
+import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
 import { validateResumeSectionContent, type ResumeSectionId } from "@/lib/agent/resume-save-guard";
 import {
   buildVerifiedActionFailure,
@@ -6,6 +6,7 @@ import {
   stableContentHash,
   validateDocumentFieldContent,
 } from "@/lib/agent/verified-action";
+import { createResumeEditProposalForUser } from "@/lib/server/resume-edit-proposal-service";
 
 const SECTION_MAP: Record<string, ResumeSectionId> = {
   "个人概述": "summary", "概述": "summary", summary: "summary",
@@ -24,12 +25,70 @@ function riskFlagsFromParams(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
-async function handler(params: Record<string, unknown>): Promise<ToolResult> {
+async function handler(
+  params: Record<string, unknown>,
+  context?: ToolExecutionContext,
+): Promise<ToolResult> {
   const draftId = String(params.draftId || "");
   const sectionId = resolveSection(params.section || params.sectionId);
   const proposedContent = String(params.proposedContent || params.content || "");
   const reason = String(params.reason || "").slice(0, 1200);
   const riskFlags = riskFlagsFromParams(params.riskFlags);
+
+  if (context) {
+    try {
+      const proposal = await createResumeEditProposalForUser(context.principal, {
+        sectionId,
+        proposedContent,
+        reason,
+        riskFlags,
+        draftId: draftId || undefined,
+        expectedBaseHash: String(params.baseHash || params.expectedBaseHash || ""),
+        expectedBaseVersion: String(params.baseVersion || params.expectedBaseVersion || ""),
+        requestId: context.requestId,
+      });
+      const contentValidation = validateDocumentFieldContent(proposal.proposedContent, {
+        minCompactLength: 1,
+        targetLabel: proposal.sectionId,
+      });
+      const verifiedAction = buildVerifiedActionSuccess({
+        action: "create_resume_edit_proposal",
+        targetType: "cv",
+        targetId: proposal.id,
+        targetField: proposal.sectionId,
+        baseHash: proposal.baseHash,
+        versionId: proposal.baseVersion,
+        data: proposal,
+        expectedContent: proposal.proposedContent,
+        readBackContent: proposal.proposedContent,
+        checks: contentValidation.checks,
+      });
+      return {
+        success: true,
+        data: proposal,
+        errorCategory: "ok",
+        llmSummary: `已创建简历修改提案 ${proposal.id}，板块 ${proposal.sectionId}，等待用户审批后才会写入 CV。`,
+        uiPayload: { type: "resume_edit_proposal", ...proposal },
+        rawData: proposal,
+        verifiedAction,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "创建简历修改提案失败";
+      return {
+        success: false,
+        data: null,
+        error: message,
+        errorCategory: /变化|不存在|无效|为空|找不到/.test(message) ? "need_user_input" : "transient",
+        recoverable: !/变化|不存在|无效|为空|找不到/.test(message),
+        verifiedAction: buildVerifiedActionFailure({
+          action: "create_resume_edit_proposal",
+          targetType: "cv",
+          targetField: sectionId,
+          error: message,
+        }),
+      };
+    }
+  }
 
   const validation = draftId ? { valid: true } : validateResumeSectionContent(sectionId, proposedContent);
   if (!validation.valid) {

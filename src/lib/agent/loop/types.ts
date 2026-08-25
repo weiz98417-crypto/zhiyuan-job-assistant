@@ -7,6 +7,10 @@ export interface LoopConfig {
   toolWhitelist?: string[];
 }
 
+export interface ModelRecoveryPolicy {
+  switchProvider?: boolean;
+}
+
 export const DEFAULT_LOOP_CONFIG: LoopConfig = {
   maxIterations: 5, // bumped from 3 — resume optimization + reference lookup need 3-4 iterations
 };
@@ -33,6 +37,7 @@ export type SSEEvent =
   | { type: "tool_call"; name: string; params: Record<string, unknown> }
   | { type: "tool_result"; name: string; result: string; success: boolean; data?: unknown; uiPayload?: Record<string, unknown>; verifiedAction?: VerifiedActionResult }
   | { type: "tool_error"; name: string; error: string; recoverable: boolean }
+  | { type: "run_directive"; directive: "continue" | "recover" | "wait_user"; reason?: string }
   | { type: "result_quality"; quality: ResultQuality }
   | { type: "text"; content: string }
   | { type: "tool_calls"; tool_calls: Array<{ id: string; name: string; arguments: string }> }

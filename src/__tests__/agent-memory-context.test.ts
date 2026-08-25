@@ -270,14 +270,15 @@ describe("agent memory isolation and writeback", () => {
       path.join(process.cwd(), "src", "app", "api", "agent", "memory-writeback", "route.ts"),
       "utf-8",
     );
-    const interviewRoute = fs.readFileSync(
-      path.join(process.cwd(), "src", "app", "api", "agent", "coach", "session", "route.ts"),
+    const interviewService = fs.readFileSync(
+      path.join(process.cwd(), "src", "lib", "server", "interview-analysis-service.ts"),
       "utf-8",
     );
 
     expect(writebackRoute).toContain('status: "candidate"');
     expect(writebackRoute).toContain("readBackVerified: true");
-    expect(interviewRoute).toContain('status: "candidate"');
+    expect(interviewService).toContain('status: "candidate"');
+    expect(interviewService).toContain("readBackVerified: true");
     expect(writebackRoute).not.toContain('status: "active"');
   });
 

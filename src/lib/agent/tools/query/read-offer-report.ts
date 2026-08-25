@@ -1,5 +1,6 @@
 import type { OfferEvaluationReport, OfferSnapshot } from "@/types";
-import type { ToolDefinition, ToolResult } from "../types";
+import { getAgentReadService } from "@/lib/agent/runtime/agent-read-service";
+import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
 
 function apiPath(path: string): string {
   return typeof window === "undefined" ? `http://localhost:3000${path}` : path;
@@ -15,7 +16,7 @@ function parseJson<T>(value: unknown, fallback: T): T {
   }
 }
 
-async function handler(params: Record<string, unknown>): Promise<ToolResult> {
+async function handler(params: Record<string, unknown>, context?: ToolExecutionContext): Promise<ToolResult> {
   const reportId = Number(params.offerReportId || params.reportId || 0);
   if (!Number.isFinite(reportId) || reportId <= 0) {
     return {
@@ -27,16 +28,23 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
     };
   }
 
-  const res = await fetch(apiPath(`/api/offer-reports/${reportId}`));
-  if (!res.ok) {
-    return {
-      success: false,
-      data: null,
-      error: `读取 Offer 报告失败: HTTP ${res.status}`,
-      errorCategory: "permanent",
-    };
+  const res = context?.principal
+    ? undefined
+    : await fetch(apiPath(`/api/offer-reports/${reportId}`));
+  if (res && !res.ok) {
+      return {
+        success: false,
+        data: null,
+        error: `读取 Offer 报告失败: HTTP ${res.status}`,
+        errorCategory: "permanent",
+      };
   }
-  const json = await res.json();
+  const directReport = context?.principal
+    ? await getAgentReadService().getOfferReport(context.principal, reportId)
+    : undefined;
+  const json = context?.principal
+    ? { success: Boolean(directReport), data: directReport }
+    : await res!.json();
   if (!json.success || !json.data) {
     return {
       success: false,

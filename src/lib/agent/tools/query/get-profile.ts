@@ -1,45 +1,65 @@
-import type { ToolDefinition, ToolResult } from "../types";
+import { assembleAgentMemoryContext } from "@/lib/agent/memory-context";
+import { getAgentReadService } from "@/lib/agent/runtime/agent-read-service";
+import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
 import { fetchAgentMemoryContext } from "../memory-helpers";
 
-async function handler(params: Record<string, unknown> = {}): Promise<ToolResult> {
+async function handler(
+  params: Record<string, unknown> = {},
+  context?: ToolExecutionContext,
+): Promise<ToolResult> {
   const sectionFilter = typeof params.section === "string" ? params.section.trim() : "";
   try {
-    const [dnaRes, profileRes, cvRes, refsRes] = await Promise.all([
-      fetch("/api/profile/dna").catch(() => null),
-      fetch("/api/data/profile").catch(() => null),
-      fetch("/api/cv/data").catch(() => null),
-      fetch("/api/cv/references").catch(() => null),
-    ]);
-
     let dnaSummary = "";
-    if (dnaRes?.ok) {
-      const j = await dnaRes.json();
-      dnaSummary = j?.data?.summary || "";
-    }
-
     let profileData: Record<string, unknown> | null = null;
-    if (profileRes?.ok) {
-      const j = await profileRes.json();
-      profileData = (j?.data || null) as Record<string, unknown> | null;
-    }
-
     let cvData: Record<string, unknown> | null = null;
-    let cvSections: Record<string, string> = {};
-    if (cvRes?.ok) {
-      const j = await cvRes.json();
-      cvData = (j?.data || null) as Record<string, unknown> | null;
-      if (cvData?.versions) {
-        const versions = cvData.versions as Record<string, { sections?: Array<{ id: string; title: string; content: string }> }>;
-        const activeVer = (cvData.activeVersion as string) || Object.keys(versions)[0];
-        const sections = versions[activeVer]?.sections || [];
-        for (const s of sections) cvSections[s.id] = (s.content || "").trim();
+    const cvSections: Record<string, string> = {};
+    let refResumes: Array<{ id: number; name: string; tags: string[] }> = [];
+    if (context) {
+      const service = getAgentReadService();
+      const [dna, profile, cv, references] = await Promise.all([
+        service.getProfileDnaSummary(context.principal),
+        service.getProfile(context.principal),
+        service.getCurrentResume(context.principal),
+        service.listReferenceResumes(context.principal),
+      ]);
+      dnaSummary = dna;
+      profileData = profile as Record<string, unknown> | null;
+      cvData = cv;
+      refResumes = references.map((reference) => ({
+        id: reference.id,
+        name: reference.name,
+        tags: reference.tags.map(String),
+      }));
+    } else {
+      const [dnaRes, profileRes, cvRes, refsRes] = await Promise.all([
+        fetch("/api/profile/dna").catch(() => null),
+        fetch("/api/data/profile").catch(() => null),
+        fetch("/api/cv/data").catch(() => null),
+        fetch("/api/cv/references").catch(() => null),
+      ]);
+      if (dnaRes?.ok) {
+        const json = await dnaRes.json();
+        dnaSummary = json?.data?.summary || "";
+      }
+      if (profileRes?.ok) {
+        const json = await profileRes.json();
+        profileData = (json?.data || null) as Record<string, unknown> | null;
+      }
+      if (cvRes?.ok) {
+        const json = await cvRes.json();
+        cvData = (json?.data || null) as Record<string, unknown> | null;
+      }
+      if (refsRes?.ok) {
+        const json = await refsRes.json();
+        refResumes = (json?.data || []) as Array<{ id: number; name: string; tags: string[] }>;
       }
     }
 
-    let refResumes: Array<{ id: number; name: string; tags: string[] }> = [];
-    if (refsRes?.ok) {
-      const j = await refsRes.json();
-      refResumes = (j?.data || []) as Array<{ id: number; name: string; tags: string[] }>;
+    if (cvData?.versions) {
+      const versions = cvData.versions as Record<string, { sections?: Array<{ id: string; title: string; content: string }> }>;
+      const activeVer = (cvData.activeVersion as string) || Object.keys(versions)[0];
+      const sections = versions[activeVer]?.sections || [];
+      for (const section of sections) cvSections[section.id] = (section.content || "").trim();
     }
 
     // Build llmSummary — concise decision text for LLM
@@ -77,13 +97,16 @@ async function handler(params: Record<string, unknown> = {}): Promise<ToolResult
       if (dealBreakers?.length) summaryParts.push(`底线: ${dealBreakers.join(", ")}`);
     }
 
-    const memoryContext = await fetchAgentMemoryContext({
+    const memoryInput = {
       task: "profile_growth",
       agentId: "profile",
       query: sectionFilter ? `profile ${sectionFilter}` : "profile resume goals preferences interview observations",
       budgetChars: 700,
       semanticTopK: 4,
-    });
+    };
+    const memoryContext = context
+      ? await assembleAgentMemoryContext({ ...memoryInput, userId: context.principal.userId })
+      : await fetchAgentMemoryContext(memoryInput);
     if (memoryContext?.llmSummary) summaryParts.push(`Long-term memory: ${memoryContext.llmSummary}`);
 
     return {

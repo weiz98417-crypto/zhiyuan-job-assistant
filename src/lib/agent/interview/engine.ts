@@ -44,7 +44,7 @@ export interface InterviewSession {
   currentFollowups: string[];
 }
 
-const PHASE_ORDER: InterviewPhase[] = ["intro", "tech", "tech", "tech", "behavioral", "behavioral", "reverse", "summary"];
+const PHASE_ORDER: InterviewPhase[] = ["intro", "tech", "behavioral", "reverse"];
 const PHASE_QUESTION_COUNTS: Record<string, number> = { intro: 1, tech: 3, behavioral: 2, reverse: 3, summary: 0 };
 
 /** Create a new interview session */

@@ -129,7 +129,26 @@ export function normalizeResumeSections(input: Partial<Record<ResumeSectionId, s
   for (const sectionId of RESUME_SECTION_ORDER) {
     sections[sectionId] = cleanText(input[sectionId] || "");
   }
+  const embeddedProjects = splitEmbeddedProjects(sections.experience);
+  if (embeddedProjects.projects) {
+    sections.experience = embeddedProjects.experience;
+    sections.projects = [sections.projects, embeddedProjects.projects].filter(Boolean).join("\n\n");
+  }
   return sections;
+}
+
+function splitEmbeddedProjects(experience: string): { experience: string; projects: string } {
+  const lines = cleanText(experience).split("\n");
+  const projectStart = lines.findIndex((line) => {
+    const normalized = line.trim().replace(/^[-•\d.、\s]+/, "");
+    return /^(项目经历|项目经验|项目实践|代表项目|主要项目|项目案例|Projects?)\s*[:：]?\s*$/i.test(normalized)
+      || /^(项目经历|项目经验|项目实践|代表项目|主要项目|项目名称|项目背景|项目描述|项目职责|核心工作|项目成果|项目业绩|项目内容|项目亮点)\s*[:：]/i.test(normalized);
+  });
+  if (projectStart < 0) return { experience: cleanText(experience), projects: "" };
+  return {
+    experience: cleanText(lines.slice(0, projectStart).join("\n")),
+    projects: cleanText(lines.slice(projectStart).join("\n")),
+  };
 }
 
 export function resumeSectionsToText(sections: ResumeSections): string {

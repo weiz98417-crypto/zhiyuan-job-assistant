@@ -1,9 +1,34 @@
 import type { ToolDefinition, ToolResult } from "../types";
+import type { ToolExecutionContext } from "../types";
 import { loadSOP, initSOP, advanceStage, getStagePrompt, clearSOP } from "@/lib/agent/profile-sop";
 import { triggerProfileUpdate } from "@/lib/profile-update";
+import { runProfileSop } from "@/lib/server/profile-sop-service";
 
-async function handler(params: Record<string, unknown>): Promise<ToolResult> {
+async function handler(
+  params: Record<string, unknown>,
+  context?: ToolExecutionContext,
+): Promise<ToolResult> {
   const action = (params.action as string) || "start";
+
+  if (context) {
+    try {
+      const data = await runProfileSop(context.principal, {
+        action,
+        answer: typeof params.answer === "string" ? params.answer : undefined,
+      });
+      return { success: true, data, errorCategory: "ok", rawData: data };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "画像 SOP 执行失败";
+      const needsInput = /请提供|Unknown action/.test(message);
+      return {
+        success: false,
+        data: null,
+        error: message,
+        errorCategory: needsInput ? "need_user_input" : "transient",
+        recoverable: !needsInput,
+      };
+    }
+  }
 
   if (action === "start") {
     const existing = loadSOP();

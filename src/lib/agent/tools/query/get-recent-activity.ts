@@ -1,17 +1,28 @@
-import type { ToolDefinition, ToolResult } from "../types";
+import { getAgentReadService } from "@/lib/agent/runtime/agent-read-service";
+import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
 
-async function handler(params: Record<string, unknown>): Promise<ToolResult> {
+async function handler(
+  params: Record<string, unknown>,
+  context?: ToolExecutionContext,
+): Promise<ToolResult> {
   const rawLimit = Number(params.limit) || 10;
   const dateFrom = typeof params.date_from === "string" ? params.date_from : "";
   const sp = new URLSearchParams();
   sp.set("limit", String(rawLimit));
   if (dateFrom) sp.set("date_from", dateFrom);
   try {
+    if (context) {
+      const applications = await getAgentReadService().listApplications(context.principal, {
+        limit: rawLimit,
+        date_from: dateFrom || undefined,
+      });
+      return { success: true, data: applications, rawData: applications, errorCategory: "ok" };
+    }
     const res = await fetch(`/api/data/applications?${sp.toString()}`);
     const json = await res.json();
-    return { success: json.success, data: json.data, error: json.error };
+    return { success: json.success, data: json.data, error: json.error, errorCategory: json.success ? "ok" : "permanent" };
   } catch (err) {
-    return { success: false, data: null, error: `${err instanceof Error ? err.message : "unknown"}` };
+    return { success: false, data: null, error: `${err instanceof Error ? err.message : "unknown"}`, errorCategory: "transient" };
   }
 }
 function formatResult(result: ToolResult): string {

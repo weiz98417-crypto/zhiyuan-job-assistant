@@ -12,10 +12,10 @@ import {
   validateDocumentFieldContent,
 } from "@/lib/agent/verified-action";
 import {
-  cancelAgentRunClient,
-  getAgentRunClient,
-  listActiveAgentRunsClient,
-} from "@/lib/agent/run-ledger-client";
+  getDurableAgentRunClient,
+  listActiveDurableAgentRunsClient,
+  requestDurableAgentRunCancelClient,
+} from "@/lib/agent/runtime/durable-run-client";
 import { readFile } from "@/lib/agent/tools/query/read-file";
 import {
   createAgentTaskContract,
@@ -317,35 +317,33 @@ describe("agent runtime regression evals", () => {
 
   it("recovery: reload can read active durable runs for the current session", async () => {
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
-      expect(url).toBe("/api/agent/runs?sessionId=42");
+      expect(url).toBe("/api/agent/runs?conversationId=42&activeOnly=true");
       return new Response(JSON.stringify({
         success: true,
-        enabled: true,
         data: [{
           id: "run-refresh",
-          user_id: "user-1",
-          session_id: 42,
-          task_type: "resume_edit",
-          agent_id: "resume",
+          userId: "user-1",
+          conversationId: 42,
+          taskType: "resume_edit",
+          agentId: "resume",
           status: "running",
-          created_at: "2026-06-10T00:00:00.000Z",
-          updated_at: "2026-06-10T00:01:00.000Z",
+          createdAt: "2026-06-10T00:00:00.000Z",
+          updatedAt: "2026-06-10T00:01:00.000Z",
         }],
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     }));
 
-    const result = await listActiveAgentRunsClient(42);
+    const result = await listActiveDurableAgentRunsClient(42);
 
-    expect(result.enabled).toBe(true);
-    expect(result.data).toHaveLength(1);
-    expect(result.data[0]).toMatchObject({
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
       id: "run-refresh",
-      session_id: 42,
+      conversationId: 42,
       status: "running",
     });
   });
 
-  it("recovery: resume control can load active run details and latest step", async () => {
+  it("recovery: resume control can load the current durable run snapshot", async () => {
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
       expect(url).toBe("/api/agent/runs/run-refresh");
       return new Response(JSON.stringify({
@@ -353,52 +351,40 @@ describe("agent runtime regression evals", () => {
         data: {
           run: {
             id: "run-refresh",
-            user_id: "user-1",
-            session_id: 42,
-            task_type: "resume_edit",
-            agent_id: "resume",
+            userId: "user-1",
+            conversationId: 42,
+            taskType: "resume_edit",
+            agentId: "resume",
             status: "waiting_user",
-            created_at: "2026-06-10T00:00:00.000Z",
-            updated_at: "2026-06-10T00:01:00.000Z",
+            checkpointBoundary: "after_tool",
+            createdAt: "2026-06-10T00:00:00.000Z",
+            updatedAt: "2026-06-10T00:01:00.000Z",
           },
-          steps: [{
-            id: 2,
-            run_id: "run-refresh",
-            phase: "verifying",
-            tool_name: "save_resume_section",
-            status: "failed",
-            input_summary: "section=skills",
-            output_summary: "read-back mismatch",
-            verifier_json: { code: "read_back.mismatch" },
-            error_json: {},
-            created_at: "2026-06-10T00:01:00.000Z",
-          }],
         },
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     }));
 
-    const detail = await getAgentRunClient("run-refresh");
+    const detail = await getDurableAgentRunClient("run-refresh");
 
-    expect(detail?.run.status).toBe("waiting_user");
-    expect(detail?.steps.at(-1)).toMatchObject({
-      phase: "verifying",
-      tool_name: "save_resume_section",
-      status: "failed",
-    });
+    expect(detail).toMatchObject({ status: "waiting_user", checkpointBoundary: "after_tool" });
   });
 
   it("recovery: cancel control calls the owner-scoped cancel endpoint", async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-      expect(url).toBe("/api/agent/runs/run-refresh");
-      expect(init?.method).toBe("DELETE");
-      return new Response(JSON.stringify({ success: true }), {
+      expect(url).toBe("/api/agent/runs/run-refresh/cancel");
+      expect(init?.method).toBe("POST");
+      expect(JSON.parse(String(init?.body))).toEqual({ requestId: "cancel-refresh" });
+      return new Response(JSON.stringify({ success: true, data: { run: { id: "run-refresh", status: "cancel_requested" } } }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(cancelAgentRunClient("run-refresh")).resolves.toBe(true);
+    await expect(requestDurableAgentRunCancelClient("run-refresh", "cancel-refresh")).resolves.toMatchObject({
+      id: "run-refresh",
+      status: "cancel_requested",
+    });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -407,8 +393,8 @@ describe("agent runtime regression evals", () => {
 
     expect(page).toContain("handleResumeActiveRun");
     expect(page).toContain("handleCancelActiveRun");
-    expect(page).toContain("getAgentRunClient");
-    expect(page).toContain("cancelAgentRunClient");
+    expect(page).toContain("getDurableAgentRunClient");
+    expect(page).toContain("requestDurableAgentRunCancelClient");
   });
 
   it("recovery: agent page keeps a rollback affordance for the latest applied resume edit", () => {

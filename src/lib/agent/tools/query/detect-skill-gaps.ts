@@ -1,5 +1,6 @@
-import type { ToolDefinition, ToolResult } from "../types";
+import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
 import { fetchAgentMemoryContext } from "../memory-helpers";
+import { getSkillGapContextForUser } from "@/lib/server/agent-insight-service";
 
 interface SkillGapParams {
   jd_text?: string;
@@ -11,8 +12,37 @@ function apiPath(path: string): string {
   return typeof window === "undefined" ? `http://localhost:3000${path}` : path;
 }
 
-async function handler(params: Record<string, unknown>): Promise<ToolResult> {
+async function handler(
+  params: Record<string, unknown>,
+  context?: ToolExecutionContext,
+): Promise<ToolResult> {
   const { jd_text, cv_text, reportNum } = params as SkillGapParams;
+
+  if (context) {
+    try {
+      const data = await getSkillGapContextForUser(context.principal, {
+        jdText: jd_text,
+        cvText: cv_text,
+        reportNum,
+      });
+      return {
+        success: true,
+        data: { jd_text: data.jdText, cv_text: data.cvText, memoryContext: data.memorySummary },
+        rawData: { jd_text: data.jdText, cv_text: data.cvText, memoryContext: data.memorySummary },
+        llmSummary: buildSkillGapPrompt(data.jdText, data.cvText, data.memorySummary),
+        errorCategory: "ok",
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "技能缺口上下文读取失败";
+      return {
+        success: false,
+        data: null,
+        error: message,
+        errorCategory: /不足|不完整/.test(message) ? "need_user_input" : "transient",
+        recoverable: !/不足|不完整/.test(message),
+      };
+    }
+  }
 
   let effectiveJdText = jd_text || "";
   if (!effectiveJdText && reportNum) {

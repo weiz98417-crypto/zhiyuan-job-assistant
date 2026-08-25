@@ -4,6 +4,14 @@
 
 ## Language
 
+**Agent Conversation**:
+用户与纸鸢持续交互的对话容器；它同时包含 Conversation Turn 和 Agent Run，一个 Run 可以引用同一 Conversation 中多个 Turn。
+_Avoid_: Agent Run, 聊天页面, Session 状态
+
+**Conversation Turn**:
+Conversation 中一次用户输入及其对应交互的稳定记录；它可以发起新的 Agent Run，也可以为等待中的 Run 提供补充信息或批准。
+_Avoid_: Agent Run, API 请求, 模型轮次
+
 **岗位发现**:
 从用户的目标方向、关键词、排除词、城市和公司来源中持续发现可处理的岗位机会，并把结果沉淀为可查看、可保存、可评估、可跳过的机会池。
 _Avoid_: 职位搜索, 岗位搜索, 搜职位
@@ -71,3 +79,51 @@ _Avoid_: 临时解析结果, 上传内容, 覆盖版本
 **简历草稿工件**:
 由 Agent 生成并持久化的一个或多个简历修改方案，拥有稳定的 artifact id、variant id、section patch 和完整性证据；聊天消息只引用它，不承载其唯一正文。
 _Avoid_: 方案文本, 最近一条消息, 优化回复
+
+**Agent Run**:
+为完成一个用户目标而创建的持久执行实体；它拥有独立身份和生命周期，不因浏览器关闭、连接中断或执行进程重启而变成另一项任务。
+_Avoid_: Run 台账, API 请求, 聊天会话, 页面任务
+
+**运行续跑**:
+Agent Run 中断后，从已持久化的安全执行位置继续同一个 Run；它保留原 Run 身份，不等同于重试一次请求或重新加载聊天记录。
+_Avoid_: 会话恢复, 页面恢复, 重新执行, Retry
+
+**等待用户**:
+Agent Run 尚未结束但必须取得用户信息或批准才能安全继续的状态；用户后续输入会继续同一个 Run，而不是创建替代任务。
+_Avoid_: 执行失败, Run 结束, 页面暂停
+
+**Run Gate**:
+Agent Run 继续执行前必须满足的一项持久条件，例如取得缺失信息或批准一个精确工具动作；Gate 的范围和状态属于 Run。
+_Avoid_: 权限弹窗, Tool Governance 状态, 永久授权
+
+**Recovery Attempt**:
+Recovery Supervisor 在 Agent Run 内为跨过一个已分类失败而选择的一次有预算恢复动作；它保留在同一 Run 中，并受已有尝试与风险约束。
+_Avoid_: Repair, 无限重试, 工程修复
+
+**工程修复建议**:
+Run 结束后由 Review 从证据中提炼的代码、配置或测试改进方向；它不能改变已经结束的 Run 结果。
+_Avoid_: Recovery Attempt, 自动修复, repairing 状态
+
+**Run Contract**:
+绑定一个 Agent Run 的完成约束，定义该目标允许使用的能力、需要的批准、验证要求以及什么结果可以被称为成功。
+_Avoid_: Task Contract, 提示词规则, 工具白名单
+
+**Run Context**:
+Runtime 从 Conversation Turn、Run Contract、计划进度、Gate、已完成 Tool Attempt 和事实源引用确定性构建的模型上下文；浏览器消息列表不是它的事实源。
+_Avoid_: 前端 messages, Prompt 拼接, 聊天缓存
+
+**Plan Item**:
+Agent Run 为推进目标形成的一个有序工作项；它不是独立的用户任务，也不拥有脱离所属 Run 的完成状态。
+_Avoid_: Task, 子任务, Step
+
+**Tool Attempt**:
+Agent Run 对一个具体工具动作的一次受治理执行尝试；同一动作在恢复过程中可能产生多个可区分的 Tool Attempt。
+_Avoid_: Tool Call, 工具结果, Agent Step
+
+**后台作业**:
+由长耗时工具创建并独立持久化的工作实体；Tool Attempt 通过稳定标识引用它，Agent Run 可以在其完成、失败或需要处理时续跑。
+_Avoid_: 长请求, 后台 Promise, detached 进程
+
+**Run Evidence**:
+Agent Run 及其 Tool Attempt 产生的可审计事实，用于向用户展示进度并支持治理、Review 和 Eval；它不是 Run 执行状态本身。
+_Avoid_: 日志, Run 台账, 调试信息

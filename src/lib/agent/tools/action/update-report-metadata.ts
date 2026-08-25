@@ -1,9 +1,10 @@
-import type { ToolDefinition, ToolResult } from "../types";
+import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
 import {
   buildVerifiedActionFailure,
   buildVerifiedActionSuccess,
   type VerifiedActionCheck,
 } from "@/lib/agent/verified-action";
+import { updateReportMetadataForUser } from "@/lib/server/report-metadata-service";
 
 interface UpdatedReport {
   report_num: number;
@@ -48,9 +49,15 @@ async function resolveReportNum(value: unknown): Promise<number | null> {
   }
 }
 
-async function handler(params: Record<string, unknown>): Promise<ToolResult> {
-  const reportNum = await resolveReportNum(params.reportNum);
-  if (!reportNum) {
+async function handler(
+  params: Record<string, unknown>,
+  context?: ToolExecutionContext,
+): Promise<ToolResult> {
+  const explicitReportNum = Number(params.reportNum);
+  const reportNum = context
+    ? Number.isFinite(explicitReportNum) && explicitReportNum > 0 ? explicitReportNum : undefined
+    : await resolveReportNum(params.reportNum);
+  if (!context && !reportNum) {
     return {
       success: false,
       data: null,
@@ -84,6 +91,72 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
       errorCategory: "need_user_input",
       llmSummary: "用户想修改报告，但没有提供公司、岗位、类型、合法性或关键词等可保存字段。",
     };
+  }
+
+  if (context) {
+    try {
+      const report = await updateReportMetadataForUser(context.principal, {
+        reportNum: reportNum || undefined,
+        company,
+        role,
+        archetype,
+        legitimacy,
+        keywords: Array.isArray(payload.keywords) ? payload.keywords as string[] : undefined,
+      });
+      const expectedProjection = { report_num: report.report_num, ...payload };
+      const readBackProjection: Record<string, unknown> = { report_num: report.report_num };
+      for (const key of ["company", "role", "archetype", "legitimacy"] as const) {
+        if (Object.prototype.hasOwnProperty.call(payload, key)) readBackProjection[key] = report[key] || "";
+      }
+      if (Object.prototype.hasOwnProperty.call(payload, "keywords")) {
+        readBackProjection.keywords = parseKeywords(report.keywords_json);
+      }
+      const verifiedAction = buildVerifiedActionSuccess({
+        action: "update_report_metadata",
+        targetType: "report",
+        targetId: report.report_num,
+        data: report,
+        expectedContent: expectedProjection,
+        readBackContent: readBackProjection,
+        checks: [{
+          phase: "verifier",
+          ok: true,
+          code: "report.metadata_read_back_match",
+          message: "Updated report metadata matches principal-scoped read-back.",
+        }],
+      });
+      return {
+        success: true,
+        data: report,
+        errorCategory: "ok",
+        llmSummary: `已更新报告 #${report.report_num} 的保存信息：${report.changed.join("；")}。这次只是修改已保存报告信息，没有重新评估或重新打分。`,
+        uiPayload: {
+          type: "report_metadata_updated",
+          reportNum: report.report_num,
+          company: report.company,
+          role: report.role,
+          readBackVerified: true,
+        },
+        verifiedAction,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "报告更新失败";
+      const needsInput = /不存在|确认|没有提供/.test(message);
+      return {
+        success: false,
+        data: null,
+        error: message,
+        errorCategory: needsInput ? "need_user_input" : "transient",
+        recoverable: !needsInput,
+        llmSummary: needsInput ? message : "报告更新暂时失败，Runtime 将读取持久状态后重试。",
+        verifiedAction: buildVerifiedActionFailure({
+          action: "update_report_metadata",
+          targetType: "report",
+          targetId: reportNum || undefined,
+          error: message,
+        }),
+      };
+    }
   }
 
   try {
@@ -148,7 +221,7 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
       ? buildVerifiedActionSuccess({
           action: "update_report_metadata",
           targetType: "report",
-          targetId: reportNum,
+          targetId: reportNum || undefined,
           data: report,
           expectedContent: expectedProjection,
           readBackContent: readBackProjection,

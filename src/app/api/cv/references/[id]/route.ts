@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { getDataRepositories } from "@/lib/data-repositories";
+import { getAgentReadService } from "@/lib/agent/runtime/agent-read-service";
 import {
   buildReferenceResumeRawText,
   normalizeReferenceVisibility,
@@ -29,31 +30,11 @@ export async function GET(
       return NextResponse.json({ success: false, error: "无效 ID" }, { status: 400 });
     }
 
-    const resume = await getDataRepositories().referenceResumes.get(numId, user.userId);
+    const resume = await getAgentReadService().getReferenceResume({ userId: user.userId }, numId);
     if (!resume) {
       return NextResponse.json({ success: false, error: "参考简历不存在" }, { status: 404 });
     }
-
-    const ownedByUser = !resume.user_id || resume.user_id === user.userId;
-    return NextResponse.json({
-      success: true,
-      data: {
-        id: resume.id,
-        name: resume.name,
-        source: resume.source,
-        sections: ownedByUser ? parseReferenceSections(resume.sections_json) : buildSharedSections(resume),
-        tags: JSON.parse(resume.tags || "[]"),
-        notes: ownedByUser ? resume.notes : "",
-        roleCategory: resume.role_category || "",
-        visibility: resume.visibility || "private",
-        status: resume.status || "active",
-        qualityScore: Number(resume.quality_score || 0),
-        anonymized: Boolean(resume.anonymized),
-        ownedByUser,
-        created_at: resume.created_at,
-        updated_at: resume.updated_at,
-      },
-    });
+    return NextResponse.json({ success: true, data: resume });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "未知错误";
     return NextResponse.json(
@@ -146,24 +127,6 @@ export async function PATCH(
       { status: 500 },
     );
   }
-}
-
-function parseReferenceSections(value: string | undefined): CVSection[] {
-  if (!value) return [];
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed as CVSection[] : [];
-  } catch {
-    return [];
-  }
-}
-
-function buildSharedSections(resume: { raw_text?: string; shared_text_redacted?: string }): CVSection[] {
-  const text = resume.shared_text_redacted?.trim()
-    || redactReferenceResumeText(resume.raw_text || "");
-  return text
-    ? [{ id: "shared-summary", title: "共享摘要", content: text }]
-    : [];
 }
 
 function legacyVisibilityToAction(value: string | undefined) {

@@ -1,6 +1,28 @@
-import type { ToolDefinition, ToolResult } from "../types";
+import { loadAgentMode } from "@/lib/server/agent-mode-service";
+import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
 
-async function handler(_params: Record<string, unknown>): Promise<ToolResult> {
+async function handler(
+  _params: Record<string, unknown>,
+  context?: ToolExecutionContext,
+): Promise<ToolResult> {
+  if (context) {
+    try {
+      const content = loadAgentMode("dingwei");
+      const phaseMatches = content.match(/##\s+(第[一二三四]阶段[：:][^\n]+)/g) || [];
+      return {
+        success: true,
+        data: { framework: content, phases: phaseMatches.map((phase) => phase.replace(/^##\s+/, "")) },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        data: null,
+        error: error instanceof Error ? error.message : "定位引导系统暂不可用",
+        errorCategory: "transient",
+        recoverable: true,
+      };
+    }
+  }
   const res = await fetch("/api/agent/mode/dingwei");
   if (!res.ok) return { success: false, data: null, error: "定位引导系统暂不可用" };
   const json = await res.json();

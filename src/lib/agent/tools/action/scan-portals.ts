@@ -1,4 +1,4 @@
-import type { ToolDefinition, ToolResult } from "@/lib/agent/tools/types";
+import type { ToolDefinition, ToolExecutionContext, ToolResult } from "@/lib/agent/tools/types";
 
 interface JobDiscoveryRunInput {
   companies?: string[];
@@ -32,7 +32,7 @@ export const scanPortals: ToolDefinition<ScanPortalsParams> = {
     maxResults: { type: "number", required: false, description: "本轮最多发现的岗位机会数量。" },
     confirmed: { type: "boolean", required: false, description: "用户是否已经确认开始岗位发现。" },
   },
-  async handler(params) {
+  async handler(params, context?: ToolExecutionContext) {
     const criteria = normalizeJobDiscoveryCriteria(params);
     const confirmed = params.confirmed === true || params.userConfirmed === true;
     const changeBatch = /换一批|再来一批|下一批|换几个|换一组/i.test(String(params.query || ""));
@@ -81,6 +81,43 @@ export const scanPortals: ToolDefinition<ScanPortalsParams> = {
     }
 
     try {
+      if (context?.principal.userId) {
+        const { startJobDiscoveryRunForUser } = await import("@/lib/job-discovery-run");
+        const run = await startJobDiscoveryRunForUser(context.principal.userId, params);
+        if (!run.success) throw new Error(run.message);
+        const readBack = run.readBack;
+        return {
+          success: true,
+          data: {
+            scanId: run.scanId,
+            conflict: run.conflict,
+            readBack,
+            readBackVerified: true,
+          },
+          errorCategory: "ok",
+          llmSummary: run.conflict
+            ? `已恢复正在进行的岗位发现任务 ${run.scanId}，当前状态 ${readBack.status}。`
+            : `已开始岗位发现任务 ${run.scanId}，已读回状态 ${readBack.status}，公司数 ${readBack.companiesTotal}。`,
+          uiPayload: {
+            type: "job_discovery_run",
+            scanId: run.scanId,
+            status: readBack.status,
+            companiesDone: readBack.companiesDone,
+            companiesTotal: readBack.companiesTotal,
+            jobsFound: readBack.jobsFound,
+            jobsNew: readBack.jobsNew,
+            criteria,
+            recoveredExistingScan: run.conflict,
+            readBackVerified: true,
+            readBackEvidence: {
+              scanId: readBack.scanId,
+              status: readBack.status,
+              createdAt: readBack.createdAt,
+            },
+          },
+          rawData: { scanId: run.scanId, criteria, readBack, readBackVerified: true },
+        };
+      }
       const createResponse = await fetch("/api/scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

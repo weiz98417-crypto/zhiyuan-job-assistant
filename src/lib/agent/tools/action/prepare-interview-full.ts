@@ -1,12 +1,34 @@
-import type { ToolDefinition, ToolResult } from "../types";
+import { loadAgentMode, loadInterviewStoryBank } from "@/lib/server/agent-mode-service";
+import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
 
 interface InterviewPrepParams {
   company?: string;
   role?: string;
 }
 
-async function handler(params: Record<string, unknown>): Promise<ToolResult> {
+async function handler(
+  params: Record<string, unknown>,
+  context?: ToolExecutionContext,
+): Promise<ToolResult> {
   const { company, role } = params as InterviewPrepParams;
+
+  if (context) {
+    let prepFramework = "";
+    let storyBank = "";
+    try { prepFramework = loadAgentMode("interview-prep"); } catch { /* best effort */ }
+    try { storyBank = loadInterviewStoryBank(); } catch { /* best effort */ }
+    const target = company ? `${company} ${role || ""}`.trim() : "通用";
+    return {
+      success: true,
+      data: {
+        target,
+        prepFramework,
+        storyBank,
+        hasPrepFramework: Boolean(prepFramework),
+        hasStoryBank: Boolean(storyBank),
+      },
+    };
+  }
 
   const [interviewRes, storyRes] = await Promise.all([
     fetch("/api/agent/mode/interview-prep"),

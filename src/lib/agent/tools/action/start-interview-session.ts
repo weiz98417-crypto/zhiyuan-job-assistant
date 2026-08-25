@@ -1,9 +1,35 @@
-import type { ToolDefinition, ToolResult } from "../types";
+import { startInterviewSessionForAgent } from "@/lib/server/interview-analysis-service";
+import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
 
-async function handler(params: Record<string, unknown>): Promise<ToolResult> {
+async function handler(
+  params: Record<string, unknown>,
+  context?: ToolExecutionContext,
+): Promise<ToolResult> {
   const { company, role } = params as { company?: string; role?: string };
   if (!company || !role) {
     return { success: false, data: null, error: "请提供公司和岗位" };
+  }
+
+  if (context) {
+    try {
+      const result = await startInterviewSessionForAgent(context.principal, {
+        company,
+        role,
+        difficulty: typeof params.difficulty === "string" ? params.difficulty : undefined,
+        focus: typeof params.focus === "string" ? params.focus : undefined,
+        requestKey: context.requestId || `${context.runId}:start_interview_session`,
+      }, { signal: context.signal });
+      return { success: true, data: result, errorCategory: "ok", rawData: result };
+    } catch (error) {
+      return {
+        success: false,
+        data: null,
+        error: error instanceof Error ? error.message : "启动失败",
+        errorCategory: "transient",
+        recoverable: true,
+        rawData: { dispatchState: "unknown" },
+      };
+    }
   }
 
   const res = await fetch("/api/agent/coach/session", {

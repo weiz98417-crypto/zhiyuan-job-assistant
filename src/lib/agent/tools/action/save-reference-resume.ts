@@ -1,9 +1,10 @@
-import type { ToolDefinition, ToolResult } from "../types";
+import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
 import {
   buildVerifiedActionFailure,
   buildVerifiedActionSuccess,
   type VerifiedActionCheck,
 } from "@/lib/agent/verified-action";
+import { saveReferenceResumeForAgent } from "@/lib/server/reference-resume-service";
 
 interface SaveReferenceResumeParams {
   resume_text?: string;
@@ -20,7 +21,10 @@ function hasSpecificRoleCategory(value: string): boolean {
   return !/^(general|通用|未确定|unknown|其他|other)$/.test(normalized);
 }
 
-async function handler(params: Record<string, unknown>): Promise<ToolResult> {
+async function handler(
+  params: Record<string, unknown>,
+  context?: ToolExecutionContext,
+): Promise<ToolResult> {
   const input = params as SaveReferenceResumeParams;
   const resumeText = String(input.resume_text || "").trim();
   const roleCategory = String(input.role_category || "").trim();
@@ -45,6 +49,51 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
       recoverable: false,
       retryHint: "请先询问用户：这份优秀简历要保存到哪个岗位方向？",
     };
+  }
+
+  if (context) {
+    try {
+      const data = await saveReferenceResumeForAgent(context.principal, {
+        resumeText,
+        name: input.name,
+        roleCategory,
+        visibility: input.visibility || "private",
+        tags: input.tags || [],
+        notes: input.notes || "",
+      }, { signal: context.signal });
+      const verifiedAction = buildVerifiedActionSuccess({
+        action: "save_reference_resume",
+        targetType: "reference_resume",
+        targetId: data.id,
+        data,
+        expectedContent: { id: data.id, name: data.name, roleCategory: data.roleCategory },
+        readBackContent: { id: data.id, name: data.name, roleCategory: data.roleCategory },
+      });
+      return {
+        success: true,
+        data,
+        llmSummary: [
+          `优秀简历已保存：${data.name}`,
+          `岗位方向：${data.roleCategory}`,
+          `可见性：${String(data.visibility || "private")}`,
+          `质量分：${typeof data.qualityScore === "number" ? data.qualityScore.toFixed(2) : "unknown"}`,
+        ].join("\n"),
+        uiPayload: data,
+        rawData: data,
+        verifiedAction,
+        errorCategory: "ok",
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "保存优秀简历失败";
+      const needsInput = /不像|确认|需要|提供/.test(message);
+      return {
+        success: false,
+        data: null,
+        error: message,
+        errorCategory: needsInput ? "need_user_input" : "transient",
+        recoverable: !needsInput,
+      };
+    }
   }
 
   const response = await fetch("/api/cv/import-reference", {

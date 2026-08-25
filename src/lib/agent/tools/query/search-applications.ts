@@ -1,7 +1,34 @@
-import type { ToolDefinition, ToolResult } from "../types";
+import { getAgentReadService } from "@/lib/agent/runtime/agent-read-service";
+import type { ApplicationListFilters } from "@/lib/data-repositories";
+import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
 
-async function handler(params: Record<string, unknown>): Promise<ToolResult> {
+async function handler(
+  params: Record<string, unknown>,
+  context?: ToolExecutionContext,
+): Promise<ToolResult> {
   const { status, company, role, score_min: scoreMin, date_from: dateFrom, limit: rawLimit, offset: rawOffset } = params;
+  const filters: ApplicationListFilters = {
+    status: typeof status === "string" ? status : undefined,
+    company: typeof company === "string" ? company : undefined,
+    role: typeof role === "string" ? role : undefined,
+    score_min: typeof scoreMin === "number" ? scoreMin : undefined,
+    date_from: typeof dateFrom === "string" ? dateFrom : undefined,
+    limit: typeof rawLimit === "number" ? rawLimit : undefined,
+    offset: typeof rawOffset === "number" ? rawOffset : undefined,
+  };
+  if (context) {
+    try {
+      const applications = await getAgentReadService().listApplications(context.principal, filters);
+      return { success: true, data: applications, errorCategory: "ok", rawData: applications };
+    } catch (err) {
+      return {
+        success: false,
+        data: null,
+        error: `查询失败: ${err instanceof Error ? err.message : "unknown"}`,
+        errorCategory: "transient",
+      };
+    }
+  }
   const sp = new URLSearchParams();
   if (typeof status === "string") sp.set("status", status);
   if (typeof company === "string") sp.set("company", company);

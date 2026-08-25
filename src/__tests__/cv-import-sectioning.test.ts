@@ -14,6 +14,12 @@ describe("CV import sectioning", () => {
     vi.stubEnv("DEEPSEEK_API_KEY", "test-key");
     vi.stubEnv("DEEPSEEK_RESUME_PARSE_MODEL", "deepseek-chat");
     let persistedCvData: unknown;
+    let storedIntake: {
+      document: { id: string; version_id: string; content_hash: string };
+      artifact: { source_hash: string };
+      chunks: unknown[];
+      cvData: unknown;
+    } | undefined;
     vi.doMock("@/lib/auth", () => ({
       getCurrentUser: async () => ({ userId: "import-user", username: "import-user", role: "member", tokenVersion: 0 }),
     }));
@@ -23,10 +29,20 @@ describe("CV import sectioning", () => {
           get: async () => persistedCvData ? { data_json: JSON.stringify(persistedCvData) } : undefined,
         },
         resumeDocuments: {
-          createIntake: async (input: { document: { id: string; version_id: string }; cvData: unknown }) => {
+          list: async () => [],
+          createIntake: async (input: {
+            document: { id: string; version_id: string; content_hash: string };
+            artifact: { source_hash: string };
+            chunks: unknown[];
+            cvData: unknown;
+          }) => {
+            storedIntake = input;
             persistedCvData = input.cvData;
             return input.document;
           },
+          get: async () => storedIntake?.document,
+          getArtifact: async () => storedIntake?.artifact,
+          listChunks: async () => storedIntake?.chunks || [],
         },
       }),
     }));
@@ -99,11 +115,15 @@ describe("CV import sectioning", () => {
       getDataRepositories: () => ({
         cv: { get: async () => persistedCvData ? { data_json: JSON.stringify(persistedCvData) } : undefined },
         resumeDocuments: {
+          list: async () => [],
           createIntake: async (input: Record<string, unknown>) => {
             capturedIntake = input;
             persistedCvData = input.cvData;
-            return input.document;
+            return input.document as { id: string; version_id: string };
           },
+          get: async () => capturedIntake?.document,
+          getArtifact: async () => capturedIntake?.artifact,
+          listChunks: async () => capturedIntake?.chunks || [],
         },
       }),
     }));

@@ -1,6 +1,8 @@
-import type { ToolDefinition, ToolResult } from "../types";
+import { getApplicationContext } from "@/lib/application-workflow";
+import type { ApplicationContextInput } from "@/lib/application-workflow";
+import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
 
-async function handler(params: Record<string, unknown>): Promise<ToolResult> {
+async function handler(params: Record<string, unknown>, context?: ToolExecutionContext): Promise<ToolResult> {
   const sp = new URLSearchParams();
   sp.set("context", "1");
   for (const key of ["id", "company", "role", "reportNum", "jdId"]) {
@@ -8,8 +10,9 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
     if (typeof value === "string" || typeof value === "number") sp.set(key, String(value));
   }
   try {
-    const res = await fetch(`/api/data/applications?${sp.toString()}`);
-    const json = await res.json();
+    const json = context?.principal
+      ? { success: true, data: await getApplicationContext(params as ApplicationContextInput, context.principal.userId) }
+      : await fetch(`/api/data/applications?${sp.toString()}`).then((res) => res.json());
     if (!json.success) {
       return { success: false, data: json, error: json.error || "读取投递上下文失败", errorCategory: "permanent" };
     }

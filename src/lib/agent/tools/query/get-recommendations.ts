@@ -1,7 +1,32 @@
 import db from "@/lib/db";
-import type { ToolDefinition, ToolResult } from "../types";
+import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
+import { getRecommendationsForUser } from "@/lib/server/agent-insight-service";
 
-async function handler(params: Record<string, unknown>): Promise<ToolResult> {
+async function handler(
+  params: Record<string, unknown>,
+  context?: ToolExecutionContext,
+): Promise<ToolResult> {
+  if (context) {
+    try {
+      return {
+        success: true,
+        data: await getRecommendationsForUser(context.principal, {
+          limit: Number(params.limit) || 10,
+          role: typeof params.role === "string" ? params.role : undefined,
+          archetype: typeof params.archetype === "string" ? params.archetype : undefined,
+        }),
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "画像获取失败";
+      return {
+        success: false,
+        data: null,
+        error: message,
+        errorCategory: /未找到/.test(message) ? "need_user_input" : "transient",
+        recoverable: !/未找到/.test(message),
+      };
+    }
+  }
   try {
     const limit = Number(params.limit) || 10;
     const roleFilter = typeof params.role === "string" ? params.role.toLowerCase() : "";

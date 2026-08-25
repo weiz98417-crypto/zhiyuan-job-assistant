@@ -13,12 +13,11 @@ import { DEFAULT_SUGGESTIONS } from "@/components/agent/SuggestionChips";
 import type { SuggestionChip } from "@/components/agent/SuggestionChips";
 import { logInteraction } from "@/lib/agent/memory";
 import { migrateExploreToAgent } from "@/lib/agent/migrate";
-import { orchestrate } from "@/lib/agent/orchestrator";
-import { agentLoopClient } from "@/lib/agent/loop/client-runner";
+import { orchestrate, type ClientAgentDefinition } from "@/lib/agent/orchestrator/client";
+import { agentLoopRemote } from "@/lib/agent/loop/remote-runner";
 import { inferPreferredDocumentTypeFromText, type ImageDocumentType, type ImageIntakeResult } from "@/lib/agent/image-intake";
 import { buildImageIntakeStatusText, buildImageIntakeToolSummary, routeImageIntake } from "@/lib/agent/image-intake-router";
 import { routeAgentTask } from "@/lib/agent/task-routing";
-import type { AgentDefinition } from "@/lib/agent/registry/types";
 import {
   createAgentTaskContract,
   createResumeBaseSnapshot,
@@ -30,16 +29,15 @@ import {
 import type { AgentTaskType } from "@/lib/agent/task-contract";
 import type { VerifiedActionResult } from "@/lib/agent/verified-action";
 import {
-  appendAgentRunStepClient,
-  cancelAgentRunClient,
-  createAgentRunClient,
-  getAgentRunClient,
-  listActiveAgentRunsClient,
-  updateAgentRunClient,
-  type ClientAgentRunDetail,
-  type ClientAgentRunRecord,
-  type ClientAgentRunStepRecord,
-} from "@/lib/agent/run-ledger-client";
+  createDurableAgentRunClient,
+  DurableRunOwnershipUnknownError,
+  getDurableAgentRunClient,
+  listActiveDurableAgentRunsClient,
+  observeDurableAgentRun,
+  requestDurableAgentRunCancelClient,
+  submitDurableAgentRunInputClient,
+} from "@/lib/agent/runtime/durable-run-client";
+import type { AgentRunSnapshot } from "@/lib/agent/runtime/durable-agent-run";
 import type { AgentRunStatus } from "@/lib/agent/run-ledger";
 import {
   buildRunRecoveryMessage,
@@ -158,7 +156,7 @@ type ActiveRunNotice = {
   id: string;
   taskType: string;
   agentId: string;
-  status: AgentRunStatus;
+  status: string;
   phase?: string;
   guidedTaskId?: string;
   guidedTaskPhase?: string;
@@ -166,6 +164,15 @@ type ActiveRunNotice = {
   verifierSummary?: string;
   updatedAt?: string;
 };
+
+const NON_TERMINAL_DURABLE_RUN_STATUSES = new Set([
+  "queued",
+  "running",
+  "waiting_user",
+  "recovering",
+  "verifying",
+  "cancel_requested",
+]);
 
 const HANDOFF_CONSUMED_STORAGE_KEY = "agent:consumed-handoffs:v1";
 
@@ -331,7 +338,7 @@ async function persistCareerPositioningArtifact(
 
 function buildRunTarget(
   content: string,
-  agent: AgentDefinition,
+  agent: ClientAgentDefinition,
   imageIntake?: ImageIntakeResult | null,
 ): string {
   const structured = imageIntake?.structured || {};
@@ -345,35 +352,24 @@ function buildRunTarget(
   return truncateLedgerText(content || agent.name || agent.id, 120) || agent.id;
 }
 
-function activeNoticeFromRun(run: ClientAgentRunRecord): ActiveRunNotice {
+function activeNoticeFromRun(run: AgentRunSnapshot): ActiveRunNotice {
   return {
     id: run.id,
-    taskType: run.task_type,
-    agentId: run.agent_id,
+    taskType: run.taskType,
+    agentId: run.agentId,
     status: run.status,
-    updatedAt: run.updated_at,
-  };
-}
-
-function latestRunStep(steps: ClientAgentRunStepRecord[] | undefined): ClientAgentRunStepRecord | null {
-  return Array.isArray(steps) && steps.length > 0 ? steps[steps.length - 1] : null;
-}
-
-function activeNoticeFromRunDetail(detail: ClientAgentRunDetail): ActiveRunNotice {
-  const lastStep = latestRunStep(detail.steps);
-  return {
-    ...activeNoticeFromRun(detail.run),
-    phase: lastStep?.phase || undefined,
-    toolName: lastStep?.tool_name || undefined,
-    verifierSummary: lastStep?.verifier_json ? truncateLedgerText(lastStep.verifier_json, 140) : undefined,
+    updatedAt: run.updatedAt,
   };
 }
 
 function runStatusLabel(status: string): string {
   const labels: Record<string, string> = {
+    queued: "排队中",
     planned: "已计划",
     running: "运行中",
     waiting_user: "等待用户",
+    recovering: "恢复中",
+    cancel_requested: "取消中",
     verifying: "自检中",
     repairing: "自愈中",
     recovered: "已恢复",
@@ -531,7 +527,7 @@ function AgentPageInner() {
   const [undoToast, setUndoToast] = useState<{ id: number; title: string } | null>(null);
   const [sessionSidebarOpen, setSessionSidebarOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
-  const [activeAgent, setActiveAgent] = useState<AgentDefinition | null>(null);
+  const [activeAgent, setActiveAgent] = useState<ClientAgentDefinition | null>(null);
   const [evalProgress, setEvalProgress] = useState<EvalBlockProgress[]>([]);
   const [completionInfo, setCompletionInfo] = useState<CompletionInfo | null>(null);
   const [resultQuality, setResultQuality] = useState<string | null>(null);
@@ -549,6 +545,7 @@ function AgentPageInner() {
   const handoffSessionCreateKeyRef = useRef<string>("");
   const createdHandoffSessionIdRef = useRef<number | null>(null);
   const manualSessionSwitchRef = useRef<number | null>(null);
+  const durableRunCursorsRef = useRef<Record<string, number>>({});
 
   const rafRef = useRef<number>(0);
 
@@ -691,8 +688,8 @@ function AgentPageInner() {
     if (!mounted || !currentSessionId) return;
     let cancelled = false;
 
-    listActiveAgentRunsClient(currentSessionId)
-      .then(({ data }) => {
+    listActiveDurableAgentRunsClient(currentSessionId)
+      .then((data) => {
         if (cancelled) return;
         setActiveRunNotice(data[0] ? activeNoticeFromRun(data[0]) : null);
       })
@@ -704,6 +701,102 @@ function AgentPageInner() {
       cancelled = true;
     };
   }, [mounted, currentSessionId]);
+
+  useEffect(() => {
+    const notice = activeRunNotice;
+    if (!mounted || !notice || !NON_TERMINAL_DURABLE_RUN_STATUSES.has(notice.status)) return;
+    const runId = notice.id;
+    setStreaming(true);
+
+    return observeDurableAgentRun(runId, {
+      afterCursor: durableRunCursorsRef.current[runId] || 0,
+      onEvents(events, cursor) {
+        durableRunCursorsRef.current[runId] = cursor;
+        for (const runEvent of events) {
+          if (runEvent.type === "run.status_changed") {
+            const status = String(runEvent.payload.status || "");
+            if (status) {
+              setActiveRunNotice((current) => current?.id === runId ? { ...current, status } : current);
+            }
+            if (!NON_TERMINAL_DURABLE_RUN_STATUSES.has(status)) {
+              setStreaming(false);
+              setPhase(null);
+              setExecutingTool(undefined);
+              if (currentSessionId) {
+                window.setTimeout(() => {
+                  getSession(currentSessionId)
+                    .then((session) => {
+                      if (session?.messages) setMessages(session.messages);
+                    })
+                    .catch(() => {});
+                }, 100);
+              }
+            }
+            continue;
+          }
+          if (runEvent.type !== "run.ui_event") continue;
+          const uiEvent = runEvent.payload.event;
+          if (!uiEvent || typeof uiEvent !== "object" || !("type" in uiEvent)) continue;
+          const event = uiEvent as Record<string, unknown>;
+          const eventType = String(event.type || "");
+          if (eventType === "phase") {
+            setPhase((event.phase || null) as AgentPhase);
+          } else if (eventType === "thinking_content") {
+            setThinkingContent(String(event.content || ""));
+          } else if (eventType === "tool_call") {
+            setExecutingTool(String(event.name || ""));
+          } else if (eventType === "text") {
+            const content = String(event.content || "");
+            streamContentRef.current += content;
+            setStreamText(streamContentRef.current);
+            setMessages((current) => {
+              const next = [...current];
+              const lastIndex = next.length - 1;
+              const last = next[lastIndex];
+              const result = last?.toolResult;
+              const sameRun = Boolean(
+                result && typeof result === "object" &&
+                "durableRunId" in result &&
+                String((result as Record<string, unknown>).durableRunId) === runId,
+              );
+              const assistant: AgentMessage = {
+                role: "assistant",
+                content: streamContentRef.current,
+                timestamp: new Date().toISOString(),
+                toolResult: { durableRunId: runId },
+              };
+              if (last?.role === "assistant" && (!last.content || sameRun)) next[lastIndex] = assistant;
+              else next.push(assistant);
+              return next;
+            });
+          } else if (eventType === "tool_result") {
+            const name = String(event.name || "");
+            const uiPayload = event.uiPayload && typeof event.uiPayload === "object"
+              ? event.uiPayload as Record<string, unknown>
+              : undefined;
+            const toolMessage: AgentMessage = {
+              role: "tool",
+              toolName: name,
+              content: String(event.result || ""),
+              toolResult: {
+                success: event.success === true,
+                data: event.data,
+                uiPayload,
+                durableRunId: runId,
+              },
+              timestamp: new Date().toISOString(),
+            };
+            setMessages((current) => [...current, toolMessage]);
+          } else if (eventType === "tool_error") {
+            setExecutingTool(undefined);
+            setPhase("reflecting");
+          } else if (eventType === "done") {
+            setExecutingTool(undefined);
+          }
+        }
+      },
+    });
+  }, [activeRunNotice, currentSessionId, mounted]);
 
   const appendAssistantStatusMessage = useCallback(async (content: string) => {
     const message: AgentMessage = {
@@ -768,14 +861,14 @@ function AgentPageInner() {
     if (!runId || activeRunAction) return;
     setActiveRunAction("resume");
     try {
-      const detail = await getAgentRunClient(runId);
-      if (!detail) {
+      const run = await getDurableAgentRunClient(runId);
+      if (!run) {
         setActiveRunNotice(null);
         await appendAssistantStatusMessage(`没有找到 Agent run #${shortRunId(runId)}，可能已经结束或被清理。`);
         return;
       }
-      setActiveRunNotice(activeNoticeFromRunDetail(detail));
-      const content = buildRunRecoveryMessage(detail);
+      setActiveRunNotice(activeNoticeFromRun(run));
+      const content = buildRunRecoveryMessage(run);
       const nextMessages = upsertRunRecoveryStatusMessage(messages, runId, content, new Date().toISOString());
       setMessages(nextMessages);
       if (currentSessionId) {
@@ -812,20 +905,10 @@ function AgentPageInner() {
     if (!runId || activeRunAction) return;
     setActiveRunAction("cancel");
     try {
-      abortRef.current?.abort();
-      abortRef.current = null;
-      setStreaming(false);
-      setPhase(null);
-      setExecutingTool(undefined);
-      setThinkingContent("");
-      setActiveAgent(null);
-      const ok = await cancelAgentRunClient(runId);
-      if (ok) {
-        setActiveRunNotice((prev) => (prev?.id === runId ? { ...prev, status: "cancelled" } : prev));
-        await appendAssistantStatusMessage(`已取消 Agent run #${shortRunId(runId)}。这次任务不会再被标记为完成。`);
-        window.setTimeout(() => {
-          setActiveRunNotice((prev) => (prev?.id === runId ? null : prev));
-        }, 2000);
+      const run = await requestDurableAgentRunCancelClient(runId, crypto.randomUUID());
+      if (run) {
+        setActiveRunNotice(activeNoticeFromRun(run));
+        await appendAssistantStatusMessage(`已提交 Agent run #${shortRunId(runId)} 的取消请求，Worker 会在安全位置停止。`);
       } else {
         await appendAssistantStatusMessage(`取消 Agent run #${shortRunId(runId)} 失败，它可能已经结束。`);
       }
@@ -888,6 +971,31 @@ function AgentPageInner() {
       setStartTime(Date.now());
       setEvalProgress([]);
       setCompletionInfo(null);
+
+      if (activeRunNotice && NON_TERMINAL_DURABLE_RUN_STATUSES.has(activeRunNotice.status)) {
+        const submitted = await submitDurableAgentRunInputClient(activeRunNotice.id, {
+          requestId: crypto.randomUUID(),
+          input: { content, images },
+        });
+        if (submitted) {
+          setActiveRunNotice(activeNoticeFromRun(submitted.run));
+        } else {
+          setStreaming(false);
+          setPhase(null);
+          setMessages((current) => {
+            const next = [...current];
+            const lastIndex = next.length - 1;
+            if (next[lastIndex]?.role === "assistant" && !next[lastIndex]?.content) {
+              next[lastIndex] = {
+                ...next[lastIndex],
+                content: "补充信息未能写入当前 Run，请稍后重试。",
+              };
+            }
+            return next;
+          });
+        }
+        return;
+      }
 
       const imageDataUris = (images || []).filter((src) => typeof src === "string" && src.startsWith("data:image/"));
       const imageIntakeToolTimestamp = imageDataUris.length ? new Date().toISOString() : "";
@@ -964,6 +1072,7 @@ function AgentPageInner() {
       const controller = new AbortController();
       abortRef.current = controller;
       let durableRunId: string | null = null;
+      let workerOwnedRun = false;
 
       try {
         // ── Client-side orchestration: classify + agentLoopClient ──
@@ -1241,7 +1350,7 @@ function AgentPageInner() {
         });
         const routeForcedAgentId = forcedAgentId || (routeDecision.taskType ? taskAgentId(routeDecision.taskType) : undefined);
 
-        const { agent, systemPrompt, toolWhitelist, tools } = await orchestrate(routedContent, {
+        const { agent, systemPrompt } = await orchestrate(routedContent, {
           sessionId: currentSessionId,
           messages: sessionMessages,
           memoryDigest,
@@ -1341,74 +1450,29 @@ Rules:
             if (taskType === "interview_coaching" && interviewState?.planSnapshot) {
               completedContractCriteria.add("JD/resume context bound");
             }
-            const createdRun = await createAgentRunClient({
-              sessionId: currentSessionId,
+            const created = await createDurableAgentRunClient({
+              requestId: crypto.randomUUID(),
+              conversationId: currentSessionId,
               taskType,
               agentId: agent.id,
+              input: { content, images },
               contract,
             });
-            durableRunId = createdRun?.id || null;
-            if (createdRun) {
+            const createdRun = created?.run || null;
+            if (created?.assignment.owner === "worker" && createdRun) {
+              workerOwnedRun = true;
+              durableRunId = createdRun.id;
               setActiveRunNotice({
                 ...activeNoticeFromRun(createdRun),
-                status: "running",
                 phase: "understanding",
                 guidedTaskId: activeGuidedSessionForRun?.taskId,
                 guidedTaskPhase: activeGuidedSessionForRun?.phase,
               });
-              if (activeGuidedSessionForRun) {
-                await appendAgentRunStepClient(createdRun.id, {
-                  phase: "guided-task-lock",
-                  status: "succeeded",
-                  inputSummary: summarizeLedgerParams({
-                    userText: content,
-                    activeTask: activeGuidedSessionForRun.taskType,
-                    agentId: activeGuidedSessionForRun.agentId,
-                  }),
-                  outputSummary: routeDecision.requiresClarification
-                    ? `需要确认是否切换到 ${routeDecision.clarificationQuestion || "新任务"}`
-                    : `继续 ${taskLabelZh(activeGuidedSessionForRun.taskType)}`,
-                  verifier: {
-                    taskId: activeGuidedSessionForRun.taskId,
-                    taskType: activeGuidedSessionForRun.taskType,
-                    phase: activeGuidedSessionForRun.phase,
-                    expectedInput: activeGuidedSessionForRun.expectedInput,
-                    routeLocked: true,
-                    routeAudit: routeDecision.auditSummary,
-                    requiresClarification: routeDecision.requiresClarification,
-                  },
-                }).catch(() => null);
-              }
-              if (imageIntake) {
-                const imageDecision = routeImageIntake(content, imageIntake);
-                await appendAgentRunStepClient(createdRun.id, {
-                  phase: "image-intake",
-                  toolName: "recognize_document_image",
-                  status: imageDecision.route === "retry_image" ? "failed" : "succeeded",
-                  inputSummary: summarizeLedgerParams({
-                    userText: content,
-                    images: imageDataUris,
-                    preferredDocumentType,
-                  }),
-                  outputSummary: truncateLedgerText(buildImageIntakeToolSummary(imageDecision, imageIntake), 240),
-                  verifier: {
-                    documentType: imageDecision.documentType,
-                    route: imageDecision.route,
-                    confidence: imageDecision.confidence,
-                    quality: imageDecision.quality || "unknown",
-                    reason: imageDecision.reason,
-                    retryHint: imageDecision.retryHint,
-                    extractedTextLength: imageIntake.extractedText?.length || 0,
-                    perImageCount: imageIntake.perImage?.length || 0,
-                  },
-                  error: imageDecision.route === "retry_image"
-                    ? { reason: imageDecision.reason, errors: imageIntake.errors || [] }
-                    : {},
-                }).catch(() => null);
-              }
-              await updateAgentRunClient(createdRun.id, "running").catch(() => null);
+              abortRef.current = null;
+              return;
             }
-          } catch {
+          } catch (error) {
+            if (error instanceof DurableRunOwnershipUnknownError) throw error;
             durableRunId = null;
           }
         }
@@ -1437,7 +1501,6 @@ Rules:
                 }
               : prev,
           );
-          appendAgentRunStepClient(runId, input).catch(() => {});
         };
 
         const updateRunStatus = async (
@@ -1447,7 +1510,6 @@ Rules:
           if (!durableRunId) return;
           const runId = durableRunId;
           setActiveRunNotice((prev) => (prev?.id === runId ? { ...prev, status } : prev));
-          await updateAgentRunClient(runId, status, patch).catch(() => null);
           if (status === "succeeded" || status === "cancelled") {
             window.setTimeout(() => {
               setActiveRunNotice((prev) => (prev?.id === runId ? null : prev));
@@ -1470,20 +1532,15 @@ Rules:
         }));
 
         let firstEvent = true;
-        for await (const event of agentLoopClient(
-          activeSystemPrompt, msgList, undefined, controller.signal, undefined,
-          toolWhitelist.length > 0 ? toolWhitelist : undefined, tools,
+        for await (const event of agentLoopRemote(
+          activeSystemPrompt,
+          msgList,
+          controller.signal,
           {
             agentId: agent.id,
-            imageIntake,
-            preferredDocumentType,
             interviewState,
             interviewRebindAction: rebindResolution?.action,
-            pendingReferenceResumeSave: pendingReferenceResumeSaveForRun,
             taskContract: activeTaskContract,
-            resumeImageSourceText: activeGuidedSessionForRun?.source === "image_clarification" && activeGuidedSessionForRun.documentType === "resume"
-              ? activeGuidedSessionForRun.sourceText
-              : undefined,
           },
         )) {
           if (firstEvent) { setStartTime(Date.now()); firstEvent = false; }
@@ -2066,7 +2123,6 @@ Rules:
         const errorMsg = err instanceof Error ? err.message : "未知错误";
         console.error("Stream error:", errorMsg);
         if (durableRunId) {
-          await updateAgentRunClient(durableRunId, "failed", { error: { message: errorMsg } }).catch(() => null);
           setActiveRunNotice((prev) => (prev?.id === durableRunId ? { ...prev, status: "failed" } : prev));
         }
         setStreaming(false);
@@ -2083,12 +2139,14 @@ Rules:
           return copy;
         });
       } finally {
-        setStreaming(false);
-        setPhase(null);
-        abortRef.current = null;
+        if (!workerOwnedRun) {
+          setStreaming(false);
+          setPhase(null);
+        }
+        if (abortRef.current === controller) abortRef.current = null;
       }
     },
-    [messages, currentSessionId, makeSessionTitle, renameSessionFromFirstUserMessage, generateMemoryDigestWithStatus, refreshLatestRollbackProposal],
+    [activeRunNotice, messages, currentSessionId, makeSessionTitle, renameSessionFromFirstUserMessage, generateMemoryDigestWithStatus, refreshLatestRollbackProposal],
   );
 
   useEffect(() => {

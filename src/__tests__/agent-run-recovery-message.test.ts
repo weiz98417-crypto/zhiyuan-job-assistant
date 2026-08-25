@@ -34,33 +34,33 @@ describe("agent run recovery status messages", () => {
     expect(JSON.stringify(twice)).not.toContain("first status");
   });
 
-  it("describes running recovery as a status check, not a repeated execution", () => {
+  it("describes a running durable Run as continuing from checkpoints", () => {
     const content = buildRunRecoveryMessage({
-      run: {
-        id: "1ce2be63-d220-48b0-913a-e707aa6898c5",
-        user_id: "user-1",
-        session_id: 1,
-        task_type: "jd_evaluation",
-        agent_id: "evaluate",
-        status: "running",
-        created_at: "2026-06-16T00:00:00.000Z",
-        updated_at: "2026-06-16T00:00:01.000Z",
-      },
-      steps: [{
-        id: 1,
-        run_id: "1ce2be63-d220-48b0-913a-e707aa6898c5",
-        phase: "archetype_detected",
-        tool_name: "",
-        status: "running",
-        input_summary: "",
-        output_summary: "",
-        created_at: "2026-06-16T00:00:01.000Z",
-      }],
+      id: "1ce2be63-d220-48b0-913a-e707aa6898c5",
+      userId: "user-1",
+      conversationId: 1,
+      requestId: "request-1",
+      taskType: "jd_evaluation",
+      agentId: "evaluate",
+      status: "recovering",
+      snapshotVersion: 4,
+      eventCursor: 9,
+      contract: {},
+      budgets: {},
+      runtimeMode: "worker_all",
+      parentRunId: null,
+      depth: 0,
+      ownerId: null,
+      fencingToken: 2,
+      heartbeatAt: "2026-06-16T00:00:01.000Z",
+      leaseExpiresAt: "2026-06-16T00:00:31.000Z",
+      createdAt: "2026-06-16T00:00:00.000Z",
+      updatedAt: "2026-06-16T00:00:01.000Z",
     });
 
     expect(content).toContain("已查看 Agent run #1ce2be63 的运行状态");
-    expect(content).toContain("最近一步：archetype_detected");
-    expect(content).toContain("不会自动重跑");
+    expect(content).toContain("事件游标：9");
+    expect(content).toContain("Worker 会从最近的安全检查点继续");
     expect(content).not.toContain("已恢复 Agent run");
   });
 });

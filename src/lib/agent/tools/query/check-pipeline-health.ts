@@ -1,4 +1,5 @@
-import type { ToolDefinition, ToolResult } from "../types";
+import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
+import { getPipelineHealthForUser } from "@/lib/server/agent-insight-service";
 
 interface AppRecord {
   company?: string;
@@ -8,7 +9,24 @@ interface AppRecord {
   notes?: string;
 }
 
-async function handler(_params: Record<string, unknown>): Promise<ToolResult> {
+async function handler(
+  params: Record<string, unknown>,
+  context?: ToolExecutionContext,
+): Promise<ToolResult> {
+  if (context) {
+    try {
+      const threshold = Number(params.days_threshold) || 7;
+      return { success: true, data: await getPipelineHealthForUser(context.principal, threshold) };
+    } catch (error) {
+      return {
+        success: false,
+        data: null,
+        error: error instanceof Error ? error.message : "无法读取投递数据库",
+        errorCategory: "transient",
+        recoverable: true,
+      };
+    }
+  }
   try {
     // Read applications from IndexedDB via existing Dexie wrapper
     const { default: db } = await import("@/lib/db");

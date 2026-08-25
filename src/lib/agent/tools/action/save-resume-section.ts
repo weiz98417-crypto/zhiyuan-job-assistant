@@ -1,5 +1,9 @@
-import type { ToolDefinition, ToolResult } from "../types";
+import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
 import { validateResumeSectionContent, type ResumeSectionId } from "@/lib/agent/resume-save-guard";
+import {
+  createResumeEditProposalForUser,
+  ResumeProposalServiceError,
+} from "@/lib/server/resume-edit-proposal-service";
 import {
   buildVerifiedActionFailure,
   buildVerifiedActionSuccess,
@@ -20,7 +24,10 @@ function resolveSection(value: unknown): ResumeSectionId {
   return SECTION_MAP[text] || "experience";
 }
 
-async function handler(params: Record<string, unknown>): Promise<ToolResult> {
+async function handler(
+  params: Record<string, unknown>,
+  context?: ToolExecutionContext,
+): Promise<ToolResult> {
   const sectionId = resolveSection(params.section || params.sectionId);
   const proposedContent = String(params.content || params.proposedContent || "");
   const expectedBaseHash = typeof params.baseHash === "string" ? params.baseHash : "";
@@ -59,6 +66,62 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
         error,
       }),
     };
+  }
+
+  if (context) {
+    try {
+      const proposal = await createResumeEditProposalForUser(context.principal, {
+        sectionId,
+        proposedContent,
+        reason: "legacy_save_resume_section",
+        riskFlags: ["legacy_save_resume_section", "agent_generated"],
+        expectedBaseHash,
+        expectedBaseVersion,
+        requestId: context.requestId || `${context.runId}:save_resume_section`,
+      });
+      const verifiedAction = buildVerifiedActionSuccess({
+        action: "save_resume_section",
+        targetType: "cv",
+        targetId: proposal.id,
+        targetField: sectionId,
+        baseHash: proposal.baseHash,
+        versionId: proposal.baseVersion,
+        data: proposal,
+        expectedContent: proposedContent,
+        readBackContent: proposal.proposedContent,
+      });
+      const data = {
+        ...proposal,
+        saved: false,
+        proposalCreated: true,
+        proposedHash: proposal.proposedHash || stableContentHash(proposedContent),
+      };
+      return {
+        success: true,
+        data,
+        errorCategory: "ok",
+        llmSummary: `已创建简历修改提案 ${proposal.id}，等待用户确认后才会写入 CV。`,
+        uiPayload: { type: "resume_edit_proposal", ...data },
+        rawData: data,
+        verifiedAction,
+      };
+    } catch (error) {
+      const code = error instanceof ResumeProposalServiceError ? error.code : "verification_failed";
+      const message = error instanceof Error ? error.message : "创建简历修改提案失败";
+      return {
+        success: false,
+        data: null,
+        error: message,
+        errorCategory: code === "conflict" || code === "invalid_input" || code === "not_found" ? "need_user_input" : "transient",
+        recoverable: code === "verification_failed",
+        verifiedAction: buildVerifiedActionFailure({
+          action: "save_resume_section",
+          targetType: "cv",
+          targetField: sectionId,
+          error: message,
+        }),
+      };
+    }
   }
 
   const res = await fetch("/api/cv/edit-proposals", {

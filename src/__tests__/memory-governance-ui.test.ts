@@ -27,17 +27,18 @@ describe("memory governance admin boundaries", () => {
 
   it("keeps normal reference material APIs lightweight and owner-scoped", () => {
     const listRoute = source("src/app/api/cv/references/route.ts");
+    const readService = source("src/lib/agent/runtime/agent-read-service.ts");
     const detailRoute = source("src/app/api/cv/references/[id]/route.ts");
     const cvPage = source("src/app/cv/page.tsx");
     const viewer = source("src/app/cv/reference-viewer.tsx");
 
-    expect(listRoute).toContain("ownedByUser");
+    expect(readService).toContain("ownedByUser");
     expect(listRoute).not.toContain("...r");
     expect(listRoute).not.toContain("memory_items");
     expect(listRoute).not.toContain("reference_resume_chunks");
     expect(listRoute).not.toContain("memory_chunks");
 
-    expect(detailRoute).toContain("buildSharedSections(resume)");
+    expect(readService).toContain("buildSharedSections(resume)");
     expect(detailRoute).toContain("状态由管理员治理流程控制");
     expect(detailRoute).toContain("applyUserReferenceAction(\"request_team_share\"");
     expect(detailRoute).toContain("return \"withdraw_team_share\"");

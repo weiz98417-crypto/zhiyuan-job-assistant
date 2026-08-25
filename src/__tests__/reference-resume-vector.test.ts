@@ -172,11 +172,11 @@ describe("reference resume schema boundaries", () => {
   });
 
   it("wires semantic references into CV optimization with a no-match fallback", () => {
-    const optimizeRoute = fs.readFileSync(path.join(process.cwd(), "src/app/api/cv/optimize-section/route.ts"), "utf8");
+    const optimizeService = fs.readFileSync(path.join(process.cwd(), "src/lib/server/resume-optimization-service.ts"), "utf8");
     const judgeEngine = fs.readFileSync(path.join(process.cwd(), "src/lib/judge-engine.ts"), "utf8");
-    expect(optimizeRoute).toContain("retrieveReferenceResumeSnippets");
-    expect(optimizeRoute).toContain("fast && !semanticReferenceSnippets.length");
-    expect(optimizeRoute).toContain("referenceSnippets: semanticReferenceSnippets");
+    expect(optimizeService).toContain("retrieveReferenceResumeSnippets");
+    expect(optimizeService).toContain("input.fast && !snippets.length");
+    expect(optimizeService).toContain("referenceSnippets: snippets");
     expect(judgeEngine).toContain("buildSemanticReferencePrompt(referenceSnippets)");
     expect(judgeEngine).toContain("Do not copy the reference wording verbatim");
   });

@@ -17,6 +17,7 @@ export interface DeepSeekJsonConfig {
   messages: { role: string; content: string }[];
   temperature?: number;
   max_tokens?: number;
+  signal?: AbortSignal;
 }
 
 /* ── Shared: DeepSeek streaming chunk reader (fetch + line-buffer loop) ── */
@@ -237,6 +238,7 @@ export async function callDeepSeekJson(config: DeepSeekJsonConfig): Promise<stri
     retries: 2,
     timeout: 30_000,
     fallbackModel: process.env.DEEPSEEK_FALLBACK_MODEL,
+    signal: config.signal,
   });
 
   if (!response.ok) {

@@ -38,23 +38,35 @@ src/lib
 
 ## Agent Runtime
 
-The Agent chat route is a server-side loop. The browser sends the user message, selected images, session state, and pending confirmations. The server builds context, selects a sub-agent, enforces tool policy, executes tools, and streams text/tool updates back to the UI.
+Production Agent execution is owned by a PostgreSQL-backed PM2 Worker. The browser creates an Agent Run, submits durable input or approval commands, and observes cursor-based events; closing the page or losing SSE does not cancel the Run. `legacy`, `shadow`, `worker_readonly`, and `worker_all` modes support staged rollout with exactly one execution owner per Run.
+
+The Runtime checkpoints before model calls and governed side effects. A Worker crash or classified failure therefore resumes the same Run from its latest safe checkpoint. Recovery decisions are bounded and persisted: retry transport/provider failures, repair parameters, compact oversized context, replan with another safe tool, reconcile uncertain effects, or wait for user input. The failed observation is injected into the next model context so a requeued Run does not blindly repeat the same path.
+
+Monitoring, Review, Eval, Admin projection, and alerts consume a transactional outbox. Their latency or failure can create backlog or dead-letter records, but cannot change the Run outcome. Policy admission, idempotency, transaction boundaries, reconciliation, and read-back verification remain synchronous because they protect execution correctness.
 
 Key modules:
 
 | Module | Responsibility |
 | --- | --- |
+| `src/lib/agent/runtime/durable-agent-run.ts` | Durable commands, legal state transitions, inputs, gates, checkpoints, child Runs, cancellation, and idempotency. |
+| `src/lib/agent/runtime/postgres-agent-run-store.ts` | PostgreSQL claim, lease, heartbeat, fencing, event/snapshot/checkpoint transactions, and outbox writes. |
+| `src/lib/agent/runtime/agent-worker.ts` | Bounded concurrent execution, deadlines, heartbeat, drain, structured recovery, and safe requeue. |
+| `src/lib/agent/runtime/durable-orchestrator-engine.ts` | Rebuild model context, compact it, execute the existing orchestrator, project events, and verify the Run Contract. |
+| `src/lib/agent/runtime/governed-tool-attempt.ts` | Persist intent, enforce capability/policy/Gate, execute with cancellation, reconcile, verify, and persist the result. |
+| `src/lib/agent/runtime/recovery-supervisor.ts` | Select a bounded recovery action from structured Observation and persistent budgets. |
+| `src/lib/agent/runtime/run-evidence-observer.ts` | Consume the outbox and isolate Evidence/Review/Admin projection failures. |
 | `src/lib/agent/orchestrator/index.ts` | Route user intent to the right sub-agent and build prompt context. |
 | `src/lib/agent/registry/agents/*` | Agent definitions and tool allowlists. |
-| `src/lib/agent/tools/index.ts` | Registers 48 tools and exposes execution helpers. |
+| `src/lib/agent/tools/index.ts` | Immutable tool definitions and execution helpers; Worker allowlists live in execution context. |
 | `src/lib/agent/tool-governance.ts` | Classifies tool side effects, task contract policies, allowed agents, read-back requirements, and route conflicts. |
 | `src/lib/agent/task-routing.ts` | Central routing matrix for text intent, image document type, memory policy task, and allowed tools. |
-| `src/lib/agent/loop/client-runner.ts` | Client-facing loop orchestration, pending save flow, tool execution sequence. |
-| `src/lib/agent/loop/server-runner.ts` | Server-side model invocation and stream handling. |
+| `src/lib/agent/runtime/durable-run-client.ts` | Browser command/query adapter, SSE cursor resume, and polling fallback. |
+| `src/lib/agent/loop/client-runner.ts` | Transitional legacy-mode adapter retained during staged rollout. |
+| `src/lib/agent/loop/server-runner.ts` | Shared model/tool cycle used by the Worker orchestrator and legacy mode during migration. |
 | `src/lib/agent/loop/tool-policy.ts` | Guardrails for interview rebinding, raw report leakage, and tool misuse. |
 | `src/components/MarkdownRenderer.tsx` | Sanitized Markdown rendering for readable chat output. |
 
-Tool execution is governed twice: static tests require registered tools to have metadata, and the runtime blocks calls when a tool effect conflicts with the active task contract. Durable writes, exports, and admin actions must return read-back or deterministic verifier evidence before the assistant can claim success.
+Every static tool exposed in `worker_all` calls a principal-scoped server application service; the Worker does not forge cookies or depend on relative HTTP, localStorage, IndexedDB, or DOM. MCP connectors and external services receive the Run AbortSignal and bounded deadlines. Durable writes, exports, and admin actions must return read-back or deterministic verifier evidence before the assistant can claim success.
 
 ## Image Intake Flow
 
@@ -115,7 +127,7 @@ Offer evaluation is separated from JD evaluation. The offer agent owns:
 
 ## Interview Coach Flow
 
-The interview coach stores a session snapshot with the selected JD/resume context.
+The interview coach stores the selected JD/resume binding and every turn as a read-back-verified session checkpoint. The route is only an authenticated protocol adapter; model calls, fallback questions, scoring, memory writeback, idempotent turn recovery, and persistence live in the shared interview application service.
 
 ```text
 Launch / bind materials
@@ -123,7 +135,8 @@ Launch / bind materials
   -> user answers
   -> score and feedback
   -> next question
-  -> recap persisted in session history
+  -> checkpoint and read back after every turn
+  -> recap persisted in the same session history
 ```
 
 `src/lib/agent/interview-session-state.ts` and `src/lib/agent/interview-rebind-policy.ts` keep the coach anchored to the original materials. This is what prevents the repeated failure mode where the agent asks many questions at once or forgets the JD/resume constraint.
@@ -134,7 +147,7 @@ The data layer has two runtime drivers. The current LAN deployment uses PostgreS
 
 | Driver | Status | Usage |
 | --- | --- | --- |
-| PostgreSQL | Current LAN runtime | Repository-backed server data path, multi-user data, run ledger, reviews, and pgvector memory foundation. |
+| PostgreSQL | Production and current LAN runtime | Repository-backed business data, durable Run state, Tool Attempts, checkpoints, outbox, reviews, and pgvector memory. |
 | SQLite | Fallback/archive | Local lightweight mode, migration source, and readonly archive path. |
 
 `src/lib/data-repositories.ts` is the canonical data access layer for server routes that need to work across both drivers. It delegates to PostgreSQL when `DB_DRIVER=postgres`; otherwise it can use SQLite fallback.
@@ -191,3 +204,5 @@ OpenSpec changes under `openspec/changes/` document the implementation plan for 
 - Memory feedback promotion.
 - Admin memory governance UI.
 - Hardened memory/tool policies.
+- Durable Agent Run, governed Tool Attempts, bounded Recovery Supervisor, and asynchronous Evidence observer.
+- Dedicated PM2 Agent Worker and Alibaba Cloud release/rollback runbook.

@@ -6,7 +6,7 @@ import { Send, Loader2, Check, CheckCircle, X, ChevronDown, ChevronUp, Brain, Re
 import { WarmButton, ScoreBadge } from "@/components/design";
 import MarkdownRenderer from "@/components/MarkdownRenderer";
 import { getToolDisplay } from "@/lib/agent/tool-display-names";
-import { getAgentById } from "@/lib/agent/registry";
+import { getAgentDisplayName } from "@/lib/agent/client-metadata";
 import { fetchDiscoveryJobDetail, getAgentEvaluationUrl, saveDiscoveryJobJD } from "@/lib/job-discovery";
 import type { AgentMessage, CoachMode, InterviewQuestion, InterviewSessionState } from "@/types";
 import { createJD } from "@/lib/jd-storage";
@@ -2501,7 +2501,7 @@ export default function AgentChat({
             effectiveAgentId !== prevAgentId &&
             msg.role !== "user";
           const agentLabel = showAgentLabel
-            ? getAgentById(effectiveAgentId)?.name || effectiveAgentId
+            ? getAgentDisplayName(effectiveAgentId)
             : undefined;
 
           return (

@@ -1,4 +1,8 @@
-import type { ToolDefinition, ToolResult } from "../types";
+import {
+  DurableJDEvaluationInputError,
+  runDurableJDEvaluation,
+} from "@/lib/server/durable-jd-evaluation";
+import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
 
 interface EvalJDParams {
   jdText?: string;
@@ -7,7 +11,10 @@ interface EvalJDParams {
   language?: "zh" | "en";
 }
 
-async function handler(params: Record<string, unknown>): Promise<ToolResult> {
+async function handler(
+  params: Record<string, unknown>,
+  context?: ToolExecutionContext,
+): Promise<ToolResult> {
   const { jdText, jdUrl, images, language } = params as EvalJDParams;
 
   const hasText = typeof jdText === "string" && jdText.trim().length >= 50;
@@ -16,6 +23,27 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
 
   if (!hasText && !hasUrl && !hasImages) {
     return { success: false, data: null, error: "请提供 JD 文本（≥50字符）、链接或截图" };
+  }
+
+  if (context) {
+    try {
+      const result = await runDurableJDEvaluation(context.principal, {
+        jdText,
+        jdUrl,
+        images,
+        language,
+      }, { signal: context.signal });
+      return { success: true, data: result, errorCategory: "ok" };
+    } catch (error) {
+      const needsInput = error instanceof DurableJDEvaluationInputError;
+      return {
+        success: false,
+        data: null,
+        error: error instanceof Error ? error.message : "JD 评估失败",
+        errorCategory: needsInput ? "need_user_input" : "transient",
+        recoverable: !needsInput,
+      };
+    }
   }
 
   // If images provided, OCR first to extract JD text

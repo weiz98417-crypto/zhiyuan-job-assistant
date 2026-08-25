@@ -1,14 +1,36 @@
-import type { ToolDefinition, ToolResult } from "../types";
+import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
+import {
+  analyzePipelineHealth,
+  type PipelineHealthInput,
+  type PipelineHealthThresholds,
+} from "@/lib/server/pipeline-health-service";
 
-async function handler(params: Record<string, unknown>): Promise<ToolResult> {
-  const pipeline = params.pipeline;
-  const res = await fetch("/api/analytics/health-check", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ pipeline, thresholds: params.thresholds }),
-  });
-  const json = await res.json();
-  return { success: json.success, data: json.data, error: json.error };
+async function handler(params: Record<string, unknown>, context?: ToolExecutionContext): Promise<ToolResult> {
+  if (!params.pipeline || typeof params.pipeline !== "object") {
+    return { success: false, data: null, error: "缺少 Pipeline 数据", errorCategory: "permanent" };
+  }
+  try {
+    const result = await analyzePipelineHealth(
+      params.pipeline as PipelineHealthInput,
+      params.thresholds as Partial<PipelineHealthThresholds> | undefined,
+      context?.signal,
+    );
+    return {
+      success: true,
+      data: result,
+      errorCategory: "ok",
+      llmSummary: `Pipeline 健康状态 ${result.status}，评分 ${result.score}，发现 ${result.issues.length} 个问题。`,
+      rawData: result,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      error: error instanceof Error ? error.message : "健康检查失败",
+      errorCategory: "transient",
+      recoverable: true,
+    };
+  }
 }
 
 function formatResult(result: ToolResult): string {

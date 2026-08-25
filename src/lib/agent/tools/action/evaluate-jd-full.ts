@@ -1,6 +1,10 @@
-import type { ToolDefinition, ToolResult } from "../types";
+import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
 import type { ImageIntakeResult } from "@/lib/agent/image-intake";
 import { fetchAgentMemoryContext } from "../memory-helpers";
+import {
+  DurableJDEvaluationInputError,
+  runDurableJDEvaluation,
+} from "@/lib/server/durable-jd-evaluation";
 
 interface EvalJDFullParams {
   jd_text?: string;
@@ -9,6 +13,7 @@ interface EvalJDFullParams {
   target_company?: string;
   images?: string[];
   allow_web_search?: boolean;
+  language?: "zh" | "en";
 }
 
 function apiPath(path: string): string {
@@ -93,7 +98,7 @@ async function extractJDFromImages(images: string[]): Promise<{
   return { jdText: bodies.join("\n\n---\n\n"), company, role, errors };
 }
 
-async function handler(params: Record<string, unknown>): Promise<ToolResult> {
+async function legacyHandler(params: Record<string, unknown>): Promise<ToolResult> {
   const { jd_url, cv_text, target_company, images, allow_web_search } = params as EvalJDFullParams;
   let jdText = (params as EvalJDFullParams).jd_text || "";
   let targetCompany = target_company || "";
@@ -178,6 +183,47 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
     data: { _stream: res.body },
     _streaming: true,
   };
+}
+
+async function handler(
+  params: Record<string, unknown>,
+  context?: ToolExecutionContext,
+): Promise<ToolResult> {
+  if (!context) return legacyHandler(params);
+  const input = params as EvalJDFullParams;
+  try {
+    const result = await runDurableJDEvaluation(context.principal, {
+      jdText: input.jd_text || "",
+      jdUrl: input.jd_url || "",
+      cvText: input.cv_text || "",
+      targetCompany: input.target_company || "",
+      images: Array.isArray(input.images) ? input.images : [],
+      allowWebSearch: input.allow_web_search === true,
+      language: input.language === "en" ? "en" : "zh",
+    }, { signal: context.signal });
+    return { success: true, data: result };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "JD 评估失败";
+    if (error instanceof DurableJDEvaluationInputError) {
+      return {
+        success: false,
+        data: null,
+        error: message,
+        errorCategory: "need_user_input",
+        recoverable: false,
+        llmSummary: `${message}。请让用户补充完整 JD 文本、公开链接或清晰截图。`,
+      };
+    }
+    return {
+      success: false,
+      data: null,
+      error: message,
+      errorCategory: "transient",
+      recoverable: true,
+      retryHint: "评估运行中断，Runtime 将根据持久化证据重试或恢复",
+      rawData: { dispatchState: "unknown" },
+    };
+  }
 }
 
 function formatResult(result: ToolResult): string {

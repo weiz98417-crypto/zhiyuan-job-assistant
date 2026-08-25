@@ -57,6 +57,7 @@ import { getWeather, searchPlace, getDirections } from "./mcp/baidu-map";
 import { searchJobs } from "./mcp/job-search";
 
 import type { ToolDefinition, ToolResult } from "./types";
+import type { ToolExecutionContext } from "./types";
 
 /* ── Singleton registry ── */
 
@@ -121,6 +122,8 @@ registry.register(searchPlace);
 registry.register(getDirections);
 registry.register(searchJobs);
 
+registry.seal();
+
 /* ── Backward-compatible exports ── */
 
 /**
@@ -153,8 +156,9 @@ export function getToolsByCategory(category: "query" | "action"): ToolDefinition
 export async function executeTool(
   name: string,
   params: Record<string, unknown>,
+  context?: ToolExecutionContext,
 ): Promise<ToolResult> {
-  return registry.execute(name, params);
+  return registry.execute(name, params, context);
 }
 
 export function buildToolListForLLM(): string {
@@ -175,16 +179,6 @@ export function buildToolListForAgent(toolNames: string[]): string {
     return `- ${t!.name}: ${t!.description}${paramsStr ? ` (${paramsStr})` : ""}`;
   });
   return `\n## 可用工具\n\n${lines.join("\n")}`;
-}
-
-/** Set tool whitelist for current active agent */
-export function setActiveAgentTools(toolNames: string[]): void {
-  registry.setActiveAgentTools(toolNames);
-}
-
-/** Clear tool whitelist (allow all tools) */
-export function clearActiveAgentTools(): void {
-  registry.clearActiveAgentTools();
 }
 
 export function formatToolResult(result: ToolResult, toolName: string): string {

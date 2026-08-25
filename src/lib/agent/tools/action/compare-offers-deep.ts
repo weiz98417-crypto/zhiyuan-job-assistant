@@ -1,6 +1,11 @@
 import type { OfferEvaluationReport, OfferSnapshot } from "@/types";
 import { evaluateOfferSnapshot, normalizeOfferSnapshot } from "@/lib/offer-evaluation";
-import type { ToolDefinition, ToolResult } from "../types";
+import {
+  compareOffersForAgent,
+  OfferAgentInputError,
+  type OfferComparisonInput,
+} from "@/lib/server/offer-agent-service";
+import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
 
 interface OfferData {
   company: string;
@@ -79,8 +84,47 @@ async function fetchOffersByIds(offerIds: number[]): Promise<OfferSnapshot[]> {
   return fetched;
 }
 
-async function handler(params: Record<string, unknown>): Promise<ToolResult> {
-  let offers = (params.offers as OfferData[]) || [];
+async function handler(
+  params: Record<string, unknown>,
+  context?: ToolExecutionContext,
+): Promise<ToolResult> {
+  if (context) {
+    try {
+      const { reports, ranking } = await compareOffersForAgent(
+        context.principal,
+        params as OfferComparisonInput,
+      );
+      return {
+        success: true,
+        data: { reports, ranking },
+        errorCategory: "ok",
+        llmSummary: `Offer 对比完成：${ranking.map((report, index) => `${index + 1}. ${report.company} ${report.overallScore}/5`).join("；")}。请只给用户摘要和取舍逻辑，不要输出完整报告。`,
+        uiPayload: {
+          type: "offer_comparison",
+          offers: reports.map((report) => ({
+            offerId: report.offerId,
+            company: report.company,
+            role: report.role,
+            overallScore: report.overallScore,
+            verdict: report.verdict,
+            redFlags: report.redFlags.slice(0, 3),
+          })),
+          winner: ranking[0]?.company,
+        },
+        rawData: { reports, ranking },
+      };
+    } catch (error) {
+      const needsInput = error instanceof OfferAgentInputError;
+      return {
+        success: false,
+        data: null,
+        error: error instanceof Error ? error.message : "Offer 对比失败",
+        errorCategory: needsInput ? "need_user_input" : "transient",
+        recoverable: !needsInput,
+      };
+    }
+  }
+  const offers = (params.offers as OfferData[]) || [];
   const offerIds = Array.isArray(params.offerIds) ? (params.offerIds as unknown[]).map((v) => Number(v)).filter(Number.isFinite) : [];
 
   let snapshots: OfferSnapshot[] = [];

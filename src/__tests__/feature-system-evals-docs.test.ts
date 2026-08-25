@@ -35,7 +35,7 @@ describe("feature-system eval documentation coverage", () => {
       .filter((file) => /^\d{2}-.+-Evals\.md$/.test(file))
       .sort();
 
-    expect(evalDocs).toHaveLength(26);
+    expect(evalDocs).toHaveLength(27);
 
     for (const file of evalDocs) {
       const doc = readEvalDoc(file);

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { getDataRepositories } from "@/lib/data-repositories";
 import { sanitizeDealBreakers } from "@/lib/profile-skill-quality";
+import { getAgentReadService } from "@/lib/agent/runtime/agent-read-service";
 import fs from "fs";
 import path from "path";
 
@@ -47,15 +48,10 @@ export async function GET() {
       await repos.profiles.upsert(user.userId, "{}", "[]", JSON.stringify(goals || {}));
     }
 
-    const profile = await repos.profiles.get(user.userId);
+    const profile = await getAgentReadService().getProfile({ userId: user.userId });
     return NextResponse.json({
       success: true,
-      data: profile ? {
-        data: JSON.parse(profile.data_json || "{}"),
-        goals: sanitizeGoals(JSON.parse(profile.goals_json || "{}")),
-        history: JSON.parse(profile.history_json || "[]"),
-        lastUpdated: profile.last_updated,
-      } : null,
+      data: profile,
     });
   } catch (err: unknown) {
     if ((err as Error).message === 'Not authenticated') {

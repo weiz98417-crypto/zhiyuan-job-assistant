@@ -1,5 +1,6 @@
 import type { OfferEvaluationReport, OfferSnapshot } from "@/types";
-import type { ToolDefinition, ToolResult } from "../types";
+import { getOfferReportForAgent } from "@/lib/server/offer-agent-service";
+import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
 
 function apiPath(path: string): string {
   return typeof window === "undefined" ? `http://localhost:3000${path}` : path;
@@ -33,12 +34,17 @@ async function loadReport(reportId: number): Promise<Partial<OfferEvaluationRepo
   };
 }
 
-async function handler(params: Record<string, unknown>): Promise<ToolResult> {
+async function handler(
+  params: Record<string, unknown>,
+  context?: ToolExecutionContext,
+): Promise<ToolResult> {
   const reportId = Number(params.offerReportId || params.reportId || 0);
   if (!Number.isFinite(reportId) || reportId <= 0) {
     return { success: false, data: null, error: "缺少 offerReportId", errorCategory: "need_user_input" };
   }
-  const report = await loadReport(reportId);
+  const report = context
+    ? await getOfferReportForAgent(context.principal, reportId)
+    : await loadReport(reportId);
   if (!report) {
     return { success: false, data: null, error: "未找到 Offer 报告", errorCategory: "need_user_input" };
   }

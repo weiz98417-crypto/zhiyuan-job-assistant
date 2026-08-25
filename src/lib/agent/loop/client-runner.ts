@@ -1047,9 +1047,8 @@ export async function* agentLoopClient(
           toolResult = policyResult;
           formatted = formatToolResult(toolResult, tc.name);
           yield { type: "tool_result", name: tc.name, result: formatted, success: false, data: toolResult.data, uiPayload: toolResult.uiPayload, verifiedAction: toolResult.verifiedAction };
-          yield { type: "tool_error", name: tc.name, error: toolResult.error || "工具调用被策略拦截", recoverable: false };
-          ctx.push({ role: "user", content: `[TOOL_BLOCKED tool=${tc.name}] ${toolResult.llmSummary || toolResult.error || "工具调用被策略拦截"}\n\n请不要改用其它大工具重试。请基于已有本地上下文回答；缺少必要信息时只向用户索要那一项。` });
-          forceTextOnly = true;
+          yield { type: "tool_error", name: tc.name, error: toolResult.error || "工具调用被策略拦截", recoverable: true };
+          ctx.push({ role: "user", content: `[TOOL_DENIED tool=${tc.name}] ${toolResult.llmSummary || toolResult.error || "工具调用被策略拦截"}\n请改用尚未尝试且被允许的安全路径；如果缺少批准，只询问一个精确问题。` });
           continue;
         }
 
@@ -1063,9 +1062,8 @@ export async function* agentLoopClient(
           toolResult = governanceResult;
           formatted = formatToolResult(toolResult, tc.name);
           yield { type: "tool_result", name: tc.name, result: formatted, success: false, data: toolResult.data, uiPayload: toolResult.uiPayload, verifiedAction: toolResult.verifiedAction };
-          yield { type: "tool_error", name: tc.name, error: toolResult.error || "工具调用被治理策略阻止", recoverable: false };
-          ctx.push({ role: "user", content: `[TOOL_BLOCKED tool=${tc.name}] ${toolResult.llmSummary || toolResult.error || "工具调用被治理策略阻止"}` });
-          forceTextOnly = true;
+          yield { type: "tool_error", name: tc.name, error: toolResult.error || "工具调用被治理策略阻止", recoverable: true };
+          ctx.push({ role: "user", content: `[TOOL_DENIED tool=${tc.name}] ${toolResult.llmSummary || toolResult.error || "工具调用被治理策略阻止"}\n请改用尚未尝试且被允许的安全路径；如果缺少批准，只询问一个精确问题。` });
           continue;
         }
 

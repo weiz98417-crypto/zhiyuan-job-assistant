@@ -1,4 +1,6 @@
-import type { ErrorCategory, ToolDefinition, ToolResult } from "../types";
+import { updateApplicationStatus } from "@/lib/application-workflow";
+import type { UpdateApplicationStatusInput } from "@/lib/application-workflow";
+import type { ErrorCategory, ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
 
 type UpdatePayload = {
   ambiguous?: boolean;
@@ -13,14 +15,16 @@ function asErrorCategory(value: unknown, fallback: ErrorCategory): ErrorCategory
   return value === "ok" || value === "transient" || value === "permanent" || value === "need_user_input" ? value : fallback;
 }
 
-async function handler(params: Record<string, unknown>): Promise<ToolResult> {
+async function handler(params: Record<string, unknown>, context?: ToolExecutionContext): Promise<ToolResult> {
   try {
-    const res = await fetch("/api/data/applications", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...params, source: params.source || "agent_chat" }),
-    });
-    const json = await res.json() as UpdatePayload & { success?: boolean };
+    const input = { ...params, source: params.source || "agent_chat" } as UpdateApplicationStatusInput;
+    const json = context?.principal
+      ? await updateApplicationStatus(input, context.principal.userId)
+      : await fetch("/api/data/applications", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(input),
+        }).then((res) => res.json()) as UpdatePayload & { success?: boolean };
     if (!json.success) {
       return {
         success: false,

@@ -1,11 +1,49 @@
-import type { ToolDefinition, ToolResult } from "../types";
+import type {
+  ToolDefinition,
+  ToolExecutionContext,
+  ToolReconciliationOutcome,
+  ToolResult,
+} from "../types";
 import { buildVerifiedActionFailure, buildVerifiedActionSuccess } from "@/lib/agent/verified-action";
+import {
+  discardResumeEditProposalForUser,
+  reconcileResumeEditProposalForUser,
+} from "@/lib/server/resume-edit-proposal-service";
 
 function getProposalId(params: Record<string, unknown>): string {
   return String(params.proposalId || params.id || "").trim();
 }
 
-async function handler(params: Record<string, unknown>): Promise<ToolResult> {
+async function reconcile(
+  params: Record<string, unknown>,
+  context: ToolExecutionContext,
+): Promise<ToolReconciliationOutcome> {
+  const proposalId = getProposalId(params);
+  if (!proposalId) return { state: "not_executed", summary: "缺少 proposalId，工具不可能完成写入" };
+  try {
+    const outcome = await reconcileResumeEditProposalForUser(context.principal, proposalId, "discarded");
+    const data = outcome.data;
+    if (outcome.state !== "verified" || !data) return outcome;
+    return {
+      state: "verified",
+      summary: `简历修改提案 ${proposalId} 已废弃且读回一致`,
+      result: {
+        success: true,
+        data,
+        errorCategory: "ok",
+        llmSummary: `简历修改提案 ${proposalId} 已废弃且读回一致。`,
+        rawData: data,
+      },
+    };
+  } catch {
+    return { state: "unknown", summary: `简历修改提案 ${proposalId} 的废弃状态仍无法确认` };
+  }
+}
+
+async function handler(
+  params: Record<string, unknown>,
+  context?: ToolExecutionContext,
+): Promise<ToolResult> {
   const proposalId = getProposalId(params);
   if (!proposalId) {
     const error = "缺少简历修改提案 id，无法废弃。";
@@ -20,6 +58,45 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
         error,
       }),
     };
+  }
+
+  if (context) {
+    try {
+      const data = await discardResumeEditProposalForUser(context.principal, proposalId);
+      const verifiedAction = buildVerifiedActionSuccess({
+        action: "discard_resume_edit_proposal",
+        targetType: "cv",
+        targetId: proposalId,
+        data,
+        expectedContent: "discarded",
+        readBackContent: data.proposal.status,
+        checks: [{ phase: "readBack", ok: true, code: "proposal.status_discarded", message: "Proposal status read-back is discarded." }],
+      });
+      return {
+        success: true,
+        data,
+        errorCategory: "ok",
+        llmSummary: `已废弃简历修改提案 ${proposalId}，不会改动 CV。`,
+        uiPayload: { type: "resume_edit_proposal_discarded", ...data },
+        rawData: data,
+        verifiedAction,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "废弃简历修改提案失败";
+      return {
+        success: false,
+        data: null,
+        error: message,
+        errorCategory: /not found|not pending|不存在/.test(message) ? "need_user_input" : "transient",
+        recoverable: !/not found|not pending|不存在/.test(message),
+        verifiedAction: buildVerifiedActionFailure({
+          action: "discard_resume_edit_proposal",
+          targetType: "cv",
+          targetId: proposalId,
+          error: message,
+        }),
+      };
+    }
   }
 
   const res = await fetch(`/api/cv/edit-proposals/${proposalId}/discard`, { method: "POST" });
@@ -77,5 +154,6 @@ export const discardResumeEditProposal: ToolDefinition = {
   },
   category: "action",
   handler,
+  reconcile,
   formatResult,
 };

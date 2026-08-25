@@ -1,4 +1,5 @@
-import type { ToolDefinition, ToolResult } from "../types";
+import { decodeJDRiskTerms } from "@/lib/server/jd-risk-service";
+import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
 
 interface DecodedTerm {
   term: string;
@@ -8,7 +9,10 @@ interface DecodedTerm {
 
 const SEVERITY_EMOJI: Record<string, string> = { critical: "🔴", high: "🟠", medium: "🟡", low: "⚪" };
 
-async function handler(params: Record<string, unknown>): Promise<ToolResult> {
+async function handler(
+  params: Record<string, unknown>,
+  context?: ToolExecutionContext,
+): Promise<ToolResult> {
   const text = [params.text, params.phrase, params.jd_text]
     .find((value) => typeof value === "string" && value.trim()) as string | undefined;
   if (!text || !text.trim()) {
@@ -19,6 +23,15 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
       errorCategory: "need_user_input",
       recoverable: false,
       retryHint: "请提供具体的 JD 短语、投递说明或完整 JD 文本，不能为空",
+    };
+  }
+
+  if (context) {
+    const matches = decodeJDRiskTerms(text);
+    return {
+      success: true,
+      data: matches,
+      llmSummary: formatResult({ success: true, data: matches }),
     };
   }
 

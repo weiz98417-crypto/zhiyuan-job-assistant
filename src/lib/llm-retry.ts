@@ -40,6 +40,7 @@ export interface LLMRetryOptions {
   temperature?: number;
   max_tokens?: number;
   response_format?: { type: string };
+  signal?: AbortSignal;
 }
 
 function classifyError(err: unknown, statusCode?: number): LLMError {
@@ -63,8 +64,28 @@ function classifyError(err: unknown, statusCode?: number): LLMError {
   return new LLMError('unknown', message, false, statusCode);
 }
 
-async function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) {
+    await new Promise<void>((resolve) => setTimeout(resolve, ms));
+    return;
+  }
+  if (signal.aborted) throw abortReason(signal);
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', onAbort);
+      reject(abortReason(signal));
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+function abortReason(signal: AbortSignal): Error {
+  return signal.reason instanceof Error ? signal.reason : new Error('Request aborted');
 }
 
 /**
@@ -86,6 +107,7 @@ export async function llmRetry(
     temperature,
     max_tokens,
     response_format,
+    signal,
   } = options;
 
   let lastError: LLMError | null = null;
@@ -100,7 +122,11 @@ export async function llmRetry(
       const isStreamAttempt = stream && attempt === 0; // only stream on first attempt
 
       try {
+        if (signal?.aborted) throw abortReason(signal);
         const controller = new AbortController();
+        const forwardAbort = () => controller.abort(signal?.reason);
+        if (signal?.aborted) forwardAbort();
+        else signal?.addEventListener('abort', forwardAbort, { once: true });
         const timer = setTimeout(() => controller.abort(), timeout);
 
         const body: Record<string, unknown> = {
@@ -120,7 +146,10 @@ export async function llmRetry(
           },
           body: JSON.stringify(body),
           signal: controller.signal,
-        }).finally(() => clearTimeout(timer));
+        }).finally(() => {
+          clearTimeout(timer);
+          signal?.removeEventListener('abort', forwardAbort);
+        });
 
         if (!res.ok) {
           const errorText = await res.text().catch(() => '');
@@ -134,6 +163,7 @@ export async function llmRetry(
 
         return res;
       } catch (err) {
+        if (signal?.aborted) throw abortReason(signal);
         lastError = classifyError(err);
 
         // If this was a stream that failed, retry with stream=false
@@ -149,7 +179,7 @@ export async function llmRetry(
         if (attempt === retries) break;
 
         // Exponential backoff: 1s, 2s
-        await sleep(1000 * (attempt + 1));
+        await sleep(1000 * (attempt + 1), signal);
       }
     }
   }

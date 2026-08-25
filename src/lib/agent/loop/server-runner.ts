@@ -6,11 +6,11 @@
  *
  * Quality-gated loop logic ported from client-runner.ts.
  */
-import type { LoopConfig, LoopState, SSEEvent, AgentPhase, ResultQuality } from "./types";
+import type { LoopConfig, LoopState, SSEEvent, AgentPhase, ResultQuality, ModelRecoveryPolicy } from "./types";
 import { DEFAULT_LOOP_CONFIG } from "./types";
 import { isGarbledText } from "./text-quality";
 import { executeTool, formatToolResult, getTool } from "@/lib/agent/tools";
-import type { ToolResult, ErrorCategory } from "@/lib/agent/tools/types";
+import type { ToolExecutionContext, ToolResult, ErrorCategory } from "@/lib/agent/tools/types";
 import type { AgentDefinition } from "@/lib/agent/registry/types";
 import { enforceToolPolicy, inferCompanyFromMessages, isToolAllowedInMode } from "./tool-policy";
 import { ZHIPU_API_URL, ZHIPU_FALLBACK_MODEL } from "@/lib/zhipu";
@@ -19,6 +19,7 @@ import type { InterviewRebindAction } from "@/lib/agent/interview-rebind-policy"
 import { requiresReadBackVerification } from "@/lib/agent/tools/readback-verification";
 import type { AgentTaskContract } from "@/lib/agent/task-contract";
 import { enforceToolGovernance } from "@/lib/agent/tool-governance";
+import { executeGovernedRuntimeTool } from "@/lib/agent/runtime/governed-tool-runtime";
 
 /* ── Context cap (per-tool) ── */
 const DEFAULT_TOOL_CTX_CAP = 800;
@@ -93,14 +94,15 @@ function inferDecodeTextFromMessages(messages: DeepSeekMessage[]): string | null
 /* ── LLM API with fallback ── */
 
 const MODEL_CHAIN = [
-  { model: "deepseek-v4-flash", url: "https://api.deepseek.com/chat/completions", keyEnv: "DEEPSEEK_API_KEY" },
-  { model: "deepseek-v4-pro", url: "https://api.deepseek.com/chat/completions", keyEnv: "DEEPSEEK_API_KEY" },
-  { model: ZHIPU_FALLBACK_MODEL, url: ZHIPU_API_URL, keyEnv: "ZHIPU_API_KEY" },
+  { provider: "deepseek", model: "deepseek-v4-flash", url: "https://api.deepseek.com/chat/completions", keyEnv: "DEEPSEEK_API_KEY" },
+  { provider: "deepseek", model: "deepseek-v4-pro", url: "https://api.deepseek.com/chat/completions", keyEnv: "DEEPSEEK_API_KEY" },
+  { provider: "zhipu", model: ZHIPU_FALLBACK_MODEL, url: ZHIPU_API_URL, keyEnv: "ZHIPU_API_KEY" },
 ];
 
 interface DeepSeekMessage {
   role: string;
   content: string;
+  images?: string[];
   tool_call_id?: string;
   tool_calls?: Array<{
     id: string;
@@ -120,19 +122,26 @@ async function callLLM(
   systemPrompt: string,
   tools?: Array<{ type: string; function: object }>,
   modelPreference?: string,
+  modelRecovery?: ModelRecoveryPolicy,
 ): Promise<{ text: string; toolCalls: NativeToolCall[] }> {
   let lastError = "";
-  // If model preferred, reorder chain to put it first
-  const chain = modelPreference
-    ? [...MODEL_CHAIN].sort((a) => a.model === modelPreference ? -1 : 1)
+  const preferredProvider = MODEL_CHAIN.find((candidate) => candidate.model === modelPreference)?.provider;
+  const eligibleModels = modelRecovery?.switchProvider && preferredProvider
+    ? MODEL_CHAIN.filter((candidate) => candidate.provider !== preferredProvider)
     : MODEL_CHAIN;
+  const chain = modelPreference && !modelRecovery?.switchProvider
+    ? [...eligibleModels].sort((a) => a.model === modelPreference ? -1 : 1)
+    : eligibleModels;
   for (const { model, url, keyEnv } of chain) {
     const apiKey = process.env[keyEnv];
     if (!apiKey) continue;
 
     const body: Record<string, unknown> = {
       model,
-      messages: [...(systemPrompt ? [{ role: "system", content: systemPrompt }] : []), ...messages],
+      messages: [
+        ...(systemPrompt ? [{ role: "system", content: systemPrompt }] : []),
+        ...messages.map(({ images: _images, ...message }) => message),
+      ],
       temperature: 0.7,
       max_tokens: 16384,
       stream: true,
@@ -218,15 +227,17 @@ function estimateTokens(messages: { role: string; content: string }[]): number {
 export async function* agentLoopServer(opts: {
   agent?: AgentDefinition;
   systemPrompt: string;
-  messages: { role: string; content: string }[];
+  messages: { role: string; content: string; images?: string[] }[];
   config?: LoopConfig;
   tools?: Array<{ type: string; function: object }>;
   signal?: AbortSignal;
   interviewState?: InterviewSessionState;
   interviewRebindAction?: InterviewRebindAction;
   taskContract?: AgentTaskContract | null;
+  executionContext?: ToolExecutionContext;
+  modelRecovery?: ModelRecoveryPolicy;
 }): AsyncGenerator<SSEEvent> {
-  const { systemPrompt, messages, config = DEFAULT_LOOP_CONFIG, tools, agent, signal, interviewState, interviewRebindAction, taskContract } = opts;
+  const { systemPrompt, messages, config = DEFAULT_LOOP_CONFIG, tools, agent, signal, interviewState, interviewRebindAction, taskContract, executionContext, modelRecovery } = opts;
   const modelPreference = agent?.model;
   const toolWhitelist = agent?.toolNames?.length ? agent.toolNames : undefined;
   const state: LoopState = {
@@ -236,7 +247,11 @@ export async function* agentLoopServer(opts: {
     phase: "understanding",
   };
 
-  let ctx: DeepSeekMessage[] = messages.map((m) => ({ role: m.role, content: m.content }));
+  let ctx: DeepSeekMessage[] = messages.map((message) => ({
+    role: message.role,
+    content: message.content,
+    images: message.images ? [...message.images] : undefined,
+  }));
   let autoRetryCount = 0;
   let forceTextOnly = false; // Set after degradeToUser: next LLM response is text-only, no tools
   const MAX_AUTO_RETRY = 2;
@@ -263,12 +278,18 @@ export async function* agentLoopServer(opts: {
     let thinkText: string;
     let toolCalls: NativeToolCall[];
     try {
-      const resp = await callLLM(ctx, systemPrompt, tools, modelPreference);
+      const resp = await callLLM(ctx, systemPrompt, tools, modelPreference, modelRecovery);
       thinkText = resp.text;
       toolCalls = resp.toolCalls;
     } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      if (executionContext?.workerId && Number.isFinite(executionContext.fencingToken)) {
+        yield { type: "error", message };
+        yield { type: "done" };
+        return;
+      }
       yield { type: "phase", phase: "responding" };
-      yield { type: "text", content: `AI 请求失败: ${err instanceof Error ? err.message : "未知错误"}` };
+      yield { type: "text", content: `AI 请求失败: ${message}` };
       yield { type: "done" };
       return;
     }
@@ -306,6 +327,7 @@ export async function* agentLoopServer(opts: {
     for (const tc of toolCalls) {
       let params: Record<string, unknown>;
       try { params = JSON.parse(tc.arguments); } catch { continue; }
+      injectLatestImagesForImageTool(tc.name, params, ctx);
       if (tc.name === "evaluate_jd_full" && typeof params.target_company !== "string") {
         const inferredCompany = inferCompanyFromMessages(ctx);
         if (inferredCompany) params.target_company = inferredCompany;
@@ -325,6 +347,7 @@ export async function* agentLoopServer(opts: {
         : recentCalls.find((c) => c.name === tc.name && c.params === paramsKey);
       let toolResult: ToolResult;
       let formatted: string;
+      let durableRunDirective: "continue" | "recover" | "wait_user" = "continue";
 
       if (recent) {
         toolResult = { success: true, data: recent.result, errorCategory: "ok" as const };
@@ -334,6 +357,53 @@ export async function* agentLoopServer(opts: {
         yield { type: "phase", phase: "executing" };
         yield { type: "tool_call", name: tc.name, params };
 
+        const durableExecution = Boolean(
+          executionContext?.workerId
+          && Number.isFinite(executionContext.fencingToken),
+        );
+        if (durableExecution) {
+          const modeDenial: ToolResult | undefined = !isToolAllowedInMode(tc.name, toolWhitelist)
+            ? {
+                success: false,
+                data: null,
+                error: `工具 ${tc.name} 不在当前 Agent 模式下可用`,
+                errorCategory: "permanent",
+                recoverable: true,
+              }
+            : undefined;
+          const policyDenial = modeDenial
+            || enforceToolPolicy({ toolName: tc.name, params, messages: ctx, toolWhitelist, interviewState, interviewRebindAction })
+            || enforceToolGovernance({ toolName: tc.name, params, taskContract, agentId: agent?.id })
+            || undefined;
+          const outcome = await executeGovernedRuntimeTool({
+            principal: executionContext!.principal,
+            runId: executionContext!.runId,
+            workerId: executionContext!.workerId!,
+            fencingToken: executionContext!.fencingToken!,
+            toolName: tc.name,
+            args: params,
+            allowlist: toolWhitelist || executionContext!.allowlist,
+            requestId: executionContext!.requestId,
+            policyDenial,
+            signal: executionContext!.signal,
+          });
+          durableRunDirective = outcome.runDirective;
+          toolResult = outcome.attempt.result || {
+            success: false,
+            data: null,
+            error: outcome.observation?.userSafeSummary || "工具执行未返回结果",
+            errorCategory: "transient",
+            recoverable: true,
+          };
+          formatted = formatToolResult(toolResult, tc.name);
+          if (outcome.runDirective !== "continue") {
+            yield {
+              type: "run_directive",
+              directive: outcome.runDirective,
+              reason: outcome.observation?.userSafeSummary,
+            };
+          }
+        } else {
         if (!isToolAllowedInMode(tc.name, toolWhitelist)) {
           const errMsg = `工具 ${tc.name} 不在当前 Agent 模式下可用`;
           yield { type: "tool_result", name: tc.name, result: errMsg, success: false };
@@ -347,9 +417,8 @@ export async function* agentLoopServer(opts: {
           toolResult = policyResult;
           formatted = formatToolResult(toolResult, tc.name);
           yield { type: "tool_result", name: tc.name, result: formatted, success: false };
-          yield { type: "tool_error", name: tc.name, error: toolResult.error || "工具调用被策略拦截", recoverable: false };
-          ctx.push({ role: "user", content: `[TOOL_BLOCKED tool=${tc.name}] ${toolResult.llmSummary || toolResult.error || "工具调用被策略拦截"}\n\n请不要改用其它大工具重试。请基于已有本地上下文回答；缺少必要信息时只向用户索要那一项。` });
-          forceTextOnly = true;
+          yield { type: "tool_error", name: tc.name, error: toolResult.error || "工具调用被策略拦截", recoverable: true };
+          ctx.push({ role: "user", content: `[TOOL_DENIED tool=${tc.name}] ${toolResult.llmSummary || toolResult.error || "工具调用被策略拦截"}\n请改用尚未尝试且被允许的安全路径；如果缺少批准，只询问一个精确问题。` });
           continue;
         }
 
@@ -363,18 +432,20 @@ export async function* agentLoopServer(opts: {
           toolResult = governanceResult;
           formatted = formatToolResult(toolResult, tc.name);
           yield { type: "tool_result", name: tc.name, result: formatted, success: false, data: toolResult.data, uiPayload: toolResult.uiPayload, verifiedAction: toolResult.verifiedAction };
-          yield { type: "tool_error", name: tc.name, error: toolResult.error || "工具调用被治理策略阻止", recoverable: false };
-          ctx.push({ role: "user", content: `[TOOL_BLOCKED tool=${tc.name}] ${toolResult.llmSummary || toolResult.error || "工具调用被治理策略阻止"}` });
-          forceTextOnly = true;
+          yield { type: "tool_error", name: tc.name, error: toolResult.error || "工具调用被治理策略阻止", recoverable: true };
+          ctx.push({ role: "user", content: `[TOOL_DENIED tool=${tc.name}] ${toolResult.llmSummary || toolResult.error || "工具调用被治理策略阻止"}\n请改用尚未尝试且被允许的安全路径；如果缺少批准，只询问一个精确问题。` });
           continue;
         }
 
         try {
-          toolResult = await executeTool(tc.name, params);
+          toolResult = await executeTool(tc.name, params, executionContext
+            ? { ...executionContext, allowlist: toolWhitelist || executionContext.allowlist }
+            : undefined);
         } catch (execErr) {
           toolResult = { success: false, data: null, error: execErr instanceof Error ? execErr.message : "Tool execution error", errorCategory: "transient" as const };
         }
         formatted = formatToolResult(toolResult, tc.name);
+        }
       }
 
       yield {
@@ -390,6 +461,11 @@ export async function* agentLoopServer(opts: {
       // ── Self-healing: yield error info so LLM can adapt ──
       if (!toolResult.success) {
         yield { type: "tool_error", name: tc.name, error: toolResult.error || "未知错误", recoverable: toolResult.recoverable !== false };
+      }
+
+      if (durableRunDirective === "wait_user") {
+        yield { type: "done" };
+        return;
       }
 
       state.phase = "verifying";
@@ -476,7 +552,7 @@ export async function* agentLoopServer(opts: {
       yield { type: "phase", phase: "responding" };
       yield { type: "text", content: `搜索暂不可用（已尝试 ${autoRetryCount} 次），以下是我基于已有知识的分析：` };
       try {
-        const forceResp = await callLLM(ctx, systemPrompt, tools, modelPreference);
+        const forceResp = await callLLM(ctx, systemPrompt, tools, modelPreference, modelRecovery);
         const clean = forceResp.text.trim();
         if (clean) yield { type: "text", content: clean };
       } catch { /* ignore */ }
@@ -497,4 +573,22 @@ export async function* agentLoopServer(opts: {
   }
 
   yield { type: "done" };
+}
+
+function injectLatestImagesForImageTool(
+  toolName: string,
+  params: Record<string, unknown>,
+  messages: DeepSeekMessage[],
+): void {
+  const tool = getTool(toolName);
+  if (!tool?.parameters?.images || (Array.isArray(params.images) && params.images.length > 0)) return;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.role !== "user" || !message.images?.length) continue;
+    const images = message.images
+      .filter((image) => typeof image === "string" && image.startsWith("data:image/"))
+      .slice(0, 5);
+    if (images.length > 0) params.images = images;
+    return;
+  }
 }

@@ -182,23 +182,21 @@ export default function ReportsPage() {
     if (!report.reportNum) return;
     setTrackerStatus("saving");
     try {
-      const existing: any = undefined;
       const num = report.reportNum;
       const today = new Date().toISOString().slice(0, 10);
       const reportPath = `/api/reports/${report.reportNum}/pdf`;
       const notes = `Archetype: ${report.archetype || "unknown"}; Report #${report.reportNum}`;
       const app = {
-        ...(existing || {}),
         num,
-        date: existing?.date || today,
+        date: today,
         company: report.company || "未知公司",
         role: report.role || "未知岗位",
         score: report.overallScore || 0,
-        status: existing?.status || "evaluated",
+        status: "evaluated",
         pdfGenerated: true,
         reportPath,
         notes,
-        createdAt: existing?.createdAt || new Date(),
+        createdAt: new Date(),
         updatedAt: new Date(),
       };
 

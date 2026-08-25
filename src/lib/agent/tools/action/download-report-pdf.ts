@@ -1,4 +1,5 @@
-import type { ToolDefinition, ToolResult } from "../types";
+import { createReportPdfArtifact } from "@/lib/server/report-pdf-service";
+import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
 
 interface ReportData {
   company: string;
@@ -27,11 +28,22 @@ function hasPdfMagic(bytes: Uint8Array): boolean {
   return bytes.length > 4 && bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46;
 }
 
-async function handler(params: Record<string, unknown>): Promise<ToolResult> {
+async function handler(params: Record<string, unknown>, context?: ToolExecutionContext): Promise<ToolResult> {
   const reportNum = Number(params.reportNum);
   if (!reportNum) return { success: false, data: null, error: "reportNum is required" };
 
   try {
+    if (context?.principal) {
+      const artifact = await createReportPdfArtifact(context.principal, reportNum);
+      return {
+        success: true,
+        data: artifact,
+        rawData: artifact,
+        errorCategory: "ok",
+        llmSummary: `报告 #${reportNum} 的 PDF 下载工件已生成，并已完成文件校验。`,
+        uiPayload: { type: "download", ...artifact },
+      };
+    }
     const res = await fetch(apiPath(`/api/data/reports/${reportNum}`));
     const json = await res.json();
     if (!json.success) return { success: false, data: null, error: json.error || "报告不存在" };
@@ -59,6 +71,7 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
 
     return {
       success: true,
+      errorCategory: "ok",
       data: {
         reportNum,
         company: report.company,

@@ -157,13 +157,13 @@ describe("memory feedback integration wiring", () => {
 
   it("uses snippet-level, scoped usage for reference reranking", () => {
     const referenceVector = source("src/lib/reference-resume-vector.ts");
-    const optimizeRoute = source("src/app/api/cv/optimize-section/route.ts");
+    const optimizeService = source("src/lib/server/resume-optimization-service.ts");
 
     expect(referenceVector).toContain("metadata_json->'snippetIds'");
     expect(referenceVector).toContain("metadata_json->>'roleCategory'");
     expect(referenceVector).toContain("metadata_json->>'sectionId'");
     expect(referenceVector).toContain("feedbackTrustScore");
-    expect(optimizeRoute).toContain("ranking: semanticReferenceSnippets.map");
+    expect(optimizeService).toContain("ranking: snippets.map");
   });
 
   it("keeps candidate pattern memory out of default optimization retrieval", () => {

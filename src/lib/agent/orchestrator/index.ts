@@ -12,28 +12,33 @@
 import { classifyIntent, getAllAgents, getAgentById } from "@/lib/agent/registry";
 import { classifyIntentLLM, isValidAgent } from "@/lib/agent/classify-intent-llm";
 // loadAgentMD imported dynamically to avoid bundling fs into client
-import {
-  getCareerDNASummary,
-  getKnowledgeForAgent,
-  getClaudeAgentActivity,
-} from "@/lib/agent/shared-memory";
 import type { AgentDefinition, AgentPromptContext } from "@/lib/agent/registry/types";
 import type { SSEEvent } from "@/lib/agent/loop/types";
 import registry from "@/lib/agent/tools";
-import { buildContext } from "@/lib/agent/memory/coordinator";
 import { resolveImageIntakeAgentId, type ImageDocumentType, type ImageIntakeResult } from "@/lib/agent/image-intake";
+import type { ExecutionPrincipal } from "@/lib/agent/runtime/durable-agent-run";
+import type { AgentTaskContract } from "@/lib/agent/task-contract";
+import { injectKnowledge, type AgentScenario } from "@/lib/agent/knowledge";
+import type { ModelRecoveryPolicy } from "@/lib/agent/loop/types";
 
 // ── Types ──
 
 export interface OrchestratorContext {
   sessionId: number | null;
-  messages: { role: string; content: string }[];
+  messages: { role: string; content: string; images?: string[] }[];
   memoryDigest?: string;
   signal?: AbortSignal;
   forcedAgentId?: string;
   agentState?: Record<string, unknown>;
   imageIntake?: ImageIntakeResult | null;
   preferredDocumentType?: ImageDocumentType;
+  principal?: ExecutionPrincipal;
+  runId?: string;
+  workerId?: string;
+  fencingToken?: number;
+  taskContract?: AgentTaskContract | null;
+  durable?: boolean;
+  modelRecovery?: ModelRecoveryPolicy;
 }
 
 export interface OrchestratorResult {
@@ -58,6 +63,23 @@ async function buildAgentContext(
   agent: AgentDefinition,
   ctx: OrchestratorContext,
 ): Promise<AgentPromptContext> {
+  if (ctx.durable && ctx.principal) {
+    const { getAgentReadService } = await import("@/lib/agent/runtime/agent-read-service");
+    const profile = await getAgentReadService().getProfile(ctx.principal).catch(() => null);
+    return {
+      careerDNA: profile ? durableProfileSummary(profile) : "",
+      memoryDigest: ctx.memoryDigest,
+      agentStateInjection: ctx.agentState ? JSON.stringify(ctx.agentState, null, 2) : undefined,
+      currentMessages: ctx.messages,
+      agentKnowledge: durableKnowledgeForAgent(agent.knowledgeSubset || []),
+    };
+  }
+  const {
+    getCareerDNASummary,
+    getKnowledgeForAgent,
+    getClaudeAgentActivity,
+  } = await import("@/lib/agent/shared-memory");
+  const { buildContext } = await import("@/lib/agent/memory/coordinator");
   const [careerDNA, agentKnowledge, claudeAgentActivity] = await Promise.all([
     getCareerDNASummary(),
     Promise.resolve(getKnowledgeForAgent(agent.knowledgeSubset || [])),
@@ -128,17 +150,20 @@ export async function* orchestrateGen(
   let targetAgentId = "general";
   let modelTier: "default" | "pro" = "default";
 
-  // LLM classification with regex fallback
-  const llmIntent = await classifyIntentLLM(content, agents);
-  if (llmIntent && isValidAgent(llmIntent.agentId, agents)) {
-    targetAgentId = llmIntent.agentId;
-    modelTier = llmIntent.modelTier || "default";
-    yield { type: "intent", agentId: targetAgentId, reason: llmIntent.reason, modelTier };
+  if (ctx.forcedAgentId && isValidAgent(ctx.forcedAgentId, agents)) {
+    targetAgentId = ctx.forcedAgentId;
+    yield { type: "intent", agentId: targetAgentId, reason: "Run 已锁定 Agent", modelTier };
   } else {
-    // Fallback: regex classification
-    const fallbackAgent = classifyIntent(content);
-    targetAgentId = fallbackAgent.id;
-    yield { type: "intent", agentId: targetAgentId, reason: "正则分类 (LLM 不可用)", modelTier };
+    const llmIntent = await classifyIntentLLM(content, agents);
+    if (llmIntent && isValidAgent(llmIntent.agentId, agents)) {
+      targetAgentId = llmIntent.agentId;
+      modelTier = llmIntent.modelTier || "default";
+      yield { type: "intent", agentId: targetAgentId, reason: llmIntent.reason, modelTier };
+    } else {
+      const fallbackAgent = classifyIntent(content);
+      targetAgentId = fallbackAgent.id;
+      yield { type: "intent", agentId: targetAgentId, reason: "正则分类 (LLM 不可用)", modelTier };
+    }
   }
 
   // Phase 2: Load target agent
@@ -156,7 +181,9 @@ export async function* orchestrateGen(
     buildAgentContext(agent, ctx),
   ]);
 
-  const memCtx = await buildContext(ctx.sessionId, ctx.messages);
+  const memCtx = ctx.durable
+    ? { semanticInjection: "", agentStateInjection: "" }
+    : await (await import("@/lib/agent/memory/coordinator")).buildContext(ctx.sessionId, ctx.messages);
   const systemPrompt = buildSystemPrompt(soul.body, promptCtx, memCtx);
 
   // Phase 4: Select model based on tier
@@ -171,7 +198,7 @@ export async function* orchestrateGen(
   const toolNames = agent.toolNames?.length
     ? agent.toolNames
     : agent.tools.map((t) => t.name);
-  const allTools = registry.toOpenAITools();
+  const allTools = registry.toOpenAITools(toolNames, ctx.durable === true);
   const tools = allTools.filter((t) => toolNames.includes(t.function.name));
 
   // Phase 6: Delegate to agent loop
@@ -183,7 +210,48 @@ export async function* orchestrateGen(
     messages: ctx.messages,
     tools,
     signal: ctx.signal,
+    taskContract: ctx.taskContract,
+    modelRecovery: ctx.modelRecovery,
+    executionContext: ctx.principal && ctx.runId
+      ? {
+          principal: ctx.principal,
+          runId: ctx.runId,
+          allowlist: toolNames,
+          signal: ctx.signal,
+          workerId: ctx.workerId,
+          fencingToken: ctx.fencingToken,
+        }
+      : undefined,
   });
+}
+
+function durableProfileSummary(profile: {
+  data: Record<string, unknown>;
+  goals: Record<string, unknown>;
+  history: unknown[];
+  lastUpdated: string;
+}): string {
+  return JSON.stringify({
+    data: profile.data,
+    goals: profile.goals,
+    recentHistory: profile.history.slice(-5),
+    lastUpdated: profile.lastUpdated,
+  }).slice(0, 4_000);
+}
+
+function durableKnowledgeForAgent(domains: AgentDefinition["knowledgeSubset"]): string {
+  const scenarios: Partial<Record<string, AgentScenario>> = {
+    "interview-styles": "interview_prep",
+    "salary-benchmarks": "evaluate",
+    "zhiyuan-levels": "dingwei",
+    "jd-signals": "evaluate",
+  };
+  const selected = new Set<AgentScenario>();
+  for (const domain of domains || []) {
+    const scenario = scenarios[domain];
+    if (scenario) selected.add(scenario);
+  }
+  return Array.from(selected).map((scenario) => injectKnowledge(scenario)).filter(Boolean).join("\n\n");
 }
 
 /** Safe wrapper: dynamic import to avoid fs in client bundle */

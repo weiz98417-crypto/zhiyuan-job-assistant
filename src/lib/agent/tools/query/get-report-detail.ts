@@ -1,11 +1,13 @@
-import type { ToolDefinition, ToolResult } from "../types";
+import { getAgentReadService } from "@/lib/agent/runtime/agent-read-service";
+import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
 
-async function handler(params: Record<string, unknown>): Promise<ToolResult> {
+async function handler(params: Record<string, unknown>, context?: ToolExecutionContext): Promise<ToolResult> {
   // Discovery mode: list recent reports
   if (params.list === true || params.list === "true") {
     try {
-      const listRes = await fetch("/api/data/reports");
-      const listJson = await listRes.json();
+      const listJson = context?.principal
+        ? { success: true, data: await getAgentReadService().listReports(context.principal) }
+        : await fetch("/api/data/reports").then((res) => res.json());
       if (listJson.success && Array.isArray(listJson.data)) {
         const reports = (listJson.data as Array<{ report_num: number; company: string; role: string; date: string; overall_score: number }>).slice(0, 20);
         const summary = reports.length === 0 ? "暂无报告" :
@@ -19,14 +21,20 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
 
   const id = params.reportNum || params.reportId;
   try {
-    const res = await fetch(`/api/data/reports/${id}`);
-    const json = await res.json();
+    const reportNum = Number(id);
+    const directReport = context?.principal && Number.isFinite(reportNum)
+      ? await getAgentReadService().getReport(context.principal, reportNum)
+      : undefined;
+    const json = context?.principal
+      ? { success: Boolean(directReport), data: directReport, error: directReport ? undefined : "报告不存在" }
+      : await fetch(`/api/data/reports/${id}`).then((res) => res.json());
     if (!json.success) {
       // Build helpful error with recent reports list
       let errMsg = json.error || "报告不存在";
       try {
-        const listRes = await fetch("/api/data/reports");
-        const listJson = await listRes.json();
+        const listJson = context?.principal
+          ? { success: true, data: await getAgentReadService().listReports(context.principal) }
+          : await fetch("/api/data/reports").then((res) => res.json());
         if (listJson.success && Array.isArray(listJson.data)) {
           const reports = listJson.data.slice(0, 5) as Array<{ report_num: number; company: string; role: string; date: string }>;
           if (reports.length) {

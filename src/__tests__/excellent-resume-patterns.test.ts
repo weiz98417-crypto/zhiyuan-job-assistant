@@ -68,14 +68,14 @@ describe("excellent resume pattern memory", () => {
 
   it("wires save, optimize retrieval, and feedback usage endpoints", () => {
     const importRoute = fs.readFileSync(path.join(process.cwd(), "src/app/api/cv/import-reference/route.ts"), "utf8");
-    const optimizeRoute = fs.readFileSync(path.join(process.cwd(), "src/app/api/cv/optimize-section/route.ts"), "utf8");
+    const optimizeService = fs.readFileSync(path.join(process.cwd(), "src/lib/server/resume-optimization-service.ts"), "utf8");
     const preferenceRoute = fs.readFileSync(path.join(process.cwd(), "src/app/api/cv/record-preference/route.ts"), "utf8");
     const patternsLib = fs.readFileSync(path.join(process.cwd(), "src/lib/excellent-resume-patterns.ts"), "utf8");
 
     expect(patternsLib).toContain(EXCELLENT_RESUME_PATTERN_MEMORY_TYPE);
     expect(importRoute).toContain("persistExcellentResumePatternsBestEffort");
-    expect(optimizeRoute).toContain("retrieveExcellentResumePatternMemory");
-    expect(optimizeRoute).toContain("patternMemoryIds");
+    expect(optimizeService).toContain("retrieveExcellentResumePatternMemory");
+    expect(optimizeService).toContain("patternMemoryIds");
     expect(preferenceRoute).toContain("recordOptimizationMemoryFeedback");
     expect(preferenceRoute).toContain("referenceMemory");
   });

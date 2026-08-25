@@ -1,6 +1,6 @@
 # Feature System Evals 文档索引
 
-本目录把 `docs/feature-system` 中 01-26 号功能的 evals 资产按功能拆开记录。27 号“岗位发现 Agent 化”文档本身已经包含完整实施任务和 eval 规范，本目录同时保留一份索引用副本，方便从 evals 目录统一查找。
+本目录把 `docs/feature-system` 中 01-28 号功能的 evals 资产按功能拆开记录。27 号“岗位发现 Agent 化”文档本身已经包含完整实施任务和 eval 规范，本目录同时保留一份索引用副本，方便从 evals 目录统一查找。
 
 每份文档都必须区分：
 - 已落地或部分落地的 eval 资产：已经存在的 Vitest、脚本、fixture 或文档覆盖测试。
@@ -40,6 +40,7 @@
 | 25 工程变更治理与自动化优化Loop系统 | [25-工程变更治理与自动化优化Loop系统-Evals.md](25-%E5%B7%A5%E7%A8%8B%E5%8F%98%E6%9B%B4%E6%B2%BB%E7%90%86%E4%B8%8E%E8%87%AA%E5%8A%A8%E5%8C%96%E4%BC%98%E5%8C%96Loop%E7%B3%BB%E7%BB%9F-Evals.md) |
 | 26 用户注入防范与内容安全系统 | [26-用户注入防范与内容安全系统-Evals.md](26-%E7%94%A8%E6%88%B7%E6%B3%A8%E5%85%A5%E9%98%B2%E8%8C%83%E4%B8%8E%E5%86%85%E5%AE%B9%E5%AE%89%E5%85%A8%E7%B3%BB%E7%BB%9F-Evals.md) |
 | 27 岗位发现 Agent 化实施任务 | [27-岗位发现Agent化实施任务与Evals.md](27-%E5%B2%97%E4%BD%8D%E5%8F%91%E7%8E%B0Agent%E5%8C%96%E5%AE%9E%E6%96%BD%E4%BB%BB%E5%8A%A1%E4%B8%8EEvals.md) |
+| 28 Durable Agent Run 与自恢复运行时 | [28-Durable-Agent-Run与自恢复运行时-Evals.md](28-Durable-Agent-Run%E4%B8%8E%E8%87%AA%E6%81%A2%E5%A4%8D%E8%BF%90%E8%A1%8C%E6%97%B6-Evals.md) |
 
 ## 维护规则
 

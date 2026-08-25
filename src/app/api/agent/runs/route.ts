@@ -1,75 +1,125 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import {
-  createAgentRun,
-  isAgentRunLedgerAvailable,
-  listActiveAgentRuns,
-} from "@/lib/agent/run-ledger";
+  getDurableAgentRuntime,
+  isDurableAgentRuntimeAvailable,
+} from "@/lib/agent/runtime/runtime-factory";
+import { resolveAgentRuntimeAssignment } from "@/lib/agent/runtime/runtime-mode";
 
 export async function GET(request: Request) {
   try {
-    let user;
-    try {
-      user = await getCurrentUser();
-    } catch {
-      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
-    }
-
-    if (!isAgentRunLedgerAvailable()) {
+    const user = await currentUserOrNull();
+    if (!user) return unauthorized();
+    if (!isDurableAgentRuntimeAvailable()) {
       return NextResponse.json({ success: true, enabled: false, data: [] });
     }
 
     const url = new URL(request.url);
-    const rawSessionId = url.searchParams.get("sessionId");
-    const sessionId = rawSessionId ? Number(rawSessionId) : undefined;
-    if (rawSessionId && !Number.isFinite(sessionId)) {
-      return NextResponse.json({ success: false, error: "Invalid sessionId" }, { status: 400 });
-    }
-
-    const rows = await listActiveAgentRuns(user.userId, sessionId);
+    const rawConversationId = url.searchParams.get("conversationId") || url.searchParams.get("sessionId");
+    const conversationId = parseOptionalNumber(rawConversationId);
+    if (rawConversationId && conversationId === undefined) return invalid("Invalid conversationId");
+    const activeOnly = url.searchParams.get("activeOnly") !== "false";
+    const rows = await getDurableAgentRuntime().listRuns(
+      { userId: user.userId },
+      { conversationId, activeOnly },
+    );
     return NextResponse.json({ success: true, enabled: true, data: rows });
-  } catch (err) {
-    return NextResponse.json({ success: false, error: String(err) }, { status: 500 });
+  } catch (error) {
+    return failure(error);
   }
 }
 
 export async function POST(request: Request) {
   try {
-    let user;
-    try {
-      user = await getCurrentUser();
-    } catch {
-      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
-    }
-
-    if (!isAgentRunLedgerAvailable()) {
-      return NextResponse.json({ success: false, error: "Agent run ledger unavailable" }, { status: 503 });
-    }
+    const user = await currentUserOrNull();
+    if (!user) return unauthorized();
 
     const body = await request.json().catch(() => ({}));
-    const taskType = typeof body.taskType === "string" ? body.taskType.trim() : "";
-    if (!taskType) {
-      return NextResponse.json({ success: false, error: "taskType is required" }, { status: 400 });
+    const requestId = stringField(body.requestId);
+    const taskType = stringField(body.taskType);
+    const agentId = stringField(body.agentId);
+    const content = stringField(body.input?.content);
+    if (!requestId) return invalid("requestId is required");
+    if (!taskType) return invalid("taskType is required");
+    if (!agentId) return invalid("agentId is required");
+    if (!content) return invalid("input.content is required");
+
+    const rawConversationId = body.conversationId ?? body.sessionId ?? null;
+    const conversationId = rawConversationId === null ? null : parseOptionalNumber(String(rawConversationId));
+    if (rawConversationId !== null && conversationId === undefined) return invalid("Invalid conversationId");
+
+    const assignment = resolveAgentRuntimeAssignment(user.userId, taskType);
+    if (assignment.owner !== "worker") {
+      return NextResponse.json({
+        success: true,
+        enabled: false,
+        data: { run: null, replayed: false, assignment },
+      });
+    }
+    if (!isDurableAgentRuntimeAvailable()) {
+      return NextResponse.json(
+        { success: false, error: "Durable Agent Runtime unavailable" },
+        { status: 503 },
+      );
     }
 
-    const sessionId =
-      body.sessionId === null || body.sessionId === undefined || body.sessionId === ""
-        ? null
-        : Number(body.sessionId);
-    if (sessionId !== null && !Number.isFinite(sessionId)) {
-      return NextResponse.json({ success: false, error: "Invalid sessionId" }, { status: 400 });
-    }
-
-    const run = await createAgentRun({
-      userId: user.userId,
-      sessionId,
-      taskType,
-      agentId: typeof body.agentId === "string" ? body.agentId : "",
-      contract: body.contract && typeof body.contract === "object" ? body.contract : {},
-    });
-
-    return NextResponse.json({ success: true, data: run }, { status: 201 });
-  } catch (err) {
-    return NextResponse.json({ success: false, error: String(err) }, { status: 500 });
+    const result = await getDurableAgentRuntime().createRun(
+      { userId: user.userId },
+      {
+        requestId,
+        conversationId: conversationId ?? null,
+        taskType,
+        agentId,
+        input: {
+          content,
+          images: Array.isArray(body.input?.images) ? body.input.images.map(String) : undefined,
+        },
+        contract: objectField(body.contract),
+        runtimeMode: assignment.mode === "worker_readonly" ? "worker_readonly" : "worker_all",
+        parentRunId: stringField(body.parentRunId) || null,
+      },
+    );
+    return NextResponse.json(
+      { success: true, enabled: true, data: { ...result, assignment } },
+      { status: result.replayed ? 200 : 201 },
+    );
+  } catch (error) {
+    return failure(error);
   }
+}
+
+async function currentUserOrNull() {
+  try {
+    return await getCurrentUser();
+  } catch {
+    return null;
+  }
+}
+
+function stringField(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function objectField(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function parseOptionalNumber(value: string | null): number | undefined {
+  if (value === null || value.trim() === "") return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function unauthorized() {
+  return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+}
+
+function invalid(error: string) {
+  return NextResponse.json({ success: false, error }, { status: 400 });
+}
+
+function failure(error: unknown) {
+  return NextResponse.json({ success: false, error: String(error) }, { status: 500 });
 }

@@ -1,7 +1,24 @@
-import type { ToolDefinition, ToolResult } from "../types";
+import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
 import { loadSemanticContext } from "@/lib/agent/memory/semantic";
+import { getProfileInsightsForUser } from "@/lib/server/agent-insight-service";
 
-async function handler(_params: Record<string, unknown>): Promise<ToolResult> {
+async function handler(
+  _params: Record<string, unknown>,
+  context?: ToolExecutionContext,
+): Promise<ToolResult> {
+  if (context) {
+    try {
+      return { success: true, data: await getProfileInsightsForUser(context.principal) };
+    } catch (error) {
+      return {
+        success: false,
+        data: null,
+        error: error instanceof Error ? error.message : "画像分析失败",
+        errorCategory: "transient",
+        recoverable: true,
+      };
+    }
+  }
   const semanticCtx = await loadSemanticContext();
 
   // Read profile signals from IndexedDB

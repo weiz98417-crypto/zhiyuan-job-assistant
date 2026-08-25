@@ -1,5 +1,7 @@
 # 18 — 服务端 Agent ReAct Loop
 
+> 状态：历史迁移文档。自 2026-08-24 起，生产目标架构由 [28-Durable Agent Run 与自恢复运行时](../feature-system/28-Durable-Agent-Run%E4%B8%8E%E8%87%AA%E6%81%A2%E5%A4%8D%E8%BF%90%E8%A1%8C%E6%97%B6.md) 取代“HTTP 请求拥有 Loop”的描述。`server-runner` 仍作为 Worker 内部的模型/工具周期复用，`client-runner` 仅在 `legacy` 迁移模式保留；浏览器和 SSE 不再拥有 Worker Run 生命周期。以下内容记录演进过程，不应作为当前部署或恢复语义的事实源。
+
 所属阶段：Phase 3 · 持续演进
 
 服务端 Agent Loop 最初解决的是“API key 不应暴露在前端”和“工具执行应该放在服务端”的问题。当前它已经演进为“任务契约 + 工具治理 + 读回校验 + 运行复盘”的闭环：Loop 不只负责调模型和工具，还要判断一次高风险任务是否真的完成。

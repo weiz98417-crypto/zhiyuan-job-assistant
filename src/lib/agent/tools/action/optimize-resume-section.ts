@@ -1,5 +1,9 @@
-import type { ToolDefinition, ToolResult } from "../types";
+import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
 import { fetchAgentMemoryContext } from "../memory-helpers";
+import {
+  optimizeResumeSectionForAgent,
+  ResumeOptimizationInputError,
+} from "@/lib/server/resume-optimization-service";
 
 interface OptimizeParams {
   section?: string;
@@ -24,9 +28,47 @@ function resolveSection(input?: string): string {
   return "experience";
 }
 
-async function handler(params: Record<string, unknown>): Promise<ToolResult> {
+async function handler(
+  params: Record<string, unknown>,
+  context?: ToolExecutionContext,
+): Promise<ToolResult> {
   const { section, instruction, operation = "full", effort = 3, referenceIds } = params as OptimizeParams & { referenceIds?: number[] };
   const sectionId = resolveSection(section);
+
+  if (context) {
+    try {
+      const data = await optimizeResumeSectionForAgent(context.principal, {
+        sectionId: sectionId as "summary" | "experience" | "projects" | "education" | "skills",
+        instruction,
+        operation,
+        effort,
+        referenceIds,
+        jdText: typeof params.jd_text === "string" ? params.jd_text : undefined,
+        requestKey: context.requestId || `${context.runId}:optimize_resume_section:${sectionId}`,
+      }, { signal: context.signal });
+      return {
+        success: true,
+        data: {
+          sectionId: data.sectionId,
+          artifactId: data.artifactId,
+          draftIds: data.variants.map((draft) => draft.id),
+          readBackVerified: true,
+        },
+        llmSummary: `已为 ${data.sectionId} 生成并持久化 ${data.variants.length} 个简历草稿。artifactId=${data.artifactId}。可选草稿：${data.variants.map((draft) => `${draft.label}:${draft.id}`).join("；")}。等待用户选择后，调用 create_resume_edit_proposal(draftId=所选ID)。`,
+        uiPayload: { type: "resume_draft", ...data },
+        rawData: data,
+      };
+    } catch (error) {
+      const needsInput = error instanceof ResumeOptimizationInputError;
+      return {
+        success: false,
+        data: null,
+        error: error instanceof Error ? error.message : "优化失败",
+        errorCategory: needsInput ? "need_user_input" : "transient",
+        recoverable: !needsInput,
+      };
+    }
+  }
 
   // Read the server document first. localStorage is only a compatibility cache.
   const fullCV: Record<string, string> = {};
@@ -112,43 +154,49 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
   }
 
   const variants = optimizeJson.data?.variants || [];
-  const draftRes = await fetch("/api/cv/drafts", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ sectionId, variants }),
-  });
-  const draftJson = await draftRes.json().catch(() => ({}));
-  if (!draftRes.ok || !draftJson.success || !draftJson.data?.artifactId) {
-    return {
-      success: false,
-      data: { sectionId, variants },
-      error: draftJson.error || "优化方案未能持久化，已阻止把临时聊天文本当作可应用草稿",
-      errorCategory: draftRes.status >= 500 ? "transient" : "permanent",
-    };
+  let draftData = optimizeJson.data?.artifactId && optimizeJson.data?.readBackVerified
+    ? optimizeJson.data
+    : null;
+  if (!draftData) {
+    const draftRes = await fetch("/api/cv/drafts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sectionId, variants }),
+    });
+    const draftJson = await draftRes.json().catch(() => ({}));
+    if (!draftRes.ok || !draftJson.success || !draftJson.data?.artifactId) {
+      return {
+        success: false,
+        data: { sectionId, variants },
+        error: draftJson.error || "优化方案未能持久化，已阻止把临时聊天文本当作可应用草稿",
+        errorCategory: draftRes.status >= 500 ? "transient" : "permanent",
+      };
+    }
+    draftData = draftJson.data;
   }
 
   return {
     success: true,
     data: {
       sectionId,
-      artifactId: draftJson.data.artifactId,
-      draftIds: draftJson.data.variants.map((draft: { id: string }) => draft.id),
+      artifactId: draftData.artifactId,
+      draftIds: draftData.variants.map((draft: { id: string }) => draft.id),
       readBackVerified: true,
     },
-    llmSummary: `已为 ${sectionId} 生成并持久化 ${draftJson.data.variants.length} 个简历草稿。artifactId=${draftJson.data.artifactId}。可选草稿：${draftJson.data.variants.map((draft: { id: string; label?: string }) => `${draft.label || "方案"}:${draft.id}`).join("；")}。等待用户选择后，调用 create_resume_edit_proposal(draftId=所选ID)，不要从 Markdown 重建正文。`,
+    llmSummary: `已为 ${sectionId} 生成并持久化 ${draftData.variants.length} 个简历草稿。artifactId=${draftData.artifactId}。可选草稿：${draftData.variants.map((draft: { id: string; label?: string }) => `${draft.label || "方案"}:${draft.id}`).join("；")}。等待用户选择后，调用 create_resume_edit_proposal(draftId=所选ID)，不要从 Markdown 重建正文。`,
     uiPayload: {
       type: "resume_draft",
-      artifactId: draftJson.data.artifactId,
+      artifactId: draftData.artifactId,
       sectionId,
-      variants: draftJson.data.variants.map((draft: { id: string; variantId?: string; label?: string; title?: string; approach?: string }) => ({
+      variants: draftData.variants.map((draft: { id: string; variantId?: string; label?: string; title?: string; approach?: string }) => ({
         id: draft.id,
         variantId: draft.variantId,
         label: draft.label || draft.title,
         approach: draft.approach,
       })),
-      readBackVerified: draftJson.data.readBackVerified === true,
+      readBackVerified: draftData.readBackVerified === true,
     },
-    rawData: draftJson.data,
+    rawData: draftData,
   };
 }
 

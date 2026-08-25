@@ -1,4 +1,4 @@
-import type { ToolDefinition, ToolResult } from "../types";
+import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
 
 const MIME: Record<string, string> = {
   md: "text/markdown",
@@ -121,7 +121,7 @@ ${body}
 </html>`;
 }
 
-async function handler(params: Record<string, unknown>): Promise<ToolResult> {
+async function handler(params: Record<string, unknown>, context?: ToolExecutionContext): Promise<ToolResult> {
   const { content, filename, format } = params;
   if (typeof content !== "string" || content.length === 0) {
     return { success: false, data: null, error: "content is required (non-empty string)" };
@@ -133,6 +133,33 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
   const ext = (typeof format === "string" && MIME[format] ? format : "md") as string;
   const fullName = `${filename}.${ext}`;
   const rawContent = content as string;
+
+  if (context?.principal.userId) {
+    try {
+      const { createExportArtifact } = await import("@/lib/server/export-artifact-service");
+      const artifact = await createExportArtifact(context.principal, {
+        content: rawContent,
+        filename,
+        format: ext,
+      });
+      return {
+        success: true,
+        data: artifact,
+        errorCategory: "ok",
+        llmSummary: `文件 ${artifact.filename} 已生成并完成读回校验。`,
+        uiPayload: { type: "export_artifact", ...artifact },
+        rawData: artifact,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        data: null,
+        error: error instanceof Error ? error.message : "导出失败",
+        errorCategory: "transient",
+        recoverable: true,
+      };
+    }
+  }
 
   // Detect if content is already HTML (LLM sometimes writes HTML directly)
   const isAlreadyHtml = /^\s*<(!DOCTYPE|html|head|body)/i.test(rawContent.trim());

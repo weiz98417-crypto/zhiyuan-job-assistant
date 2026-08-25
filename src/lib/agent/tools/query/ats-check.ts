@@ -1,8 +1,29 @@
-import type { ToolDefinition, ToolResult } from "../types";
+import { analyzeATSResume } from "@/lib/server/ats-analysis-service";
+import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
 
-async function handler(params: Record<string, unknown>): Promise<ToolResult> {
+async function handler(
+  params: Record<string, unknown>,
+  context?: ToolExecutionContext,
+): Promise<ToolResult> {
   const cvText = params.cv_text as string;
   if (!cvText) return { success: false, data: null, error: "请提供 CV 文本" };
+
+  if (context) {
+    try {
+      return {
+        success: true,
+        data: await analyzeATSResume(cvText, { signal: context.signal }),
+      };
+    } catch (error) {
+      return {
+        success: false,
+        data: null,
+        error: error instanceof Error ? error.message : "ATS 检查失败",
+        errorCategory: "transient",
+        recoverable: true,
+      };
+    }
+  }
 
   const res = await fetch("/api/cv/ats-check", {
     method: "POST",

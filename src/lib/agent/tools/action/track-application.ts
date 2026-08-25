@@ -1,4 +1,6 @@
-import type { ErrorCategory, ToolDefinition, ToolResult } from "../types";
+import { trackApplication } from "@/lib/application-workflow";
+import type { TrackApplicationInput } from "@/lib/application-workflow";
+import type { ErrorCategory, ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
 
 type TrackPayload = {
   created?: boolean;
@@ -13,20 +15,25 @@ function asErrorCategory(value: unknown, fallback: ErrorCategory): ErrorCategory
   return value === "ok" || value === "transient" || value === "permanent" || value === "need_user_input" ? value : fallback;
 }
 
-async function handler(params: Record<string, unknown>): Promise<ToolResult> {
+async function handler(params: Record<string, unknown>, context?: ToolExecutionContext): Promise<ToolResult> {
   try {
-    const res = await fetch("/api/data/applications", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...params, source: params.source || "agent_chat" }),
-    });
-    const json = await res.json() as TrackPayload & { success?: boolean };
+    const input = { ...params, source: params.source || "agent_chat" } as TrackApplicationInput;
+    const res = context?.principal
+      ? undefined
+      : await fetch("/api/data/applications", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(input),
+        });
+    const json = context?.principal
+      ? await trackApplication(input, context.principal.userId)
+      : await res!.json() as TrackPayload & { success?: boolean };
     if (!json.success) {
       return {
         success: false,
         data: json,
         error: json.error || "加入投递追踪失败",
-        errorCategory: asErrorCategory(json.errorCategory, res.status === 400 ? "need_user_input" : "permanent"),
+        errorCategory: asErrorCategory(json.errorCategory, res?.status === 400 ? "need_user_input" : "permanent"),
       };
     }
     const app = json.data || {};

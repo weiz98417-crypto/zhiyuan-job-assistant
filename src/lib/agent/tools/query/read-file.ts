@@ -4,7 +4,8 @@
  * Triple-pipe: returns llmSummary (for LLM), uiPayload (for UI), and rawData.
  * Routes: reference resumes → DB, "我的简历" → CV sections, file paths → server-side read.
  */
-import type { ToolDefinition, ToolResult } from "../types";
+import { getAgentReadService } from "@/lib/agent/runtime/agent-read-service";
+import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
 
 function isCurrentResumeResource(path: string): boolean {
   const normalized = path.trim().replace(/[“”"'`]/g, "");
@@ -12,7 +13,10 @@ function isCurrentResumeResource(path: string): boolean {
   return /^(?!.*参考)(?:[\p{Script=Han}A-Za-z·•\s]{2,30})的(?:个人)?简历$/u.test(normalized);
 }
 
-async function handler(params: Record<string, unknown>): Promise<ToolResult> {
+async function handler(
+  params: Record<string, unknown>,
+  context?: ToolExecutionContext,
+): Promise<ToolResult> {
   const rawPath = String(params.path || params.file || "");
   const offset = Number(params.offset) || 0;
   const limit = Number(params.limit) || 0;
@@ -32,12 +36,12 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
     // Build available resources hint
     let hint = "可用资源: read_file(path='我的简历') 读取你的简历";
     try {
-      const refsRes = await fetch("/api/cv/references");
-      if (refsRes.ok) {
-        const refsJson = await refsRes.json();
-        const refs = (refsJson.data || []) as Array<{ id: number; name: string; tags: string[] }>;
-        if (refs.length) hint += "; 参考简历: " + refs.map(r => `#${r.id} ${r.name}`).join(", ");
-      }
+      const refs = context
+        ? await getAgentReadService().listReferenceResumes(context.principal)
+        : await fetch("/api/cv/references")
+          .then((response) => response.ok ? response.json() : null)
+          .then((json) => (json?.data || []) as Array<{ id: number; name: string }>);
+      if (refs.length) hint += "; 参考简历: " + refs.map((reference) => `#${reference.id} ${reference.name}`).join(", ");
     } catch { /* non-blocking */ }
     return {
       success: false, data: null,
@@ -52,10 +56,12 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
   // ── Route 1: Reference resumes ──
   if (isReference) {
     try {
-      const listRes = await fetch("/api/cv/references");
-      const listJson = await listRes.json();
-      if (listJson.success && Array.isArray(listJson.data) && listJson.data.length > 0) {
-        const refs = listJson.data as Array<{ id: number; name: string }>;
+      const refs = context
+        ? await getAgentReadService().listReferenceResumes(context.principal)
+        : await fetch("/api/cv/references")
+          .then((response) => response.json())
+          .then((json) => json.success && Array.isArray(json.data) ? json.data as Array<{ id: number; name: string }> : []);
+      if (refs.length > 0) {
         const nameMatch = p.match(/参考简历[/\s]*[：:]*\s*(.+)/);
         const targetName = nameMatch ? nameMatch[1].trim() : "";
         const found = targetName
@@ -63,10 +69,13 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
           : refs[0];
 
         if (found) {
-          const detailRes = await fetch(`/api/cv/references/${found.id}`);
-          const detailJson = await detailRes.json();
-          if (detailJson.success) {
-            const sections = detailJson.data.sections || [] as Array<{ id: string; title: string; content: string }>;
+          const detail = context
+            ? await getAgentReadService().getReferenceResume(context.principal, found.id)
+            : await fetch(`/api/cv/references/${found.id}`)
+              .then((response) => response.json())
+              .then((json) => json.success ? json.data : null);
+          if (detail) {
+            const sections = detail.sections || [] as Array<{ id: string; title: string; content: string }>;
             const parts: string[] = [];
             let total = 0;
             for (const s of sections) {
@@ -76,7 +85,7 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
               }
             }
             const content = parts.join("\n\n");
-            const llmText = `参考简历: ${detailJson.data.name}\n来源: ${detailJson.data.source || "upload"}\n\n${content}`;
+            const llmText = `参考简历: ${detail.name}\n来源: ${detail.source || "upload"}\n\n${content}`;
 
             return {
               success: true,
@@ -84,11 +93,11 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
               llmSummary: sliceWithIndicator(llmText),
               uiPayload: {
                 type: "reference_resume",
-                name: detailJson.data.name,
-                source: detailJson.data.source,
+                name: detail.name,
+                source: detail.source,
                 sections: sections.map((s: { id: string; title: string; content: string }) => ({ title: s.title || s.id, content: s.content, preview: s.content?.slice(0, 500) || "" })),
               },
-              rawData: detailJson.data,
+              rawData: detail,
               data: { content, truncated: false, source: "db", totalChars: total },
             };
           }
@@ -119,9 +128,13 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
   if (isCurrentResumeResource(p)) {
     try {
       const includeSource = projection === "source" || projection === "raw" || projection === "原文";
-      const cvRes = await fetch(includeSource ? "/api/cv/data?includeSource=1" : "/api/cv/data");
-      const cvJson = await cvRes.json().catch(() => ({}));
-      if (!cvRes.ok || cvJson?.success === false) {
+      const cvRes = context
+        ? null
+        : await fetch(includeSource ? "/api/cv/data?includeSource=1" : "/api/cv/data");
+      const cvJson = context
+        ? { success: true, data: await getAgentReadService().getCurrentResume(context.principal, { includeSource }) }
+        : await cvRes!.json().catch(() => ({}));
+      if (cvRes && (!cvRes.ok || cvJson?.success === false)) {
         return {
           success: false,
           data: null,
@@ -213,8 +226,12 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
 
   // ── Route 3: File path → server-side read ──
   try {
-    const res = await fetch(`/api/agent/read-file?path=${encodeURIComponent(p)}`);
-    const json = await res.json();
+    const response = context
+      ? null
+      : await fetch(`/api/agent/read-file?path=${encodeURIComponent(p)}`);
+    const json = context
+      ? { success: true, data: await getAgentReadService().readProjectFile(p), errorCategory: "ok" }
+      : await response!.json();
     if (json.success) {
       const rawContent = json.data.content as string;
       // Line-based offset/limit for file reads (like Cursor/Claude Code)
@@ -238,16 +255,15 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
     // Build helpful error with available resources
     let errMsg = json.error || "读取失败";
     try {
-      const refsRes = await fetch("/api/cv/references");
-      if (refsRes.ok) {
-        const refsJson = await refsRes.json();
-        const refs = (refsJson.data || []) as Array<{ id: number; name: string }>;
-        const hints: string[] = [];
-        hints.push("read_file(path='我的简历')");
-        if (refs.length) hints.push("参考简历: " + refs.map(r => `read_file(path='参考简历/${r.name}')`).join(", "));
-        hints.push("项目文件: cv.md, config/profile.yml");
-        errMsg += `。可用资源: ${hints.join("; ")}`;
-      }
+      const refs = context
+        ? await getAgentReadService().listReferenceResumes(context.principal)
+        : await fetch("/api/cv/references")
+          .then((referenceResponse) => referenceResponse.ok ? referenceResponse.json() : null)
+          .then((refsJson) => (refsJson?.data || []) as Array<{ id: number; name: string }>);
+      const hints: string[] = ["read_file(path='我的简历')"];
+      if (refs.length) hints.push("参考简历: " + refs.map((reference) => `read_file(path='参考简历/${reference.name}')`).join(", "));
+      hints.push("项目文件: cv.md, config/profile.yml");
+      errMsg += `。可用资源: ${hints.join("; ")}`;
     } catch { /* non-blocking */ }
     return {
       success: false, data: null,
@@ -255,10 +271,12 @@ async function handler(params: Record<string, unknown>): Promise<ToolResult> {
       errorCategory: (json.errorCategory as ToolResult["errorCategory"]) || "permanent",
     };
   } catch (err) {
+    const message = err instanceof Error ? err.message : "未知错误";
+    const permanent = /不支持|不存在|编码异常/.test(message);
     return {
       success: false, data: null,
-      error: `读取请求失败: ${err instanceof Error ? err.message : "未知错误"}`,
-      errorCategory: "transient",
+      error: `读取请求失败: ${message}`,
+      errorCategory: permanent ? "permanent" : "transient",
     };
   }
 }

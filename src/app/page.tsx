@@ -145,7 +145,8 @@ export default function HomePage() {
     status: a.status,
     date: a.date,
     updatedAt: (() => {
-      const d = (a as any).updatedAt || (a as any).updated_at || a.date;
+      const persisted = a as Application & { updated_at?: string };
+      const d = persisted.updatedAt || persisted.updated_at || a.date;
       const parsed = new Date(d);
       return isNaN(parsed.getTime()) ? a.date : parsed.toISOString().split("T")[0];
     })(),
