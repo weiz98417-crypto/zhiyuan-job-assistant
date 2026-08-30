@@ -1,5 +1,6 @@
 import type {
   AgentRunEvent,
+  AgentRunGate,
   AgentRunSnapshot,
   DurableRunInput,
   SubmitAgentRunInputResult,
@@ -52,6 +53,7 @@ const RUN_EVENT_TYPES = [
   "run.gate_opened",
   "run.gate_resolved",
 ];
+const RUN_CREATE_REQUEST_TIMEOUT_MS = 5_000;
 
 interface JsonEnvelope<T> {
   success: boolean;
@@ -67,7 +69,7 @@ export async function createDurableAgentRunClient(
     const result = await requestJson<DurableRunCreateResponse>("/api/agent/runs", {
       method: "POST",
       body: JSON.stringify(command),
-    });
+    }, RUN_CREATE_REQUEST_TIMEOUT_MS);
     if (result?.data) return result.data;
   }
   throw new DurableRunOwnershipUnknownError();
@@ -93,6 +95,40 @@ export async function requestDurableAgentRunCancelClient(
     { method: "POST", body: JSON.stringify({ requestId }) },
   );
   return result?.data?.run || null;
+}
+
+export async function requestDurableAgentRunPauseClient(
+  runId: string,
+  requestId: string,
+): Promise<AgentRunSnapshot | null> {
+  const result = await requestJson<{ run: AgentRunSnapshot }>(
+    `/api/agent/runs/${encodeURIComponent(runId)}/pause`,
+    { method: "POST", body: JSON.stringify({ requestId }) },
+  );
+  return result?.data?.run || null;
+}
+
+export async function requestDurableAgentRunResumeClient(
+  runId: string,
+  requestId: string,
+): Promise<AgentRunSnapshot | null> {
+  const result = await requestJson<{ run: AgentRunSnapshot }>(
+    `/api/agent/runs/${encodeURIComponent(runId)}/resume`,
+    { method: "POST", body: JSON.stringify({ requestId }) },
+  );
+  return result?.data?.run || null;
+}
+
+export async function respondDurableAgentRunGateClient(
+  gateId: string,
+  decision: "approved" | "denied",
+  requestId: string,
+): Promise<AgentRunGate | null> {
+  const result = await requestJson<{ gate: AgentRunGate }>(
+    `/api/agent/run-gates/${encodeURIComponent(gateId)}/response`,
+    { method: "POST", body: JSON.stringify({ requestId, decision }) },
+  );
+  return result?.data?.gate || null;
 }
 
 export async function listActiveDurableAgentRunsClient(
@@ -197,11 +233,20 @@ export function observeDurableAgentRun(
   };
 }
 
-async function requestJson<T>(url: string, init?: RequestInit): Promise<JsonEnvelope<T> | null> {
+async function requestJson<T>(
+  url: string,
+  init?: RequestInit,
+  timeoutMs?: number,
+): Promise<JsonEnvelope<T> | null> {
+  const timeoutController = timeoutMs ? new AbortController() : null;
+  const timeout = timeoutController
+    ? setTimeout(() => timeoutController.abort(), timeoutMs)
+    : null;
   try {
     const response = await fetch(url, {
       cache: "no-store",
       ...init,
+      signal: timeoutController?.signal || init?.signal,
       headers: {
         "Content-Type": "application/json",
         ...(init?.headers || {}),
@@ -211,5 +256,7 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<JsonEnve
     return response.ok && payload.success ? payload : null;
   } catch {
     return null;
+  } finally {
+    if (timeout) clearTimeout(timeout);
   }
 }

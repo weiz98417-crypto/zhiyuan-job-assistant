@@ -1,0 +1,3 @@
+# Agent architecture migrates behind flags before one production cutover
+
+Run Admission, Run Continuation, Task Programs, and Conversation Item projection are implemented incrementally behind feature flags, with shadow decisions or dual writes where comparison is required. Production behavior switches once Memory/Postgres conformance, production-session replay, all capability short journeys, and cross-task long journeys pass their deterministic release gates; the legacy paths are removed after the cutover stabilizes. We chose this over both a big-bang rewrite and module-by-module production behavior releases so implementation risk stays bounded without exposing users to a long-lived hybrid architecture.

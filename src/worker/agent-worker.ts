@@ -1,4 +1,4 @@
-import "dotenv/config";
+import dotenv from "dotenv";
 import os from "os";
 import { AgentWorker } from "@/lib/agent/runtime/agent-worker";
 import { DurableOrchestratorExecutionEngine } from "@/lib/agent/runtime/durable-orchestrator-engine";
@@ -16,6 +16,9 @@ import registry from "@/lib/agent/tools";
 import { createBackgroundToolHandlers } from "@/lib/agent/runtime/background-tool-handlers";
 import { PostgresRunContextSource } from "@/lib/agent/runtime/postgres-run-context-source";
 import { reconcileGovernedRuntimeTools } from "@/lib/agent/runtime/governed-tool-runtime";
+
+dotenv.config({ path: ".env.local" });
+dotenv.config();
 
 const runtime = getDurableAgentRuntime();
 const workerId = process.env.AGENT_WORKER_ID?.trim() || `${os.hostname()}:${process.pid}`;

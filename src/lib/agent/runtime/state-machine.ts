@@ -4,12 +4,13 @@ import {
 } from "@/lib/agent/runtime/types";
 
 const ALLOWED_TRANSITIONS: Readonly<Record<AgentRunStatus, readonly AgentRunStatus[]>> = {
-  queued: ["running", "cancel_requested", "failed"],
-  running: ["waiting_user", "recovering", "verifying", "cancel_requested", "failed"],
-  waiting_user: ["queued", "cancel_requested", "failed"],
-  recovering: ["queued", "running", "waiting_user", "cancel_requested", "failed"],
-  verifying: ["running", "recovering", "waiting_user", "cancel_requested", "succeeded", "failed"],
-  cancel_requested: ["cancelled", "recovering", "failed"],
+  queued: ["running", "paused", "cancel_requested", "failed"],
+  running: ["waiting_user", "paused", "recovering", "verifying", "cancel_requested", "failed"],
+  waiting_user: ["queued", "paused", "cancel_requested", "failed"],
+  paused: ["queued", "running", "cancel_requested", "failed"],
+  recovering: ["queued", "running", "waiting_user", "paused", "cancel_requested", "failed"],
+  verifying: ["running", "recovering", "waiting_user", "paused", "cancel_requested", "succeeded", "failed"],
+  cancel_requested: ["cancelled"],
   succeeded: [],
   failed: [],
   cancelled: [],

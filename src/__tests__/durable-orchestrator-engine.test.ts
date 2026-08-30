@@ -4,9 +4,220 @@ import {
   InMemoryAgentRunStore,
 } from "@/lib/agent/runtime/durable-agent-run";
 import { DurableOrchestratorExecutionEngine } from "@/lib/agent/runtime/durable-orchestrator-engine";
-import { createAgentTaskContract } from "@/lib/agent/task-contract";
+import { createAgentTaskContract, type AgentTaskType } from "@/lib/agent/task-contract";
+
+const ADVISORY_TASKS: AgentTaskType[] = [
+  "general_chat",
+  "career_positioning_guidance",
+  "resume_query",
+  "interview_coaching",
+];
+
+const VERIFIED_EFFECT_TASKS: AgentTaskType[] = [
+  "resume_edit",
+  "jd_evaluation",
+  "offer_evaluation",
+  "profile_update",
+  "reference_resume_save",
+  "file_export",
+  "job_search",
+];
 
 describe("Durable Orchestrator execution engine", () => {
+  it("satisfies the durable general-chat contract with an assistant response", async () => {
+    const runtime = new DurableAgentRunService(new InMemoryAgentRunStore());
+    const contract = createAgentTaskContract({ taskType: "general_chat", target: "给出三步计划" });
+    await runtime.createRun(
+      { userId: "user-general-chat" },
+      {
+        requestId: "request-general-chat",
+        conversationId: 41,
+        taskType: "general_chat",
+        agentId: "general",
+        input: { content: "请给我一份三步求职行动计划" },
+        contract,
+      },
+    );
+    const run = await runtime.claimNextRun({ workerId: "worker-general-chat" });
+    const engine = new DurableOrchestratorExecutionEngine({
+      runtime,
+      loadConversation: async () => [],
+      saveConversation: async () => undefined,
+      orchestrate: async function* () {
+        yield { type: "text", content: "第一步投递，第二步复盘，第三步跟进。" };
+        yield { type: "done" };
+      },
+    });
+
+    const result = await engine.execute({
+      run: run!,
+      checkpoint: null,
+      signal: new AbortController().signal,
+    });
+
+    expect(result.outcome).toBe("succeeded");
+  });
+
+  it.each(ADVISORY_TASKS)("does not mistake an internal tool-only %s result for a user delivery", async (taskType) => {
+    const runtime = new DurableAgentRunService(new InMemoryAgentRunStore());
+    const savedConversations: unknown[] = [];
+    const contract = createAgentTaskContract({ taskType, target: `test:${taskType}` });
+    await runtime.createRun(
+      { userId: `user-advisory-${taskType}` },
+      {
+        requestId: `request-advisory-${taskType}`,
+        conversationId: 100,
+        taskType,
+        agentId: "general",
+        input: { content: `test:${taskType}` },
+        contract,
+      },
+    );
+    const run = await runtime.claimNextRun({ workerId: `worker-advisory-${taskType}` });
+    const engine = new DurableOrchestratorExecutionEngine({
+      runtime,
+      loadConversation: async () => [],
+      saveConversation: async (_principal, _conversationId, messages) => {
+        savedConversations.push(messages);
+      },
+      orchestrate: async function* () {
+        yield { type: "tool_result", name: "test_tool", success: true, result: "工具结果可用" };
+        yield { type: "done" };
+      },
+    });
+
+    await expect(engine.execute({
+      run: run!,
+      checkpoint: null,
+      signal: new AbortController().signal,
+    })).rejects.toThrow("Run Contract unmet");
+    expect(savedConversations.length).toBeGreaterThan(0);
+    expect(savedConversations.at(-1)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: "user", content: `test:${taskType}` }),
+      expect.objectContaining({ role: "assistant" }),
+    ]));
+  });
+
+  it("turns the self-positioning framework into a real first-stage question", async () => {
+    const runtime = new DurableAgentRunService(new InMemoryAgentRunStore());
+    const savedConversations: Array<Array<{ role: string; content: string }>> = [];
+    const contract = createAgentTaskContract({
+      taskType: "career_positioning_guidance",
+      target: "帮我做自我定位",
+    });
+    await runtime.createRun(
+      { userId: "user-positioning" },
+      {
+        requestId: "request-positioning",
+        conversationId: 102,
+        taskType: "career_positioning_guidance",
+        agentId: "profile",
+        input: { content: "帮我做自我定位" },
+        contract,
+      },
+    );
+    const run = await runtime.claimNextRun({ workerId: "worker-positioning" });
+    const engine = new DurableOrchestratorExecutionEngine({
+      runtime,
+      loadConversation: async () => [],
+      saveConversation: async (_principal, _conversationId, messages) => {
+        savedConversations.push(messages);
+      },
+      orchestrate: async function* () {
+        yield {
+          type: "tool_result",
+          name: "self_positioning",
+          success: true,
+          result: "4 阶段引导框架已加载，请引导用户从第一阶段开始。",
+          data: { phases: ["第一阶段：设定期望"] },
+        };
+        yield { type: "done" };
+      },
+    });
+
+    const result = await engine.execute({
+      run: run!,
+      checkpoint: null,
+      signal: new AbortController().signal,
+    });
+
+    expect(result.outcome).toBe("succeeded");
+    expect(savedConversations.flat()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        role: "assistant",
+        content: expect.stringMatching(/第一阶段[\s\S]*最希望得到什么/),
+      }),
+    ]));
+    expect(JSON.stringify(savedConversations)).not.toContain("请引导用户从第一阶段开始");
+  });
+
+  it("clears a recoverable tool failure after a later tool succeeds", async () => {
+    const runtime = new DurableAgentRunService(new InMemoryAgentRunStore());
+    const contract = createAgentTaskContract({ taskType: "general_chat", target: "查资料并回答" });
+    await runtime.createRun(
+      { userId: "user-tool-recovery" },
+      {
+        requestId: "request-tool-recovery",
+        conversationId: 103,
+        taskType: "general_chat",
+        agentId: "general",
+        input: { content: "查资料并回答" },
+        contract,
+      },
+    );
+    const run = await runtime.claimNextRun({ workerId: "worker-tool-recovery" });
+    const engine = new DurableOrchestratorExecutionEngine({
+      runtime,
+      loadConversation: async () => [],
+      saveConversation: async () => undefined,
+      orchestrate: async function* () {
+        yield { type: "tool_result", name: "first_tool", success: false, result: "暂时失败" };
+        yield { type: "tool_error", name: "first_tool", error: "暂时失败", recoverable: true, category: "transient" };
+        yield { type: "tool_result", name: "safe_tool", success: true, result: "安全结果" };
+        yield { type: "text", content: "我换了一种安全方法，已经完成任务。" };
+        yield { type: "done" };
+      },
+    });
+
+    await expect(engine.execute({
+      run: run!,
+      checkpoint: null,
+      signal: new AbortController().signal,
+    })).resolves.toMatchObject({ outcome: "succeeded" });
+  });
+
+  it.each(VERIFIED_EFFECT_TASKS)("keeps tool-only %s effects behind recovery when verification is unmet", async (taskType) => {
+    const runtime = new DurableAgentRunService(new InMemoryAgentRunStore());
+    const contract = createAgentTaskContract({ taskType, target: `test:${taskType}` });
+    await runtime.createRun(
+      { userId: `user-verified-${taskType}` },
+      {
+        requestId: `request-verified-${taskType}`,
+        conversationId: 101,
+        taskType,
+        agentId: "general",
+        input: { content: `test:${taskType}` },
+        contract,
+      },
+    );
+    const run = await runtime.claimNextRun({ workerId: `worker-verified-${taskType}` });
+    const engine = new DurableOrchestratorExecutionEngine({
+      runtime,
+      loadConversation: async () => [],
+      saveConversation: async () => undefined,
+      orchestrate: async function* () {
+        yield { type: "tool_result", name: "test_tool", success: true, result: "未验证的工具结果" };
+        yield { type: "done" };
+      },
+    });
+
+    await expect(engine.execute({
+      run: run!,
+      checkpoint: null,
+      signal: new AbortController().signal,
+    })).rejects.toThrow("Run Contract unmet");
+  });
+
   it("consumes durable input and persists only redacted UI event envelopes", async () => {
     const runtime = new DurableAgentRunService(new InMemoryAgentRunStore());
     await runtime.createRun(
@@ -173,15 +384,15 @@ describe("Durable Orchestrator execution engine", () => {
 
   it("starts a new model cycle after recovery is decided for a failed completion", async () => {
     const runtime = new DurableAgentRunService(new InMemoryAgentRunStore());
-    const contract = createAgentTaskContract({ taskType: "resume_query", target: "读取我的简历" });
+    const contract = createAgentTaskContract({ taskType: "file_export", target: "导出报告" });
     await runtime.createRun(
       { userId: "user-contract-recovery" },
       {
         requestId: "request-contract-recovery",
         conversationId: 49,
-        taskType: "resume_query",
-        agentId: "resume",
-        input: { content: "读取我的简历" },
+        taskType: "file_export",
+        agentId: "general",
+        input: { content: "导出报告" },
         contract,
       },
     );
@@ -194,11 +405,22 @@ describe("Durable Orchestrator execution engine", () => {
       orchestrate: async function* () {
         orchestrateCalls += 1;
         if (orchestrateCalls === 1) {
-          yield { type: "text", content: "我已经读取了你的简历。" };
+          yield { type: "text", content: "报告已经导出。" };
           return;
         }
-        yield { type: "tool_result", name: "read_file", success: true, result: "已读取简历" };
-        yield { type: "text", content: "已读取你的简历。" };
+        yield {
+          type: "tool_result",
+          name: "export_file",
+          success: true,
+          result: "报告已导出",
+          data: {
+            filename: "report.pdf",
+            size: 1024,
+            sha256: "verified-hash",
+            readBackVerified: true,
+          },
+        };
+        yield { type: "text", content: "报告已导出并完成校验。" };
       },
     });
 
@@ -233,6 +455,57 @@ describe("Durable Orchestrator execution engine", () => {
 
     expect(result.outcome).toBe("succeeded");
     expect(orchestrateCalls).toBe(2);
+  });
+
+  it("preserves a non-recoverable tool failure instead of replanning the contract", async () => {
+    const runtime = new DurableAgentRunService(new InMemoryAgentRunStore());
+    const contract = createAgentTaskContract({ taskType: "resume_edit", target: "优化简历" });
+    await runtime.createRun(
+      { userId: "user-permanent-tool-failure" },
+      {
+        requestId: "request-permanent-tool-failure",
+        conversationId: 52,
+        taskType: "resume_edit",
+        agentId: "resume",
+        input: { content: "优化简历" },
+        contract,
+      },
+    );
+    const run = await runtime.claimNextRun({ workerId: "worker-permanent-tool-failure" });
+    const engine = new DurableOrchestratorExecutionEngine({
+      runtime,
+      loadConversation: async () => [],
+      saveConversation: async () => undefined,
+      orchestrate: async function* () {
+        yield {
+          type: "tool_result",
+          name: "optimize_resume_section",
+          success: false,
+          result: "简历优化服务认证失败，请检查服务配置",
+        };
+        yield {
+          type: "tool_error",
+          name: "optimize_resume_section",
+          error: "简历优化服务认证失败，请检查服务配置",
+          recoverable: false,
+          category: "permanent",
+        };
+        yield { type: "done" };
+      },
+    });
+
+    await expect(engine.execute({
+      run: run!,
+      checkpoint: null,
+      signal: new AbortController().signal,
+    })).resolves.toMatchObject({
+      outcome: "failed",
+      failure: {
+        category: "tool_permanent",
+        retryability: "never",
+        userSafeSummary: "简历优化服务认证失败，请检查服务配置",
+      },
+    });
   });
 
   it("passes the durable Run Contract into orchestration-time tool governance", async () => {

@@ -5,23 +5,8 @@
  * 校验缺失 name/model → fallback
  */
 
-// Server-only: fs/path are unavailable in browser
-let readFileSync: (p: string, encoding: string) => string;
-let existsSync: (p: string) => boolean;
-let resolvePath: (...p: string[]) => string;
-
-if (typeof window === "undefined") {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const fs = require("fs");
-  readFileSync = fs.readFileSync;
-  existsSync = fs.existsSync;
-  resolvePath = require("path").resolve;
-} else {
-  // Browser stub — never actually called (loadAgentMD is server-only)
-  readFileSync = () => { throw new Error("loadAgentMD is server-only"); };
-  existsSync = () => false;
-  resolvePath = (...p) => p.join("/");
-}
+import { existsSync, readFileSync } from "node:fs";
+import { resolve as resolvePath } from "node:path";
 
 export interface AgentSoul {
   meta: {

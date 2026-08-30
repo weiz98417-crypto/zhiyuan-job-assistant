@@ -19,10 +19,16 @@ All commands below are exposed through `package.json`.
 | --- | --- |
 | `npm run test` | Run the Vitest suite. |
 | `npm run eval:memory` | Run deterministic long-term memory evals. |
+| `npm run eval:agent-pr` | Run PR-safe deterministic Agent projections, task journeys, Eval metadata, and hard-veto rubric tests. |
+| `npm run eval:agent-deterministic` | Replay deterministic Agent runtime and journey fixtures. |
+| `npm run eval:agent-staging` | Run a pinned staging benchmark; requires fixed `AGENT_EVAL_*_VERSION` variables. |
+| `npm run eval:agent-release` | Run the release benchmark with the same fixed-version requirement. |
 | `npm run smoke:embedding` | Opt-in live embedding provider smoke test. |
 | `npx tsc --noEmit` | Type-check without emitting files. |
 
 `eval:memory` uses local fixtures and deterministic keyword embeddings. It does not call PostgreSQL, pgvector, OCR, or a live model provider.
+
+Staging/release Agent commands fail closed when model, prompt, tool, or fixture versions are missing. They print the pinned metadata before running the bounded adapter checks; live model execution and Eval Run persistence are enabled only in an explicitly configured staging environment.
 
 `smoke:embedding` reads local secrets and must not print API keys or authorization headers.
 

@@ -1,0 +1,3 @@
+# Server-owned Run Admission is authoritative
+
+All Conversation Turn entry adapters may provide routing hints, but they cannot authoritatively choose `taskType`, `agentId`, Run Contract, or whether to create a new Agent Conversation. A server-owned Run Admission decision uses the Conversation, current Agent Run, Turn, and referenced Artifacts to continue the current Run, create a new Run in the same Conversation, request clarification, or reject the request; it also constructs the authoritative Run Contract and Agent selection. We chose this over client-owned admission because browser, card, and API entry implementations had developed conflicting semantics and could create goals without durable Run records.

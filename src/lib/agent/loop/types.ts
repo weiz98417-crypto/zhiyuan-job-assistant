@@ -36,7 +36,7 @@ export type SSEEvent =
   | { type: "thinking_content"; content: string }
   | { type: "tool_call"; name: string; params: Record<string, unknown> }
   | { type: "tool_result"; name: string; result: string; success: boolean; data?: unknown; uiPayload?: Record<string, unknown>; verifiedAction?: VerifiedActionResult }
-  | { type: "tool_error"; name: string; error: string; recoverable: boolean }
+  | { type: "tool_error"; name: string; error: string; recoverable: boolean; category?: import("@/lib/agent/tools/types").ErrorCategory }
   | { type: "run_directive"; directive: "continue" | "recover" | "wait_user"; reason?: string }
   | { type: "result_quality"; quality: ResultQuality }
   | { type: "text"; content: string }

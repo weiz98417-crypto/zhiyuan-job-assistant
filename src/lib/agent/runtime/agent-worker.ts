@@ -11,6 +11,7 @@ import {
 
 export interface AgentRunExecutionResult {
   outcome: "succeeded" | "waiting_user" | "failed";
+  failure?: AgentRuntimeObservation;
 }
 
 export interface AgentRunExecutionEngine {
@@ -173,11 +174,14 @@ export class AgentWorker {
         });
       }
       if (result.outcome === "failed") {
+        const failure = result.failure;
         return this.options.runtime.transitionRun({
           runId: run.id,
           workerId: this.options.workerId,
           fencingToken: run.fencingToken,
           nextStatus: "failed",
+          observation: failure,
+          error: failure ? safeRunError(failure) : undefined,
         });
       }
       try {
@@ -206,6 +210,15 @@ export class AgentWorker {
         throw error;
       }
     } catch (error) {
+      const currentAfterError = await this.options.runtime.getRun(principal, run.id);
+      if (currentAfterError?.status === "cancel_requested") {
+        return this.options.runtime.transitionRun({
+          runId: run.id,
+          workerId: this.options.workerId,
+          fencingToken: run.fencingToken,
+          nextStatus: "cancelled",
+        });
+      }
       const observation = observationFromError(error);
       const latestCheckpoint = await this.options.runtime.getLatestCheckpoint(principal, run.id);
       const currentBudgets = budgetState(latestCheckpoint?.budgets || checkpoint?.budgets || run.budgets);
@@ -242,6 +255,8 @@ export class AgentWorker {
           workerId: this.options.workerId,
           fencingToken: run.fencingToken,
           nextStatus: "failed",
+          observation,
+          error: safeRunError(observation),
         });
       }
       await this.options.runtime.transitionRun({
@@ -311,6 +326,15 @@ function observationFromError(error: unknown): AgentRuntimeObservation {
         : "执行遇到问题，正在尝试尚未使用的安全路径",
     diagnosticRef: "agent-worker",
     recoveryCapabilities,
+  };
+}
+
+function safeRunError(observation: AgentRuntimeObservation): Record<string, unknown> {
+  return {
+    category: observation.category,
+    summary: observation.userSafeSummary,
+    diagnosticRef: observation.diagnosticRef,
+    retryability: observation.retryability,
   };
 }
 

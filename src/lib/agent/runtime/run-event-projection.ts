@@ -1,3 +1,8 @@
+import {
+  projectToolResultForUser,
+  sanitizeSafeReasoningSummary,
+} from "@/lib/agent/surface-projection";
+
 export function projectDurableUiEvent(
   event: Record<string, unknown> & { type: string },
 ): Record<string, unknown> & { type: string } {
@@ -8,11 +13,18 @@ export function projectDurableUiEvent(
     const verifiedAction = record(event.verifiedAction);
     const verifier = record(verifiedAction.verifier);
     const success = event.success === true;
+    const safeView = projectToolResultForUser({
+      toolName: safeIdentifier(event.name),
+      success,
+      uiPayload: recordOrUndefined(event.uiPayload),
+    });
     return {
       type,
       name: safeIdentifier(event.name),
       success,
-      summary: success ? "工具执行成功" : "工具执行未成功",
+      summary: safeView.summary || (success ? "工具执行成功" : "工具执行未成功"),
+      safeView,
+      uiPayload: safeView.uiPayload,
       verified: verifiedAction.success === true && verifier.ok === true,
     };
   }
@@ -35,8 +47,16 @@ export function projectDurableUiEvent(
     };
   }
   if (type === "agent_switch") return { type, agentId: safeIdentifier(event.agentId) };
-  if (type === "text" || type === "thinking_content") {
-    return { type, charCount: typeof event.content === "string" ? event.content.length : 0 };
+  if (type === "text") {
+    const content = typeof event.content === "string" ? event.content : "";
+    return { type, charCount: content.length };
+  }
+  if (type === "thinking_content") {
+    return {
+      type,
+      summary: sanitizeSafeReasoningSummary(event.content),
+      charCount: typeof event.content === "string" ? event.content.length : 0,
+    };
   }
   if (type === "persist_done") {
     return { type, readBackVerified: event.readBackVerified === true };
@@ -52,4 +72,10 @@ function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
+}
+
+function recordOrUndefined(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
 }

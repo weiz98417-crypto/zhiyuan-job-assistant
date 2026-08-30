@@ -96,6 +96,7 @@ export async function generateResumeDraftForAgent(
     temperature: 0.25,
     max_tokens: 10000,
     response_format: { type: "json_object" },
+    thinking: { type: "disabled" },
     retries: 2,
     fallbackModel: process.env.DEEPSEEK_FALLBACK_MODEL,
     signal: options.signal,

@@ -187,7 +187,7 @@ async function generateReasons(
     .join("\n\n");
 
   try {
-    const apiKey = process.env.NEXT_PUBLIC_DEEPSEEK_API_KEY || "";
+    const apiKey = process.env.DEEPSEEK_API_KEY || "";
     const res = await fetch("https://api.deepseek.com/v1/chat/completions", {
       method: "POST",
       headers: {

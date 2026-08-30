@@ -835,6 +835,7 @@ export interface AgentTool {
 export interface AgentMessage {
   role: "user" | "assistant" | "tool";
   content: string;
+  itemId?: string;
   /** Data URL attachments for user-uploaded JD screenshots or files. */
   images?: string[];
   mode?: "explore" | "execute" | "interview-coach";

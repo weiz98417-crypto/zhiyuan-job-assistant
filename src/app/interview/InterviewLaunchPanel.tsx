@@ -10,7 +10,11 @@ import {
   createInterviewState,
   interviewTitleFromPlan,
 } from "@/lib/agent/interview-session-state";
-import { getCVFullText } from "@/lib/cv-storage";
+import { getCVFullTextFromData, loadCVDataFromServer } from "@/lib/cv-storage";
+import {
+  normalizeInterviewJDs,
+  resolveSelectedInterviewJD,
+} from "@/lib/agent/interview-launch-materials";
 import type { JDRecord } from "@/types";
 
 export default function InterviewLaunchPanel() {
@@ -36,15 +40,16 @@ export default function InterviewLaunchPanel() {
     } catch {
       /* keep local fallback */
     }
-    const text = getCVFullText();
-    setJds(allJds);
+    const normalizedJds = normalizeInterviewJDs(allJds);
+    const serverCV = await loadCVDataFromServer();
+    const text = serverCV ? getCVFullTextFromData(serverCV) : "";
+    setJds(normalizedJds);
     setCvText(text);
-    if (allJds.length > 0) {
-      const selectedStillExists = allJds.some((jd) => jd.id === selectedJdId);
-      if (selectedJdId === "" || !selectedStillExists) {
-        setSelectedJdId(allJds[0].id || "");
-      }
-    }
+    setSelectedJdId((current) => (
+      resolveSelectedInterviewJD(normalizedJds, current)?.id
+      || normalizedJds[0]?.id
+      || ""
+    ));
   };
 
   useEffect(() => {
@@ -60,7 +65,7 @@ export default function InterviewLaunchPanel() {
   }, []);
 
   const selectedJd = useMemo(
-    () => jds.find((jd) => jd.id === selectedJdId),
+    () => resolveSelectedInterviewJD(jds, selectedJdId),
     [jds, selectedJdId],
   );
 

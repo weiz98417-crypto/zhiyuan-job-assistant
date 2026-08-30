@@ -1,10 +1,26 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const boundaries = vi.hoisted(() => ({ optimizeResumeSectionForAgent: vi.fn() }));
+const boundaries = vi.hoisted(() => {
+  class ResumeOptimizationProviderError extends Error {
+    retryable: boolean;
+
+    constructor(message: string, retryable: boolean) {
+      super(message);
+      this.name = "ResumeOptimizationProviderError";
+      this.retryable = retryable;
+    }
+  }
+
+  return {
+    optimizeResumeSectionForAgent: vi.fn(),
+    ResumeOptimizationProviderError,
+  };
+});
 
 vi.mock("@/lib/server/resume-optimization-service", () => ({
   optimizeResumeSectionForAgent: boundaries.optimizeResumeSectionForAgent,
   ResumeOptimizationInputError: class extends Error {},
+  ResumeOptimizationProviderError: boundaries.ResumeOptimizationProviderError,
 }));
 
 import { optimizeResumeSection } from "@/lib/agent/tools/action/optimize-resume-section";
@@ -45,5 +61,33 @@ describe("server resume optimization tool", () => {
     );
     expect(globalThis.fetch).not.toHaveBeenCalled();
     expect(localStorage.getItem).not.toHaveBeenCalled();
+  });
+
+  it("does not recover an exhausted provider authentication failure", async () => {
+    boundaries.optimizeResumeSectionForAgent.mockRejectedValue(
+      new boundaries.ResumeOptimizationProviderError("简历优化服务认证失败", false),
+    );
+
+    const result = await optimizeResumeSection.handler({ section: "工作经历" }, context);
+
+    expect(result).toMatchObject({
+      success: false,
+      errorCategory: "permanent",
+      recoverable: false,
+    });
+  });
+
+  it("allows recovery for a transient provider failure", async () => {
+    boundaries.optimizeResumeSectionForAgent.mockRejectedValue(
+      new boundaries.ResumeOptimizationProviderError("简历优化服务暂时不可用", true),
+    );
+
+    const result = await optimizeResumeSection.handler({ section: "工作经历" }, context);
+
+    expect(result).toMatchObject({
+      success: false,
+      errorCategory: "transient",
+      recoverable: true,
+    });
   });
 });

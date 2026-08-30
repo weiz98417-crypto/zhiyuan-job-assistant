@@ -10,12 +10,27 @@ import { getAgentDisplayName } from "@/lib/agent/client-metadata";
 import { fetchDiscoveryJobDetail, getAgentEvaluationUrl, saveDiscoveryJobJD } from "@/lib/job-discovery";
 import type { AgentMessage, CoachMode, InterviewQuestion, InterviewSessionState } from "@/types";
 import { createJD } from "@/lib/jd-storage";
+import { projectToolResultForUser } from "@/lib/agent/surface-projection";
+import type { AgentArtifactRef } from "@/lib/agent/task-journey";
+import { buildOfferAgentHandoffUrl } from "@/lib/agent/offer-handoff";
+import { countAnsweredInterviewRounds } from "@/lib/agent/interview-session-state";
+import AgentActivityTrack from "./AgentActivityTrack";
 
 import SuggestionChips from "./SuggestionChips";
 import type { SuggestionChip } from "./SuggestionChips";
 
 const MAX_IMAGES = 5;
 const VALID_FILE_TYPES = ["image/png", "image/jpeg", "image/webp", "application/pdf"];
+const ACTIVITY_RUN_STATUSES = new Set([
+  "queued",
+  "running",
+  "waiting_user",
+  "recovering",
+  "verifying",
+  "cancel_requested",
+  "paused",
+]);
+const COMPACT_AGENT_CARD_CLASS = "w-fit max-w-[min(560px,78%)] min-w-0";
 
 /* ── Types ── */
 
@@ -38,6 +53,7 @@ export interface CompletionInfo {
 /* ── Props ── */
 
 interface AgentChatProps {
+  currentSessionId: number | null;
   messages: AgentMessage[];
   streaming: boolean;
   streamText: string;
@@ -54,11 +70,16 @@ interface AgentChatProps {
   completionInfo?: CompletionInfo | null;
   /** Tool result quality (good/empty/irrelevant/garbled) — drives verification indicator */
   resultQuality?: string | null;
+  /** Durable Run state used by the activity track. */
+  runStatus?: string;
+  /** Safe versioned materials bound to the current Run. */
+  contextArtifacts?: AgentArtifactRef[];
   /** Active mock interview binding from the persisted chat session. */
   interviewState?: InterviewSessionState;
 
   suggestions?: SuggestionChip[];
   onSend: (content: string, images?: string[]) => Promise<void>;
+  onGateDecision?: (gateId: string, decision: "approved" | "denied") => Promise<void>;
   onStop?: () => void;
   emptyState: React.ReactNode;
 }
@@ -99,7 +120,7 @@ function statusLabel(status?: string): string {
 function InterviewBindingBar({ state }: { state?: InterviewSessionState }) {
   const plan = state?.planSnapshot;
   if (!plan) return null;
-  const answered = state.transcript.filter((turn) => turn.role === "user").length;
+  const answered = countAnsweredInterviewRounds(state);
   const currentQuestion = state.currentQuestionId
     ? state.questionGraph.find((node) => node.id === state.currentQuestionId)
     : state.questionGraph.at(-1);
@@ -381,6 +402,55 @@ function textValue(value: unknown): string {
   return typeof value === "string" ? value : value === undefined || value === null ? "" : String(value);
 }
 
+function RunGateCard({
+  payload,
+  onDecision,
+}: {
+  payload: Record<string, unknown>;
+  onDecision?: (gateId: string, decision: "approved" | "denied") => Promise<void>;
+}) {
+  const [submitting, setSubmitting] = useState<"approved" | "denied" | null>(null);
+  const gateId = textValue(payload.gateId);
+  const request = payload.request && typeof payload.request === "object" && !Array.isArray(payload.request)
+    ? payload.request as Record<string, unknown>
+    : {};
+  const status = textValue(payload.status) || "pending";
+  const title = textValue(request.userVisibleName) || "确认继续执行";
+
+  const decide = async (decision: "approved" | "denied") => {
+    if (!gateId || !onDecision || submitting || status !== "pending") return;
+    setSubmitting(decision);
+    try {
+      await onDecision(gateId, decision);
+    } finally {
+      setSubmitting(null);
+    }
+  };
+
+  return (
+    <div className={COMPACT_AGENT_CARD_CLASS}>
+      <div className="rounded-[var(--radius-md)] border border-amber-200 bg-amber-50/60 px-4 py-3">
+        <div className="text-sm font-semibold text-[var(--color-text)]">{title}</div>
+        <p className="mt-1 text-xs leading-5 text-[var(--color-muted)]">此操作会修改已保存的数据，需要你明确确认后才会继续。</p>
+        <div className="mt-3 flex items-center gap-2">
+          {status === "pending" ? (
+            <>
+              <button type="button" disabled={!onDecision || submitting !== null} onClick={() => void decide("approved")} className="inline-flex items-center gap-1.5 rounded-[var(--radius-sm)] bg-[var(--color-primary)] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50">
+                {submitting === "approved" ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}批准并继续
+              </button>
+              <button type="button" disabled={!onDecision || submitting !== null} onClick={() => void decide("denied")} className="inline-flex items-center gap-1.5 rounded-[var(--radius-sm)] border border-[var(--color-divider)] bg-[var(--color-surface)] px-3 py-1.5 text-xs font-medium text-[var(--color-text)] disabled:opacity-50">
+                {submitting === "denied" ? <Loader2 size={13} className="animate-spin" /> : <X size={13} />}拒绝
+              </button>
+            </>
+          ) : (
+            <span className="text-xs text-[var(--color-muted)]">{status === "approved" ? "已批准，正在继续" : "已拒绝"}</span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ResumeDocumentCard({ payload }: { payload: Record<string, unknown> }) {
   const [sections, setSections] = useState<Array<{ id: string; title: string; content: string }>>([]);
   const [loading, setLoading] = useState(true);
@@ -416,7 +486,7 @@ function ResumeDocumentCard({ payload }: { payload: Record<string, unknown> }) {
   }, [sectionFilter, requestedVersion]);
 
   return (
-    <div className="w-full max-w-[96%] min-w-0">
+    <div className={COMPACT_AGENT_CARD_CLASS}>
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-divider)] bg-[var(--color-surface)]">
         <div className="flex items-center gap-2 border-b border-[var(--color-divider)] bg-[var(--color-bg)] px-3 py-2">
           <FileText size={14} className="text-[var(--color-primary)]" />
@@ -479,7 +549,7 @@ function ResumeDraftCard({ payload, onSend }: { payload: Record<string, unknown>
   };
 
   return (
-    <div className="w-full max-w-[96%] min-w-0">
+    <div className={COMPACT_AGENT_CARD_CLASS}>
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-divider)] bg-[var(--color-surface)]">
         <div className="flex items-center gap-2 border-b border-[var(--color-divider)] bg-[var(--color-bg)] px-3 py-2">
           <Sparkles size={14} className="text-[var(--color-primary)]" />
@@ -568,7 +638,7 @@ function ResumeEditProposalCard({
   };
 
   return (
-    <div className="max-w-[94%] min-w-0">
+    <div className={COMPACT_AGENT_CARD_CLASS}>
       <motion.div
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
@@ -683,7 +753,7 @@ function InterviewQuestionCard({ payload }: { payload: Record<string, unknown> }
   const category = INTERVIEW_CATEGORY_LABEL[q.category] || q.category || "面试题";
 
   return (
-    <div className="max-w-[92%]">
+    <div className={COMPACT_AGENT_CARD_CLASS}>
       <motion.div
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
@@ -855,7 +925,7 @@ function ReportSummaryCard({ payload, content }: { payload?: Record<string, unkn
   const score = payload?.overallScore as number | undefined;
   const archetype = payload?.archetype as string | undefined;
   return (
-    <div className="max-w-[90%]">
+    <div className={COMPACT_AGENT_CARD_CLASS}>
       <motion.div
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
@@ -900,16 +970,6 @@ function ReportSummaryCard({ payload, content }: { payload?: Record<string, unkn
   );
 }
 
-type OfferHandoffIntent = "negotiate" | "ask_hr" | "explain";
-
-function buildOfferAgentHandoffUrl(reportId: number, intent: OfferHandoffIntent): string {
-  const params = new URLSearchParams();
-  params.set("newSession", "1");
-  params.set("offerReportId", String(reportId));
-  params.set("intent", intent);
-  return `/agent?${params.toString()}`;
-}
-
 function offerVerdictLabel(verdict: string): string {
   if (verdict === "accept") return "建议接受";
   if (verdict === "accept_after_negotiation") return "谈判后接受";
@@ -917,7 +977,15 @@ function offerVerdictLabel(verdict: string): string {
   return "谨慎推进";
 }
 
-function OfferResultCard({ payload, success }: { payload: Record<string, unknown>; success: boolean }) {
+function OfferResultCard({
+  payload,
+  success,
+  currentSessionId,
+}: {
+  payload: Record<string, unknown>;
+  success: boolean;
+  currentSessionId: number | null;
+}) {
   const reportId = Number(payload.reportId || payload.reportNum || 0);
   const offerId = Number(payload.offerId || 0);
   const company = textValue(payload.company) || "未知公司";
@@ -931,7 +999,7 @@ function OfferResultCard({ payload, success }: { payload: Record<string, unknown
   const cardTitle = type === "offer_report" ? "Offer 报告已读取" : "Offer 评估完成";
 
   return (
-    <div className="max-w-[94%] min-w-0">
+    <div className={COMPACT_AGENT_CARD_CLASS}>
       <motion.div
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
@@ -969,24 +1037,24 @@ function OfferResultCard({ payload, success }: { payload: Record<string, unknown
             </div>
           )}
 
-          {reportId > 0 && (
+          {reportId > 0 && currentSessionId && (
             <div className="flex flex-wrap gap-2">
               <a
-                href={buildOfferAgentHandoffUrl(reportId, "explain")}
+                href={buildOfferAgentHandoffUrl(reportId, "explain", currentSessionId)}
                 className="inline-flex items-center gap-1 rounded-[var(--radius-sm)] border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-text)] hover:bg-[var(--color-surface-hover)]"
               >
                 <BookOpen size={13} />
                 <span>解释报告</span>
               </a>
               <a
-                href={buildOfferAgentHandoffUrl(reportId, "negotiate")}
+                href={buildOfferAgentHandoffUrl(reportId, "negotiate", currentSessionId)}
                 className="inline-flex items-center gap-1 rounded-[var(--radius-sm)] bg-[var(--color-primary-muted)] px-3 py-1.5 text-xs font-medium text-[var(--color-primary)] hover:opacity-90"
               >
                 <FileText size={13} />
                 <span>谈判策略</span>
               </a>
               <a
-                href={buildOfferAgentHandoffUrl(reportId, "ask_hr")}
+                href={buildOfferAgentHandoffUrl(reportId, "ask_hr", currentSessionId)}
                 className="inline-flex items-center gap-1 rounded-[var(--radius-sm)] bg-[var(--color-primary)] px-3 py-1.5 text-xs font-medium text-white hover:opacity-90"
               >
                 <User size={13} />
@@ -1084,7 +1152,7 @@ function EvalCompletionNotice({ info }: { info: CompletionInfo }) {
       transition={{ duration: 0.3 }}
       className="flex justify-start"
     >
-      <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-[var(--radius-md)] px-4 py-3 max-w-[90%]">
+      <div className={`${COMPACT_AGENT_CARD_CLASS} rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3`}>
         <div className="flex items-center gap-2 text-sm">
           <CheckCircle size={16} className="text-emerald-500 flex-shrink-0" />
           <span className="font-medium text-[var(--color-text)]">
@@ -1136,7 +1204,7 @@ function EvalConfirmCard({ msg }: { msg: AgentMessage }) {
 
   if (discarded) {
     return (
-      <div className="max-w-[90%]">
+      <div className={COMPACT_AGENT_CARD_CLASS}>
         <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-[var(--radius-md)] px-4 py-3">
           <p className="text-xs text-[var(--color-muted)]">已放弃保存。评估结果仅在本次对话中可见。</p>
         </div>
@@ -1146,7 +1214,7 @@ function EvalConfirmCard({ msg }: { msg: AgentMessage }) {
 
   if (jdSaved && reportSaved) {
     return (
-      <div className="max-w-[90%]">
+      <div className={COMPACT_AGENT_CARD_CLASS}>
         <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-[var(--radius-md)] px-4 py-3">
           <div className="flex items-center gap-2 text-sm">
             <Check size={16} className="text-emerald-500" />
@@ -1192,7 +1260,7 @@ function EvalConfirmCard({ msg }: { msg: AgentMessage }) {
   };
 
   return (
-    <div className="max-w-[90%]">
+    <div className={COMPACT_AGENT_CARD_CLASS}>
       <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-[var(--radius-lg)] px-4 py-3">
         <div className="flex items-center gap-2 mb-2">
           <span className="font-medium text-sm text-[var(--color-text)]">{company} — {role}</span>
@@ -1270,7 +1338,7 @@ function ProfileViewCard({ data }: { data: ProfileViewData }) {
   ];
 
   return (
-    <div className="space-y-3 max-w-[95%]">
+    <div className={`space-y-3 ${COMPACT_AGENT_CARD_CLASS}`}>
       {sectionDefs.map(({ id, label, icon: Icon, content }) => {
         if (!content) return null;
         const isOpen = expanded.has(id);
@@ -1393,7 +1461,7 @@ function JobDiscoveryConfirmationCard({
   };
 
   return (
-    <div className="max-w-[94%] min-w-0">
+    <div className={COMPACT_AGENT_CARD_CLASS}>
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
         className="overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-divider)] bg-[var(--color-surface)]">
         <div className="flex items-center gap-2 border-b border-[var(--color-divider)] bg-[var(--color-bg)] px-3 py-2">
@@ -1502,7 +1570,7 @@ function JobDiscoveryRunCard({
 
   return (
     <div className="space-y-2">
-      <div className="max-w-[94%] min-w-0">
+      <div className={COMPACT_AGENT_CARD_CLASS}>
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
           className="overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-divider)] bg-[var(--color-surface)]">
           <div className="flex items-center gap-2 border-b border-[var(--color-divider)] bg-[var(--color-bg)] px-3 py-2">
@@ -1587,7 +1655,7 @@ function JobDiscoveryZeroResultStrategyCard({
   };
 
   return (
-    <div className="max-w-[94%] min-w-0">
+    <div className={COMPACT_AGENT_CARD_CLASS}>
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
         className="overflow-hidden rounded-[var(--radius-md)] border border-amber-200 bg-amber-50/60">
         <div className="flex items-center gap-2 border-b border-amber-200 bg-amber-100/70 px-3 py-2">
@@ -1871,7 +1939,7 @@ function JobDiscoveryBatchCard({ payload, onSend }: { payload: Record<string, un
   const remaining = Math.max(0, jobs.length - visible.length);
 
   return (
-    <div className="max-w-[94%] min-w-0">
+    <div className={COMPACT_AGENT_CARD_CLASS}>
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
         className="overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-divider)] bg-[var(--color-surface)]">
         <div className="flex items-center gap-2 border-b border-[var(--color-divider)] bg-[var(--color-bg)] px-3 py-2">
@@ -1896,7 +1964,7 @@ function JobDiscoveryBatchCard({ payload, onSend }: { payload: Record<string, un
 function JobDiscoveryErrorCard({ payload }: { payload: Record<string, unknown> }) {
   const error = textValue(payload.error) || "岗位发现暂时不可用";
   return (
-    <div className="max-w-[94%] min-w-0">
+    <div className={COMPACT_AGENT_CARD_CLASS}>
       <div className="rounded-[var(--radius-md)] border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
         {error}
       </div>
@@ -1936,7 +2004,7 @@ function ApplicationPipelineCard({
   const event = typeof payload.event === "object" && payload.event !== null ? payload.event as Record<string, unknown> : {};
 
   return (
-    <div className="max-w-[94%] min-w-0">
+    <div className={COMPACT_AGENT_CARD_CLASS}>
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
         className={`overflow-hidden rounded-[var(--radius-md)] border ${success ? "border-emerald-200 bg-emerald-50/30" : "border-red-200 bg-red-50/30"}`}>
         <div className="flex items-center gap-2 border-b border-[var(--color-divider)] bg-[var(--color-bg)] px-3 py-2">
@@ -1994,6 +2062,7 @@ function ApplicationPipelineCard({
 }
 
 function MessageBubble({
+  currentSessionId,
   msg,
   isStreaming,
   streamText,
@@ -2003,7 +2072,9 @@ function MessageBubble({
   activeAgentId,
   startTime,
   onSend,
+  onGateDecision,
 }: {
+  currentSessionId: number | null;
   msg: AgentMessage;
   isStreaming: boolean;
   streamText: string;
@@ -2013,6 +2084,7 @@ function MessageBubble({
   activeAgentId?: string;
   startTime?: number;
   onSend: (content: string) => Promise<void>;
+  onGateDecision?: (gateId: string, decision: "approved" | "denied") => Promise<void>;
 }) {
   const isUser = msg.role === "user";
   const imageAttachments = Array.isArray(msg.images)
@@ -2023,13 +2095,20 @@ function MessageBubble({
     // Check for uiPayload-based rendering first (triple-pipe architecture)
     const raw = msg.toolResult as Record<string, unknown> | undefined;
     const uiPayload = raw?.uiPayload as Record<string, unknown> | undefined;
-    const toolSuccess = typeof raw?.success === "boolean" ? raw.success : true;
+    const toolSuccess = typeof raw?.success === "boolean"
+      ? raw.success
+      : raw?.status === "failed"
+        ? false
+        : true;
 
     if (uiPayload?.type === "resume_document") {
       return <ResumeDocumentCard payload={uiPayload} />;
     }
     if (uiPayload?.type === "resume_draft") {
       return <ResumeDraftCard payload={uiPayload} onSend={onSend} />;
+    }
+    if (uiPayload?.type === "run_gate") {
+      return <RunGateCard payload={uiPayload} onDecision={onGateDecision} />;
     }
 
     // Data query tools: data is for LLM only, show minimal indicator
@@ -2050,9 +2129,8 @@ function MessageBubble({
     };
     if (DATA_QUERY_TOOLS[msg.toolName || ""]) {
       const label = DATA_QUERY_TOOLS[msg.toolName!];
-      const preview = (typeof raw?.result === "string" ? raw.result : msg.content || "").slice(0, 80).replace(/\n/g, " ");
       return (
-        <div className="max-w-[90%]">
+        <div className={COMPACT_AGENT_CARD_CLASS}>
           <motion.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
@@ -2061,7 +2139,6 @@ function MessageBubble({
             <div className="flex items-center gap-2 px-3 py-2">
               <FileText size={14} className="text-[var(--color-primary)]" />
               <span className="text-xs font-medium text-[var(--color-text)]">{toolSuccess ? label : "工具调用失败"}</span>
-              {preview && <span className="text-xs text-[var(--color-muted)] truncate">{preview}</span>}
               {toolSuccess ? (
                 <Check size={12} className="text-emerald-500 ml-auto flex-shrink-0" />
               ) : (
@@ -2076,7 +2153,7 @@ function MessageBubble({
     // get_profile: show minimal indicator (data is for LLM, full profile is at /profile)
     if (msg.toolName === "get_profile") {
       return (
-        <div className="max-w-[90%]">
+        <div className={COMPACT_AGENT_CARD_CLASS}>
           <motion.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
@@ -2126,7 +2203,7 @@ function MessageBubble({
       return <ApplicationPipelineCard payload={uiPayload} success={toolSuccess} onSend={onSend} />;
     }
     if (uiPayload?.type === "offer_evaluation" || uiPayload?.type === "offer_report") {
-      return <OfferResultCard payload={uiPayload} success={toolSuccess} />;
+      return <OfferResultCard payload={uiPayload} success={toolSuccess} currentSessionId={currentSessionId} />;
     }
 
     // Report blocks: uiPayload or legacy text
@@ -2134,17 +2211,7 @@ function MessageBubble({
       if (uiPayload?.type === "report_blocks") {
         return <ReportSummaryCard payload={uiPayload} content={msg.content} />;
       }
-      if (isReportMessage(msg.content)) {
-        return <ReportSummaryCard content={msg.content} />;
-      }
-      // Fallback: render as markdown text
-      return (
-        <div className="max-w-[90%]">
-          <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-[var(--radius-md)] px-4 py-3 text-sm">
-            <MarkdownRenderer content={msg.content} />
-          </div>
-        </div>
-      );
+      return <SafeToolStatusView toolName={msg.toolName} success={toolSuccess} />;
     }
 
     // evaluate_jd / evaluate_jd_full: don't show raw tool card — result goes to EvalConfirmCard / EvalCompletionNotice
@@ -2167,7 +2234,7 @@ function MessageBubble({
         ? uiPayload.perImage.filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
         : [];
       return (
-        <div className="max-w-[90%]">
+        <div className={COMPACT_AGENT_CARD_CLASS}>
           <motion.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
@@ -2228,15 +2295,13 @@ function MessageBubble({
       let downloadUrl: string | null = null;
       let filename: string | null = null;
       try {
-        const raw = msg.toolResult as Record<string, unknown> | undefined;
-        if (raw?.data && typeof raw.data === "object") {
-          const d = raw.data as { downloadUrl?: string; filename?: string };
-          downloadUrl = d.downloadUrl || null;
-          filename = d.filename || null;
-        }
+        const d = uiPayload as { downloadUrl?: string; filename?: string } | undefined;
+        downloadUrl = typeof d?.downloadUrl === "string" ? d.downloadUrl : null;
+        filename = typeof d?.filename === "string" ? d.filename : null;
       } catch { /* fall through */ }
+      if (!downloadUrl && !filename) return <SafeToolStatusView toolName={msg.toolName} success={toolSuccess} />;
       return (
-        <div className="max-w-[90%]">
+        <div className={COMPACT_AGENT_CARD_CLASS}>
           <ToolResultCard
             toolName={msg.toolName}
             toolResult={typeof msg.toolResult === "string" ? msg.toolResult : msg.content || ""}
@@ -2248,24 +2313,7 @@ function MessageBubble({
       );
     }
 
-    const resultStr = typeof msg.toolResult === "string"
-      ? msg.toolResult
-      : typeof (msg.toolResult as { result?: unknown } | null)?.result === "string"
-        ? (msg.toolResult as { result: string }).result
-        : msg.content || "";
-    const success = typeof msg.toolResult === "object" && msg.toolResult !== null
-      ? (msg.toolResult as { success?: boolean }).success !== false
-      : true;
-
-    return (
-      <div className="max-w-[90%]">
-        <ToolResultCard
-          toolName={msg.toolName || "tool"}
-          toolResult={resultStr}
-          success={success}
-        />
-      </div>
-    );
+    return <SafeToolStatusView toolName={msg.toolName} success={toolSuccess} />;
   }
 
   const showStream = isStreaming || (isUser ? false : !msg.content && streamText);
@@ -2331,9 +2379,23 @@ function MessageBubble({
   );
 }
 
+function SafeToolStatusView({ toolName, success }: { toolName?: string; success: boolean }) {
+  const view = projectToolResultForUser({ toolName, success });
+  if (view.kind === "silent") return null;
+  return (
+    <div className={COMPACT_AGENT_CARD_CLASS}>
+      <div className="flex items-center gap-2 rounded-[var(--radius-md)] border border-[var(--color-divider)] px-3 py-2 text-xs text-[var(--color-muted)]">
+        {success ? <Check size={13} className="text-emerald-500" /> : <X size={13} className="text-red-500" />}
+        <span>{view.summary || view.label}</span>
+      </div>
+    </div>
+  );
+}
+
 /* ── AgentChat Component ── */
 
 export default function AgentChat({
+  currentSessionId,
   messages,
   streaming,
   streamText,
@@ -2345,9 +2407,12 @@ export default function AgentChat({
   evalProgress,
   completionInfo,
   resultQuality,
+  runStatus,
+  contextArtifacts,
   interviewState,
   suggestions,
   onSend,
+  onGateDecision,
   onStop,
   emptyState,
 }: AgentChatProps) {
@@ -2483,14 +2548,18 @@ export default function AgentChat({
 
       {/* Messages */}
       <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden py-4 space-y-4 cursor-default">
-        {messages.map((msg, i) => {
+        {messages.filter((msg) => {
+          if (msg.role === "assistant" && !msg.content.trim()) return false;
+          if (msg.role === "tool" && msg.toolName === "evaluate_jd_full") return false;
+          return true;
+        }).map((msg, i, visibleMessages) => {
           // Last assistant: this msg is assistant AND no assistant messages appear after it
           const isLastAssistant =
             msg.role === "assistant" && streaming &&
-            !messages.slice(i + 1).some(m => m.role === "assistant");
+            !visibleMessages.slice(i + 1).some(m => m.role === "assistant");
 
           // Agent source label: show when agent_id changes between messages
-          const prevMsg = i > 0 ? messages[i - 1] : null;
+          const prevMsg = i > 0 ? visibleMessages[i - 1] : null;
           const effectiveAgentId =
             msg.agent_id || (msg.mode === "interview-coach" ? "interview" : undefined);
           const prevAgentId =
@@ -2505,7 +2574,7 @@ export default function AgentChat({
             : undefined;
 
           return (
-            <div key={`${msg.timestamp}-${i}`}>
+            <div key={msg.itemId || `${msg.timestamp}-${i}`}>
               {agentLabel && (
                 <div className="flex justify-center mb-1">
                   <span className="text-[10px] text-[var(--color-muted)] opacity-50 tracking-wide">
@@ -2514,6 +2583,7 @@ export default function AgentChat({
                 </div>
               )}
               <MessageBubble
+                currentSessionId={currentSessionId}
                 msg={msg}
                 isStreaming={isLastAssistant}
                 streamText={isLastAssistant ? streamText : ""}
@@ -2523,26 +2593,28 @@ export default function AgentChat({
                 activeAgentId={isLastAssistant ? activeAgentId : undefined}
                 startTime={isLastAssistant ? startTime : undefined}
                 onSend={onSend}
+                onGateDecision={onGateDecision}
               />
             </div>
           );
         })}
 
-        {/* Status bar: shown independently when executing, even without stream text */}
-        {streaming && phase && phase !== "done" && (
-          <div className="flex justify-start pl-4">
-            <AgentStatusBar phase={phase} toolName={executingTool} startTime={startTime} evalProgress={evalProgress} resultQuality={resultQuality} />
-          </div>
+        {(streaming || (runStatus && ACTIVITY_RUN_STATUSES.has(runStatus))) && (
+          <AgentActivityTrack
+            streaming={streaming}
+            status={runStatus}
+            phase={phase}
+            thinkingContent={thinkingContent}
+            startTime={startTime}
+            artifacts={contextArtifacts}
+            evalProgress={evalProgress}
+            resultQuality={resultQuality}
+          />
         )}
 
         {/* Eval completion notice: shown after streaming ends and persist_done fires */}
         {!streaming && completionInfo && (
           <EvalCompletionNotice info={completionInfo} />
-        )}
-
-        {/* Standalone thinking/reflecting bubbles */}
-        {streaming && thinkingContent && (phase === "understanding" || phase === "reflecting") && (
-          <ThinkingBubble content={thinkingContent} />
         )}
 
         {!hasRealChat && !streaming && emptyState}

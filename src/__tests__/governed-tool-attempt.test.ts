@@ -55,6 +55,57 @@ describe("Governed Tool Attempt", () => {
     expect(await store.listRunAttempts("run-1")).toHaveLength(1);
   });
 
+  it("keeps a policy denial inside the model loop so the Agent can choose a safe path", async () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "read_profile",
+      description: "Read a profile",
+      category: "query",
+      parameters: {},
+      capability: {
+        risk: "low",
+        deadlineClass: "foreground_read",
+        deadlineMs: 30_000,
+        cancellation: "cooperative",
+        idempotency: "none",
+        reconciliation: "none",
+        verification: "none",
+        backgroundCapable: false,
+        workerExecution: "server",
+      },
+      handler: async () => ({ success: true, data: "profile" }),
+      formatResult: (result) => String(result.data),
+    });
+    registry.seal();
+    const executor = new GovernedToolAttemptExecutor(registry, new InMemoryToolAttemptStore());
+
+    const outcome = await executor.execute({
+      principal: { userId: "user-policy" },
+      runId: "run-policy",
+      workerId: "worker-policy",
+      fencingToken: 1,
+      toolName: "read_profile",
+      args: {},
+      allowlist: ["read_profile"],
+      policyDenial: {
+        success: false,
+        data: { blockedBy: "tool_governance" },
+        error: "当前任务不允许这个工具",
+        errorCategory: "policy_denied",
+        recoverable: true,
+      },
+    });
+
+    expect(outcome).toMatchObject({
+      runDirective: "continue",
+      attempt: {
+        status: "denied",
+        effectState: "not_dispatched",
+        result: { errorCategory: "policy_denied", recoverable: true },
+      },
+    });
+  });
+
   it("does not dispatch a completed side effect twice under at-least-once delivery", async () => {
     let dispatches = 0;
     const registry = new ToolRegistry();
@@ -442,5 +493,86 @@ describe("Governed Tool Attempt", () => {
       attempt: { status: "succeeded", effectState: "verified" },
     });
     expect(dispatches).toBe(1);
+  });
+
+  it("closes a rejected persistent Gate without waiting forever or dispatching the write", async () => {
+    let dispatches = 0;
+    const runtime = new DurableAgentRunService(new InMemoryAgentRunStore());
+    await runtime.createRun({ userId: "user-gate-denied" }, {
+      requestId: "request-gate-denied",
+      conversationId: 51,
+      taskType: "resume_edit",
+      agentId: "resume",
+      input: { content: "不要应用这份修改" },
+    });
+    const firstRun = await runtime.claimNextRun({ workerId: "worker-gate-denied-a" });
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "apply_resume_edit_proposal",
+      description: "Apply a resume proposal",
+      category: "action",
+      parameters: {},
+      governance: {
+        name: "apply_resume_edit_proposal",
+        effect: "high_risk_write",
+        allowedTaskTypes: ["resume_edit"],
+        agentAllowlist: ["resume"],
+        documentTypes: ["resume"],
+        requiresUserConfirmation: true,
+        requiresReadBack: true,
+        successContract: "Apply and verify",
+        userVisibleNameZh: "应用简历修改",
+        conflictPriority: 90,
+      },
+      capability: {
+        risk: "high",
+        deadlineClass: "verified_write",
+        deadlineMs: 60_000,
+        cancellation: "after_dispatch_reconcile",
+        idempotency: "request_key",
+        reconciliation: "read_back",
+        verification: "read_back",
+        backgroundCapable: false,
+        workerExecution: "server",
+      },
+      handler: async () => {
+        dispatches += 1;
+        return { success: true, data: { applied: true, readBackVerified: true } };
+      },
+      formatResult: (result) => JSON.stringify(result.data),
+    });
+    registry.seal();
+    const executor = new GovernedToolAttemptExecutor(registry, new InMemoryToolAttemptStore(), undefined, runtime);
+    const principal = { userId: "user-gate-denied" };
+    const args = { proposalId: "proposal-denied" };
+    await executor.execute({
+      principal,
+      runId: firstRun!.id,
+      workerId: firstRun!.ownerId!,
+      fencingToken: firstRun!.fencingToken,
+      toolName: "apply_resume_edit_proposal",
+      args,
+      allowlist: ["apply_resume_edit_proposal"],
+    });
+    const gateEvent = (await runtime.listEvents(principal, firstRun!.id, 0))
+      .find((event) => event.type === "run.gate_opened");
+    await runtime.respondGate(principal, String(gateEvent?.payload.gateId), "deny-gate", "denied");
+    const resumedRun = await runtime.claimNextRun({ workerId: "worker-gate-denied-b" });
+
+    const denied = await executor.execute({
+      principal,
+      runId: resumedRun!.id,
+      workerId: resumedRun!.ownerId!,
+      fencingToken: resumedRun!.fencingToken,
+      toolName: "apply_resume_edit_proposal",
+      args,
+      allowlist: ["apply_resume_edit_proposal"],
+    });
+
+    expect(denied).toMatchObject({
+      runDirective: "continue",
+      attempt: { status: "denied", effectState: "not_dispatched" },
+    });
+    expect(dispatches).toBe(0);
   });
 });

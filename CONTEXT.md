@@ -12,6 +12,10 @@ _Avoid_: Agent Run, 聊天页面, Session 状态
 Conversation 中一次用户输入及其对应交互的稳定记录；它可以发起新的 Agent Run，也可以为等待中的 Run 提供补充信息或批准。
 _Avoid_: Agent Run, API 请求, 模型轮次
 
+**Run Admission**:
+将 Conversation Turn、当前 Agent Run 与引用 Artifact 解析为继续当前 Run、在当前 Conversation 创建新 Run、请求澄清或拒绝的权威决定；它同时固定目标、约束与材料关系。
+_Avoid_: 前端路由, Agent 选择, newSession 参数, Task 分类
+
 **岗位发现**:
 从用户的目标方向、关键词、排除词、城市和公司来源中持续发现可处理的岗位机会，并把结果沉淀为可查看、可保存、可评估、可跳过的机会池。
 _Avoid_: 职位搜索, 岗位搜索, 搜职位
@@ -88,6 +92,10 @@ _Avoid_: Run 台账, API 请求, 聊天会话, 页面任务
 Agent Run 中断后，从已持久化的安全执行位置继续同一个 Run；它保留原 Run 身份，不等同于重试一次请求或重新加载聊天记录。
 _Avoid_: 会话恢复, 页面恢复, 重新执行, Retry
 
+**Continuation Stimulus**:
+能够推动等待或暂停中的 Agent Run 继续执行的有序持久输入，包括 Conversation Turn、Gate 决策、后台作业结果和人工恢复指令；记录、消费与执行完成是三个不同事实。
+_Avoid_: 回调, 唤醒信号, 临时事件, 已消费输入
+
 **等待用户**:
 Agent Run 尚未结束但必须取得用户信息或批准才能安全继续的状态；用户后续输入会继续同一个 Run，而不是创建替代任务。
 _Avoid_: 执行失败, Run 结束, 页面暂停
@@ -108,6 +116,18 @@ _Avoid_: Recovery Attempt, 自动修复, repairing 状态
 绑定一个 Agent Run 的完成约束，定义该目标允许使用的能力、需要的批准、验证要求以及什么结果可以被称为成功。
 _Avoid_: Task Contract, 提示词规则, 工具白名单
 
+**Task Program**:
+一类用户目标在 Agent Run 内允许经历的阶段、可使用的能力、必须形成的验证事实和成功出口；它规定执行骨架，模型只生成当前阶段所需内容。
+_Avoid_: Prompt, Tool 列表, Run Contract, 模型计划
+
+**确定性 Program**:
+必须按已定义阶段完成副作用、读回验证或 Artifact 持久化的 Task Program，任何必做阶段缺失都不能声明成功。
+_Avoid_: 高风险 Prompt, 事后成功判分, Tool 白名单
+
+**对话型 Program**:
+以只读回答或引导为目标、保留上下文绑定和成功约束但不强制写入或 Artifact 阶段的 Task Program。
+_Avoid_: 无 Contract 对话, 自由聊天, 确定性 Program
+
 **Run Context**:
 Runtime 从 Conversation Turn、Run Contract、计划进度、Gate、已完成 Tool Attempt 和事实源引用确定性构建的模型上下文；浏览器消息列表不是它的事实源。
 _Avoid_: 前端 messages, Prompt 拼接, 聊天缓存
@@ -127,3 +147,51 @@ _Avoid_: 长请求, 后台 Promise, detached 进程
 **Run Evidence**:
 Agent Run 及其 Tool Attempt 产生的可审计事实，用于向用户展示进度并支持治理、Review 和 Eval；它不是 Run 执行状态本身。
 _Avoid_: 日志, Run 台账, 调试信息
+
+**过程状态轨道**:
+Agent Run 在执行、等待、校验或恢复期间面向用户展示的受控进度视图；它只表达可理解的阶段和状态，不承载系统提示词、Skill 正文、工具参数或原始推理。
+_Avoid_: 思维链, 加载文案, 工具日志
+
+**推理摘要**:
+经过策略约束、面向用户改写的 Agent 工作说明，用于解释当前正在比较、查找或核对什么；它不是模型原始推理，也不等同于完整 Run Evidence。
+_Avoid_: Chain of Thought, 原始思考, 系统提示词
+
+**安全工具视图**:
+从 Tool Attempt 结果中筛选出的、允许进入用户界面的摘要或结构化结果；没有安全工具视图的内部工具结果默认静默或显示统一降级状态。
+_Avoid_: 原始工具结果, 工具 JSON, Skill 内容
+
+**合法任务转换图**:
+定义一个 Agent Run 或 Conversation 中哪些任务类型可以衔接、可传递哪些 Artifact、是否需要确认以及旧 Run 如何处理的产品规则集合。
+_Avoid_: 任意任务跳转, 模型自由切换
+
+**组合求职旅程**:
+由多个合法任务转换组成、用于验证跨能力衔接和中断恢复的完整用户目标路径，例如 JD 分析到简历诊断再到面试准备。
+_Avoid_: 测试脚本, 多轮聊天样例
+
+**Agent 安全视图**:
+Agent Conversation 中允许普通用户看到的文本、状态、确认节点或结构化 Artifact 视图；每类任务都必须定义安全视图，但不要求都表现为复杂卡片。
+_Avoid_: 通用工具结果卡, 原始事件, Debug 数据
+
+**Conversation Item**:
+由 Durable Run Event、Artifact 和 Gate 生命周期投影出的稳定有序用户界面记录；文本、过程状态、工具视图、Artifact 卡片和确认节点是不同的 Item 类型。
+_Avoid_: Session Message, 原始 Run Event, 页面临时状态, Tool Result
+
+**Eval Run**:
+一次有版本标识的评测执行记录，绑定代码、模型、提示词、工具、fixture 和 Judge 版本，并保存门禁结果、质量评分及失败证据。
+_Avoid_: CI 日志, 测试报告文件, Agent Run
+
+**评测样本**:
+可复跑的任务输入、程序化事实、期望约束和脱敏元数据集合；它可以来自模板合成、脱敏真实案例或线上失败晋升。
+_Avoid_: Prompt 示例, Mock 返回值, 聊天截图
+
+**质量 Judge**:
+使用任务专属 rubric 对 Agent 产物质量评分的独立评测模型；它不能覆盖权限、归属、读回或协议安全等确定性失败。
+_Avoid_: 生成模型自评, 唯一发布门禁, 人工审批
+
+**任务切换**:
+用户在当前 Agent Run 未完成时明确发起另一目标；到达安全切换点后，旧 Run 进入可恢复暂停状态，并在同一 Conversation 创建新 Run。补充当前目标的信息不属于任务切换。
+_Avoid_: 取消任务, 新消息, Agent 切换
+
+**安全切换点**:
+Agent Run 可以暂停且不会遗留结果不确定的 Tool Attempt 或未处理高风险 Gate 的持久位置；未到达该位置时，新目标必须等待当前动作完成、拒绝或取消。
+_Avoid_: 任意 checkpoint, 浏览器空闲, 模型输出结束

@@ -39,6 +39,36 @@ describe("Durable Agent Run", () => {
     ).rejects.toThrowError("Conversation 42 already has a nonterminal Agent Run");
   });
 
+  it("pauses a run for a task switch and resumes it without creating duplicate execution", async () => {
+    const runtime = new DurableAgentRunService(new InMemoryAgentRunStore());
+    const created = await runtime.createRun(
+      { userId: "user-pause" },
+      {
+        requestId: "request-pause",
+        conversationId: 77,
+        taskType: "jd_evaluation",
+        agentId: "evaluate",
+        input: { content: "评估这份 JD" },
+      },
+    );
+    const paused = await runtime.requestPause({ userId: "user-pause" }, created.run.id, "pause-1");
+    expect(paused.status).toBe("paused");
+    const second = await runtime.createRun(
+      { userId: "user-pause" },
+      {
+        requestId: "request-next",
+        conversationId: 77,
+        taskType: "resume_query",
+        agentId: "resume",
+        input: { content: "读取我的简历" },
+      },
+    );
+    expect(second.run.status).toBe("queued");
+    await expect(
+      runtime.resumeRun({ userId: "user-pause" }, created.run.id, "resume-1"),
+    ).rejects.toThrowError("Conversation already has an active Agent Run");
+  });
+
   it("fences a stale Worker after lease takeover", async () => {
     const runtime = new DurableAgentRunService(new InMemoryAgentRunStore());
     const created = await runtime.createRun(
@@ -170,6 +200,47 @@ describe("Durable Agent Run", () => {
     });
 
     expect([requested.status, cancelled.status]).toEqual(["cancel_requested", "cancelled"]);
+  });
+
+  it("persists the terminal observation and safe error on a failed Run", async () => {
+    const runtime = new DurableAgentRunService(new InMemoryAgentRunStore());
+    const created = await runtime.createRun(
+      { userId: "user-failure-evidence" },
+      {
+        requestId: "request-failure-evidence",
+        conversationId: 43,
+        taskType: "resume_edit",
+        agentId: "resume",
+        input: { content: "优化我的简历" },
+      },
+    );
+    const lease = await runtime.claimNextRun({ workerId: "worker-failure-evidence" });
+    const observation = {
+      category: "tool_permanent" as const,
+      stage: "tool_execution",
+      retryability: "never" as const,
+      effectState: "not_executed" as const,
+      fingerprint: "tool_permanent:resume-provider-auth",
+      userSafeSummary: "简历优化服务认证失败，请检查服务配置",
+      diagnosticRef: "optimize_resume_section",
+      recoveryCapabilities: [],
+    };
+    const error = {
+      category: observation.category,
+      summary: observation.userSafeSummary,
+      diagnosticRef: observation.diagnosticRef,
+    };
+
+    const failed = await runtime.transitionRun({
+      runId: created.run.id,
+      workerId: "worker-failure-evidence",
+      fencingToken: lease!.fencingToken,
+      nextStatus: "failed",
+      observation,
+      error,
+    });
+
+    expect(failed).toMatchObject({ status: "failed", lastObservation: observation, error });
   });
 
   it("scopes approval to the exact tool arguments and risk", async () => {

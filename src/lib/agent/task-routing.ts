@@ -10,10 +10,18 @@ import {
   inferRequestedTaskFromText,
   isAmbiguousGuidedFollowUp,
   isExplicitGuidedTaskCancel,
+  isConfirmedGuidedTaskSwitch,
   isGuidedSessionActive,
   taskLabelZh,
   type GuidedSessionState,
 } from "@/lib/agent/guided-session-state";
+import { isLegalTaskTransition } from "@/lib/agent/task-journey";
+import {
+  detectNegatedWriteIntent,
+  hasProfileWriteIntent,
+  hasReferenceResumeSaveIntent,
+  hasResumeWriteIntent,
+} from "@/lib/agent/write-intent";
 
 export interface AgentTaskRouteDecision {
   taskType: AgentTaskType | null;
@@ -28,7 +36,7 @@ export interface AgentTaskRouteDecision {
 }
 
 export function isReferenceResumeSaveIntent(content: string): boolean {
-  return /(保存|存|沉淀|加入|放到).{0,20}(优秀|参考|标杆|样例|范例).{0,20}(简历|履历|resume|cv)|(优秀|参考|标杆|样例|范例).{0,20}(简历|履历|resume|cv).{0,20}(保存|存|沉淀|加入|放到)/i.test(content);
+  return hasReferenceResumeSaveIntent(content);
 }
 
 export function isSelfPositioningIntent(content: string): boolean {
@@ -36,11 +44,11 @@ export function isSelfPositioningIntent(content: string): boolean {
 }
 
 export function isProfileWriteIntent(content: string): boolean {
-  return /(更新|保存|写入|记录|沉淀|提取|同步|刷新|完善|加入|修改|生成|建立|做).{0,16}(求职画像|职业画像|个人画像|画像|profile)|(求职画像|职业画像|个人画像|画像|profile).{0,16}(更新|保存|写入|记录|沉淀|提取|同步|刷新|完善|加入|修改|生成|建立)/i.test(content);
+  return hasProfileWriteIntent(content);
 }
 
 export function isResumeEditIntent(content: string): boolean {
-  return /(优化|修改|改写|润色|重写|生成|创建|保存|写入|应用|用这个|撤销|回滚|导入|同步|替换).{0,16}(简历|履历|resume|cv)|(简历|履历|resume|cv).{0,16}(优化|修改|改写|润色|重写|生成|创建|保存|写入|应用|用这个|撤销|回滚|导入|同步|替换)/i.test(content);
+  return hasResumeWriteIntent(content);
 }
 
 export function isResumeReadOnlyIntent(content: string): boolean {
@@ -120,6 +128,15 @@ export function routeAgentTask(input: {
   const fromImageClarification = inferTaskFromImageClarificationReply(content, activeTask);
   const requestedTaskType = fromImage || fromImageClarification || inferRequestedTaskFromText(content);
   const nonSemanticInput = isNonSemanticInput(content);
+  const negatedWriteTarget = detectNegatedWriteIntent(content);
+
+  if (negatedWriteTarget) {
+    return buildRouteDecision({
+      taskType: negatedWriteTarget === "resume" ? "resume_query" : "general_chat",
+      imageDecision,
+      auditSummary: `intent:negated_write:${negatedWriteTarget}`,
+    });
+  }
 
   if (isGuidedSessionActive(activeTask)) {
     if (nonSemanticInput && !requestedTaskType) {
@@ -155,6 +172,16 @@ export function routeAgentTask(input: {
       });
     }
     if (switchDecision.requestedTaskType && switchDecision.requestedTaskType !== activeTask.taskType) {
+      if (isConfirmedGuidedTaskSwitch(content) && !isLegalTaskTransition(activeTask.taskType, switchDecision.requestedTaskType)) {
+        return buildRouteDecision({
+          taskType: activeTask.taskType,
+          imageDecision,
+          requiresClarification: true,
+          clarificationQuestion: `当前「${taskLabelZh(activeTask.taskType)}」不能直接切换到「${taskLabelZh(switchDecision.requestedTaskType)}」。请先完成当前任务，或选择一个合法的下一步。`,
+          blockedReason: `illegal task transition ${activeTask.taskType} -> ${switchDecision.requestedTaskType}`,
+          auditSummary: `guided:${activeTask.taskType}:illegal_switch:${switchDecision.requestedTaskType}`,
+        });
+      }
       return buildRouteDecision({
         taskType: switchDecision.requestedTaskType,
         imageDecision,
@@ -196,9 +223,16 @@ export function routeAgentTask(input: {
 
   const documentType = imageIntake?.documentType || preferredDocumentType;
 
+  if (isSelfPositioningIntent(content)) {
+    return buildRouteDecision({
+      taskType: "career_positioning_guidance",
+      auditSummary: "intent:self_positioning",
+    });
+  }
+
   if (agentId === "offer" && isSavedOfferReportAssistIntent(content)) {
     return buildRouteDecision({
-      taskType: null,
+      taskType: "general_chat",
       auditSummary: "agent:offer:saved_report_assist",
     });
   }
@@ -237,12 +271,18 @@ export function routeAgentTask(input: {
     });
   }
 
+  if (requestedTaskType) {
+    return buildRouteDecision({
+      taskType: requestedTaskType,
+      auditSummary: `intent:${requestedTaskType}`,
+    });
+  }
+
   if (agentId === "evaluate" || documentType === "jd") return buildRouteDecision({ taskType: "jd_evaluation", auditSummary: "agent:evaluate" });
   if (agentId === "offer" || documentType === "offer") return buildRouteDecision({ taskType: "offer_evaluation", auditSummary: "agent:offer" });
   if (agentId === "interview") return buildRouteDecision({ taskType: "interview_coaching", auditSummary: "agent:interview" });
   if (isReferenceResumeSaveIntent(content)) return buildRouteDecision({ taskType: "reference_resume_save", auditSummary: "intent:reference_resume_save" });
   if (agentId === "profile") {
-    if (isSelfPositioningIntent(content)) return buildRouteDecision({ taskType: "career_positioning_guidance", auditSummary: "intent:self_positioning" });
     return buildRouteDecision({
       taskType: isProfileWriteIntent(content) ? "profile_update" : null,
       auditSummary: isProfileWriteIntent(content) ? "intent:profile_write" : "agent:profile:chat",
@@ -259,7 +299,7 @@ export function routeAgentTask(input: {
       auditSummary: taskType === "resume_edit" ? "agent:resume:edit" : "agent:resume:read_only",
     });
   }
-  return buildRouteDecision({ taskType: null, auditSummary: "general:no_contract" });
+  return buildRouteDecision({ taskType: "general_chat", auditSummary: "general:durable_chat" });
 }
 
 function taskTypeFromImageDecision(
@@ -311,6 +351,7 @@ function buildRouteDecision(input: {
 export function mapAgentTaskToMemoryTask(taskType: AgentTaskType | null): AgentMemoryTask | "general_chat" | null {
   if (!taskType) return null;
   const map: Record<AgentTaskType, AgentMemoryTask | "general_chat"> = {
+    general_chat: "general_chat",
     career_positioning_guidance: "profile_growth",
     resume_query: "general_chat",
     resume_edit: "resume_optimization",

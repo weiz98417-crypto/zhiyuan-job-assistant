@@ -1,8 +1,43 @@
 import { describe, expect, it } from "vitest";
 import { inferAgentTaskType, routeAgentTask } from "@/lib/agent/task-routing";
+import {
+  createAgentTaskContract,
+  inferCompletedCriteriaFromToolResult,
+  resolveTaskContractRunOutcome,
+} from "@/lib/agent/task-contract";
 import type { ImageIntakeResult } from "@/lib/agent/image-intake";
 
 describe("agent task routing", () => {
+  it.each([
+    ["请给我一份三步求职行动计划", "general_chat"],
+    ["帮我做自我定位", "career_positioning_guidance"],
+    ["读取我的简历", "resume_query"],
+    ["优化我的简历", "resume_edit"],
+    ["帮我评估这个 JD：负责 AI 产品规划", "jd_evaluation"],
+    ["帮我评估这个 Offer，月薪 30k", "offer_evaluation"],
+    ["开始模拟面试", "interview_coaching"],
+    ["更新我的求职画像", "profile_update"],
+    ["把这份优秀简历保存为参考简历", "reference_resume_save"],
+    ["导出这份报告 PDF", "file_export"],
+    ["帮我找 3 个杭州 AI 产品经理岗位", "job_search"],
+  ] as const)("routes default-agent intent %s to %s", (content, expectedTaskType) => {
+    const decision = routeAgentTask({ agentId: "general", content });
+
+    expect(decision.taskType).toBe(expectedTaskType);
+  });
+
+  it("routes ordinary chat through the durable read-only runtime", () => {
+    const decision = routeAgentTask({
+      agentId: "general",
+      content: "请给我一份三步求职行动计划",
+    });
+
+    expect(decision.taskType).toBe("general_chat");
+    expect(decision.contractPolicy).toBe("read_only");
+    expect(decision.memoryTask).toBe("general_chat");
+    expect(decision.auditSummary).toBe("general:durable_chat");
+  });
+
   it("does not route self-positioning guidance into profile write contracts", () => {
     expect(inferAgentTaskType({
       agentId: "profile",
@@ -12,6 +47,34 @@ describe("agent task routing", () => {
       agentId: "profile",
       content: "我很迷茫，不知道自己适合什么方向",
     })).toBe("career_positioning_guidance");
+  });
+
+  it("routes self-positioning from the default agent without contract blocking", () => {
+    const decision = routeAgentTask({
+      agentId: "general",
+      content: "帮我做自我定位",
+    });
+    expect(decision.taskType).toBe("career_positioning_guidance");
+
+    const contract = createAgentTaskContract({
+      taskType: decision.taskType!,
+      target: "帮我做自我定位",
+    });
+    const completedCriteria = [
+      ...inferCompletedCriteriaFromToolResult(contract, {
+        toolName: "self_positioning",
+        toolSuccess: true,
+        data: { stage: 1 },
+      }),
+      "next question or guidance response generated",
+    ];
+    const outcome = resolveTaskContractRunOutcome(contract, completedCriteria, {
+      hasAssistantResponse: true,
+      hasUserVisibleArtifact: false,
+    });
+
+    expect(outcome.status).toBe("succeeded");
+    expect(outcome.gate.unmetCriteria).not.toContain("answer generated");
   });
 
   it("keeps explicit profile write intents under verified profile update contracts", () => {
@@ -165,25 +228,27 @@ describe("agent task routing", () => {
     expect(decision.allowedTools).toContain("evaluate_offer");
   });
 
-  it("does not create an Offer evaluation contract for saved-report HR question handoff", () => {
+  it("creates a durable read-only Run for saved-report HR question handoff", () => {
     const decision = routeAgentTask({
       agentId: "offer",
       content: "Please use offerReportId=12 and call generate_offer_hr_question_list. Do not re-evaluate the Offer.",
     });
 
-    expect(decision.taskType).toBeNull();
-    expect(decision.contractPolicy).toBeNull();
+    expect(decision.taskType).toBe("general_chat");
+    expect(decision.contractPolicy).toBe("read_only");
+    expect(decision.allowedTools).toContain("generate_offer_hr_question_list");
     expect(decision.auditSummary).toBe("agent:offer:saved_report_assist");
   });
 
-  it("does not create an Offer evaluation contract for saved-report negotiation handoff", () => {
+  it("creates a durable read-only Run for saved-report negotiation handoff", () => {
     const decision = routeAgentTask({
       agentId: "offer",
       content: "Please use offerReportId=12 and call generate_offer_negotiation_strategy. Do not re-evaluate the Offer.",
     });
 
-    expect(decision.taskType).toBeNull();
-    expect(decision.contractPolicy).toBeNull();
+    expect(decision.taskType).toBe("general_chat");
+    expect(decision.contractPolicy).toBe("read_only");
+    expect(decision.allowedTools).toContain("generate_offer_negotiation_strategy");
     expect(decision.auditSummary).toBe("agent:offer:saved_report_assist");
   });
 
@@ -358,6 +423,24 @@ describe("agent task routing", () => {
     expect(decision.taskType).toBe("offer_evaluation");
     expect(decision.requiresClarification).toBe(false);
     expect(decision.allowedTools).toContain("evaluate_offer");
+  });
+
+  it("blocks confirmed switches that are absent from the shared journey graph", () => {
+    const decision = routeAgentTask({
+      agentId: "general",
+      content: "确认切换到岗位发现",
+      activeTask: {
+        taskId: "offer-1",
+        taskType: "offer_evaluation",
+        agentId: "offer",
+        status: "waiting_user",
+        startedAt: "2026-08-26T00:00:00.000Z",
+        lastUpdatedAt: "2026-08-26T00:00:00.000Z",
+      },
+    });
+    expect(decision.taskType).toBe("offer_evaluation");
+    expect(decision.requiresClarification).toBe(true);
+    expect(decision.blockedReason).toContain("illegal task transition");
   });
 
   it("routes short evaluate replies from JD image clarification into JD evaluation instead of the stale profile lock", () => {

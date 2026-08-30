@@ -63,6 +63,7 @@ export interface ToolRouteConflictIssue {
 export interface ToolGovernanceDecision {
   allowed: boolean;
   reason?: string;
+  requiresUserInput?: boolean;
   effect: ToolEffect;
   contractPolicy?: TaskContractPolicy;
   governance?: ToolGovernance;
@@ -678,6 +679,7 @@ export const TOOL_GOVERNANCE_REGISTRY: Record<string, ToolGovernance> = {
 };
 
 export const TASK_CONTRACT_POLICY: Record<AgentTaskType, TaskContractPolicy> = {
+  general_chat: "read_only",
   career_positioning_guidance: "guidance",
   resume_query: "read_only",
   resume_edit: "high_risk_verified_write",
@@ -784,6 +786,7 @@ export function evaluateToolGovernance(input: {
     const question = contract.routing.clarificationQuestion || contract.routing.blockedReason || "当前任务需要先确认用户意图。";
     return {
       allowed: false,
+      requiresUserInput: true,
       effect,
       contractPolicy: policy,
       governance,
@@ -829,6 +832,7 @@ export function evaluateToolGovernance(input: {
   ) {
     return {
       allowed: false,
+      requiresUserInput: true,
       effect,
       contractPolicy: policy,
       governance,
@@ -848,6 +852,7 @@ export function enforceToolGovernance(input: {
   const decision = evaluateToolGovernance(input);
   if (decision.allowed) return null;
   const message = decision.reason || `工具 ${input.toolName} 被治理策略阻止。`;
+  const requiresUserInput = decision.requiresUserInput === true;
   return {
     success: false,
     data: {
@@ -858,15 +863,18 @@ export function enforceToolGovernance(input: {
       blockedBy: "tool_governance",
     },
     error: message,
-    errorCategory: "need_user_input",
-    recoverable: false,
-    llmSummary: `${message} 请不要改用其它大工具绕过；如果缺少确认，只问用户一个确认问题。`,
+    errorCategory: requiresUserInput ? "need_user_input" : "policy_denied",
+    recoverable: !requiresUserInput,
+    llmSummary: requiresUserInput
+      ? `${message} 只向用户询问这一项必要信息或确认。`
+      : `${message} 不要绕过策略；请改用当前任务允许的安全能力继续完成目标。`,
     uiPayload: {
       governanceBlocked: true,
       reason: message,
       effect: decision.effect,
       contractPolicy: decision.contractPolicy,
       taskType: input.taskContract?.taskType,
+      requiresUserInput,
     },
   };
 }

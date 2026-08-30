@@ -1,0 +1,3 @@
+# Agent UI reads persisted Conversation Item projections
+
+Durable Run Events, Artifacts, and Run Gate lifecycles are projected server-side into stable, ordered Conversation Items that the Agent UI reads directly. Text, progress, safe Tool views, Artifact cards, and confirmation nodes have explicit Item lifecycles; Session Messages remain a compatibility read model rather than a parallel source of truth. We chose a persisted projection over client-side full event replay and mixed Session state because it keeps real-time and refreshed views consistent without moving event ordering, deduplication, redaction, or Gate reconciliation into the browser.

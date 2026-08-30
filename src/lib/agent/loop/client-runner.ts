@@ -71,6 +71,7 @@ const ERROR_CATEGORY_ACTIONS: Record<ErrorCategory, { autoRetry: boolean; degrad
   transient:       { autoRetry: true,  degradeToUser: false },
   permanent:       { autoRetry: false, degradeToUser: true  },
   need_user_input: { autoRetry: false, degradeToUser: true  },
+  policy_denied:   { autoRetry: false, degradeToUser: false },
 };
 
 /** Resolve errorCategory from a ToolResult. Falls back to "permanent" for
@@ -958,7 +959,7 @@ export async function* agentLoopClient(
             const d = (toolResult.data as { filename?: string }) || {};
             ctx.push({ role: "user", content: `<!-- tool:${tc.name} result -->已导出文件: ${d.filename || "download"}。用户设备已自动下载，你不需要再提下载操作。` });
           } else {
-            const catHints: Record<ErrorCategory, string> = { ok: "", transient: "\n<!-- ⚠️ 请换参数重试。 -->", permanent: "", need_user_input: "" };
+            const catHints: Record<ErrorCategory, string> = { ok: "", transient: "\n<!-- ⚠️ 请换参数重试。 -->", permanent: "", need_user_input: "", policy_denied: "\n<!-- 请改用安全能力继续原任务。 -->" };
             // Parallel path: aggressive cap (500 chars) — LLM just needs to know which results to dig into
             const ctxCap = 500;
             const llmText = getLLMContext(toolResult, tc.name);
@@ -1407,6 +1408,7 @@ ${followupInstruction}`,
         transient:       "\n<!-- ⚠️ 搜索未找到理想结果，请换参数重试。 -->",
         permanent:       "",
         need_user_input: "",
+        policy_denied:   "\n<!-- 当前动作不被允许，请改用安全能力继续原任务。 -->",
       };
       const hint = categoryHints[category]
         || (quality === "empty" ? "\n<!-- ⚠️ 搜索结果为空，请在下一轮换不同关键词重新搜索。不要直接回复用户。 -->"

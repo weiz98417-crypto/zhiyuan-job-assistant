@@ -1,4 +1,9 @@
 import type { AgentTaskType } from "@/lib/agent/task-contract";
+import {
+  hasProfileWriteIntent,
+  hasReferenceResumeSaveIntent,
+  hasResumeWriteIntent,
+} from "@/lib/agent/write-intent";
 
 export type GuidedSessionStatus =
   | "active"
@@ -61,6 +66,7 @@ export const GUIDED_TASK_TYPES = new Set<AgentTaskType>([
 ]);
 
 const TASK_AGENT_ID: Record<AgentTaskType, string> = {
+  general_chat: "general",
   career_positioning_guidance: "profile",
   resume_query: "resume",
   resume_edit: "resume",
@@ -74,6 +80,7 @@ const TASK_AGENT_ID: Record<AgentTaskType, string> = {
 };
 
 const TASK_LABEL_ZH: Record<AgentTaskType, string> = {
+  general_chat: "普通对话",
   career_positioning_guidance: "自我定位",
   resume_query: "简历查询",
   resume_edit: "简历修改",
@@ -284,15 +291,19 @@ export function inferRequestedTaskFromText(content: string): AgentTaskType | nul
   if (/(评估|分析|看看|看下).{0,16}(offer|录用|薪资|合同|待遇)|\boffer\b/i.test(text)) return "offer_evaluation";
   if (/(评估|分析|看看|看下).{0,16}(JD|jd|职位|岗位|招聘|job description)|\bjd\b/i.test(text)) return "jd_evaluation";
   if (/(模拟|练习|准备|继续).{0,10}(面试)|下一题|追问/.test(text)) return "interview_coaching";
-  if (/(优秀|参考|标杆).{0,16}(简历|resume|cv).{0,16}(保存|沉淀|加入)|(保存|沉淀|加入).{0,16}(优秀|参考|标杆).{0,16}(简历|resume|cv)/i.test(text)) {
+  if (/(导出|下载).{0,16}(报告|PDF|文件|简历|履历|resume|cv)|(报告|PDF|文件|简历|履历|resume|cv).{0,16}(导出|下载)/i.test(text)) return "file_export";
+  if (hasReferenceResumeSaveIntent(text)) {
     return "reference_resume_save";
+  }
+  if (hasProfileWriteIntent(text)) {
+    return "profile_update";
   }
   if (
     /(简历|履历|resume|cv)/i.test(text) &&
     /(我现在的|当前|现在|已有|我的|读取|读一下|打开|展示|看一下|看看|查看|查询|给我看|是什么|内容|写了什么|长什么样|有哪些|在哪)/i.test(text) &&
-    !/(优化|修改|改写|润色|重写|生成|创建|保存|写入|应用|用这个|撤销|回滚|导入|同步|替换)/i.test(text)
+    !hasResumeWriteIntent(text)
   ) return "resume_query";
-  if (/(优化|修改|改|润色|保存).{0,12}(简历|resume|cv)|(简历|resume|cv).{0,12}(优化|修改|润色|保存)/i.test(text)) return "resume_edit";
+  if (hasResumeWriteIntent(text)) return "resume_edit";
   if (/(自我定位|职业方向|方向探索|找方向|迷茫)/.test(text)) return "career_positioning_guidance";
   return null;
 }

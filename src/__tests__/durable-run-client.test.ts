@@ -11,6 +11,7 @@ import {
 } from "@/lib/agent/runtime/durable-run-client";
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -79,6 +80,43 @@ describe("Durable Agent Run browser adapter", () => {
     expect(fetchMock.mock.calls.map((call) => call[1]?.body)).toEqual([
       expect.stringContaining('"requestId":"request-stable"'),
       expect.stringContaining('"requestId":"request-stable"'),
+    ]);
+  });
+
+  it("bounds a stalled create request before retrying the same command", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
+      if (fetchMock.mock.calls.length > 1) {
+        return Promise.resolve(Response.json({
+          success: true,
+          enabled: true,
+          data: {
+            run: { id: "run-timeout", status: "queued", eventCursor: 1 },
+            replayed: true,
+            assignment: { mode: "worker_all", owner: "worker", shadow: false, cohortBucket: 5 },
+          },
+        }));
+      }
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const resultPromise = createDurableAgentRunClient({
+      requestId: "request-timeout",
+      conversationId: 12,
+      taskType: "resume_edit",
+      agentId: "resume",
+      input: { content: "优化我的简历" },
+    });
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    await expect(resultPromise).resolves.toMatchObject({ run: { id: "run-timeout" } });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.map((call) => call[1]?.body)).toEqual([
+      expect.stringContaining('"requestId":"request-timeout"'),
+      expect.stringContaining('"requestId":"request-timeout"'),
     ]);
   });
 

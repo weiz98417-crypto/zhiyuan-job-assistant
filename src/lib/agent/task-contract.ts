@@ -1,6 +1,8 @@
 import { stableContentHash, type VerifiedActionResult } from "@/lib/agent/verified-action";
+import type { AgentArtifactRef } from "@/lib/agent/task-journey";
 
 export type AgentTaskType =
+  | "general_chat"
   | "career_positioning_guidance"
   | "resume_query"
   | "resume_edit"
@@ -33,6 +35,10 @@ export interface AgentTaskContract {
     activeTaskPhase?: string;
     routeLocked?: boolean;
   };
+  journey?: {
+    graphVersion: string;
+    artifacts: AgentArtifactRef[];
+  };
   createdAt: string;
 }
 
@@ -64,7 +70,30 @@ export interface TaskContractRunOutcome {
   safeMessage?: string;
 }
 
+export type RunContractEnforcement = "advisory" | "verified_effect";
+
+const RUN_CONTRACT_ENFORCEMENT: Record<AgentTaskType, RunContractEnforcement> = {
+  general_chat: "advisory",
+  career_positioning_guidance: "advisory",
+  resume_query: "advisory",
+  resume_edit: "verified_effect",
+  jd_evaluation: "verified_effect",
+  offer_evaluation: "verified_effect",
+  interview_coaching: "advisory",
+  profile_update: "verified_effect",
+  reference_resume_save: "verified_effect",
+  file_export: "verified_effect",
+  job_search: "verified_effect",
+};
+
+export function getRunContractEnforcement(taskType: AgentTaskType): RunContractEnforcement {
+  return RUN_CONTRACT_ENFORCEMENT[taskType];
+}
+
 const DEFAULT_SUCCESS_CRITERIA: Record<AgentTaskType, string[]> = {
+  general_chat: [
+    "answer generated",
+  ],
   career_positioning_guidance: [
     "guidance framework loaded",
     "next question or guidance response generated",
@@ -122,6 +151,7 @@ const DEFAULT_SUCCESS_CRITERIA: Record<AgentTaskType, string[]> = {
 };
 
 const DEFAULT_VALIDATORS: Record<AgentTaskType, string[]> = {
+  general_chat: ["assistant_response"],
   career_positioning_guidance: ["guidance_response"],
   resume_query: ["read_only_resume_response"],
   resume_edit: ["base_hash", "document_field", "read_back_match", "no_placeholder_content"],
@@ -143,6 +173,7 @@ export function createAgentTaskContract(input: {
   successCriteria?: string[];
   validators?: string[];
   routing?: AgentTaskContract["routing"];
+  journey?: AgentTaskContract["journey"];
 }): AgentTaskContract {
   return {
     taskType: input.taskType,
@@ -153,6 +184,7 @@ export function createAgentTaskContract(input: {
     successCriteria: input.successCriteria || DEFAULT_SUCCESS_CRITERIA[input.taskType],
     validators: input.validators || DEFAULT_VALIDATORS[input.taskType],
     routing: input.routing,
+    journey: input.journey,
     createdAt: new Date().toISOString(),
   };
 }
@@ -321,8 +353,34 @@ export function inferCompletedCriteriaFromToolResult(
     }
   }
 
-  if (contract.taskType === "interview_coaching" && signals.toolName === "generate_interview_questions") {
-    completed.add("one question generated");
+  if (contract.taskType === "interview_coaching") {
+    const questions = Array.isArray(data.questions) ? data.questions : Array.isArray(uiPayload.questions) ? uiPayload.questions : [];
+    const planSnapshot = isRecord(data.planSnapshotSeed) ? data.planSnapshotSeed : {};
+    const hasBoundContext = Object.values(planSnapshot).some((value) => hasNonEmptyString(value));
+    if (signals.toolName === "prepare_interview_full" && (hasNonEmptyString(data.target) || data.hasPrepFramework === true)) {
+      completed.add("JD/resume context bound");
+    }
+    if (signals.toolName === "generate_interview_questions") {
+      if (hasBoundContext) completed.add("JD/resume context bound");
+      if (questions.length > 0) completed.add("one question generated");
+    }
+    if (signals.toolName === "start_interview_session") {
+      if (hasNonEmptyString(data.sessionId) && data.readBackVerified === true) {
+        completed.add("JD/resume context bound");
+        completed.add("session state updated without losing context");
+      }
+      if (hasNonEmptyString(data.question)) completed.add("one question generated");
+    }
+  }
+
+  if (contract.taskType === "profile_update" && signals.toolName === "mine_profile") {
+    const hasExtractedSignals = data.done === true || (isRecord(data.collected) && Object.keys(data.collected).length > 0);
+    const verifiedWrite = data.done === true && data.readBackVerified === true;
+    if (hasExtractedSignals) completed.add("candidate signals extracted");
+    if (verifiedWrite) {
+      completed.add("signal validator passes");
+      completed.add("profile or memory write read-back verification passes");
+    }
   }
 
   if (contract.taskType === "file_export" && (signals.toolName === "export_file" || signals.toolName === "download_report_pdf")) {
@@ -395,7 +453,7 @@ export function resolveTaskContractRunOutcome(
   options: {
     requiresClarification?: boolean;
     hasAssistantResponse?: boolean;
-    lastToolSuccess?: boolean;
+    hasUserVisibleArtifact?: boolean;
   } = {},
 ): TaskContractRunOutcome {
   const gate = evaluateTaskContractCompletion(contract, completedCriteria);

@@ -212,7 +212,7 @@ describe("agent runtime regression evals", () => {
 
     const outcome = resolveTaskContractRunOutcome(contract, completedCriteria, {
       hasAssistantResponse: true,
-      lastToolSuccess: true,
+      hasUserVisibleArtifact: false,
     });
 
     expect(outcome.status).toBe(RESUME_RUNTIME_INCIDENT_20260717.expected.draftStatus);
@@ -230,7 +230,7 @@ describe("agent runtime regression evals", () => {
     const outcome = resolveTaskContractRunOutcome(
       contract,
       ["resume context read", "answer generated"],
-      { hasAssistantResponse: true, lastToolSuccess: false },
+      { hasAssistantResponse: true, hasUserVisibleArtifact: false },
     );
 
     expect(outcome.status).toBe("succeeded");

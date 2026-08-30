@@ -39,6 +39,7 @@ import {
   renameVersion,
   saveCVData,
   computeSectionsHash,
+  createDefaultCVData,
 } from "@/lib/cv-storage";
 import OptimizePanel from "./optimize-panel";
 import VersionDiff from "./version-diff";
@@ -134,7 +135,7 @@ function referenceStatusClass(value?: string): string {
 export default function CVPage() {
   const [sections, setSections] = useState<CVSection[]>([]);
   const [savedHash, setSavedHash] = useState("");
-  const [cvData, setCVData] = useState(() => loadCVData());
+  const [cvData, setCVData] = useState(() => createDefaultCVData());
   const [showVersionMenu, setShowVersionMenu] = useState(false);
   const [editingVersionId, setEditingVersionId] = useState<string | null>(null);
   const [editVersionName, setEditVersionName] = useState("");

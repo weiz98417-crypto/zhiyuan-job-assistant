@@ -3,6 +3,7 @@ import { fetchAgentMemoryContext } from "../memory-helpers";
 import {
   optimizeResumeSectionForAgent,
   ResumeOptimizationInputError,
+  ResumeOptimizationProviderError,
 } from "@/lib/server/resume-optimization-service";
 
 interface OptimizeParams {
@@ -60,12 +61,14 @@ async function handler(
       };
     } catch (error) {
       const needsInput = error instanceof ResumeOptimizationInputError;
+      const providerFailure = error instanceof ResumeOptimizationProviderError ? error : null;
+      const recoverable = providerFailure?.retryable ?? false;
       return {
         success: false,
         data: null,
         error: error instanceof Error ? error.message : "优化失败",
-        errorCategory: needsInput ? "need_user_input" : "transient",
-        recoverable: !needsInput,
+        errorCategory: needsInput ? "need_user_input" : recoverable ? "transient" : "permanent",
+        recoverable: needsInput ? false : recoverable,
       };
     }
   }

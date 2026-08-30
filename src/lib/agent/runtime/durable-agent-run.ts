@@ -4,6 +4,7 @@ import {
   isTerminalAgentRunStatus,
   type AgentRunStatus,
 } from "@/lib/agent/runtime/types";
+import type { AgentRuntimeObservation } from "@/lib/agent/runtime/observation";
 
 export interface ExecutionPrincipal {
   userId: string;
@@ -12,6 +13,7 @@ export interface ExecutionPrincipal {
 export interface DurableRunInput {
   content: string;
   images?: string[];
+  persistInConversation?: boolean;
 }
 
 export interface CreateAgentRunCommand {
@@ -39,6 +41,8 @@ export interface AgentRunSnapshot {
   eventCursor: number;
   contract: unknown;
   budgets: Record<string, unknown>;
+  lastObservation: Record<string, unknown>;
+  error: Record<string, unknown>;
   runtimeMode: string;
   parentRunId: string | null;
   depth: number;
@@ -84,6 +88,13 @@ export interface TransitionAgentRunCommand {
   workerId: string;
   fencingToken: number;
   nextStatus: AgentRunStatus;
+  observation?: AgentRuntimeObservation;
+  error?: Record<string, unknown>;
+}
+
+export interface AgentRunControlCommand {
+  runId: string;
+  requestId: string;
 }
 
 export interface RecordAgentRunEventCommand {
@@ -199,6 +210,8 @@ export interface AgentRunStore {
     runId: string,
     requestId: string,
   ): Promise<AgentRunSnapshot>;
+  requestPause(principal: ExecutionPrincipal, runId: string, requestId: string): Promise<AgentRunSnapshot>;
+  resumeRun(principal: ExecutionPrincipal, runId: string, requestId: string): Promise<AgentRunSnapshot>;
   openGate(command: OpenAgentRunGateCommand): Promise<AgentRunGate>;
   respondGate(
     principal: ExecutionPrincipal,
@@ -207,6 +220,11 @@ export interface AgentRunStore {
     decision: "approved" | "denied",
   ): Promise<AgentRunGate>;
   isGateApproved(
+    principal: ExecutionPrincipal,
+    runId: string,
+    scopeHash: string,
+  ): Promise<boolean>;
+  isGateDenied(
     principal: ExecutionPrincipal,
     runId: string,
     scopeHash: string,
@@ -279,6 +297,16 @@ export class DurableAgentRunService {
     return this.store.requestCancel(principal, runId, requestId);
   }
 
+  requestPause(principal: ExecutionPrincipal, runId: string, requestId: string): Promise<AgentRunSnapshot> {
+    if (!requestId.trim()) throw new Error("Pause requestId is required");
+    return this.store.requestPause(principal, runId, requestId);
+  }
+
+  resumeRun(principal: ExecutionPrincipal, runId: string, requestId: string): Promise<AgentRunSnapshot> {
+    if (!requestId.trim()) throw new Error("Resume requestId is required");
+    return this.store.resumeRun(principal, runId, requestId);
+  }
+
   openGate(command: OpenAgentRunGateCommand): Promise<AgentRunGate> {
     return this.store.openGate(command);
   }
@@ -299,6 +327,14 @@ export class DurableAgentRunService {
     scopeHash: string,
   ): Promise<boolean> {
     return this.store.isGateApproved(principal, runId, scopeHash);
+  }
+
+  isGateDenied(
+    principal: ExecutionPrincipal,
+    runId: string,
+    scopeHash: string,
+  ): Promise<boolean> {
+    return this.store.isGateDenied(principal, runId, scopeHash);
   }
 
   submitInput(
@@ -392,6 +428,8 @@ export class InMemoryAgentRunStore implements AgentRunStore {
       eventCursor: 0,
       contract: command.contract ?? {},
       budgets: { ...(command.budgets || {}) },
+      lastObservation: {},
+      error: {},
       runtimeMode: command.runtimeMode || "worker_all",
       parentRunId: command.parentRunId || null,
       depth,
@@ -432,6 +470,17 @@ export class InMemoryAgentRunStore implements AgentRunStore {
         && run.leaseExpiresAt !== null
         && new Date(run.leaseExpiresAt).getTime() <= now.getTime()
       ))
+      .filter((run) => {
+        if (run.conversationId === null) return true;
+        return !Array.from(this.runsById.values()).some((other) => (
+          other.id !== run.id
+          && other.userId === run.userId
+          && other.conversationId === run.conversationId
+          && ["running", "recovering", "verifying", "cancel_requested"].includes(other.status)
+          && other.leaseExpiresAt !== null
+          && new Date(other.leaseExpiresAt).getTime() > now.getTime()
+        ));
+      })
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt))[0];
     if (!eligible) return null;
 
@@ -458,9 +507,11 @@ export class InMemoryAgentRunStore implements AgentRunStore {
     }
 
     run.status = transitionAgentRun(run.status, command.nextStatus);
+    if (command.observation) run.lastObservation = { ...command.observation };
+    if (command.error) run.error = { ...command.error };
     run.snapshotVersion += 1;
     run.updatedAt = new Date().toISOString();
-    if (run.status === "waiting_user" || run.status === "queued") {
+    if (run.status === "waiting_user" || run.status === "queued" || run.status === "paused") {
       run.ownerId = null;
       run.leaseExpiresAt = null;
     }
@@ -486,7 +537,11 @@ export class InMemoryAgentRunStore implements AgentRunStore {
   async saveCheckpoint(command: SaveAgentRunCheckpointCommand): Promise<AgentRunCheckpoint> {
     const run = this.runsById.get(command.runId);
     if (!run) throw new Error("Agent Run not found");
-    if (run.ownerId !== command.workerId || run.fencingToken !== command.fencingToken) {
+    const owned = run.ownerId === command.workerId && run.fencingToken === command.fencingToken;
+    const gateOpenerFinishing = run.status === "waiting_user"
+      && run.ownerId === null
+      && run.fencingToken === command.fencingToken;
+    if (!owned && !gateOpenerFinishing) {
       throw new Error("Stale Agent Run owner");
     }
 
@@ -558,6 +613,39 @@ export class InMemoryAgentRunStore implements AgentRunStore {
         pendingParents.push(child.id);
       }
     }
+    return { ...run };
+  }
+
+  async requestPause(principal: ExecutionPrincipal, runId: string, requestId: string): Promise<AgentRunSnapshot> {
+    const run = this.runsById.get(runId);
+    if (!run || run.userId !== principal.userId) throw new Error("Agent Run not found");
+    const requestKey = `${principal.userId}:pause:${requestId}`;
+    if (this.commandRequests.has(requestKey) || isTerminalAgentRunStatus(run.status)) return { ...run };
+    this.commandRequests.add(requestKey);
+    if (run.status !== "paused") {
+      run.status = transitionAgentRun(run.status, "paused");
+      run.ownerId = null;
+      run.leaseExpiresAt = null;
+      run.snapshotVersion += 1;
+      this.activeRunByConversation.delete(run.conversationId === null ? "" : `${run.userId}:${run.conversationId}`);
+      this.appendEvent(run, "run.paused", { requestId });
+    }
+    return { ...run };
+  }
+
+  async resumeRun(principal: ExecutionPrincipal, runId: string, requestId: string): Promise<AgentRunSnapshot> {
+    const run = this.runsById.get(runId);
+    if (!run || run.userId !== principal.userId) throw new Error("Agent Run not found");
+    const requestKey = `${principal.userId}:resume:${requestId}`;
+    if (this.commandRequests.has(requestKey)) return { ...run };
+    this.commandRequests.add(requestKey);
+    if (run.status !== "paused") return { ...run };
+    const key = run.conversationId === null ? null : `${run.userId}:${run.conversationId}`;
+    if (key && this.activeRunByConversation.has(key)) throw new Error("Conversation already has an active Agent Run");
+    run.status = transitionAgentRun(run.status, "queued");
+    run.snapshotVersion += 1;
+    if (key) this.activeRunByConversation.set(key, run.id);
+    this.appendEvent(run, "run.resumed", { requestId });
     return { ...run };
   }
 
@@ -633,6 +721,21 @@ export class InMemoryAgentRunStore implements AgentRunStore {
       && gate.userId === principal.userId
       && gate.scopeHash === scopeHash
       && gate.status === "approved"
+    ));
+  }
+
+  async isGateDenied(
+    principal: ExecutionPrincipal,
+    runId: string,
+    scopeHash: string,
+  ): Promise<boolean> {
+    const run = this.runsById.get(runId);
+    if (!run || run.userId !== principal.userId) return false;
+    return Array.from(this.gatesById.values()).some((gate) => (
+      gate.runId === runId
+      && gate.userId === principal.userId
+      && gate.scopeHash === scopeHash
+      && gate.status === "denied"
     ));
   }
 
@@ -717,7 +820,7 @@ export class InMemoryAgentRunStore implements AgentRunStore {
     if (run.ownerId !== command.workerId || run.fencingToken !== command.fencingToken) {
       throw new Error("Stale Agent Run owner");
     }
-    if (isTerminalAgentRunStatus(run.status) || run.status === "waiting_user" || run.status === "queued") {
+    if (isTerminalAgentRunStatus(run.status) || run.status === "waiting_user" || run.status === "queued" || run.status === "cancel_requested") {
       throw new Error("Agent Run is not heartbeat eligible");
     }
     const now = command.now || new Date();

@@ -133,6 +133,21 @@ describe("Recovery Supervisor", () => {
     expect(decision).toMatchObject({ action: "fail", nextStatus: "failed", terminal: true });
   });
 
+  it("never retries a failure explicitly classified as non-retryable", () => {
+    const decision = new RecoverySupervisor().decide({
+      category: "tool_permanent",
+      stage: "tool_execution",
+      retryability: "never",
+      effectState: "not_executed",
+      fingerprint: "tool_permanent:provider-auth",
+      userSafeSummary: "简历优化服务认证失败，请检查服务配置",
+      diagnosticRef: "optimize_resume_section",
+      recoveryCapabilities: [],
+    });
+
+    expect(decision).toMatchObject({ action: "fail", nextStatus: "failed", terminal: true });
+  });
+
   it("compacts context before retrying a context-window failure", () => {
     const decision = new RecoverySupervisor().decide({
       category: "provider",

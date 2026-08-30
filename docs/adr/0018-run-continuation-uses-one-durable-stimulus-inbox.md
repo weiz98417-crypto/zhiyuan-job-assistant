@@ -1,0 +1,3 @@
+# Run continuation uses one durable stimulus inbox
+
+Conversation Turns, Run Gate decisions, background job results, and manual recovery commands enter one ordered durable inbox as Continuation Stimuli. Recording a stimulus does not mean it has been consumed: the worker consumes it only from a compatible checkpoint, while persistence, valid state transition, and wake-up are committed atomically and duplicate requests remain idempotent. We chose this over separate continuation paths because independent Turn, Gate, and store-adapter implementations had diverged and could leave a Run waiting after its input was already recorded or consumed.

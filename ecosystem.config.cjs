@@ -14,7 +14,7 @@ module.exports = {
       name: "zhiyuan-web",
       cwd: releaseDirectory,
       script: path.join(releaseDirectory, "node_modules", "next", "dist", "bin", "next"),
-      args: "start -H 127.0.0.1 -p 3000",
+      args: "start -H 127.0.0.1 -p 3100",
       instances: 1,
       exec_mode: "fork",
       autorestart: true,
@@ -22,6 +22,8 @@ module.exports = {
       env: {
         NODE_ENV: "production",
         AGENT_ARTIFACT_DIR: artifactDirectory,
+        DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY,
+        ZHIPU_API_KEY: process.env.ZHIPU_API_KEY,
       },
     },
     {
@@ -44,6 +46,8 @@ module.exports = {
         DB_DRIVER: "postgres",
         AGENT_ARTIFACT_DIR: artifactDirectory,
         AGENT_WORKER_CONCURRENCY: "2",
+        DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY,
+        ZHIPU_API_KEY: process.env.ZHIPU_API_KEY,
       },
     },
   ],

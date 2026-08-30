@@ -58,6 +58,7 @@ export interface RuntimeAdminRun {
   wakeAt: string | null;
   isolationReason: string;
   lastObservation: Record<string, unknown>;
+  error: Record<string, unknown>;
   leaseStale: boolean;
   createdAt: string;
   updatedAt: string;
@@ -154,7 +155,7 @@ export class AgentRuntimeAdminService {
           SELECT id, user_id, session_id, task_type, agent_id, status, runtime_mode,
                  snapshot_version, event_sequence, owner_id, lease_expires_at,
                  heartbeat_at, fencing_token, wake_at, isolation_reason,
-                 last_observation_json, created_at, updated_at
+                 last_observation_json, error_json, created_at, updated_at
           FROM agent_runs
           WHERE legacy = FALSE
           ORDER BY updated_at DESC
@@ -494,6 +495,7 @@ function mapRun(row: Record<string, unknown>): RuntimeAdminRun {
     wakeAt: nullableDate(row.wake_at),
     isolationReason: String(row.isolation_reason || ""),
     lastObservation: objectRecord(row.last_observation_json),
+    error: objectRecord(row.error_json),
     leaseStale: Boolean(leaseExpiresAt) && Date.parse(leaseExpiresAt!) <= Date.now(),
     createdAt: dateString(row.created_at),
     updatedAt: dateString(row.updated_at),

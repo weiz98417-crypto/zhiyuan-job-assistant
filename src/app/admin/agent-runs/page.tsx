@@ -14,6 +14,7 @@ import {
   ShieldAlert,
   XCircle,
 } from "lucide-react";
+import { createBrowserRequestId } from "@/lib/browser-request-id";
 
 interface RuntimeRun {
   id: string;
@@ -32,6 +33,7 @@ interface RuntimeRun {
   wakeAt: string | null;
   isolationReason: string;
   lastObservation: Record<string, unknown>;
+  error: Record<string, unknown>;
   leaseStale: boolean;
   createdAt: string;
   updatedAt: string;
@@ -131,6 +133,7 @@ const STATUS_FILTERS = [
   { value: "running", label: "运行中" },
   { value: "recovering", label: "恢复中" },
   { value: "waiting_user", label: "等待用户" },
+  { value: "paused", label: "已暂停" },
   { value: "verifying", label: "验证中" },
   { value: "cancel_requested", label: "取消中" },
   { value: "succeeded", label: "成功" },
@@ -172,7 +175,7 @@ export default function AdminAgentRunsPage() {
       const response = await fetch("/api/admin/agent-runtime", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ requestId: crypto.randomUUID(), action, ...values }),
+        body: JSON.stringify({ requestId: createBrowserRequestId(), action, ...values }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.success) throw new Error(payload.error || "Runtime 操作失败");
@@ -301,6 +304,7 @@ function RunPanel({ run, events, checkpoints, mutating, command }: { run: Runtim
         {!terminal && <div className="flex gap-2"><ActionButton disabled={Boolean(mutating)} onClick={() => command("isolate_run", { runId: run.id, reason: "admin isolation" })}>隔离</ActionButton><ActionButton danger disabled={Boolean(mutating)} onClick={() => window.confirm("确认取消这个 Run 及其活跃子 Run？") && void command("cancel_run", { runId: run.id })}>取消</ActionButton></div>}
       </div>
       <JsonLine label="最近 Observation" value={run.lastObservation} />
+      <JsonLine label="终态错误" value={run.error} />
       {run.isolationReason && <p className="mt-2 text-xs text-amber-700">隔离原因：{run.isolationReason}</p>}
       <div className="mt-3 grid gap-3 lg:grid-cols-2">
         <Timeline title="最近事件" empty="暂无事件">{events.map((event) => <div key={event.id} className="text-xs text-[var(--color-muted)]"><span className="font-medium text-[var(--color-text)]">#{event.sequence} {event.eventType}</span> · {formatTime(event.createdAt)}<JsonLine label="" value={event.payload} /></div>)}</Timeline>
@@ -350,12 +354,12 @@ function JsonLine({ label, value }: { label: string; value: unknown }) {
 function statusTone(status: string): "default" | "red" | "green" | "amber" {
   if (["failed", "cancelled"].includes(status)) return "red";
   if (status === "succeeded") return "green";
-  if (["queued", "running", "recovering", "waiting_user", "verifying", "cancel_requested", "waiting"].includes(status)) return "amber";
+  if (["queued", "running", "recovering", "waiting_user", "paused", "verifying", "cancel_requested", "waiting"].includes(status)) return "amber";
   return "default";
 }
 
 function statusLabel(status: string) {
-  return ({ queued: "排队", running: "运行中", recovering: "恢复中", waiting_user: "等待用户", verifying: "验证中", cancel_requested: "取消中", succeeded: "成功", failed: "失败", cancelled: "已取消" } as Record<string, string>)[status] || status;
+  return ({ queued: "排队", running: "运行中", recovering: "恢复中", waiting_user: "等待用户", paused: "已暂停", verifying: "验证中", cancel_requested: "取消中", succeeded: "成功", failed: "失败", cancelled: "已取消" } as Record<string, string>)[status] || status;
 }
 
 function taskLabel(taskType: string) {

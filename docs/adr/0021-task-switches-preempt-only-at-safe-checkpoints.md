@@ -1,0 +1,3 @@
+# Task switches preempt only at safe checkpoints
+
+When a user clearly starts a new goal in an Agent Conversation, the current Agent Run is automatically paused and the new Run is created in the same Conversation only after the current Run reaches a safe checkpoint. A Run with an indeterminate Tool Attempt or unresolved high-risk Gate cannot be preempted; the user must complete, deny, or cancel that action first. We chose this over always asking before safe switches and over immediate preemption because the former adds friction to harmless context switches while the latter can orphan side effects or approvals.

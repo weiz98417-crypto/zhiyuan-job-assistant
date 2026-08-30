@@ -174,7 +174,8 @@ describe("agent tool governance", () => {
 
     expect(result).toMatchObject({
       success: false,
-      errorCategory: "need_user_input",
+      errorCategory: "policy_denied",
+      recoverable: true,
     });
     expect(String(result?.error)).toContain("不属于当前任务");
   });

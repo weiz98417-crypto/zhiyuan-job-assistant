@@ -1,5 +1,9 @@
 import { getDataRepositories } from "@/lib/data-repositories";
 import type { ExecutionPrincipal } from "@/lib/agent/runtime/durable-agent-run";
+import { rebuildInterviewStateFromMessages } from "@/lib/agent/interview-session-state";
+import type { AgentMessage, InterviewSessionState } from "@/types";
+import type { DurableRunContextMaterial } from "@/lib/agent/runtime/run-context";
+import { reconcileRunGateMessages } from "@/lib/agent/run-gate-message-status";
 
 export interface ExecutionConversationMessage {
   role: string;
@@ -48,6 +52,13 @@ function cloneMessage(message: ExecutionConversationMessage): ExecutionConversat
   };
 }
 
+export function reconcileExecutionRunGates(
+  messages: ExecutionConversationMessage[],
+  gates: DurableRunContextMaterial["gates"],
+): ExecutionConversationMessage[] {
+  return reconcileRunGateMessages(messages, gates);
+}
+
 export async function loadExecutionConversation(
   principal: ExecutionPrincipal,
   conversationId: number | null,
@@ -72,10 +83,45 @@ export async function saveExecutionConversation(
   messages: ExecutionConversationMessage[],
 ): Promise<void> {
   if (conversationId === null) return;
-  const updated = await getDataRepositories().sessions.update(
+  const sessions = getDataRepositories().sessions;
+  const row = await sessions.get(conversationId, principal.userId);
+  if (!row) throw new Error("Agent Conversation not found");
+  const currentInterviewState = parseInterviewState(row.interview_state_json ?? row.interviewState);
+  const interviewState = rebuildInterviewStateFromMessages(
+    currentInterviewState,
+    messages.flatMap(toAgentMessage),
+  );
+  const updated = await sessions.update(
     conversationId,
     principal.userId,
-    { messages },
+    {
+      messages,
+      ...(interviewState ? { interviewState } : {}),
+    },
   );
   if (!updated) throw new Error("Agent Conversation not found");
+}
+
+function parseInterviewState(value: unknown): InterviewSessionState | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed = typeof value === "string" ? JSON.parse(value) : value;
+    return parsed && typeof parsed === "object" && (parsed as InterviewSessionState).planSnapshot
+      ? parsed as InterviewSessionState
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function toAgentMessage(message: ExecutionConversationMessage): AgentMessage[] {
+  if (message.role !== "user" && message.role !== "assistant" && message.role !== "tool") return [];
+  return [{
+    role: message.role,
+    content: message.content,
+    images: message.images,
+    toolName: message.toolName,
+    toolResult: message.toolResult,
+    timestamp: message.timestamp || new Date().toISOString(),
+  }];
 }

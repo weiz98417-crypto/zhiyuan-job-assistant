@@ -169,11 +169,11 @@ export class PostgresAgentRunStore implements AgentRunStore {
           SET status = CASE WHEN status = 'queued' THEN 'running' ELSE status END,
               owner_id = $2,
               fencing_token = fencing_token + 1,
-              heartbeat_at = $3,
-              lease_expires_at = $3 + ($4 * interval '1 millisecond'),
+              heartbeat_at = $3::timestamptz,
+              lease_expires_at = $3::timestamptz + ($4::integer * interval '1 millisecond'),
               snapshot_version = snapshot_version + 1,
               event_sequence = event_sequence + 1,
-              updated_at = $3
+              updated_at = $3::timestamptz
           WHERE id = $1
           RETURNING *
         `, [candidate.rows[0].id, command.workerId, now, leaseMs]);
@@ -213,7 +213,7 @@ export class PostgresAgentRunStore implements AgentRunStore {
         }
         const next = transitionAgentRun(current.status, command.nextStatus);
         const terminal = isTerminalAgentRunStatus(next);
-        const releasesOwner = terminal || next === "waiting_user" || next === "queued";
+        const releasesOwner = terminal || next === "waiting_user" || next === "queued" || next === "paused";
         const updated = await client.query(`
           UPDATE agent_runs
           SET status = $2,
@@ -223,10 +223,21 @@ export class PostgresAgentRunStore implements AgentRunStore {
               retention_expires_at = CASE WHEN $3 THEN now() + interval '30 days' ELSE retention_expires_at END,
               owner_id = CASE WHEN $6 THEN NULL ELSE owner_id END,
               lease_expires_at = CASE WHEN $6 THEN NULL ELSE lease_expires_at END,
+              last_observation_json = COALESCE($7::jsonb, last_observation_json),
+              error_json = COALESCE($8::jsonb, error_json),
               updated_at = now()
           WHERE id = $1 AND owner_id = $4 AND fencing_token = $5
           RETURNING *
-        `, [command.runId, next, terminal, command.workerId, command.fencingToken, releasesOwner]);
+        `, [
+          command.runId,
+          next,
+          terminal,
+          command.workerId,
+          command.fencingToken,
+          releasesOwner,
+          command.observation ? json(command.observation) : null,
+          command.error ? json(command.error) : null,
+        ]);
         if (!updated.rows[0]) throw new Error("Stale Agent Run owner");
         const run = normalizeRun(updated.rows[0]);
         await insertEventAndOutbox(client, {
@@ -274,7 +285,12 @@ export class PostgresAgentRunStore implements AgentRunStore {
               event_sequence = event_sequence + 1,
               budgets_json = $4::jsonb,
               updated_at = now()
-          WHERE id = $1 AND owner_id = $2 AND fencing_token = $3
+          WHERE id = $1
+            AND fencing_token = $3
+            AND (
+              owner_id = $2
+              OR (status = 'waiting_user' AND owner_id IS NULL)
+            )
           RETURNING *
         `, [command.runId, command.workerId, command.fencingToken, json(command.budgets)]);
         if (!updated.rows[0]) throw new Error("Stale Agent Run owner");
@@ -420,6 +436,96 @@ export class PostgresAgentRunStore implements AgentRunStore {
     });
   }
 
+  async requestPause(
+    principal: ExecutionPrincipal,
+    runId: string,
+    requestId: string,
+  ): Promise<AgentRunSnapshot> {
+    return this.controlRun(principal, runId, requestId, "pause");
+  }
+
+  async resumeRun(
+    principal: ExecutionPrincipal,
+    runId: string,
+    requestId: string,
+  ): Promise<AgentRunSnapshot> {
+    return this.controlRun(principal, runId, requestId, "resume");
+  }
+
+  private async controlRun(
+    principal: ExecutionPrincipal,
+    runId: string,
+    requestId: string,
+    action: "pause" | "resume",
+  ): Promise<AgentRunSnapshot> {
+    return this.withClient(async (client) => {
+      await client.query("BEGIN");
+      try {
+        const selected = await client.query(
+          "SELECT * FROM agent_runs WHERE id = $1 AND user_id = $2 FOR UPDATE",
+          [runId, principal.userId],
+        );
+        if (!selected.rows[0]) throw new Error("Agent Run not found");
+        const current = normalizeRun(selected.rows[0]);
+        const controlRequestId = `${action}:${requestId}`;
+        const duplicate = await client.query(
+          "SELECT 1 FROM agent_run_inputs WHERE user_id = $1 AND request_id = $2",
+          [principal.userId, controlRequestId],
+        );
+        if (duplicate.rows[0]) {
+          await client.query("COMMIT");
+          return current;
+        }
+        if ((action === "pause" && (current.status === "paused" || isTerminalAgentRunStatus(current.status)))
+          || (action === "resume" && current.status !== "paused")) {
+          await client.query("COMMIT");
+          return current;
+        }
+        if (action === "resume" && current.conversationId !== null) {
+          const active = await client.query(`
+            SELECT 1 FROM agent_runs
+            WHERE user_id = $1 AND session_id = $2 AND id <> $3 AND legacy = FALSE
+              AND status IN ('queued', 'running', 'waiting_user', 'recovering', 'verifying', 'cancel_requested')
+            LIMIT 1
+          `, [principal.userId, current.conversationId, runId]);
+          if (active.rows[0]) throw new Error("Conversation already has an active Agent Run");
+        }
+        const next = action === "pause" ? "paused" : "queued";
+        transitionAgentRun(current.status, next);
+        await client.query(`
+          INSERT INTO agent_run_inputs (run_id, user_id, request_id, input_type, content_json, status)
+          VALUES ($1, $2, $3, $4, '{}'::jsonb, 'consumed')
+        `, [runId, principal.userId, controlRequestId, action]);
+        const updated = await client.query(`
+          UPDATE agent_runs
+          SET status = $2,
+              owner_id = CASE WHEN $3 THEN NULL ELSE owner_id END,
+              lease_expires_at = CASE WHEN $3 THEN NULL ELSE lease_expires_at END,
+              wake_at = CASE WHEN $2 = 'queued' THEN now() ELSE wake_at END,
+              snapshot_version = snapshot_version + 1,
+              event_sequence = event_sequence + 1,
+              updated_at = now()
+          WHERE id = $1
+          RETURNING *
+        `, [runId, next, action === "pause"]);
+        const run = normalizeRun(updated.rows[0]);
+        await insertEventAndOutbox(client, {
+          runId: run.id,
+          userId: run.userId,
+          sequence: run.eventCursor,
+          type: action === "pause" ? "run.paused" : "run.resumed",
+          payload: { requestId },
+        });
+        if (action === "resume") await client.query("SELECT pg_notify('agent_run_available', $1)", [run.id]);
+        await client.query("COMMIT");
+        return run;
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      }
+    });
+  }
+
   async openGate(command: OpenAgentRunGateCommand): Promise<AgentRunGate> {
     return this.withClient(async (client) => {
       await client.query("BEGIN");
@@ -548,6 +654,19 @@ export class PostgresAgentRunStore implements AgentRunStore {
     `, [runId, principal.userId, scopeHash])).rows[0]));
   }
 
+  async isGateDenied(
+    principal: ExecutionPrincipal,
+    runId: string,
+    scopeHash: string,
+  ): Promise<boolean> {
+    return this.withClient(async (client) => Boolean((await client.query(`
+      SELECT 1
+      FROM agent_run_gates
+      WHERE run_id = $1 AND user_id = $2 AND scope_hash = $3 AND status = 'denied'
+      LIMIT 1
+    `, [runId, principal.userId, scopeHash])).rows[0]));
+  }
+
   async submitInput(
     principal: ExecutionPrincipal,
     runId: string,
@@ -577,7 +696,7 @@ export class PostgresAgentRunStore implements AgentRunStore {
           VALUES ($1, $2, $3, 'turn', $4::jsonb)
           RETURNING *
         `, [runId, principal.userId, requestId, json(input)]);
-        const nextStatus = current.status === "waiting_user" ? "queued" : current.status;
+        const nextStatus = current.status === "waiting_user" || current.status === "paused" ? "queued" : current.status;
         const updated = await client.query(`
           UPDATE agent_runs
           SET status = $2,
@@ -696,13 +815,13 @@ export class PostgresAgentRunStore implements AgentRunStore {
       const now = command.now || new Date();
       const result = await client.query(`
         UPDATE agent_runs
-        SET heartbeat_at = $4,
-            lease_expires_at = $4 + ($5 * interval '1 millisecond'),
-            updated_at = $4
+        SET heartbeat_at = $4::timestamptz,
+            lease_expires_at = $4::timestamptz + ($5::integer * interval '1 millisecond'),
+            updated_at = $4::timestamptz
         WHERE id = $1
           AND owner_id = $2
           AND fencing_token = $3
-          AND status IN ('running', 'recovering', 'verifying', 'cancel_requested')
+          AND status IN ('running', 'recovering', 'verifying')
           AND isolation_requested_at IS NULL
         RETURNING *
       `, [command.runId, command.workerId, command.fencingToken, now, command.leaseMs ?? 30_000]);
@@ -723,7 +842,7 @@ export class PostgresAgentRunStore implements AgentRunStore {
         where.push(`session_id = $${params.length}`);
       }
       if (options.activeOnly) {
-        where.push("status IN ('queued', 'running', 'waiting_user', 'recovering', 'verifying', 'cancel_requested')");
+        where.push("status IN ('queued', 'running', 'waiting_user', 'paused', 'recovering', 'verifying', 'cancel_requested')");
       }
       params.push(Math.max(1, Math.min(100, options.limit || 20)));
       const result = await client.query(`
@@ -780,6 +899,8 @@ function normalizeRun(row: Record<string, unknown>): AgentRunSnapshot {
     eventCursor: Number(row.event_sequence || 0),
     contract: row.contract_json || {},
     budgets: objectRecord(row.budgets_json),
+    lastObservation: objectRecord(row.last_observation_json),
+    error: objectRecord(row.error_json),
     runtimeMode: String(row.runtime_mode || "legacy"),
     parentRunId: row.parent_run_id ? String(row.parent_run_id) : null,
     depth: Number(row.depth || 0),
@@ -849,6 +970,7 @@ function normalizeInput(row: Record<string, unknown>): AgentRunInputRecord {
     content: {
       content: String(content.content || ""),
       images: Array.isArray(content.images) ? content.images.map(String) : undefined,
+      ...(content.persistInConversation === false ? { persistInConversation: false } : {}),
     },
     status: String(row.status) as AgentRunInputRecord["status"],
     createdAt: iso(row.created_at),

@@ -40,6 +40,7 @@ export interface LLMRetryOptions {
   temperature?: number;
   max_tokens?: number;
   response_format?: { type: string };
+  thinking?: { type: "enabled" | "disabled" };
   signal?: AbortSignal;
 }
 
@@ -107,6 +108,7 @@ export async function llmRetry(
     temperature,
     max_tokens,
     response_format,
+    thinking,
     signal,
   } = options;
 
@@ -137,6 +139,7 @@ export async function llmRetry(
         if (temperature !== undefined) body.temperature = temperature;
         if (max_tokens !== undefined) body.max_tokens = max_tokens;
         if (response_format) body.response_format = response_format;
+        if (thinking) body.thinking = thinking;
 
         const res = await fetch(apiUrl, {
           method: 'POST',

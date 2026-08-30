@@ -100,6 +100,11 @@ export interface ToolRunGateRuntime {
     runId: string,
     scopeHash: string,
   ): Promise<boolean>;
+  isGateDenied(
+    principal: ExecutionPrincipal,
+    runId: string,
+    scopeHash: string,
+  ): Promise<boolean>;
 }
 
 export class GovernedToolAttemptExecutor {
@@ -166,12 +171,42 @@ export class GovernedToolAttemptExecutor {
     const gateApproved = gateRequired
       ? await this.gates!.isGateApproved(input.principal, input.runId, gateScopeHash)
       : false;
+    const gateDenied = gateRequired
+      ? await this.gates!.isGateDenied(input.principal, input.runId, gateScopeHash)
+      : false;
 
     if (
       begun.replayed
       && ["succeeded", "denied", "failed", "waiting_user", "cancelled"].includes(begun.attempt.status)
       && !(begun.attempt.status === "waiting_user" && gateApproved)
     ) {
+      if (begun.attempt.status === "waiting_user" && gateDenied) {
+        const denialResult: ToolResult = {
+          success: false,
+          data: { scopeHash: gateScopeHash },
+          error: "用户已拒绝此操作",
+          errorCategory: "need_user_input",
+          recoverable: false,
+          uiPayload: {
+            type: "run_gate",
+            runId: input.runId,
+            toolName: input.toolName,
+            risk: tool?.capability?.risk || "high",
+            scopeHash: gateScopeHash,
+            status: "denied",
+          },
+        };
+        const observation = governanceObservation(input.toolName, denialResult.error || "用户已拒绝此操作", begun.attempt.id);
+        const attempt = await this.store.finishAttempt(begun.attempt.id, {
+          workerId: input.workerId,
+          fencingToken: input.fencingToken,
+          status: "denied",
+          effectState: "not_dispatched",
+          result: denialResult,
+          observation,
+        });
+        return { attempt, runDirective: "continue", observation };
+      }
       return {
         attempt: begun.attempt,
         runDirective: begun.attempt.status === "waiting_user"

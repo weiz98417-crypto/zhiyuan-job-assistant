@@ -32,7 +32,14 @@ describe("Postgres Run Context source", () => {
         }] };
       }
       if (sql.includes("FROM agent_run_gates")) {
-        return { rows: [{ tool_name: "save_resume_section", status: "approved", scope_hash: "scope-1" }] };
+        return { rows: [{
+          id: "gate-1",
+          tool_name: "save_resume_section",
+          status: "approved",
+          scope_hash: "scope-1",
+          request_json: { toolName: "save_resume_section", args: { section: "summary" } },
+          resolved_at: new Date("2026-08-24T10:01:00.000Z"),
+        }] };
       }
       if (sql.includes("FROM agent_run_events")) {
         return { rows: [
@@ -56,7 +63,14 @@ describe("Postgres Run Context source", () => {
         { type: "model.output_complete", content: "已完成上一轮回答" },
         { type: "model.output_interrupted", content: "charCount=23" },
       ],
-      gates: [{ toolName: "save_resume_section", status: "approved", scopeHash: "scope-1" }],
+      gates: [{
+        gateId: "gate-1",
+        toolName: "save_resume_section",
+        status: "approved",
+        scopeHash: "scope-1",
+        request: { toolName: "save_resume_section", args: { section: "summary" } },
+        resolvedAt: "2026-08-24T10:01:00.000Z",
+      }],
       factRefs: [{
         type: "tool_attempt",
         id: "attempt-1",

@@ -73,6 +73,7 @@ export async function POST(request: Request) {
         input: {
           content,
           images: Array.isArray(body.input?.images) ? body.input.images.map(String) : undefined,
+          ...(body.input?.persistInConversation === false ? { persistInConversation: false } : {}),
         },
         contract: objectField(body.contract),
         runtimeMode: assignment.mode === "worker_readonly" ? "worker_readonly" : "worker_all",

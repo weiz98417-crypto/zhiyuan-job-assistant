@@ -43,8 +43,8 @@ export class AgentRuntimeMaintenanceService {
             UPDATE agent_runs
             SET status = 'failed', snapshot_version = snapshot_version + 1,
                 event_sequence = event_sequence + 1, owner_id = NULL,
-                lease_expires_at = NULL, completed_at = $2,
-                retention_expires_at = $2 + interval '30 days', updated_at = $2
+                lease_expires_at = NULL, completed_at = $2::timestamptz,
+                retention_expires_at = $2::timestamptz + interval '30 days', updated_at = $2::timestamptz
             WHERE id = $1 AND status = 'waiting_user'
             RETURNING event_sequence
           `, [candidate.id, now]);

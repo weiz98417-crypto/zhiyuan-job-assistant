@@ -11,6 +11,8 @@ Start here when you need to understand, run, or change Zhiyuan.
 | [course-system/README.md](course-system/README.md) | Full course system built from the project: requirements, POC, multi-agent architecture, evals, page collaboration, auth, privacy, and safety. |
 | [SETUP.md](SETUP.md) | Local setup, LAN testing, auth, OCR, PostgreSQL, and embeddings. |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Runtime architecture, Agent loop, data layer, image intake, and memory. |
+| [agent-harness-eval-ui-blueprint.md](agent-harness-eval-ui-blueprint.md) | Confirmed blueprint for safe Agent projections, composable task journeys, layered evals, and the `/agent` UI vertical slice. |
+| [research/open-source-agent-harnesses.md](research/open-source-agent-harnesses.md) | Primary-source comparison of Codex, DeepSeek Harness, and thinking-orbs, including reuse and license boundaries. |
 | [feature-system/28-Durable-Agent-Run与自恢复运行时.md](feature-system/28-Durable-Agent-Run与自恢复运行时.md) | Durable Run state machine, governed attempts, bounded recovery, observer separation, and rollout semantics. |
 | [SCRIPTS.md](SCRIPTS.md) | npm scripts and operational commands. |
 | [feature-system/evals/README.md](feature-system/evals/README.md) | Per-feature baseline, boundary, and regression eval specs for feature-system docs. |

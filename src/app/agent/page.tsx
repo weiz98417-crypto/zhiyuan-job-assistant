@@ -1,10 +1,10 @@
 "use client";
 
 import { Suspense, useEffect, useRef, useState, useCallback } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
-import { Menu, User, Bot, RotateCcw, XCircle } from "lucide-react";
+import { Menu, User, Bot, RotateCcw, XCircle, Pause, Play } from "lucide-react";
 import { HandwritingTitle, WarmButton } from "@/components/design";
 import AgentChat from "@/components/agent/AgentChat";
 import type { EvalBlockProgress, CompletionInfo } from "@/components/agent/AgentChat";
@@ -18,6 +18,7 @@ import { agentLoopRemote } from "@/lib/agent/loop/remote-runner";
 import { inferPreferredDocumentTypeFromText, type ImageDocumentType, type ImageIntakeResult } from "@/lib/agent/image-intake";
 import { buildImageIntakeStatusText, buildImageIntakeToolSummary, routeImageIntake } from "@/lib/agent/image-intake-router";
 import { routeAgentTask } from "@/lib/agent/task-routing";
+import { collectArtifactRefsFromSafePayloads, TASK_JOURNEY_GRAPH_VERSION, type AgentArtifactRef } from "@/lib/agent/task-journey";
 import {
   createAgentTaskContract,
   createResumeBaseSnapshot,
@@ -35,8 +36,12 @@ import {
   listActiveDurableAgentRunsClient,
   observeDurableAgentRun,
   requestDurableAgentRunCancelClient,
+  requestDurableAgentRunPauseClient,
+  requestDurableAgentRunResumeClient,
+  respondDurableAgentRunGateClient,
   submitDurableAgentRunInputClient,
 } from "@/lib/agent/runtime/durable-run-client";
+import { reconcileRunGateMessages } from "@/lib/agent/run-gate-message-status";
 import type { AgentRunSnapshot } from "@/lib/agent/runtime/durable-agent-run";
 import type { AgentRunStatus } from "@/lib/agent/run-ledger";
 import {
@@ -44,6 +49,11 @@ import {
   shortRunId,
   upsertRunRecoveryStatusMessage,
 } from "@/lib/agent/run-recovery-message";
+import {
+  buildAgentSessionUrl,
+  replaceAgentSessionUrl,
+  resolveAgentSessionUrlSync,
+} from "@/lib/agent/agent-session-url";
 import { triggerProfileUpdate } from "@/lib/profile-update";
 import { scanMessage, deduplicateSignals, maybeRawContext } from "@/lib/agent/signal-extractor";
 import type { ExtractedSignal } from "@/lib/agent/signal-extractor";
@@ -62,6 +72,7 @@ import {
 import {
   persistInterviewRecap,
   shouldPersistInterviewRecap,
+  countAnsweredInterviewRounds,
   updateInterviewStateWithAssistantMessage,
   updateInterviewStateWithExchange,
   updateInterviewStateWithToolResult,
@@ -99,6 +110,9 @@ import {
 } from "@/lib/agent/guided-session-state";
 import type { ResumeEditProposalDTO } from "@/lib/agent/resume-edit-proposals";
 import { getReadBackRequirementStatus } from "@/lib/agent/tools/readback-verification";
+import { projectAgentMessages, projectToolResultForUser, sanitizeSafeReasoningSummary } from "@/lib/agent/surface-projection";
+import { AgentItemAssembler } from "@/lib/agent/item-projection";
+import { createBrowserRequestId } from "@/lib/browser-request-id";
 import {
   buildCareerPositioningArtifact,
   buildCareerPositioningFallback,
@@ -157,12 +171,15 @@ type ActiveRunNotice = {
   taskType: string;
   agentId: string;
   status: string;
+  createdAt?: string;
   phase?: string;
   guidedTaskId?: string;
   guidedTaskPhase?: string;
   toolName?: string;
   verifierSummary?: string;
   updatedAt?: string;
+  journeyGraphVersion?: string;
+  artifacts?: AgentArtifactRef[];
 };
 
 const NON_TERMINAL_DURABLE_RUN_STATUSES = new Set([
@@ -172,7 +189,9 @@ const NON_TERMINAL_DURABLE_RUN_STATUSES = new Set([
   "recovering",
   "verifying",
   "cancel_requested",
+  "paused",
 ]);
+const TERMINAL_DURABLE_RUN_STATUSES = new Set(["succeeded", "failed", "cancelled"]);
 
 const HANDOFF_CONSUMED_STORAGE_KEY = "agent:consumed-handoffs:v1";
 
@@ -338,7 +357,7 @@ async function persistCareerPositioningArtifact(
 
 function buildRunTarget(
   content: string,
-  agent: ClientAgentDefinition,
+  agentId: string,
   imageIntake?: ImageIntakeResult | null,
 ): string {
   const structured = imageIntake?.structured || {};
@@ -347,18 +366,30 @@ function buildRunTarget(
   const structuredTarget = [company, role].filter(Boolean).join(" / ");
   if (structuredTarget) return truncateLedgerText(structuredTarget, 120);
   if (imageIntake?.documentType && imageIntake.documentType !== "unknown") {
-    return `${imageIntake.documentType}:${agent.id}`;
+    return `${imageIntake.documentType}:${agentId}`;
   }
-  return truncateLedgerText(content || agent.name || agent.id, 120) || agent.id;
+  return truncateLedgerText(content || agentId, 120) || agentId;
 }
 
 function activeNoticeFromRun(run: AgentRunSnapshot): ActiveRunNotice {
+  const contract = run.contract && typeof run.contract === "object" && !Array.isArray(run.contract)
+    ? run.contract as Record<string, unknown>
+    : {};
+  const journey = contract.journey && typeof contract.journey === "object" && !Array.isArray(contract.journey)
+    ? contract.journey as Record<string, unknown>
+    : {};
+  const artifacts = Array.isArray(journey.artifacts)
+    ? journey.artifacts.filter((item): item is AgentArtifactRef => Boolean(item && typeof item === "object" && typeof (item as AgentArtifactRef).artifactId === "string" && typeof (item as AgentArtifactRef).kind === "string"))
+    : [];
   return {
     id: run.id,
     taskType: run.taskType,
     agentId: run.agentId,
     status: run.status,
+    createdAt: run.createdAt,
     updatedAt: run.updatedAt,
+    journeyGraphVersion: typeof journey.graphVersion === "string" ? journey.graphVersion : undefined,
+    artifacts,
   };
 }
 
@@ -368,6 +399,7 @@ function runStatusLabel(status: string): string {
     planned: "已计划",
     running: "运行中",
     waiting_user: "等待用户",
+    paused: "已暂停",
     recovering: "恢复中",
     cancel_requested: "取消中",
     verifying: "自检中",
@@ -415,13 +447,17 @@ function triggerSessionAnomalyReview(input: {
 
 async function loadTaskBaseSnapshot(taskType: AgentTaskType): Promise<AgentTaskBaseSnapshot> {
   if (taskType !== "resume_edit") return {};
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 5_000);
   try {
-    const res = await fetch("/api/cv/data", { cache: "no-store" });
+    const res = await fetch("/api/cv/data", { cache: "no-store", signal: controller.signal });
     const json = await res.json().catch(() => ({}));
     if (!res.ok || !json.success) return {};
     return createResumeBaseSnapshot(json.data);
   } catch {
     return {};
+  } finally {
+    window.clearTimeout(timeout);
   }
 }
 
@@ -513,7 +549,6 @@ async function persistMessages(messages: AgentMessage[]): Promise<void> {
 /* ── Inner page ── */
 
 function AgentPageInner() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
@@ -533,7 +568,7 @@ function AgentPageInner() {
   const [resultQuality, setResultQuality] = useState<string | null>(null);
   const [sessionLoadError, setSessionLoadError] = useState<string | null>(null);
   const [activeRunNotice, setActiveRunNotice] = useState<ActiveRunNotice | null>(null);
-  const [activeRunAction, setActiveRunAction] = useState<"resume" | "cancel" | null>(null);
+  const [activeRunAction, setActiveRunAction] = useState<"resume" | "pause" | "cancel" | null>(null);
   const [latestRollbackProposal, setLatestRollbackProposal] = useState<ResumeEditProposalDTO | null>(null);
   const [rollbackAction, setRollbackAction] = useState<"rollback" | null>(null);
 
@@ -546,6 +581,10 @@ function AgentPageInner() {
   const createdHandoffSessionIdRef = useRef<number | null>(null);
   const manualSessionSwitchRef = useRef<number | null>(null);
   const durableRunCursorsRef = useRef<Record<string, number>>({});
+  const currentSessionIdRef = useRef<number | null>(null);
+  const itemAssemblerRef = useRef<AgentItemAssembler | null>(null);
+  const itemSequenceRef = useRef(0);
+  const turnItemPrefixRef = useRef("");
 
   const rafRef = useRef<number>(0);
 
@@ -620,14 +659,25 @@ function AgentPageInner() {
   }, []);
 
   useEffect(() => {
+    currentSessionIdRef.current = currentSessionId;
+  }, [currentSessionId]);
+
+  useEffect(() => {
     if (!mounted) return;
     const requestedSessionId = searchParams.get("sessionId");
     if (!requestedSessionId) return;
     const id = Number(requestedSessionId);
     if (!Number.isFinite(id)) return;
-    if (manualSessionSwitchRef.current === currentSessionId) {
+    const manualTargetSessionId = manualSessionSwitchRef.current;
+    if (manualTargetSessionId !== null) {
+      const syncDecision = resolveAgentSessionUrlSync({
+        requestedSessionId: id,
+        currentSessionId,
+        manualTargetSessionId,
+      });
+      if (syncDecision === "await_target_url") return;
       manualSessionSwitchRef.current = null;
-      return;
+      if (syncDecision === "acknowledge_target_url" && currentSessionId === id) return;
     }
     if (currentSessionId === id) return;
 
@@ -672,17 +722,13 @@ function AgentPageInner() {
       streamContentRef.current = "";
       setSessions(await listSessions());
 
-      const url = new URL(window.location.href);
-      url.searchParams.set("sessionId", String(id));
-      const nextUrl = `${url.pathname}${url.search}${url.hash}`;
-      window.history.replaceState(null, "", nextUrl);
-      router.replace(nextUrl, { scroll: false });
+      replaceAgentSessionUrl(window.location.href, { sessionId: id }, window.history);
     };
 
     createDedicatedSession().catch((error) => {
       setSessionLoadError(error instanceof Error ? error.message : "Failed to create handoff session");
     });
-  }, [mounted, streaming, searchParams, router]);
+  }, [mounted, streaming, searchParams]);
 
   useEffect(() => {
     if (!mounted || !currentSessionId) return;
@@ -706,9 +752,16 @@ function AgentPageInner() {
     const notice = activeRunNotice;
     if (!mounted || !notice || !NON_TERMINAL_DURABLE_RUN_STATUSES.has(notice.status)) return;
     const runId = notice.id;
-    setStreaming(true);
+    if (notice.status === "paused") {
+      setStreaming(false);
+      setPhase(null);
+      return;
+    }
+    setStreaming(notice.status !== "waiting_user");
+    if (notice.status === "waiting_user") setPhase(null);
+    itemAssemblerRef.current = new AgentItemAssembler(`run:${runId}`);
 
-    return observeDurableAgentRun(runId, {
+    const stopObserving = observeDurableAgentRun(runId, {
       afterCursor: durableRunCursorsRef.current[runId] || 0,
       onEvents(events, cursor) {
         durableRunCursorsRef.current[runId] = cursor;
@@ -722,14 +775,24 @@ function AgentPageInner() {
               setStreaming(false);
               setPhase(null);
               setExecutingTool(undefined);
+              if (TERMINAL_DURABLE_RUN_STATUSES.has(status)) {
+                setActiveRunNotice((current) => (current?.id === runId ? null : current));
+              }
               if (currentSessionId) {
-                window.setTimeout(() => {
-                  getSession(currentSessionId)
-                    .then((session) => {
-                      if (session?.messages) setMessages(session.messages);
-                    })
-                    .catch(() => {});
-                }, 100);
+                const sessionId = currentSessionId;
+                const refreshPersistedMessages = async () => {
+                  for (let attempt = 0; attempt < 8; attempt += 1) {
+                    if (currentSessionIdRef.current !== sessionId) return;
+                    const session = await getSession(sessionId, { preferServer: true }).catch(() => undefined);
+                    if (session?.messages) {
+                      setMessages(session.messages);
+                      setSessions((current) => current.map((item) => item.id === sessionId ? session : item));
+                    }
+                    if (attempt === 7) return;
+                    await new Promise<void>((resolve) => window.setTimeout(resolve, 250));
+                  }
+                };
+                void refreshPersistedMessages();
               }
             }
             continue;
@@ -742,11 +805,17 @@ function AgentPageInner() {
           if (eventType === "phase") {
             setPhase((event.phase || null) as AgentPhase);
           } else if (eventType === "thinking_content") {
-            setThinkingContent(String(event.content || ""));
+            setThinkingContent(sanitizeSafeReasoningSummary(event.summary));
           } else if (eventType === "tool_call") {
             setExecutingTool(String(event.name || ""));
           } else if (eventType === "text") {
             const content = String(event.content || "");
+            const item = itemAssemblerRef.current?.apply({
+              cursor: runEvent.sequence,
+              type: "delta",
+              itemId: `run:${runId}:assistant`,
+              content,
+            });
             streamContentRef.current += content;
             setStreamText(streamContentRef.current);
             setMessages((current) => {
@@ -761,12 +830,13 @@ function AgentPageInner() {
               );
               const assistant: AgentMessage = {
                 role: "assistant",
+                itemId: item?.itemId,
                 content: streamContentRef.current,
                 timestamp: new Date().toISOString(),
                 toolResult: { durableRunId: runId },
               };
-              if (last?.role === "assistant" && (!last.content || sameRun)) next[lastIndex] = assistant;
-              else next.push(assistant);
+              if (last?.role === "assistant" && sameRun) next[lastIndex] = assistant;
+              else if (assistant.content.trim()) next.push(assistant);
               return next;
             });
           } else if (eventType === "tool_result") {
@@ -774,19 +844,33 @@ function AgentPageInner() {
             const uiPayload = event.uiPayload && typeof event.uiPayload === "object"
               ? event.uiPayload as Record<string, unknown>
               : undefined;
+            const safeView = projectToolResultForUser({ toolName: name, success: event.success === true, uiPayload });
+            if (safeView.kind === "silent") continue;
+            const observedArtifacts = collectArtifactRefsFromSafePayloads([{ uiPayload: safeView.uiPayload }]);
+            if (observedArtifacts.length > 0) {
+              setActiveRunNotice((current) => {
+                if (!current || current.id !== runId) return current;
+                const refs = new Map((current.artifacts || []).map((artifact) => [`${artifact.kind}:${artifact.artifactId}:${artifact.version}`, artifact]));
+                for (const artifact of observedArtifacts) refs.set(`${artifact.kind}:${artifact.artifactId}:${artifact.version}`, artifact);
+                return { ...current, artifacts: Array.from(refs.values()).slice(-12) };
+              });
+            }
+            const item = itemAssemblerRef.current?.apply({
+              cursor: runEvent.sequence,
+              type: "completed",
+              itemId: `run:${runId}:tool:${name}:${runEvent.sequence}`,
+              content: safeView.summary,
+              toolView: safeView,
+            });
             const toolMessage: AgentMessage = {
               role: "tool",
+              itemId: item?.itemId,
               toolName: name,
-              content: String(event.result || ""),
-              toolResult: {
-                success: event.success === true,
-                data: event.data,
-                uiPayload,
-                durableRunId: runId,
-              },
+              content: safeView.summary,
+              toolResult: { ...safeView, success: event.success === true, durableRunId: runId },
               timestamp: new Date().toISOString(),
             };
-            setMessages((current) => [...current, toolMessage]);
+            setMessages((current) => projectAgentMessages([...current, toolMessage]));
           } else if (eventType === "tool_error") {
             setExecutingTool(undefined);
             setPhase("reflecting");
@@ -796,6 +880,9 @@ function AgentPageInner() {
         }
       },
     });
+    return () => {
+      stopObserving();
+    };
   }, [activeRunNotice, currentSessionId, mounted]);
 
   const appendAssistantStatusMessage = useCallback(async (content: string) => {
@@ -810,6 +897,27 @@ function AgentPageInner() {
       await updateSession(currentSessionId, { messages: nextMessages }).catch(() => {});
     }
   }, [currentSessionId, messages]);
+
+  const handleGateDecision = useCallback(async (gateId: string, decision: "approved" | "denied") => {
+    const gate = await respondDurableAgentRunGateClient(gateId, decision, createBrowserRequestId());
+    if (!gate) {
+      await appendAssistantStatusMessage("确认请求未提交成功，请重试。");
+      return;
+    }
+    const nextMessages = projectAgentMessages(reconcileRunGateMessages(messages, [{
+      gateId: gate.id,
+      toolName: gate.toolName,
+      status: gate.status,
+      scopeHash: gate.scopeHash,
+      request: gate.request,
+      resolvedAt: gate.resolvedAt,
+    }]));
+    setMessages(nextMessages);
+    if (currentSessionId) {
+      await updateSession(currentSessionId, { messages: nextMessages }).catch(() => {});
+    }
+    setActiveRunNotice((current) => current?.id === gate.runId ? { ...current, status: "queued" } : current);
+  }, [appendAssistantStatusMessage, currentSessionId, messages]);
 
   const refreshLatestRollbackProposal = useCallback(async () => {
     try {
@@ -828,39 +936,31 @@ function AgentPageInner() {
   }, [mounted, currentSessionId, refreshLatestRollbackProposal]);
 
   const clearConsumedHandoffParams = useCallback(() => {
-    const url = new URL(window.location.href);
-    let changed = false;
-    for (const key of ["jdId", "offerId", "offerReportId", "applicationId", "reportNum", "company", "role", "intent", "newSession"]) {
-      if (url.searchParams.has(key)) {
-        url.searchParams.delete(key);
-        changed = true;
-      }
-    }
-    if (!changed) return;
-    const nextUrl = `${url.pathname}${url.search}${url.hash}`;
-    window.history.replaceState(null, "", nextUrl);
-    router.replace(nextUrl, { scroll: false });
+    const nextUrl = buildAgentSessionUrl(window.location.href, { consumeHandoff: true });
+    if (nextUrl === `${window.location.pathname}${window.location.search}${window.location.hash}`) return;
+    replaceAgentSessionUrl(window.location.href, { consumeHandoff: true }, window.history);
     createdHandoffSessionIdRef.current = null;
-  }, [router]);
+  }, []);
 
   const replaceUrlForSelectedSession = useCallback((sessionId: number) => {
-    const url = new URL(window.location.href);
-    url.searchParams.set("sessionId", String(sessionId));
-    for (const key of ["jdId", "offerId", "offerReportId", "applicationId", "reportNum", "company", "role", "intent", "newSession"]) {
-      url.searchParams.delete(key);
-    }
-    const nextUrl = `${url.pathname}${url.search}${url.hash}`;
-    window.history.replaceState(null, "", nextUrl);
-    router.replace(nextUrl, { scroll: false });
+    replaceAgentSessionUrl(window.location.href, { sessionId, consumeHandoff: true }, window.history);
     createdHandoffSessionIdRef.current = null;
     handoffSessionCreateKeyRef.current = "";
-  }, [router]);
+  }, []);
 
   const handleResumeActiveRun = useCallback(async () => {
     const runId = activeRunNotice?.id;
     if (!runId || activeRunAction) return;
     setActiveRunAction("resume");
     try {
+      if (activeRunNotice?.status === "paused") {
+        const resumed = await requestDurableAgentRunResumeClient(runId, createBrowserRequestId());
+        if (resumed) {
+          setActiveRunNotice(activeNoticeFromRun(resumed));
+          setStreaming(true);
+          return;
+        }
+      }
       const run = await getDurableAgentRunClient(runId);
       if (!run) {
         setActiveRunNotice(null);
@@ -877,7 +977,26 @@ function AgentPageInner() {
     } finally {
       setActiveRunAction(null);
     }
-  }, [activeRunAction, activeRunNotice?.id, appendAssistantStatusMessage, currentSessionId, messages]);
+  }, [activeRunAction, activeRunNotice?.id, activeRunNotice?.status, appendAssistantStatusMessage, currentSessionId, messages]);
+
+  const handlePauseActiveRun = useCallback(async () => {
+    const runId = activeRunNotice?.id;
+    if (!runId || activeRunAction || activeRunNotice?.status === "paused") return;
+    setActiveRunAction("pause");
+    try {
+      const run = await requestDurableAgentRunPauseClient(runId, createBrowserRequestId());
+      if (run) {
+        setActiveRunNotice(activeNoticeFromRun(run));
+        setStreaming(false);
+        setPhase(null);
+        await appendAssistantStatusMessage(`已暂停 Agent run #${shortRunId(runId)}，它仍可恢复。`);
+      } else {
+        await appendAssistantStatusMessage(`暂停 Agent run #${shortRunId(runId)} 失败，它可能已经结束。`);
+      }
+    } finally {
+      setActiveRunAction(null);
+    }
+  }, [activeRunAction, activeRunNotice?.id, activeRunNotice?.status, appendAssistantStatusMessage]);
 
   const handleRollbackLatestProposal = useCallback(async () => {
     const proposal = latestRollbackProposal;
@@ -905,7 +1024,7 @@ function AgentPageInner() {
     if (!runId || activeRunAction) return;
     setActiveRunAction("cancel");
     try {
-      const run = await requestDurableAgentRunCancelClient(runId, crypto.randomUUID());
+      const run = await requestDurableAgentRunCancelClient(runId, createBrowserRequestId());
       if (run) {
         setActiveRunNotice(activeNoticeFromRun(run));
         await appendAssistantStatusMessage(`已提交 Agent run #${shortRunId(runId)} 的取消请求，Worker 会在安全位置停止。`);
@@ -961,7 +1080,7 @@ function AgentPageInner() {
         content: "",
         timestamp: new Date().toISOString(),
       };
-      setMessages([...(hideUserMessage ? messages : updated), assistantMsg]);
+      setMessages(hideUserMessage ? messages : updated);
       streamContentRef.current = "";
       setStreamText("");
       setStreaming(true);
@@ -971,11 +1090,27 @@ function AgentPageInner() {
       setStartTime(Date.now());
       setEvalProgress([]);
       setCompletionInfo(null);
+      turnItemPrefixRef.current = `turn:${createBrowserRequestId()}`;
+      itemSequenceRef.current = 0;
+      itemAssemblerRef.current = new AgentItemAssembler(turnItemPrefixRef.current);
 
-      if (activeRunNotice && NON_TERMINAL_DURABLE_RUN_STATUSES.has(activeRunNotice.status)) {
+      const sessionForActiveRun = currentSessionId ? await getSession(currentSessionId).catch(() => undefined) : undefined;
+      const activeGuidedForSubmit = resolveActiveGuidedSession({
+        agentState: sessionForActiveRun?.agentState,
+        interviewState: sessionForActiveRun?.interviewState,
+      });
+      const requestedTaskForSubmit = inferRequestedTaskFromText(content);
+      const confirmedTaskSwitchForSubmit = Boolean(
+        activeGuidedForSubmit
+        && requestedTaskForSubmit
+        && requestedTaskForSubmit !== activeGuidedForSubmit.taskType
+        && isConfirmedGuidedTaskSwitch(content),
+      );
+
+      if (activeRunNotice && NON_TERMINAL_DURABLE_RUN_STATUSES.has(activeRunNotice.status) && !confirmedTaskSwitchForSubmit) {
         const submitted = await submitDurableAgentRunInputClient(activeRunNotice.id, {
-          requestId: crypto.randomUUID(),
-          input: { content, images },
+          requestId: createBrowserRequestId(),
+          input: { content, images, persistInConversation: !hideUserMessage },
         });
         if (submitted) {
           setActiveRunNotice(activeNoticeFromRun(submitted.run));
@@ -995,6 +1130,11 @@ function AgentPageInner() {
           });
         }
         return;
+      }
+
+      if (activeRunNotice && confirmedTaskSwitchForSubmit) {
+        const paused = await requestDurableAgentRunPauseClient(activeRunNotice.id, createBrowserRequestId());
+        if (paused) setActiveRunNotice(activeNoticeFromRun(paused));
       }
 
       const imageDataUris = (images || []).filter((src) => typeof src === "string" && src.startsWith("data:image/"));
@@ -1073,6 +1213,12 @@ function AgentPageInner() {
       abortRef.current = controller;
       let durableRunId: string | null = null;
       let workerOwnedRun = false;
+      const applyItem = (event: Parameters<AgentItemAssembler["apply"]>[0]) => {
+        const assembler = itemAssemblerRef.current || new AgentItemAssembler(turnItemPrefixRef.current || `turn:${createBrowserRequestId()}`);
+        itemAssemblerRef.current = assembler;
+        itemSequenceRef.current += 1;
+        return assembler.apply({ ...event, cursor: event.cursor ?? itemSequenceRef.current });
+      };
 
       try {
         // ── Client-side orchestration: classify + agentLoopClient ──
@@ -1084,6 +1230,9 @@ function AgentPageInner() {
         const currentSessionForRun = currentSessionId ? await getSession(currentSessionId) : undefined;
         const memoryDigest = currentSessionForRun?.memoryDigest;
         const agentState = markOfferStateStaleFromText(currentSessionForRun?.agentState, content) || currentSessionForRun?.agentState;
+        const journeyArtifacts = collectArtifactRefsFromSafePayloads([
+          ...(currentSessionForRun?.messages || []).filter((message) => message.role === "tool").map((message) => message.toolResult),
+        ]);
         const activeGuidedSession = resolveActiveGuidedSession({
           agentState,
           interviewState: currentSessionForRun?.interviewState,
@@ -1349,6 +1498,83 @@ function AgentPageInner() {
           activeTask: activeGuidedSessionForRun,
         });
         const routeForcedAgentId = forcedAgentId || (routeDecision.taskType ? taskAgentId(routeDecision.taskType) : undefined);
+        const interviewState = shouldBypassConversationLocks ? undefined : currentSessionForRun?.interviewState;
+        let activeTaskContract: AgentTaskContract | null = null;
+        const completedContractCriteria = new Set<string>();
+        let taskType = routeDecision.taskType;
+        if (taskType) {
+          try {
+            const baseSnapshot = await loadTaskBaseSnapshot(taskType);
+            const runAgentId = routeForcedAgentId || taskAgentId(taskType);
+            const contract = createAgentTaskContract({
+              taskType,
+              target: buildRunTarget(content, runAgentId, imageIntake),
+              requiresUserApproval: taskType === "resume_edit",
+              successCriteria: routeDecision.requiresClarification
+                ? ["clarification question asked"]
+                : undefined,
+              validators: routeDecision.requiresClarification
+                ? ["user_intent_clarification"]
+                : undefined,
+              routing: {
+                contractPolicy: routeDecision.contractPolicy,
+                memoryTask: routeDecision.memoryTask,
+                allowedTools: routeDecision.allowedTools.slice(0, 20),
+                requiresClarification: routeDecision.requiresClarification,
+                clarificationQuestion: routeDecision.clarificationQuestion,
+                blockedReason: routeDecision.blockedReason,
+                auditSummary: routeDecision.auditSummary,
+                activeTaskId: activeGuidedSessionForRun?.taskId,
+                activeTaskType: activeGuidedSessionForRun?.taskType,
+                activeTaskPhase: activeGuidedSessionForRun?.phase,
+                routeLocked: Boolean(activeGuidedSessionForRun),
+              },
+              journey: {
+                graphVersion: TASK_JOURNEY_GRAPH_VERSION,
+                artifacts: [
+                  ...journeyArtifacts,
+                  ...(baseSnapshot.baseVersion && baseSnapshot.baseHash
+                    ? [{
+                        artifactId: "active-resume",
+                        kind: "resume" as const,
+                        version: baseSnapshot.baseVersion,
+                        hash: baseSnapshot.baseHash,
+                      }]
+                    : []),
+                ].slice(-12),
+              },
+              ...baseSnapshot,
+            });
+            activeTaskContract = contract;
+            if (taskType === "interview_coaching" && interviewState?.planSnapshot) {
+              completedContractCriteria.add("JD/resume context bound");
+            }
+            const created = await createDurableAgentRunClient({
+              requestId: createBrowserRequestId(),
+              conversationId: currentSessionId,
+              taskType,
+              agentId: runAgentId,
+              input: { content, images, persistInConversation: !hideUserMessage },
+              contract,
+            });
+            const createdRun = created?.run || null;
+            if (created?.assignment.owner === "worker" && createdRun) {
+              workerOwnedRun = true;
+              durableRunId = createdRun.id;
+              setActiveRunNotice({
+                ...activeNoticeFromRun(createdRun),
+                phase: "understanding",
+                guidedTaskId: activeGuidedSessionForRun?.taskId,
+                guidedTaskPhase: activeGuidedSessionForRun?.phase,
+              });
+              abortRef.current = null;
+              return;
+            }
+          } catch (error) {
+            if (error instanceof DurableRunOwnershipUnknownError) throw error;
+            durableRunId = null;
+          }
+        }
 
         const { agent, systemPrompt } = await orchestrate(routedContent, {
           sessionId: currentSessionId,
@@ -1360,7 +1586,6 @@ function AgentPageInner() {
           forcedAgentId: routeForcedAgentId,
         });
 
-        const interviewState = shouldBypassConversationLocks ? undefined : currentSessionForRun?.interviewState;
         const interviewContext = interviewState?.planSnapshot
           ? `\n\n## Active Interview Session
 This chat is running a mock interview. Treat the following snapshot as the source of truth and do not silently switch materials.
@@ -1370,7 +1595,7 @@ Mode: ${interviewState.planSnapshot.mode}
 Difficulty: ${interviewState.planSnapshot.difficulty}
 Focus areas: ${interviewState.planSnapshot.focusAreas.join(", ") || "none"}
 Allow follow-ups: ${interviewState.planSnapshot.allowFollowUps ? "yes" : "no"}
-Answered user turns: ${interviewState.transcript.filter((t) => t.role === "user").length}
+Answered user turns: ${countAnsweredInterviewRounds(interviewState)}
 
 JD snapshot excerpt:
 ${(interviewState.planSnapshot.jdSnapshot?.body || "").slice(0, 1600) || "No JD snapshot available."}
@@ -1392,7 +1617,6 @@ Rules:
 
         setActiveAgent(agent);
 
-        let activeTaskContract: AgentTaskContract | null = null;
         if (!routeDecision.taskType) {
           routeDecision = routeAgentTask({
             agentId: agent.id,
@@ -1401,6 +1625,7 @@ Rules:
             preferredDocumentType,
             activeTask: activeGuidedSessionForRun,
           });
+          taskType = routeDecision.taskType;
         }
         const guidedDirective = buildGuidedSessionRuntimeDirective({
           activeTask: activeGuidedSessionForRun,
@@ -1408,7 +1633,6 @@ Rules:
           clarificationQuestion: routeDecision.clarificationQuestion,
         });
         const activeSystemPrompt = `${systemPrompt}${interviewContext}${rebindContext}${guidedDirective}`;
-        const completedContractCriteria = new Set<string>();
         const addContractCriteria = (criteria: string[]) => {
           if (!activeTaskContract) return;
           for (const criterion of criteria) {
@@ -1417,65 +1641,6 @@ Rules:
             }
           }
         };
-        const taskType = routeDecision.taskType;
-        if (taskType) {
-          try {
-            const baseSnapshot = await loadTaskBaseSnapshot(taskType);
-            const contract = createAgentTaskContract({
-              taskType,
-              target: buildRunTarget(content, agent, imageIntake),
-              requiresUserApproval: taskType === "resume_edit",
-              successCriteria: routeDecision.requiresClarification
-                ? ["clarification question asked"]
-                : undefined,
-              validators: routeDecision.requiresClarification
-                ? ["user_intent_clarification"]
-                : undefined,
-              routing: {
-                contractPolicy: routeDecision.contractPolicy,
-                memoryTask: routeDecision.memoryTask,
-                allowedTools: routeDecision.allowedTools.slice(0, 20),
-                requiresClarification: routeDecision.requiresClarification,
-                clarificationQuestion: routeDecision.clarificationQuestion,
-                blockedReason: routeDecision.blockedReason,
-                auditSummary: routeDecision.auditSummary,
-                activeTaskId: activeGuidedSessionForRun?.taskId,
-                activeTaskType: activeGuidedSessionForRun?.taskType,
-                activeTaskPhase: activeGuidedSessionForRun?.phase,
-                routeLocked: Boolean(activeGuidedSessionForRun),
-              },
-              ...baseSnapshot,
-            });
-            activeTaskContract = contract;
-            if (taskType === "interview_coaching" && interviewState?.planSnapshot) {
-              completedContractCriteria.add("JD/resume context bound");
-            }
-            const created = await createDurableAgentRunClient({
-              requestId: crypto.randomUUID(),
-              conversationId: currentSessionId,
-              taskType,
-              agentId: agent.id,
-              input: { content, images },
-              contract,
-            });
-            const createdRun = created?.run || null;
-            if (created?.assignment.owner === "worker" && createdRun) {
-              workerOwnedRun = true;
-              durableRunId = createdRun.id;
-              setActiveRunNotice({
-                ...activeNoticeFromRun(createdRun),
-                phase: "understanding",
-                guidedTaskId: activeGuidedSessionForRun?.taskId,
-                guidedTaskPhase: activeGuidedSessionForRun?.phase,
-              });
-              abortRef.current = null;
-              return;
-            }
-          } catch (error) {
-            if (error instanceof DurableRunOwnershipUnknownError) throw error;
-            durableRunId = null;
-          }
-        }
 
         const recordRunStep = (input: {
           phase: string;
@@ -1510,7 +1675,7 @@ Rules:
           if (!durableRunId) return;
           const runId = durableRunId;
           setActiveRunNotice((prev) => (prev?.id === runId ? { ...prev, status } : prev));
-          if (status === "succeeded" || status === "cancelled") {
+          if (TERMINAL_DURABLE_RUN_STATUSES.has(status)) {
             window.setTimeout(() => {
               setActiveRunNotice((prev) => (prev?.id === runId ? null : prev));
             }, 2500);
@@ -1552,7 +1717,7 @@ Rules:
             }
             case "intent": break;
             case "agent_switch": break;
-            case "thinking_content": setThinkingContent(event.content); break;
+            case "thinking_content": setThinkingContent(sanitizeSafeReasoningSummary(event.content)); break;
             case "tool_call":
               setExecutingTool(event.name);
               setResultQuality(null);
@@ -1659,53 +1824,35 @@ Rules:
                   updatedAt: new Date().toISOString(),
                 };
               }
-              // Show tool cards: use uiPayload if available (structured rendering), else fall back to text
+              // Project tools through the user-safe surface; raw result/data never enters the transcript.
               setMessages((prev) => {
                 const copy = [...prev];
-                const uiPayload = (event as { uiPayload?: Record<string, unknown> }).uiPayload;
-                if (uiPayload) {
-                  // Structured tool result: uiPayload drives component rendering
-                  const toolMsg: AgentMessage = {
-                    role: "tool" as const,
-                    toolName: event.name,
-                    content: event.result,
-                    toolResult: { uiPayload, data: event.data, success: event.success },
-                    timestamp: new Date().toISOString(),
-                  };
-                  const lastIdx = copy.length - 1;
-                  if (copy[lastIdx]?.role === "tool" && copy[lastIdx]?.toolName === event.name) copy[lastIdx] = toolMsg;
-                  else copy.push(toolMsg);
-                } else if (event.name === "evaluate_jd_full" && event.success && (event as { data?: unknown }).data) {
-                  // Legacy: evaluate_jd_full stores JSON data
-                  const raw = (event as { data?: Record<string, unknown> }).data;
-                  copy.push({
-                    role: "tool" as const,
-                    toolName: "evaluate_jd_full",
-                    content: JSON.stringify({
-                      company: raw?.company || "unknown",
-                      role: raw?.role || "unknown",
-                      overallScore: raw?.overallScore || 0,
-                      archetype: raw?.archetype || "",
-                      blocks: raw?.blocks || {},
-                      jdText: raw?.jdText || "",
-                      reportNum: raw?.reportNum || 0,
-                    }),
-                    timestamp: new Date().toISOString(),
-                  });
-                } else {
-                  // Plain text tool result
-                  const toolMsg: AgentMessage = {
-                    role: "tool",
-                    content: event.result,
-                    toolResult: { success: event.success, result: event.result, data: event.data },
-                    toolName: event.name,
-                    timestamp: new Date().toISOString(),
-                  };
-                  const lastIdx = copy.length - 1;
-                  if (copy[lastIdx]?.role === "tool" && copy[lastIdx]?.toolName === event.name) copy[lastIdx] = toolMsg;
-                  else copy.push(toolMsg);
-                }
-                return copy;
+                const safeView = projectToolResultForUser({
+                  toolName: event.name,
+                  success: event.success,
+                  uiPayload,
+                });
+                if (safeView.kind === "silent") return copy;
+                const item = applyItem({
+                  type: "completed",
+                  itemId: `${turnItemPrefixRef.current}:tool:${event.name}:${itemSequenceRef.current + 1}`,
+                  content: safeView.summary,
+                  toolView: safeView,
+                });
+                const toolMsg: AgentMessage = {
+                  role: "tool",
+                  itemId: item?.itemId,
+                  content: safeView.summary,
+                  toolResult: {
+                    success: event.success,
+                    uiPayload: safeView.uiPayload,
+                    safeView,
+                  },
+                  toolName: event.name,
+                  timestamp: new Date().toISOString(),
+                };
+                copy.push(toolMsg);
+                return projectAgentMessages(copy);
               });
               break;
             }
@@ -1726,7 +1873,30 @@ Rules:
                 verifier: { quality: event.quality },
               });
               break;
-            case "text": assistantText += event.content; streamContentRef.current = assistantText; setStreamText(assistantText); break;
+            case "text": {
+              assistantText += event.content;
+              streamContentRef.current = assistantText;
+              setStreamText(assistantText);
+              if (assistantText.trim()) {
+                const item = applyItem({
+                  type: "delta",
+                  itemId: `${turnItemPrefixRef.current}:assistant`,
+                  content: event.content,
+                });
+                setMessages((current) => {
+                  const next = [...current];
+                  const last = next[next.length - 1];
+                  const assistant: AgentMessage = { ...assistantMsg, itemId: item?.itemId, content: assistantText };
+                  if (last?.role === "assistant" && last.timestamp === assistantMsg.timestamp) {
+                    next[next.length - 1] = assistant;
+                  } else if (!last || last.role !== "assistant" || last.content !== assistantText) {
+                    next.push(assistant);
+                  }
+                  return next;
+                });
+              }
+              break;
+            }
             case "block_start":
               setEvalProgress(prev => {
                 const filtered = prev.filter(p => p.block !== event.block);
@@ -1813,7 +1983,14 @@ Rules:
           ? resolveTaskContractRunOutcome(activeTaskContract, Array.from(completedContractCriteria), {
               requiresClarification: routeDecision.requiresClarification,
               hasAssistantResponse: Boolean(assistantText.trim()),
-              lastToolSuccess: toolResultInfo?.success,
+              hasUserVisibleArtifact: Boolean(
+                toolResultInfo
+                && projectToolResultForUser({
+                  toolName: toolResultInfo.name,
+                  success: toolResultInfo.success,
+                  uiPayload: toolResultInfo.uiPayload,
+                }).kind !== "silent",
+              ),
             })
           : null;
         const contractGateResult = contractRunOutcome?.gate || null;
@@ -1832,11 +2009,20 @@ Rules:
             },
           });
         }
+        const lastToolSafeView = toolResultInfo
+          ? projectToolResultForUser({
+              toolName: toolResultInfo.name,
+              success: toolResultInfo.success,
+              uiPayload: toolResultInfo.uiPayload,
+            })
+          : null;
         const fallbackAssistantContent = contractRunOutcome?.status === "waiting_user"
-          ? contractRunOutcome.safeMessage || toolResultInfo?.result || "已生成待确认内容，请确认下一步。"
+          ? contractRunOutcome.safeMessage || "已生成待确认内容，请确认下一步。"
           : toolResultInfo && !toolResultInfo.success
-            ? toolResultInfo.result || "操作未能完成，请稍后重试。"
-            : "操作完成。";
+            ? lastToolSafeView?.summary || "操作未能完成，请稍后重试。"
+            : lastToolSafeView?.kind === "silent"
+              ? ""
+              : "操作完成。";
         let finalAssistantContent = sanitizeUnsupportedResumeSaveClaim(
           careerPositioningFallback || assistantText || fallbackAssistantContent,
           resumeSectionSaveSucceeded && !contractGateFailed,
@@ -1863,7 +2049,8 @@ Rules:
         setExecutingTool(undefined);
         setEvalProgress([]);
 
-        if (assistantText || toolResultInfo || careerPositioningFallback) {
+        const hasVisibleToolResult = Boolean(lastToolSafeView && lastToolSafeView.kind !== "silent");
+        if (assistantText.trim() || hasVisibleToolResult || careerPositioningFallback?.trim()) {
           // Build final assistant
           const finalAssistant: AgentMessage = {
             ...assistantMsg,
@@ -1899,15 +2086,18 @@ Rules:
                   agent_id: agent.id !== "general" ? agent.id : undefined,
                 });
               }
-              const persistedToolMessages: AgentMessage[] = toolResultHistory.map((result) => ({
-                  role: "tool",
-                  content: result.result,
+              const persistedToolMessages: AgentMessage[] = toolResultHistory
+                .map((result) => projectToolResultForUser({
                   toolName: result.name,
-                  toolResult: result.uiPayload
-                    ? { uiPayload: result.uiPayload, data: result.data, success: result.success }
-                    : result.name === "get_profile" && result.data
-                      ? { data: result.data, success: result.success }
-                      : { success: result.success, result: result.result, data: result.data },
+                  success: result.success,
+                  uiPayload: result.uiPayload,
+                }))
+                .filter((view) => view.kind !== "silent")
+                .map((view) => ({
+                  role: "tool" as const,
+                  content: view.summary,
+                  toolName: view.toolName,
+                  toolResult: view,
                   agent_id: agent.id !== "general" ? agent.id : undefined,
                   timestamp: new Date().toISOString(),
                 }));
@@ -2124,17 +2314,19 @@ Rules:
         console.error("Stream error:", errorMsg);
         if (durableRunId) {
           setActiveRunNotice((prev) => (prev?.id === durableRunId ? { ...prev, status: "failed" } : prev));
+          window.setTimeout(() => {
+            setActiveRunNotice((prev) => (prev?.id === durableRunId ? null : prev));
+          }, 2500);
         }
         setStreaming(false);
         setPhase(null);
         setMessages((prev) => {
           const copy = [...prev];
           const last = copy[copy.length - 1];
-          if (last && last.role === "assistant" && last.content === "") {
-            copy[copy.length - 1] = {
-              ...last,
-              content: `⚠️ 连接中断：${errorMsg}`,
-            };
+          if (last && last.role === "assistant" && last.content.trim() === "") {
+            copy[copy.length - 1] = { ...last, content: `⚠️ 连接中断：${errorMsg}` };
+          } else if (!last || last.role !== "assistant") {
+            copy.push({ role: "assistant", content: `⚠️ 连接中断：${errorMsg}`, timestamp: new Date().toISOString() });
           }
           return copy;
         });
@@ -2436,6 +2628,9 @@ Rules:
   const currentSession = currentSessionId
     ? sessions.find((session) => session.id === currentSessionId)
     : undefined;
+  const showActiveRunToolbar = Boolean(
+    activeRunNotice && NON_TERMINAL_DURABLE_RUN_STATUSES.has(activeRunNotice.status),
+  );
 
   return (
     <div className="flex h-[calc(100vh-(var(--space-section)*2))] min-h-[560px] max-h-[calc(100vh-(var(--space-section)*2))] w-full min-w-0 max-w-full flex-1 gap-0 overflow-hidden">
@@ -2547,38 +2742,55 @@ Rules:
         </div>
 
         {activeRunNotice && (
-          <div className="mt-3 flex flex-shrink-0 flex-wrap items-center gap-2 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-xs text-[var(--color-muted)]">
-            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-              <span className="font-medium text-[var(--color-text)]">Agent run</span>
-              <span>{activeRunNotice.taskType}</span>
-              <span>status: {activeRunNotice.status}</span>
-              {activeRunNotice.phase && <span>phase: {activeRunNotice.phase}</span>}
-              {activeRunNotice.toolName && <span>tool: {activeRunNotice.toolName}</span>}
-              {activeRunNotice.verifierSummary && <span className="max-w-full truncate">verifier: {activeRunNotice.verifierSummary}</span>}
+          showActiveRunToolbar ? <div data-testid="agent-run-toolbar" className="mt-2 flex h-8 w-fit max-w-full flex-shrink-0 items-center gap-1 overflow-hidden text-xs text-[var(--color-muted)]">
+            <div className="flex min-w-0 items-center gap-2 rounded-full bg-[var(--color-bg)] px-3">
+              <span className="font-medium text-[var(--color-text)]">
+                {activeRunNotice.status === "waiting_user"
+                  ? "等待你的回复"
+                  : activeRunNotice.status === "paused"
+                    ? "任务已暂停"
+                    : "纸鸢正在处理"}
+              </span>
+              <span>{runStatusLabel(activeRunNotice.status)}</span>
+              {activeRunNotice.phase && <span>{runPhaseLabel(activeRunNotice.phase)}</span>}
+              {activeRunNotice.artifacts && activeRunNotice.artifacts.length > 0 && <span>材料 {activeRunNotice.artifacts.length}</span>}
             </div>
-            <div className="ml-auto flex items-center gap-1">
-              <button
-                type="button"
-                onClick={handleResumeActiveRun}
-                disabled={activeRunAction !== null}
-                title="查看运行状态"
-                className="inline-flex h-7 items-center gap-1 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-[var(--color-text)] transition-colors hover:bg-[var(--color-bg)] disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <RotateCcw size={13} />
-                {activeRunAction === "resume" ? "查看中" : "查看状态"}
-              </button>
+            <div className="flex items-center gap-1">
+              {activeRunNotice.status === "paused" ? (
+                <button
+                  type="button"
+                  onClick={handleResumeActiveRun}
+                  disabled={activeRunAction !== null}
+                  title="恢复运行"
+                  className="inline-flex h-7 items-center gap-1 rounded-full px-2 text-[var(--color-text)] transition-colors hover:bg-[var(--color-bg)] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Play size={13} />
+                  {activeRunAction === "resume" ? "恢复中" : "恢复"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handlePauseActiveRun}
+                  disabled={activeRunAction !== null}
+                  title="暂停运行"
+                  className="inline-flex h-7 items-center gap-1 rounded-full px-2 text-[var(--color-text)] transition-colors hover:bg-[var(--color-bg)] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Pause size={13} />
+                  {activeRunAction === "pause" ? "暂停中" : "暂停"}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={handleCancelActiveRun}
                 disabled={activeRunAction !== null}
                 title="取消运行"
-                className="inline-flex h-7 items-center gap-1 rounded-[var(--radius-sm)] border border-red-200 bg-red-50 px-2 text-red-700 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-950/50"
+                className="inline-flex h-7 items-center gap-1 rounded-full px-2 text-red-700 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-red-300 dark:hover:bg-red-950/30"
               >
                 <XCircle size={13} />
                 {activeRunAction === "cancel" ? "取消中" : "取消"}
               </button>
             </div>
-          </div>
+          </div> : null
         )}
 
         {latestRollbackProposal && (
@@ -2603,6 +2815,7 @@ Rules:
 
         {/* AgentChat */}
         <AgentChat
+          currentSessionId={currentSessionId}
           messages={messages}
           streaming={streaming}
           streamText={streamText}
@@ -2614,9 +2827,12 @@ Rules:
           evalProgress={evalProgress}
           completionInfo={completionInfo}
           resultQuality={resultQuality}
+          runStatus={activeRunNotice?.status}
+          contextArtifacts={activeRunNotice?.artifacts}
           interviewState={currentSession?.interviewState}
           suggestions={activeAgent?.suggestions?.length ? activeAgent.suggestions.map(s => ({ icon: null as unknown as React.ReactNode, label: s.label, prompt: s.prompt })) : DEFAULT_SUGGESTIONS}
           onSend={sendMessage}
+          onGateDecision={handleGateDecision}
           onStop={handleStopStreaming}
           emptyState={null}
         />

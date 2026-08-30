@@ -365,7 +365,7 @@ ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS isolation_requested_at TIMESTAMP
 ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS isolation_reason TEXT NOT NULL DEFAULT '';
 ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS retention_expires_at TIMESTAMPTZ;
 ALTER TABLE agent_runs ADD CONSTRAINT agent_runs_status_check CHECK (
-  legacy = TRUE OR status IN ('queued', 'running', 'waiting_user', 'recovering', 'verifying', 'cancel_requested', 'succeeded', 'failed', 'cancelled')
+  legacy = TRUE OR status IN ('queued', 'running', 'waiting_user', 'paused', 'recovering', 'verifying', 'cancel_requested', 'succeeded', 'failed', 'cancelled')
 );
 
 ALTER TABLE agent_runs DROP CONSTRAINT IF EXISTS agent_runs_user_id_fkey;
@@ -644,6 +644,37 @@ CREATE INDEX IF NOT EXISTS idx_agent_eval_candidates_status ON agent_eval_candid
 CREATE INDEX IF NOT EXISTS idx_agent_eval_candidates_failure_task ON agent_eval_candidates(failure_type, task_type, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_eval_candidates_review_run ON agent_eval_candidates(review_id, run_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_eval_candidates_dedupe ON agent_eval_candidates(dedupe_key) WHERE dedupe_key <> '';
+
+CREATE TABLE IF NOT EXISTS agent_eval_runs (
+  id TEXT PRIMARY KEY,
+  created_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  mode TEXT NOT NULL DEFAULT 'deterministic',
+  status TEXT NOT NULL DEFAULT 'running',
+  code_commit TEXT NOT NULL DEFAULT '',
+  model_version TEXT NOT NULL DEFAULT '',
+  prompt_version TEXT NOT NULL DEFAULT '',
+  tool_version TEXT NOT NULL DEFAULT '',
+  fixture_id TEXT NOT NULL DEFAULT '',
+  fixture_version TEXT NOT NULL DEFAULT '',
+  graph_version TEXT NOT NULL DEFAULT '',
+  judge_version TEXT NOT NULL DEFAULT '',
+  score DOUBLE PRECISION,
+  hard_gate_passed BOOLEAN NOT NULL DEFAULT FALSE,
+  gate_results_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  failure_evidence_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+  review_id BIGINT REFERENCES agent_run_reviews(id) ON DELETE SET NULL,
+  candidate_id BIGINT REFERENCES agent_eval_candidates(id) ON DELETE SET NULL,
+  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT agent_eval_runs_mode_check CHECK (mode IN ('deterministic', 'staging', 'release')),
+  CONSTRAINT agent_eval_runs_status_check CHECK (status IN ('running', 'passed', 'failed', 'flaky')),
+  CONSTRAINT agent_eval_runs_score_check CHECK (score IS NULL OR (score >= 0 AND score <= 1))
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_eval_runs_created ON agent_eval_runs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_eval_runs_fixture ON agent_eval_runs(fixture_id, fixture_version, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_eval_runs_status ON agent_eval_runs(status, created_at DESC);
 
 CREATE SEQUENCE IF NOT EXISTS cv_data_id_seq;
 

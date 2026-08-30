@@ -111,7 +111,7 @@ describe("agent tool policy", () => {
     });
 
     expect(result?.success).toBe(false);
-    expect(result?.errorCategory).toBe("need_user_input");
+    expect(result?.errorCategory).toBe("policy_denied");
     expect(result?.llmSummary).toContain("Active interview session");
   });
 

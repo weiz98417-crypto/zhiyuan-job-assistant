@@ -8,6 +8,27 @@ import {
 } from "@/lib/agent/career-positioning-result";
 
 describe("career positioning result fallback", () => {
+  it("starts the first positioning stage when the model only loads the framework tool", () => {
+    const result = buildCareerPositioningFallback({
+      assistantText: "",
+      toolResult: {
+        name: "self_positioning",
+        success: true,
+        result: "4 阶段引导框架已加载，请引导用户从第一阶段开始。",
+        data: { phases: ["第一阶段：设定期望（1-2 轮）"] },
+      },
+      messages: [
+        { role: "user", content: "帮我做自我定位" },
+      ],
+    });
+
+    expect(result).toContain("先对齐你的期望");
+    expect(result).toContain("目标岗位");
+    expect(result).toContain("排除");
+    expect(result).toContain("行动方案");
+    expect(result).not.toContain("请引导用户");
+  });
+
   it("treats generic completion text as unsafe for self-positioning final replies", () => {
     expect(isGenericCareerPositioningCompletion("操作完成。")).toBe(true);
     expect(isGenericCareerPositioningCompletion("画像挖掘完成！定位已保存！画像已更新。可在 /profile 页面查看。")).toBe(true);

@@ -1,0 +1,3 @@
+# Task Programs share an interface with two execution depths
+
+Every explicit Agent Run goal is governed by a Task Program, while programs use one of two execution depths. Deterministic Programs require their defined preflight, clarification or Gate, execution, verification or read-back, Artifact persistence, and response stages; conversational Programs retain context binding and success constraints without inventing write or Artifact stages. The model may generate content within the current stage but cannot skip required stages. We chose this over both prompt-directed free execution, which allowed operational tasks to claim success without effects, and one rigid pipeline for every task, which would over-engineer read-only guidance and conversation.

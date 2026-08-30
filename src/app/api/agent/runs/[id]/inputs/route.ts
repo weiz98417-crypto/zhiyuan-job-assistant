@@ -27,6 +27,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       {
         content,
         images: Array.isArray(body.input?.images) ? body.input.images.map(String) : undefined,
+        ...(body.input?.persistInConversation === false ? { persistInConversation: false } : {}),
       },
     );
     return NextResponse.json(

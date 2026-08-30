@@ -6,10 +6,12 @@ import { validateResumeSectionContent, type ResumeSectionId } from "@/lib/agent/
 import { getDataRepositories } from "@/lib/data-repositories";
 import { retrieveExcellentResumePatternMemory } from "@/lib/excellent-resume-patterns";
 import { buildJudgePrompt, getTemperatureByEffort } from "@/lib/judge-engine";
-import { llmRetry } from "@/lib/llm-retry";
 import { retrieveReferenceResumeSnippets } from "@/lib/reference-resume-vector";
 import { stableResumeHash, type ResumeDraftRecord } from "@/lib/resume/document";
+import { requestResumeOptimizationModel } from "@/lib/server/resume-optimization-model";
 import type { Operation } from "@/types";
+
+export { ResumeOptimizationProviderError } from "@/lib/server/resume-optimization-model";
 
 export interface ResumeOptimizationInput {
   sectionId: ResumeSectionId;
@@ -114,8 +116,6 @@ export async function optimizeResumeSectionForAgent(
       limit: 6,
     }).catch(() => []),
   ]);
-  const apiKey = process.env.DEEPSEEK_API_KEY?.trim();
-  if (!apiKey) throw new Error("未配置 DEEPSEEK_API_KEY");
   const prompt = buildJudgePrompt({
     sectionId: input.sectionId,
     sectionContent,
@@ -138,19 +138,14 @@ export async function optimizeResumeSectionForAgent(
     patternMemory,
     preferences,
   });
-  const response = await llmRetry("https://api.deepseek.com/chat/completions", apiKey, {
-    model: input.fast && !snippets.length && !patternMemory.length
-      ? process.env.DEEPSEEK_RESUME_FAST_MODEL?.trim() || "deepseek-v4-flash"
-      : process.env.DEEPSEEK_RESUME_MODEL?.trim() || "deepseek-v4-pro",
+  const response = await requestResumeOptimizationModel({
+    fast: input.fast && !snippets.length && !patternMemory.length,
     messages: [
       { role: "system", content: prompt },
       { role: "user", content: `请优化 ${input.sectionId}，生成改写方案并严格返回 JSON。` },
     ],
     temperature: getTemperatureByEffort(effort),
-    max_tokens: 8000,
-    response_format: { type: "json_object" },
-    retries: 2,
-    fallbackModel: process.env.DEEPSEEK_FALLBACK_MODEL,
+    maxTokens: 8000,
     signal: options.signal,
   });
   const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };

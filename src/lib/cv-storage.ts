@@ -30,7 +30,7 @@ function migrateFromLegacy(legacy: CVSection[]): CVData {
   };
 }
 
-function createDefaultCVData(): CVData {
+export function createDefaultCVData(): CVData {
   return {
     activeVersion: "v1",
     versions: {
@@ -81,7 +81,7 @@ export async function loadCVDataFromServer(): Promise<CVData | null> {
     const res = await fetch("/api/cv/data", { cache: "no-store" });
     if (!res.ok) return null;
     const json = await res.json();
-    if (!json.success || !json.data || Object.keys(json.data).length === 0) return null;
+    if (!json.success) return null;
     const data = normalizeCVData(json.data);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     return data;
@@ -175,7 +175,11 @@ function cloneCVData(data: CVData): CVData {
 }
 
 export function getCVFullText(): string {
-  const sections = getActiveSections();
+  return getCVFullTextFromData(loadCVData());
+}
+
+export function getCVFullTextFromData(data: CVData): string {
+  const sections = data.versions[data.activeVersion]?.sections || [];
   return sections
     .filter((s) => s.content.trim())
     .map((s) => `【${s.title}】\n${s.content}`)

@@ -13,7 +13,14 @@ export interface DurableRunContextMaterial {
   completedToolFacts: Array<{ toolName: string; summary: string }>;
   recoveryObservations: Array<{ toolName: string; summary: string }>;
   evidence: Array<{ type: string; content: string }>;
-  gates: Array<{ toolName: string; status: string; scopeHash: string }>;
+  gates: Array<{
+    gateId?: string;
+    toolName: string;
+    status: string;
+    scopeHash: string;
+    request?: Record<string, unknown>;
+    resolvedAt?: string | null;
+  }>;
   factRefs: AgentRunFactReference[];
 }
 
@@ -33,7 +40,7 @@ export interface BuildRunContextInput {
   completedToolFacts: Array<{ toolName: string; summary: string }>;
   recoveryObservations?: Array<{ toolName: string; summary: string }>;
   evidence: Array<{ type: string; content: string }>;
-  gates: Array<{ toolName: string; status: string; scopeHash: string }>;
+  gates: DurableRunContextMaterial["gates"];
   factRefs?: AgentRunFactReference[];
 }
 

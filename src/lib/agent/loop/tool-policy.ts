@@ -212,7 +212,7 @@ export function enforceToolPolicy(input: ToolPolicyInput): ToolResult | null {
       success: false,
       data: null,
       error: "Active interview continuation must use the stored interview session, not reload resume files.",
-      errorCategory: "need_user_input",
+      errorCategory: "policy_denied",
       llmSummary: "The user asked to continue the active mock interview. Do not read files or ask for company/role again. Use the Active Interview Session planSnapshot and call generate_interview_questions with count=1.",
     };
   }
@@ -241,7 +241,7 @@ export function enforceToolPolicy(input: ToolPolicyInput): ToolResult | null {
       success: false,
       data: null,
       error: "Active interview session already has a fixed plan snapshot; do not regenerate a full interview plan.",
-      errorCategory: "need_user_input",
+      errorCategory: "policy_denied",
       llmSummary: "Active interview session is already bound to stored JD/resume snapshots. Do not call full prep/start-session tools. Continue from the stored transcript, ask exactly one next question, or ask one clarification if the user wants to restart.",
     };
   }
@@ -251,7 +251,7 @@ export function enforceToolPolicy(input: ToolPolicyInput): ToolResult | null {
       success: false,
       data: null,
       error: "当前 Agent 禁止主动联网搜索。只有用户明确要求查公开信息/面经/最新信息时才允许搜索。",
-      errorCategory: "need_user_input",
+      errorCategory: "policy_denied",
       llmSummary: "不要联网搜索。请优先使用会话里已有 JD、最近保存的 JD/报告、我的简历；如果确实缺 JD，请让用户粘贴 JD。",
     };
   }
@@ -261,7 +261,7 @@ export function enforceToolPolicy(input: ToolPolicyInput): ToolResult | null {
       success: false,
       data: null,
       error: "用户这一轮没有提供新的 JD 链接，不能臆造或复用不可访问链接去抓取。",
-      errorCategory: "need_user_input",
+      errorCategory: "policy_denied",
       llmSummary: "不要抓取链接。若用户说'这份JD/刚才那个JD'，请先使用 get_recent_jd_context 或 get_report_detail 读取本地已保存内容；读不到再请用户粘贴 JD 文本。",
     };
   }

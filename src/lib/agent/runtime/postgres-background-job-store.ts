@@ -74,8 +74,8 @@ export class PostgresAgentBackgroundJobStore implements AgentBackgroundJobStore 
           SET status = CASE WHEN status = 'cancel_requested' THEN status ELSE 'running' END,
               owner_id = $2,
               fencing_token = fencing_token + 1,
-              lease_expires_at = $3 + ($4 * interval '1 millisecond'),
-              updated_at = $3
+              lease_expires_at = $3::timestamptz + ($4::integer * interval '1 millisecond'),
+              updated_at = $3::timestamptz
           WHERE id = $1
           RETURNING *
         `, [candidate.rows[0].id, command.workerId, now, leaseMs]);
@@ -149,7 +149,7 @@ export class PostgresAgentBackgroundJobStore implements AgentBackgroundJobStore 
       const now = command.now || new Date();
       const updated = await client.query(`
         UPDATE agent_background_jobs
-        SET lease_expires_at = $4 + ($5 * interval '1 millisecond'), updated_at = $4
+        SET lease_expires_at = $4::timestamptz + ($5::integer * interval '1 millisecond'), updated_at = $4::timestamptz
         WHERE id = $1 AND owner_id = $2 AND fencing_token = $3 AND status IN ('running', 'cancel_requested')
         RETURNING *
       `, [command.jobId, command.workerId, command.fencingToken, now, Math.max(1, command.leaseMs || 30_000)]);

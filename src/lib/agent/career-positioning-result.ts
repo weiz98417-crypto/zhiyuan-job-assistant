@@ -70,6 +70,25 @@ function isDoneToolResult(toolResult?: CareerPositioningToolResult | null): bool
   );
 }
 
+function isSelfPositioningFrameworkLoaded(toolResult?: CareerPositioningToolResult | null): boolean {
+  return toolResult?.name === "self_positioning" && toolResult.success !== false;
+}
+
+function buildCareerPositioningOpeningQuestion(): string {
+  return [
+    "好，我们从第一阶段开始，先对齐你的期望。",
+    "",
+    "这次自我定位结束时，你最希望得到什么？",
+    "",
+    "1. 明确一个或几个目标岗位",
+    "2. 排除明显不适合的方向",
+    "3. 形成未来一个月的求职行动方案",
+    "4. 其他目标（请直接说）",
+    "",
+    "你可以选一项，也可以按优先级排序。",
+  ].join("\n");
+}
+
 export function isGenericCareerPositioningCompletion(text: string): boolean {
   const normalized = compact(text);
   if (!normalized) return true;
@@ -203,6 +222,12 @@ export function buildCareerPositioningFallback(params: {
   assistantText?: string;
   toolResult?: CareerPositioningToolResult | null;
 }): string | null {
+  if (
+    isSelfPositioningFrameworkLoaded(params.toolResult) &&
+    isGenericCareerPositioningCompletion(params.assistantText || "")
+  ) {
+    return buildCareerPositioningOpeningQuestion();
+  }
   if (!shouldForceCareerPositioningClose(params.messages) && !isGenericCareerPositioningCompletion(params.assistantText || "")) return null;
   const artifact = buildCareerPositioningArtifact(params.messages);
   if (!artifact && !isDoneToolResult(params.toolResult)) return null;

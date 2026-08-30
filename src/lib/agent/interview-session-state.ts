@@ -249,22 +249,29 @@ function appendAssistantTurn(
   let nodeId = next.currentQuestionId;
 
   if (looksLikeInterviewQuestion(assistantText)) {
-    const kind = inferQuestionKind(assistantText, next);
-    const parentId = kind === "follow_up" || kind === "probe" || kind === "clarification"
-      ? next.currentQuestionId
-      : undefined;
-    const node: InterviewQuestionNode = {
-      id: makeId("q"),
-      kind,
-      parentId,
-      reason: parentId ? "基于上一轮回答的自然追问" : "面试主线推进",
-      question: extractQuestion(assistantText),
-      answerTurnIds: [],
-      createdAt: assistantMsg.timestamp || new Date().toISOString(),
-    };
-    next.questionGraph.push(node);
-    next.currentQuestionId = node.id;
-    nodeId = node.id;
+    const question = extractQuestion(assistantText);
+    const duplicate = isDuplicateQuestion(next, question);
+    if (duplicate) {
+      next.currentQuestionId = duplicate.id;
+      nodeId = duplicate.id;
+    } else {
+      const kind = inferQuestionKind(assistantText, next);
+      const parentId = kind === "follow_up" || kind === "probe" || kind === "clarification"
+        ? next.currentQuestionId
+        : undefined;
+      const node: InterviewQuestionNode = {
+        id: makeId("q"),
+        kind,
+        parentId,
+        reason: parentId ? "基于上一轮回答的自然追问" : "面试主线推进",
+        question,
+        answerTurnIds: [],
+        createdAt: assistantMsg.timestamp || new Date().toISOString(),
+      };
+      next.questionGraph.push(node);
+      next.currentQuestionId = node.id;
+      nodeId = node.id;
+    }
   }
 
   next.transcript.push({
@@ -281,7 +288,12 @@ function appendAssistantTurn(
 function isInterviewControlTurn(content: string): boolean {
   const text = content.replace(/\s+/g, "").trim().toLowerCase();
   if (!text) return false;
-  return /^(下一题|下一个|继续|跳过|过|换一题|那你给|你给|给我|给个示范|示范|不会|不知道|我不知道|没思路|不会答|next|skip|continue)/i.test(text);
+  return /^(下一题|下一个|继续|跳过|过|换一题|那你给|你给|给我|给个示范|示范|不会|不知道|我不知道|没思路|不会答|开始(?:模拟)?面试|启动面试|模拟面试|准备面试|请?只?(?:问|出).{0,6}(?:一|1)道?题|next|skip|continue)/i.test(text);
+}
+
+export function countAnsweredInterviewRounds(state?: InterviewSessionState): number {
+  if (!state) return 0;
+  return state.questionGraph.filter((node) => node.answerTurnIds.length > 0).length;
 }
 
 export function updateInterviewStateWithExchange(
@@ -375,6 +387,59 @@ export function updateInterviewStateWithToolResult(
       item.id === questionNodeId ? { ...item, score } : item,
     ),
   };
+}
+
+export function rebuildInterviewStateFromMessages(
+  state: InterviewSessionState | undefined,
+  messages: AgentMessage[],
+): InterviewSessionState | undefined {
+  let next: InterviewSessionState | undefined = state?.planSnapshot
+    ? {
+        ...state,
+        currentQuestionId: undefined,
+        questionGraph: [],
+        transcript: [],
+        scoreArtifacts: [],
+      }
+    : undefined;
+  let pendingUser: AgentMessage | undefined;
+
+  for (const message of messages) {
+    if (message.role === "tool") {
+      next = updateInterviewStateWithToolResult(next, message);
+      continue;
+    }
+    if (message.role === "user") {
+      pendingUser = message;
+      continue;
+    }
+    if (message.role !== "assistant" || !message.content.trim()) continue;
+    next = pendingUser
+      ? updateInterviewStateWithExchange(next, pendingUser, message)
+      : updateInterviewStateWithAssistantMessage(next, message);
+    pendingUser = undefined;
+  }
+
+  if (pendingUser && next?.planSnapshot) {
+    const turn: InterviewTurn = {
+      id: makeId("turn_user"),
+      role: "user",
+      content: pendingUser.content,
+      questionNodeId: next.currentQuestionId,
+      createdAt: pendingUser.timestamp || new Date().toISOString(),
+    };
+    next = {
+      ...next,
+      transcript: [...next.transcript, turn],
+      questionGraph: next.questionGraph.map((node) =>
+        node.id === next?.currentQuestionId && !isInterviewControlTurn(pendingUser.content)
+          ? { ...node, answerTurnIds: [...node.answerTurnIds, turn.id] }
+          : node,
+      ),
+    };
+  }
+
+  return next;
 }
 
 export function shouldPersistInterviewRecap(userContent: string): boolean {

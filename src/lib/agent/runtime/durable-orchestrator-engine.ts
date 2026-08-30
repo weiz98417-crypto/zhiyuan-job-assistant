@@ -12,6 +12,7 @@ import type {
 import {
   compactExecutionConversation,
   loadExecutionConversation,
+  reconcileExecutionRunGates,
   saveExecutionConversation,
   type ExecutionConversationMessage,
 } from "@/lib/agent/runtime/execution-session-service";
@@ -24,8 +25,10 @@ import {
   resolveTaskContractRunOutcome,
   type AgentTaskContract,
 } from "@/lib/agent/task-contract";
+import { buildCareerPositioningFallback } from "@/lib/agent/career-positioning-result";
 import type { VerifiedActionResult } from "@/lib/agent/verified-action";
 import { projectDurableUiEvent } from "@/lib/agent/runtime/run-event-projection";
+import { projectToolResultForUser } from "@/lib/agent/surface-projection";
 import {
   buildRunContext,
   type DurableRunContextSource,
@@ -43,6 +46,7 @@ type Orchestrate = (input: {
   fencingToken: number;
   taskContract: AgentTaskContract | null;
   modelRecovery?: ModelRecoveryPolicy;
+  frozenToolCall?: { name: string; args: Record<string, unknown> };
   signal: AbortSignal;
 }) => AsyncIterable<Record<string, unknown> & { type: string }>;
 
@@ -68,6 +72,14 @@ interface StoredModelCompletion {
   charCount: number;
   toolResultCount: number;
   contractEvaluation?: StoredContractEvaluation;
+  failure?: StoredToolFailure;
+}
+
+interface StoredToolFailure {
+  toolName: string;
+  message: string;
+  category: string;
+  recoverable: false;
 }
 
 export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngine {
@@ -88,12 +100,24 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
   async execute(input: Parameters<AgentRunExecutionEngine["execute"]>[0]): Promise<AgentRunExecutionResult> {
     const principal = { userId: input.run.userId };
     const pendingInputs = await this.options.runtime.listPendingInputs(principal, input.run.id);
+    const durableMaterial = await this.contextSource.load(principal, input.run.id);
     const storedCompletion = readStoredModelCompletion(input.checkpoint?.context.modelCompletion);
     const recoveryAlreadyDecided = Object.keys(asRecord(input.checkpoint?.context.recovery)).length > 0;
+    const resolvedGate = durableMaterial.gates.some((gate) => gate.status === "approved" || gate.status === "denied");
+    const latestApprovedGate = storedCompletion?.outcome === "waiting_user"
+      ? [...durableMaterial.gates].reverse().find((gate) => (
+          gate.status === "approved"
+          && gate.request
+          && typeof gate.request.args === "object"
+          && gate.request.args !== null
+          && !Array.isArray(gate.request.args)
+        ))
+      : undefined;
     if (
       storedCompletion
       && pendingInputs.length === 0
       && !(storedCompletion.outcome === "failed" && recoveryAlreadyDecided)
+      && !(storedCompletion.outcome === "waiting_user" && resolvedGate)
     ) {
       return this.finalizeStoredCompletion(input, storedCompletion);
     }
@@ -103,8 +127,15 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
       images: item.content.images ? [...item.content.images] : undefined,
       timestamp: item.createdAt,
     }));
+    const durableConversationMessages = pendingInputs
+      .filter((item) => item.content.persistInConversation !== false)
+      .map((item) => ({
+        role: "user" as const,
+        content: item.content.content,
+        images: item.content.images ? [...item.content.images] : undefined,
+        timestamp: item.createdAt,
+      }));
     const priorMessages = await this.loadConversation(principal, input.run.conversationId);
-    const durableMaterial = await this.contextSource.load(principal, input.run.id);
     const recovery = asRecord(input.checkpoint?.context.recovery);
     const recoveryObservation = asRecord(recovery.observation);
     const recoveryDecision = asRecord(recovery.decision);
@@ -137,9 +168,10 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
     const checkpointConversationMessages = executionConversationMessages(
       input.checkpoint?.context.conversationMessages,
     );
-    const conversationMessages = checkpointConversationMessages.length > 0
+    const baseConversationMessages = checkpointConversationMessages.length > 0
       ? checkpointConversationMessages
-      : [...priorMessages, ...durableMessages];
+      : [...priorMessages, ...durableConversationMessages];
+    const conversationMessages = reconcileExecutionRunGates(baseConversationMessages, durableMaterial.gates);
     const forceCompaction = String(recoveryDecision.action || "") === "compact_context";
     const configuredContextLimit = Number(process.env.AGENT_CONTEXT_MAX_CHARS || 48_000);
     const contextLimit = forceCompaction
@@ -167,6 +199,7 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
       budgets: input.checkpoint?.budgets || input.run.budgets,
       factRefs: rebuiltContext.factRefs,
     });
+    await this.saveConversation(principal, input.run.conversationId, conversationMessages).catch(() => undefined);
     await this.options.runtime.consumeInputs({
       runId: input.run.id,
       workerId: input.run.ownerId!,
@@ -176,9 +209,16 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
 
     let assistantText = "";
     const projectedMessages: ExecutionConversationMessage[] = [];
-    let recoverableFailure = "";
+    let pendingRecoverableFailure = "";
+    let terminalToolFailure: StoredToolFailure | undefined;
     let waitingUserRequested = false;
-    let lastToolSuccess: boolean | undefined;
+    let hasUserVisibleArtifact = false;
+    let latestSuccessfulToolResult: {
+      name: string;
+      result: string;
+      success: true;
+      data?: unknown;
+    } | null = null;
     const completedCriteria = new Set<string>();
     const contract = asTaskContract(rebuiltContext.contract);
     const stream = this.orchestrate({
@@ -192,6 +232,12 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
       fencingToken: input.run.fencingToken,
       taskContract: contract,
       modelRecovery,
+      frozenToolCall: latestApprovedGate
+        ? {
+            name: String(latestApprovedGate.request?.toolName || latestApprovedGate.toolName),
+            args: latestApprovedGate.request?.args as Record<string, unknown>,
+          }
+        : undefined,
       signal: input.signal,
     })[Symbol.asyncIterator]();
     try {
@@ -212,7 +258,23 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
         });
         if (event.type === "text") assistantText += String(event.content || "");
         if (event.type === "tool_result") {
-          lastToolSuccess = event.success === true;
+          const safeView = projectToolResultForUser({
+            toolName: String(event.name || ""),
+            success: event.success === true,
+            uiPayload: event.uiPayload && typeof event.uiPayload === "object" && !Array.isArray(event.uiPayload)
+              ? event.uiPayload as Record<string, unknown>
+              : undefined,
+          });
+          if (event.success === true) {
+            pendingRecoverableFailure = "";
+            hasUserVisibleArtifact ||= safeView.kind !== "silent";
+            latestSuccessfulToolResult = {
+              name: String(event.name || ""),
+              result: String(event.result || ""),
+              success: true,
+              data: event.data,
+            };
+          }
           if (contract) {
             const data = event.data && typeof event.data === "object" ? event.data as Record<string, unknown> : {};
             const criteria = inferCompletedCriteriaFromToolResult(contract, {
@@ -229,28 +291,38 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
             });
             criteria.forEach((criterion) => completedCriteria.add(criterion));
           }
-          projectedMessages.push({
-            role: "tool",
-            content: String(event.result || ""),
-            toolName: String(event.name || ""),
-            toolResult: {
-              success: event.success,
-              data: event.data,
-              uiPayload: event.uiPayload,
-            },
-            timestamp: new Date().toISOString(),
-          });
+          if (safeView.kind !== "silent") {
+            projectedMessages.push({
+              role: "tool",
+              content: safeView.summary,
+              toolName: safeView.toolName,
+              toolResult: safeView,
+              timestamp: new Date().toISOString(),
+            });
+          }
         }
-        if (event.type === "tool_error" && event.recoverable !== false) {
-          recoverableFailure = String(event.error || "Tool execution failed");
+        if (
+          event.type === "tool_error"
+          && event.recoverable !== false
+          && event.category !== "policy_denied"
+        ) {
+          pendingRecoverableFailure = String(event.error || "Tool execution failed");
+        }
+        if (event.type === "tool_error" && event.recoverable === false) {
+          terminalToolFailure = {
+            toolName: String(event.name || "tool"),
+            message: String(event.error || "操作未能完成"),
+            category: String(event.category || "permanent"),
+            recoverable: false,
+          };
         }
         if (event.type === "run_directive") {
           if (event.directive === "wait_user") waitingUserRequested = true;
           if (event.directive === "recover") {
-            recoverableFailure = String(event.reason || "Tool execution requires recovery");
+            pendingRecoverableFailure = String(event.reason || "Tool execution requires recovery");
           }
         }
-        if (event.type === "error") recoverableFailure = String(event.message || "Agent execution failed");
+        if (event.type === "error") pendingRecoverableFailure = String(event.message || "Agent execution failed");
       }
     } catch (error) {
       const interruptedCheckpoint = await this.saveInterruptedOutput({
@@ -273,7 +345,21 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
       }).catch(() => undefined);
       throw error;
     }
-    if (recoverableFailure) {
+    const careerPositioningFallback = contract?.taskType === "career_positioning_guidance"
+      ? buildCareerPositioningFallback({
+          messages: conversationMessages.flatMap((message) => (
+            message.role === "user" || message.role === "assistant" || message.role === "tool"
+              ? [{ role: message.role, content: message.content }]
+              : []
+          )),
+          assistantText,
+          toolResult: latestSuccessfulToolResult,
+        })
+      : null;
+    if (careerPositioningFallback) assistantText = careerPositioningFallback;
+
+    if (terminalToolFailure) pendingRecoverableFailure = "";
+    if (pendingRecoverableFailure) {
       const interruptedCheckpoint = await this.saveInterruptedOutput({
         input,
         assistantText,
@@ -292,10 +378,25 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
         type: "run.model_output_interrupted",
         payload: interruptedEvidencePayload(assistantText, interruptedCheckpoint.id),
       });
-      throw new Error(recoverableFailure);
+      throw new Error(pendingRecoverableFailure);
+    }
+    if (terminalToolFailure && !assistantText.trim()) {
+      assistantText = `操作未能完成：${terminalToolFailure.message}`;
     }
     if (assistantText.trim()) {
       addAssistantCriteria(contract, completedCriteria);
+    }
+    const contractOutcome = contract
+      ? resolveTaskContractRunOutcome(contract, Array.from(completedCriteria), {
+          requiresClarification: contract.routing?.requiresClarification || waitingUserRequested,
+          hasAssistantResponse: Boolean(assistantText.trim()),
+          hasUserVisibleArtifact,
+        })
+      : null;
+    if (contractOutcome?.status === "failed" && contractOutcome.replaceAssistantMessage && contractOutcome.safeMessage) {
+      assistantText = contractOutcome.safeMessage;
+    }
+    if (assistantText.trim()) {
       projectedMessages.push({
         role: "assistant",
         content: assistantText,
@@ -313,21 +414,17 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
         timestamp,
       })),
     ], contextLimit);
-    const contractOutcome = contract
-      ? resolveTaskContractRunOutcome(contract, Array.from(completedCriteria), {
-          requiresClarification: contract.routing?.requiresClarification || waitingUserRequested,
-          hasAssistantResponse: Boolean(assistantText.trim()),
-          lastToolSuccess,
-        })
-      : null;
     const completion: StoredModelCompletion = {
       id: randomUUID(),
-      outcome: contractOutcome?.status
+      outcome: terminalToolFailure
+        ? "failed"
+        : contractOutcome?.status
         || (waitingUserRequested
           ? "waiting_user"
           : assistantText.trim() || projectedMessages.length > 0 ? "succeeded" : "failed"),
       charCount: assistantText.length,
       toolResultCount: projectedMessages.filter((message) => message.role === "tool").length,
+      failure: terminalToolFailure,
       contractEvaluation: contractOutcome
         ? {
             canClaimSuccess: contractOutcome.gate.canClaimSuccess,
@@ -434,11 +531,18 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
         });
       }
       if (completion.contractEvaluation.outcome === "failed") {
+        await this.saveConversation(principal, input.run.conversationId, conversationMessages);
+        if (completion.failure) {
+          return { outcome: "failed", failure: permanentToolObservation(completion.failure) };
+        }
         throw new Error(`Run Contract unmet: ${completion.contractEvaluation.unmetCriteria.join(", ")}`);
       }
     }
     await this.saveConversation(principal, input.run.conversationId, conversationMessages);
-    return { outcome: completion.outcome };
+    return {
+      outcome: completion.outcome,
+      ...(completion.failure ? { failure: permanentToolObservation(completion.failure) } : {}),
+    };
   }
 }
 
@@ -480,6 +584,32 @@ function readStoredModelCompletion(value: unknown): StoredModelCompletion | null
     charCount: safeCount(record.charCount),
     toolResultCount: safeCount(record.toolResultCount),
     contractEvaluation,
+    failure: readStoredToolFailure(record.failure),
+  };
+}
+
+function readStoredToolFailure(value: unknown): StoredToolFailure | undefined {
+  const record = asRecord(value);
+  if (!record.toolName || !record.message || record.recoverable !== false) return undefined;
+  return {
+    toolName: String(record.toolName),
+    message: String(record.message),
+    category: String(record.category || "permanent"),
+    recoverable: false,
+  };
+}
+
+function permanentToolObservation(failure: StoredToolFailure) {
+  const normalized = failure.message.toLowerCase().replace(/\d+/g, "#").slice(0, 120);
+  return {
+    category: "tool_permanent" as const,
+    stage: "tool_execution",
+    retryability: "never" as const,
+    effectState: "not_executed" as const,
+    fingerprint: `tool_permanent:${failure.toolName}:${normalized}`,
+    userSafeSummary: failure.message,
+    diagnosticRef: failure.toolName,
+    recoveryCapabilities: [],
   };
 }
 
@@ -543,13 +673,13 @@ const emptyRunContextSource: DurableRunContextSource = {
 
 function addAssistantCriteria(contract: AgentTaskContract | null, completed: Set<string>): void {
   if (!contract) return;
+  if (contract.taskType === "general_chat") completed.add("answer generated");
   if (contract.taskType === "resume_query") completed.add("answer generated");
   if (contract.taskType === "career_positioning_guidance") {
     completed.add("next question or guidance response generated");
   }
   if (contract.taskType === "interview_coaching") {
     completed.add("one question generated");
-    completed.add("session state updated without losing context");
   }
 }
 
@@ -568,6 +698,7 @@ function defaultOrchestrate(input: Parameters<Orchestrate>[0]): AsyncIterable<SS
     fencingToken: input.fencingToken,
     taskContract: input.taskContract,
     modelRecovery: input.modelRecovery,
+    frozenToolCall: input.frozenToolCall,
     durable: true,
     forcedAgentId: input.agentId,
   });

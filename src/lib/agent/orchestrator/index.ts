@@ -39,6 +39,7 @@ export interface OrchestratorContext {
   taskContract?: AgentTaskContract | null;
   durable?: boolean;
   modelRecovery?: ModelRecoveryPolicy;
+  frozenToolCall?: { name: string; args: Record<string, unknown> };
 }
 
 export interface OrchestratorResult {
@@ -212,6 +213,7 @@ export async function* orchestrateGen(
     signal: ctx.signal,
     taskContract: ctx.taskContract,
     modelRecovery: ctx.modelRecovery,
+    frozenToolCall: ctx.frozenToolCall,
     executionContext: ctx.principal && ctx.runId
       ? {
           principal: ctx.principal,

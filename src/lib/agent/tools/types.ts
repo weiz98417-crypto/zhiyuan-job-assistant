@@ -16,6 +16,15 @@ export type ToolIdempotency = "none" | "request_key" | "natural_key";
 export type ToolReconciliation = "none" | "read_back" | "status_poll" | "manual";
 export type ToolVerification = "none" | "read_back" | "verified_action";
 export type ToolWorkerExecution = "server" | "background" | "legacy";
+export type ToolVisibility = "silent" | "progress" | "card" | "approval" | "user_safe" | "activity_only" | "admin_only" | "hidden";
+
+export interface ToolPresentation {
+  visibility: ToolVisibility;
+  llmSummary?: string;
+  label?: string;
+  safeFallback?: string;
+  payloadType?: string;
+}
 
 export interface ToolCapability {
   risk: ToolRisk;
@@ -54,9 +63,10 @@ export interface ToolReconciliationOutcome {
  * | ok                | Success           | Continue       | Analyze & respond   |
  * | transient         | Temporary failure | autoRetry++    | Retry with new args |
  * | permanent         | Permanent failure | degradeToUser  | Tell user + suggest |
- * | need_user_input   | Needs user info   | degradeToUser  | Ask user directly   |
+ * | need_user_input   | Needs user info   | wait for user  | Ask user directly   |
+ * | policy_denied     | Unsafe action     | continue loop  | Choose a safe path  |
  */
-export type ErrorCategory = "ok" | "transient" | "permanent" | "need_user_input";
+export type ErrorCategory = "ok" | "transient" | "permanent" | "need_user_input" | "policy_denied";
 
 export interface ToolResult {
   success: boolean;
@@ -74,6 +84,7 @@ export interface ToolResult {
    * - "transient": retry-safe (network timeout, rate limit).
    * - "permanent": do NOT retry (encoding error, file not found).
    * - "need_user_input": do NOT retry, ask user for more info.
+   * - "policy_denied": do not dispatch this action; continue planning with allowed capabilities.
    */
   errorCategory?: ErrorCategory;
   /**
@@ -96,6 +107,8 @@ export interface ToolResult {
   rawData?: unknown;
   /** Machine-checkable evidence for durable mutations. Required for high-risk writes as tools migrate. */
   verifiedAction?: VerifiedActionResult;
+  /** Explicit presentation policy for the user-facing projection. */
+  presentation?: ToolPresentation;
 }
 
 export interface ToolDefinition<TParams = Record<string, unknown>> {
@@ -127,6 +140,7 @@ export interface ToolDefinition<TParams = Record<string, unknown>> {
   governance?: ToolGovernance;
   /** Durable execution contract. Missing metadata keeps the tool out of model exposure. */
   capability?: ToolCapability;
+  presentation?: ToolPresentation;
 }
 
 // Re-export AgentToolParam for convenience (maps to ToolParameter)

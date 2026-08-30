@@ -20,6 +20,7 @@ import { requiresReadBackVerification } from "@/lib/agent/tools/readback-verific
 import type { AgentTaskContract } from "@/lib/agent/task-contract";
 import { enforceToolGovernance } from "@/lib/agent/tool-governance";
 import { executeGovernedRuntimeTool } from "@/lib/agent/runtime/governed-tool-runtime";
+import { extractDsmlToolCalls } from "@/lib/agent/loop/dsml-tool-calls";
 
 /* ── Context cap (per-tool) ── */
 const DEFAULT_TOOL_CTX_CAP = 800;
@@ -73,6 +74,7 @@ const ERROR_CATEGORY_ACTIONS: Record<ErrorCategory, { autoRetry: boolean; degrad
   transient:       { autoRetry: true,  degradeToUser: false },
   permanent:       { autoRetry: false, degradeToUser: true  },
   need_user_input: { autoRetry: false, degradeToUser: true  },
+  policy_denied:   { autoRetry: false, degradeToUser: false },
 };
 
 function resolveErrorCategory(result: ToolResult): ErrorCategory {
@@ -208,7 +210,12 @@ async function callLLM(
     }
   }
 
-  return { text: fullText, toolCalls: Array.from(toolCallFragments.values()) };
+  const nativeToolCalls = Array.from(toolCallFragments.values());
+  const dsml = extractDsmlToolCalls(fullText);
+  return {
+    text: dsml.text,
+    toolCalls: nativeToolCalls.length > 0 ? nativeToolCalls : dsml.toolCalls,
+  };
   }
 
   throw new Error(`All models failed (last: ${lastError})`);
@@ -236,6 +243,7 @@ export async function* agentLoopServer(opts: {
   taskContract?: AgentTaskContract | null;
   executionContext?: ToolExecutionContext;
   modelRecovery?: ModelRecoveryPolicy;
+  frozenToolCall?: { name: string; args: Record<string, unknown> };
 }): AsyncGenerator<SSEEvent> {
   const { systemPrompt, messages, config = DEFAULT_LOOP_CONFIG, tools, agent, signal, interviewState, interviewRebindAction, taskContract, executionContext, modelRecovery } = opts;
   const modelPreference = agent?.model;
@@ -257,6 +265,7 @@ export async function* agentLoopServer(opts: {
   const MAX_AUTO_RETRY = 2;
   const recentCalls: { name: string; params: string; result: string }[] = [];
   const intermediateSteps: { tool: string; params: string; category: ErrorCategory; summary: string }[] = [];
+  let frozenToolCall = opts.frozenToolCall;
 
   while (state.iteration < config.maxIterations) {
     if (signal?.aborted) {
@@ -278,9 +287,19 @@ export async function* agentLoopServer(opts: {
     let thinkText: string;
     let toolCalls: NativeToolCall[];
     try {
-      const resp = await callLLM(ctx, systemPrompt, tools, modelPreference, modelRecovery);
-      thinkText = resp.text;
-      toolCalls = resp.toolCalls;
+      if (frozenToolCall) {
+        thinkText = "";
+        toolCalls = [{
+          id: `approved-gate-${state.iteration}`,
+          name: frozenToolCall.name,
+          arguments: JSON.stringify(frozenToolCall.args),
+        }];
+        frozenToolCall = undefined;
+      } else {
+        const resp = await callLLM(ctx, systemPrompt, tools, modelPreference, modelRecovery);
+        thinkText = resp.text;
+        toolCalls = resp.toolCalls;
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : "未知错误";
       if (executionContext?.workerId && Number.isFinite(executionContext.fencingToken)) {
@@ -367,7 +386,7 @@ export async function* agentLoopServer(opts: {
                 success: false,
                 data: null,
                 error: `工具 ${tc.name} 不在当前 Agent 模式下可用`,
-                errorCategory: "permanent",
+                errorCategory: "policy_denied",
                 recoverable: true,
               }
             : undefined;
@@ -448,6 +467,18 @@ export async function* agentLoopServer(opts: {
         }
       }
 
+      if (
+        toolResult.success
+        && shouldWaitForUserAfterToolResult(tc.name, toolResult.data)
+      ) {
+        durableRunDirective = "wait_user";
+        yield {
+          type: "run_directive",
+          directive: "wait_user",
+          reason: tc.name === "mine_profile" ? "等待用户回答当前画像问题" : "等待用户回答当前面试题",
+        };
+      }
+
       yield {
         type: "tool_result",
         name: tc.name,
@@ -460,7 +491,13 @@ export async function* agentLoopServer(opts: {
 
       // ── Self-healing: yield error info so LLM can adapt ──
       if (!toolResult.success) {
-        yield { type: "tool_error", name: tc.name, error: toolResult.error || "未知错误", recoverable: toolResult.recoverable !== false };
+        yield {
+          type: "tool_error",
+          name: tc.name,
+          error: toolResult.error || "未知错误",
+          recoverable: toolResult.recoverable !== false,
+          category: resolveErrorCategory(toolResult),
+        };
       }
 
       if (durableRunDirective === "wait_user") {
@@ -474,14 +511,14 @@ export async function* agentLoopServer(opts: {
       const quality = checkResultQuality(formatted);
       yield { type: "result_quality", quality };
 
+      const category = resolveErrorCategory(toolResult);
       if (toolResult.success) {
         state.consecutiveFailures = 0;
-      } else {
+      } else if (category !== "policy_denied") {
         state.consecutiveFailures++;
       }
 
       // ── Error category dispatch ──
-      const category = resolveErrorCategory(toolResult);
       const action = ERROR_CATEGORY_ACTIONS[category];
 
       if (action.degradeToUser) {
@@ -495,7 +532,7 @@ export async function* agentLoopServer(opts: {
       }
 
       // Only cache successful / non-degraded results
-      if (!requiresReadBackVerification(tc.name)) {
+      if (toolResult.success && !requiresReadBackVerification(tc.name)) {
         recentCalls.push({ name: tc.name, params: paramsKey, result: formatted });
         if (recentCalls.length > 5) recentCalls.shift();
       }
@@ -516,6 +553,7 @@ export async function* agentLoopServer(opts: {
         transient:       "\n<!-- ⚠️ 搜索未找到理想结果，请换参数重试。 -->",
         permanent:       "",
         need_user_input: "",
+        policy_denied:   "\n<!-- 当前动作不被允许，请改用安全能力继续原任务。 -->",
       };
       const hint = categoryHints[category]
         || (quality === "empty" ? "\n<!-- ⚠️ 搜索结果为空，请在下一轮换不同关键词重新搜索。不要直接回复用户。 -->"
@@ -591,4 +629,19 @@ function injectLatestImagesForImageTool(
     if (images.length > 0) params.images = images;
     return;
   }
+}
+
+function isWaitingProfileResult(value: unknown): boolean {
+  const data = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  return data.done !== true && typeof data.prompt === "string" && data.prompt.trim().length > 0;
+}
+
+function hasGeneratedInterviewQuestion(value: unknown): boolean {
+  const data = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  return Array.isArray(data.questions) && data.questions.length > 0;
+}
+
+export function shouldWaitForUserAfterToolResult(toolName: string, value: unknown): boolean {
+  return (toolName === "mine_profile" && isWaitingProfileResult(value))
+    || (toolName === "generate_interview_questions" && hasGeneratedInterviewQuestion(value));
 }

@@ -31,7 +31,7 @@ export class PostgresRunContextSource implements DurableRunContextSource {
           ORDER BY attempt.attempt_sequence ASC
         `, [runId, principal.userId]),
         client.query(`
-          SELECT gate.tool_name, gate.status, gate.scope_hash
+          SELECT gate.id, gate.tool_name, gate.status, gate.scope_hash, gate.request_json, gate.resolved_at
           FROM agent_run_gates gate
           JOIN agent_runs run ON run.id = gate.run_id
           WHERE gate.run_id = $1 AND run.user_id = $2
@@ -71,9 +71,12 @@ export class PostgresRunContextSource implements DurableRunContextSource {
           }];
         }),
         gates: gates.rows.map((row) => ({
+          gateId: String(row.id || ""),
           toolName: String(row.tool_name || ""),
           status: String(row.status || ""),
           scopeHash: String(row.scope_hash || ""),
+          request: record(row.request_json),
+          resolvedAt: row.resolved_at instanceof Date ? row.resolved_at.toISOString() : String(row.resolved_at || "") || null,
         })),
         factRefs: attempts.rows.map((row) => ({
           type: "tool_attempt",

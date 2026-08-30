@@ -1,5 +1,6 @@
 import db from "@/lib/db";
 import type { AgentMessage, AgentSessionState, ChatSession, InterviewSessionState } from "@/types";
+import { projectAgentMessages } from "@/lib/agent/surface-projection";
 
 const MAX_MESSAGES_PER_SESSION = 200;
 export const MEMORY_DIGEST_USER_MESSAGE_THRESHOLD = 5;
@@ -28,7 +29,7 @@ interface ServerSessionRow {
 function parseServerSession(row: ServerSessionRow): ChatSession {
   let messages: AgentMessage[] = [];
   try {
-    messages = JSON.parse(row.messages_json || "[]") as AgentMessage[];
+    messages = projectAgentMessages(JSON.parse(row.messages_json || "[]") as AgentMessage[]);
   } catch {
     messages = [];
   }
@@ -68,9 +69,10 @@ export async function createSession(
   options: { title?: string; interviewState?: InterviewSessionState; agentState?: AgentSessionState } = {},
 ): Promise<number> {
   const now = new Date().toISOString();
+  const safeMessages = projectAgentMessages(messages);
   const session: ChatSession = {
-    title: options.title || (messages.length > 0 ? makeTitle(messages) : "新对话"),
-    messages,
+    title: options.title || (safeMessages.length > 0 ? makeTitle(safeMessages) : "新对话"),
+    messages: safeMessages,
     interviewState: options.interviewState,
     agentState: options.agentState,
     pinned: false,
@@ -108,33 +110,49 @@ export async function listSessions(): Promise<ChatSession[]> {
   return serverSessions.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
 }
 
-export async function getSession(id: number): Promise<ChatSession | undefined> {
-  const local = await db.chatSessions.get(id);
-  if (local) return local;
-  try {
-    const res = await fetch(`/api/sessions/${id}`, { cache: "no-store" });
-    if (res.ok) {
-      const json = await res.json();
-      if (json.success && json.data) {
-        const session = parseServerSession(json.data as ServerSessionRow);
-        await db.chatSessions.put(session);
-        return session;
-      }
+export async function getSession(
+  id: number,
+  options: { preferServer?: boolean } = {},
+): Promise<ChatSession | undefined> {
+  const readLocal = async () => {
+    const local = await db.chatSessions.get(id);
+    if (!local) return undefined;
+    const safeMessages = projectAgentMessages(local.messages);
+    const safeSession = { ...local, messages: safeMessages };
+    if (JSON.stringify(safeMessages) !== JSON.stringify(local.messages)) {
+      await db.chatSessions.put(safeSession).catch(() => {});
     }
-  } catch {
-    /* fallback */
-  }
-  return undefined;
+    return safeSession;
+  };
+  const readServer = async () => {
+    try {
+      const res = await fetch(`/api/sessions/${id}`, { cache: "no-store" });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.data) {
+          const session = parseServerSession(json.data as ServerSessionRow);
+          await db.chatSessions.put(session).catch(() => {});
+          return session;
+        }
+      }
+    } catch {
+      /* fallback */
+    }
+    return undefined;
+  };
+  if (options.preferServer) return (await readServer()) || readLocal();
+  return (await readLocal()) || readServer();
 }
 
 export async function updateSession(id: number, updates: Partial<ChatSession>): Promise<void> {
-  await db.chatSessions.update(id, { ...updates, updatedAt: new Date().toISOString() });
+  const safeMessages = updates.messages ? projectAgentMessages(updates.messages) : undefined;
+  await db.chatSessions.update(id, { ...updates, ...(safeMessages ? { messages: safeMessages } : {}), updatedAt: new Date().toISOString() });
   const res = await fetch(`/api/sessions/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       title: updates.title,
-      messages: updates.messages,
+      messages: safeMessages,
       pinned: updates.pinned,
       memoryDigest: updates.memoryDigest,
       interviewState: updates.interviewState,
