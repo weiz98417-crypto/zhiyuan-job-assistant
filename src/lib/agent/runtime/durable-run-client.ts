@@ -5,14 +5,19 @@ import type {
   DurableRunInput,
   SubmitAgentRunInputResult,
 } from "@/lib/agent/runtime/durable-agent-run";
+import type { ConversationItem } from "@/lib/agent/item-projection";
 import type { AgentRuntimeAssignment } from "@/lib/agent/runtime/runtime-mode";
 
 export interface DurableRunCreateCommand {
   requestId: string;
   conversationId: number | null;
-  taskType: string;
-  agentId: string;
   input: DurableRunInput;
+  entryHints?: {
+    agentId?: string;
+    source?: string;
+  };
+  taskType?: string;
+  agentId?: string;
   contract?: unknown;
   parentRunId?: string | null;
 }
@@ -21,11 +26,22 @@ export interface DurableRunCreateResponse {
   run: AgentRunSnapshot | null;
   replayed: boolean;
   assignment: AgentRuntimeAssignment;
+  admission?: {
+    kind: string;
+    safeMessage?: string;
+  };
 }
 
 export interface DurableRunEventBatch {
   events: AgentRunEvent[];
   cursor: number;
+}
+
+export interface DurableRunItemBatch {
+  items: ConversationItem[];
+  cursor: number;
+  source?: string;
+  schemaVersion?: number;
 }
 
 export class DurableRunOwnershipUnknownError extends Error {
@@ -65,10 +81,16 @@ interface JsonEnvelope<T> {
 export async function createDurableAgentRunClient(
   command: DurableRunCreateCommand,
 ): Promise<DurableRunCreateResponse | null> {
+  const request = {
+    requestId: command.requestId,
+    conversationId: command.conversationId,
+    input: command.input,
+    ...(command.entryHints ? { entryHints: command.entryHints } : {}),
+  };
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const result = await requestJson<DurableRunCreateResponse>("/api/agent/runs", {
       method: "POST",
-      body: JSON.stringify(command),
+      body: JSON.stringify(request),
     }, RUN_CREATE_REQUEST_TIMEOUT_MS);
     if (result?.data) return result.data;
   }
@@ -156,6 +178,16 @@ export async function pollDurableAgentRunEventsClient(
 ): Promise<DurableRunEventBatch | null> {
   const result = await requestJson<DurableRunEventBatch>(
     `/api/agent/runs/${encodeURIComponent(runId)}/events?after=${Math.max(0, Math.floor(afterCursor))}`,
+  );
+  return result?.data || null;
+}
+
+export async function getDurableAgentRunItemsClient(
+  runId: string,
+  afterCursor = 0,
+): Promise<DurableRunItemBatch | null> {
+  const result = await requestJson<DurableRunItemBatch>(
+    `/api/agent/runs/${encodeURIComponent(runId)}/items?after=${Math.max(0, Math.floor(afterCursor))}`,
   );
   return result?.data || null;
 }

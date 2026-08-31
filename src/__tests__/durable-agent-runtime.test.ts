@@ -354,6 +354,34 @@ describe("Durable Agent Run", () => {
     });
   });
 
+  it("queues the same paused Run when a durable user input arrives", async () => {
+    const runtime = new DurableAgentRunService(new InMemoryAgentRunStore());
+    const created = await runtime.createRun(
+      { userId: "user-paused-input" },
+      {
+        requestId: "paused-input-create",
+        conversationId: 42,
+        taskType: "resume_query",
+        agentId: "resume",
+        input: { content: "读取我的简历" },
+      },
+    );
+    await runtime.requestPause({ userId: "user-paused-input" }, created.run.id, "pause-before-input");
+
+    const resumed = await runtime.submitInput(
+      { userId: "user-paused-input" },
+      created.run.id,
+      "paused-input-follow-up",
+      { content: "重点看项目经历" },
+    );
+
+    expect({ id: resumed.run.id, status: resumed.run.status, replayed: resumed.replayed }).toEqual({
+      id: created.run.id,
+      status: "queued",
+      replayed: false,
+    });
+  });
+
   it("extends the lease with a fenced heartbeat before takeover", async () => {
     const runtime = new DurableAgentRunService(new InMemoryAgentRunStore());
     await runtime.createRun(

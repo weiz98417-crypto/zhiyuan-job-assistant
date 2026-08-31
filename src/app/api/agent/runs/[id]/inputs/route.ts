@@ -4,6 +4,7 @@ import {
   getDurableAgentRuntime,
   isDurableAgentRuntimeAvailable,
 } from "@/lib/agent/runtime/runtime-factory";
+import { admitAgentRun } from "@/lib/agent/run-admission";
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -20,18 +21,34 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (!content) return NextResponse.json({ success: false, error: "input.content is required" }, { status: 400 });
 
     const { id } = await params;
-    const result = await getDurableAgentRuntime().submitInput(
+    const runtime = getDurableAgentRuntime();
+    const run = await runtime.getRun({ userId: user.userId }, id);
+    if (!run) return NextResponse.json({ success: false, error: "Agent Run not found" }, { status: 404 });
+    const input = {
+      content,
+      images: Array.isArray(body.input?.images) ? body.input.images.map(String) : undefined,
+      ...(body.input?.persistInConversation === false ? { persistInConversation: false } : {}),
+    };
+    const admission = admitAgentRun({
+      conversationId: run.conversationId,
+      input,
+      activeRun: run,
+      entryHints: { source: "run_input" },
+    });
+    if (admission.kind !== "continue_current_run") {
+      return NextResponse.json(
+        { success: false, error: admission.safeMessage || "Agent Run input does not continue the current goal", data: { admission } },
+        { status: 409 },
+      );
+    }
+    const result = await runtime.submitInput(
       { userId: user.userId },
       id,
       requestId,
-      {
-        content,
-        images: Array.isArray(body.input?.images) ? body.input.images.map(String) : undefined,
-        ...(body.input?.persistInConversation === false ? { persistInConversation: false } : {}),
-      },
+      input,
     );
     return NextResponse.json(
-      { success: true, data: result },
+      { success: true, data: { ...result, admission } },
       { status: result.replayed ? 200 : 201 },
     );
   } catch (error) {

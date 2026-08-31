@@ -64,6 +64,7 @@ export function projectDurableUiEvent(
   return { type };
 }
 
+
 function safeIdentifier(value: unknown): string {
   return typeof value === "string" ? value.replace(/[^a-zA-Z0-9_.:-]/g, "").slice(0, 80) : "";
 }

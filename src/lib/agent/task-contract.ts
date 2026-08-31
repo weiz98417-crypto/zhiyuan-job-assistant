@@ -1,5 +1,6 @@
 import { stableContentHash, type VerifiedActionResult } from "@/lib/agent/verified-action";
 import type { AgentArtifactRef } from "@/lib/agent/task-journey";
+import { bindTaskProgram, getTaskProgram, type TaskProgramBinding } from "@/lib/agent/task-program";
 
 export type AgentTaskType =
   | "general_chat"
@@ -16,6 +17,7 @@ export type AgentTaskType =
 
 export interface AgentTaskContract {
   taskType: AgentTaskType;
+  program?: TaskProgramBinding;
   target: string;
   requiresUserApproval: boolean;
   baseVersion?: string;
@@ -175,14 +177,16 @@ export function createAgentTaskContract(input: {
   routing?: AgentTaskContract["routing"];
   journey?: AgentTaskContract["journey"];
 }): AgentTaskContract {
+  const taskProgram = getTaskProgram(input.taskType);
   return {
     taskType: input.taskType,
+    program: bindTaskProgram(input.taskType),
     target: input.target,
     requiresUserApproval: input.requiresUserApproval ?? (input.taskType === "resume_edit" || input.taskType === "job_search"),
     baseVersion: input.baseVersion,
     baseHash: input.baseHash,
-    successCriteria: input.successCriteria || DEFAULT_SUCCESS_CRITERIA[input.taskType],
-    validators: input.validators || DEFAULT_VALIDATORS[input.taskType],
+    successCriteria: input.successCriteria || [...taskProgram.successCriteria] || DEFAULT_SUCCESS_CRITERIA[input.taskType],
+    validators: input.validators || [...taskProgram.validators] || DEFAULT_VALIDATORS[input.taskType],
     routing: input.routing,
     journey: input.journey,
     createdAt: new Date().toISOString(),

@@ -17,7 +17,7 @@ afterEach(() => {
 });
 
 describe("Durable Agent Run browser adapter", () => {
-  it("submits an idempotent create command and accepts server-side ownership", async () => {
+  it("submits an idempotent create request without client-owned routing or contracts", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       success: true,
       enabled: true,
@@ -45,10 +45,7 @@ describe("Durable Agent Run browser adapter", () => {
       body: JSON.stringify({
         requestId: "request-1",
         conversationId: 12,
-        taskType: "resume_query",
-        agentId: "resume",
         input: { content: "读取我的简历" },
-        contract: { target: "skills" },
       }),
     }));
   });

@@ -30,6 +30,13 @@ function mockRuntime() {
       input: { id: "input-bootstrap" },
       replayed: false,
     })),
+    listRuns: vi.fn(async () => []),
+    getRun: vi.fn(async () => ({
+      id: "run-bootstrap",
+      taskType: "interview_coaching",
+      status: "queued",
+      conversationId: 77,
+    })),
   };
   vi.doMock("@/lib/agent/runtime/runtime-factory", () => ({
     getDurableAgentRuntime: () => runtime,

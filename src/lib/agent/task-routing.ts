@@ -90,6 +90,10 @@ function hasJobDiscoveryCriteria(text: string): boolean {
   return /(AI|Agent|大模型|产品|运营|数据|增长|策略|商业|用户|平台|B端|C端|经理|实习|校招|社招|北京|上海|深圳|广州|杭州|成都|南京|苏州|武汉|远程|\d+\s*(个|条|份|家)|top\s*\d+)/i.test(text);
 }
 
+function isResumeProposalIntent(content: string): boolean {
+  return /(简历|履历|resume|cv).{0,18}(优化|修改|改写|润色|重写).{0,18}(提案|草稿|建议)|(优化|修改|改写|润色|重写).{0,18}(提案|草稿|建议).{0,18}(简历|履历|resume|cv)/i.test(content);
+}
+
 function isNonSemanticInput(content: string): boolean {
   const text = content.trim();
   return text.length > 0 && text.length <= 8 && /^[\p{P}\p{S}\s]+$/u.test(text);
@@ -131,6 +135,20 @@ export function routeAgentTask(input: {
   const negatedWriteTarget = detectNegatedWriteIntent(content);
 
   if (negatedWriteTarget) {
+    if (isSelfPositioningIntent(content)) {
+      return buildRouteDecision({
+        taskType: "career_positioning_guidance",
+        imageDecision,
+        auditSummary: `intent:self_positioning:write_forbidden:${negatedWriteTarget}`,
+      });
+    }
+    if (negatedWriteTarget === "resume" && isResumeProposalIntent(content)) {
+      return buildRouteDecision({
+        taskType: "resume_edit",
+        imageDecision,
+        auditSummary: "intent:resume_edit:proposal_only",
+      });
+    }
     return buildRouteDecision({
       taskType: negatedWriteTarget === "resume" ? "resume_query" : "general_chat",
       imageDecision,

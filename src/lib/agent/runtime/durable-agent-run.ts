@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import { transitionAgentRun } from "@/lib/agent/runtime/state-machine";
+import { nextAgentRunStatusForContinuationInput } from "@/lib/agent/runtime/run-continuation";
 import {
   isTerminalAgentRunStatus,
   type AgentRunStatus,
@@ -764,7 +765,8 @@ export class InMemoryAgentRunStore implements AgentRunStore {
       consumedAt: null,
     };
     this.inputsByRequest.set(requestKey, record);
-    if (run.status === "waiting_user") run.status = transitionAgentRun(run.status, "queued");
+    const nextStatus = nextAgentRunStatusForContinuationInput(run.status);
+    if (nextStatus !== run.status) run.status = transitionAgentRun(run.status, nextStatus);
     run.snapshotVersion += 1;
     this.appendEvent(run, "run.input_accepted", { requestId, inputId: record.id });
     return { run: { ...run }, input: this.cloneInput(record), replayed: false };

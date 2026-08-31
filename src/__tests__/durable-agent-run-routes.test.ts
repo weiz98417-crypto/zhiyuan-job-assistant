@@ -41,7 +41,7 @@ function mockRuntime() {
       run,
       replayed: false,
     })),
-    listRuns: vi.fn(async () => []),
+    listRuns: vi.fn(async () => [] as typeof run[]),
     getRun: vi.fn(async () => run),
     submitInput: vi.fn(async () => ({
       run: { ...run, status: "queued", eventCursor: 2 },
@@ -86,7 +86,7 @@ function mockRuntime() {
     getDurableAgentRuntime: () => runtime,
     isDurableAgentRuntimeAvailable: () => true,
   }));
-  return runtime;
+  return { ...runtime, run };
 }
 
 function mockWorkerAssignment() {
@@ -146,6 +146,46 @@ describe("durable Agent Run command routes", () => {
     );
   });
 
+  it("creates a server-admitted Run instead of trusting client routing and contract fields", async () => {
+    vi.resetModules();
+    mockAuth();
+    const runtime = mockRuntime();
+    mockWorkerAssignment();
+    const route = await import("@/app/api/agent/runs/route");
+
+    const response = await route.POST(new Request("http://localhost/api/agent/runs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        requestId: "request-server-admission",
+        conversationId: 12,
+        taskType: "jd_evaluation",
+        agentId: "evaluate",
+        contract: { taskType: "jd_evaluation", allowedTools: ["evaluate_jd_full"] },
+        input: { content: "读取我的简历" },
+      }),
+    }));
+    const json = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(json.success).toBe(true);
+    expect(runtime.createRun).toHaveBeenCalledWith(
+      { userId: TEST_USER.userId },
+      expect.objectContaining({
+        requestId: "request-server-admission",
+        conversationId: 12,
+        taskType: "resume_query",
+        agentId: "resume",
+        contract: expect.objectContaining({
+          taskType: "resume_query",
+          target: "读取我的简历",
+        }),
+      }),
+    );
+    expect(json.data.admission.kind).toBe("start_new_run");
+    expect(json.data.admission.evidence).toContain("client.taskType_ignored");
+  });
+
   it("returns the authenticated user's durable Run snapshot", async () => {
     vi.resetModules();
     mockAuth();
@@ -190,6 +230,67 @@ describe("durable Agent Run command routes", () => {
       "run-1",
       "input-1",
       { content: "补充：目标是后端岗位", images: undefined },
+    );
+  });
+
+  it("defers a confirmed new goal submitted to an active Run instead of accepting it as continuation input", async () => {
+    vi.resetModules();
+    mockAuth();
+    const runtime = mockRuntime();
+    runtime.getRun.mockResolvedValueOnce({
+      ...runtime.run,
+      taskType: "resume_query",
+      status: "waiting_user",
+    });
+    const route = await import("@/app/api/agent/runs/[id]/inputs/route");
+
+    const response = await route.POST(
+      new Request("http://localhost/api/agent/runs/run-1/inputs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          requestId: "switch-input-1",
+          input: { content: "确认切换到 JD 评估" },
+        }),
+      }),
+      { params: Promise.resolve({ id: "run-1" }) },
+    );
+    const json = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(json.data.admission.kind).toBe("defer_switch");
+    expect(runtime.submitInput).not.toHaveBeenCalled();
+  });
+
+  it("starts a new Run when the only prior Run in the Conversation is paused", async () => {
+    vi.resetModules();
+    mockAuth();
+    const runtime = mockRuntime();
+    mockWorkerAssignment();
+    runtime.listRuns.mockResolvedValueOnce([{
+      ...runtime.run,
+      id: "paused-run",
+      taskType: "jd_evaluation",
+      status: "paused",
+    }]);
+    const route = await import("@/app/api/agent/runs/route");
+
+    const response = await route.POST(new Request("http://localhost/api/agent/runs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        requestId: "request-after-pause",
+        conversationId: 12,
+        input: { content: "读取我的简历" },
+      }),
+    }));
+    const json = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(json.data.admission.kind).toBe("start_new_run");
+    expect(runtime.createRun).toHaveBeenCalledWith(
+      { userId: TEST_USER.userId },
+      expect.objectContaining({ taskType: "resume_query", agentId: "resume" }),
     );
   });
 

@@ -1552,11 +1552,28 @@ function AgentPageInner() {
             const created = await createDurableAgentRunClient({
               requestId: createBrowserRequestId(),
               conversationId: currentSessionId,
-              taskType,
-              agentId: runAgentId,
               input: { content, images, persistInConversation: !hideUserMessage },
-              contract,
+              entryHints: {
+                ...(routeForcedAgentId ? { agentId: routeForcedAgentId } : {}),
+                source: "agent_chat",
+              },
             });
+            if (created?.admission?.kind === "defer_switch") {
+              setStreaming(false);
+              setPhase(null);
+              setMessages((current) => {
+                const next = [...current];
+                const lastIndex = next.length - 1;
+                if (next[lastIndex]?.role === "assistant" && !next[lastIndex]?.content) {
+                  next[lastIndex] = {
+                    ...next[lastIndex],
+                    content: created.admission?.safeMessage || "当前任务尚未到达安全切换点，请先完成、取消或暂停它。",
+                  };
+                }
+                return next;
+              });
+              return;
+            }
             const createdRun = created?.run || null;
             if (created?.assignment.owner === "worker" && createdRun) {
               workerOwnedRun = true;

@@ -41,6 +41,7 @@
 | 26 用户注入防范与内容安全系统 | [26-用户注入防范与内容安全系统-Evals.md](26-%E7%94%A8%E6%88%B7%E6%B3%A8%E5%85%A5%E9%98%B2%E8%8C%83%E4%B8%8E%E5%86%85%E5%AE%B9%E5%AE%89%E5%85%A8%E7%B3%BB%E7%BB%9F-Evals.md) |
 | 27 岗位发现 Agent 化实施任务 | [27-岗位发现Agent化实施任务与Evals.md](27-%E5%B2%97%E4%BD%8D%E5%8F%91%E7%8E%B0Agent%E5%8C%96%E5%AE%9E%E6%96%BD%E4%BB%BB%E5%8A%A1%E4%B8%8EEvals.md) |
 | 28 Durable Agent Run 与自恢复运行时 | [28-Durable-Agent-Run与自恢复运行时-Evals.md](28-Durable-Agent-Run%E4%B8%8E%E8%87%AA%E6%81%A2%E5%A4%8D%E8%BF%90%E8%A1%8C%E6%97%B6-Evals.md) |
+| 29 生产全量页面与对话旅程验收 | [29-生产全量页面与对话旅程验收-Evals.md](29-%E7%94%9F%E4%BA%A7%E5%85%A8%E9%87%8F%E9%A1%B5%E9%9D%A2%E4%B8%8E%E5%AF%B9%E8%AF%9D%E6%97%85%E7%A8%8B%E9%AA%8C%E6%94%B6-Evals.md) |
 
 ## 维护规则
 

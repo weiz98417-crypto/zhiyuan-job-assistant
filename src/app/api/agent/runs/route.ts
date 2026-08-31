@@ -5,6 +5,7 @@ import {
   isDurableAgentRuntimeAvailable,
 } from "@/lib/agent/runtime/runtime-factory";
 import { resolveAgentRuntimeAssignment } from "@/lib/agent/runtime/runtime-mode";
+import { admitAgentRun } from "@/lib/agent/run-admission";
 
 export async function GET(request: Request) {
   try {
@@ -36,26 +37,14 @@ export async function POST(request: Request) {
 
     const body = await request.json().catch(() => ({}));
     const requestId = stringField(body.requestId);
-    const taskType = stringField(body.taskType);
-    const agentId = stringField(body.agentId);
     const content = stringField(body.input?.content);
     if (!requestId) return invalid("requestId is required");
-    if (!taskType) return invalid("taskType is required");
-    if (!agentId) return invalid("agentId is required");
     if (!content) return invalid("input.content is required");
 
     const rawConversationId = body.conversationId ?? body.sessionId ?? null;
     const conversationId = rawConversationId === null ? null : parseOptionalNumber(String(rawConversationId));
     if (rawConversationId !== null && conversationId === undefined) return invalid("Invalid conversationId");
 
-    const assignment = resolveAgentRuntimeAssignment(user.userId, taskType);
-    if (assignment.owner !== "worker") {
-      return NextResponse.json({
-        success: true,
-        enabled: false,
-        data: { run: null, replayed: false, assignment },
-      });
-    }
     if (!isDurableAgentRuntimeAvailable()) {
       return NextResponse.json(
         { success: false, error: "Durable Agent Runtime unavailable" },
@@ -63,25 +52,75 @@ export async function POST(request: Request) {
       );
     }
 
-    const result = await getDurableAgentRuntime().createRun(
+    const runtime = getDurableAgentRuntime();
+    const activeRuns = conversationId === null
+      ? []
+      : await runtime.listRuns({ userId: user.userId }, { conversationId, activeOnly: true, limit: 10 });
+    const activeRun = activeRuns.find((candidate) => candidate.status !== "paused") || null;
+    const input = {
+      content,
+      images: Array.isArray(body.input?.images) ? body.input.images.map(String) : undefined,
+      ...(body.input?.persistInConversation === false ? { persistInConversation: false } : {}),
+    };
+    const admission = admitAgentRun({
+      conversationId: conversationId ?? null,
+      input,
+      activeRun,
+      entryHints: {
+        agentId: stringField(body.entryHints?.agentId) || stringField(body.agentId) || undefined,
+        taskType: stringField(body.taskType) || undefined,
+        source: stringField(body.entryHints?.source) || undefined,
+      },
+    });
+    if (admission.kind === "reject") {
+      return NextResponse.json(
+        { success: false, error: admission.safeMessage || "Agent Run admission rejected", data: { admission } },
+        { status: 400 },
+      );
+    }
+
+    const assignment = resolveAgentRuntimeAssignment(user.userId, admission.taskType!);
+    if (assignment.owner !== "worker") {
+      return NextResponse.json({
+        success: true,
+        enabled: false,
+        data: { run: null, replayed: false, assignment, admission },
+      });
+    }
+
+    if (admission.kind === "continue_current_run") {
+      const result = await runtime.submitInput(
+        { userId: user.userId },
+        admission.currentRunId!,
+        requestId,
+        input,
+      );
+      return NextResponse.json(
+        { success: true, enabled: true, data: { run: result.run, replayed: result.replayed, assignment, admission } },
+        { status: result.replayed ? 200 : 201 },
+      );
+    }
+    if (admission.kind === "defer_switch") {
+      return NextResponse.json(
+        { success: true, enabled: true, data: { run: activeRun, replayed: false, assignment, admission } },
+        { status: 202 },
+      );
+    }
+
+    const result = await runtime.createRun(
       { userId: user.userId },
       {
         requestId,
         conversationId: conversationId ?? null,
-        taskType,
-        agentId,
-        input: {
-          content,
-          images: Array.isArray(body.input?.images) ? body.input.images.map(String) : undefined,
-          ...(body.input?.persistInConversation === false ? { persistInConversation: false } : {}),
-        },
-        contract: objectField(body.contract),
+        taskType: admission.taskType!,
+        agentId: admission.agentId!,
+        input,
+        contract: admission.contract,
         runtimeMode: assignment.mode === "worker_readonly" ? "worker_readonly" : "worker_all",
-        parentRunId: stringField(body.parentRunId) || null,
       },
     );
     return NextResponse.json(
-      { success: true, enabled: true, data: { ...result, assignment } },
+      { success: true, enabled: true, data: { ...result, assignment, admission } },
       { status: result.replayed ? 200 : 201 },
     );
   } catch (error) {
@@ -99,12 +138,6 @@ async function currentUserOrNull() {
 
 function stringField(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
-}
-
-function objectField(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
 }
 
 function parseOptionalNumber(value: string | null): number | undefined {

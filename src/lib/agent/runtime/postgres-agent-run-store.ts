@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import type { PoolClient } from "pg";
 import { withPostgresClient } from "@/lib/postgres";
 import { transitionAgentRun } from "@/lib/agent/runtime/state-machine";
+import { nextAgentRunStatusForContinuationInput } from "@/lib/agent/runtime/run-continuation";
 import { isTerminalAgentRunStatus } from "@/lib/agent/runtime/types";
 import type {
   AgentRunCheckpoint,
@@ -696,7 +697,7 @@ export class PostgresAgentRunStore implements AgentRunStore {
           VALUES ($1, $2, $3, 'turn', $4::jsonb)
           RETURNING *
         `, [runId, principal.userId, requestId, json(input)]);
-        const nextStatus = current.status === "waiting_user" || current.status === "paused" ? "queued" : current.status;
+        const nextStatus = nextAgentRunStatusForContinuationInput(current.status);
         const updated = await client.query(`
           UPDATE agent_runs
           SET status = $2,

@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { withPostgresClient } from "@/lib/postgres";
 import { redactReviewText } from "@/lib/agent/run-review";
 import type { JourneyEvalRecord } from "@/lib/agent/journey-eval";
+import type { AgentEvalLayer, AgentEvalLayerResult } from "@/lib/agent/eval-release-gates";
 
 export type AgentEvalRunMode = "deterministic" | "staging" | "release";
 export type AgentEvalRunStatus = "running" | "passed" | "failed" | "flaky";
@@ -190,6 +191,63 @@ export async function listAgentEvalRuns(input: {
   return withPostgresClient(async (client) => {
     const result = await client.query(`SELECT * FROM agent_eval_runs ${whereSql} ORDER BY created_at DESC LIMIT $${params.length}`, params);
     return result.rows.map(normalizeEvalRun);
+  });
+}
+
+export async function persistAgentEvalLayerResults(
+  evalRunId: string,
+  results: AgentEvalLayerResult[],
+): Promise<void> {
+  if (!evalRunId.trim()) throw new Error("Eval Run id is required");
+  await withPostgresClient(async (client) => {
+    await client.query("BEGIN");
+    try {
+      for (const result of results) {
+        await client.query(`
+          INSERT INTO agent_eval_layer_results (
+            eval_run_id, layer, passed, deterministic, score, failures_json, evidence_json
+          ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb)
+          ON CONFLICT (eval_run_id, layer) DO UPDATE SET
+            passed = EXCLUDED.passed,
+            deterministic = EXCLUDED.deterministic,
+            score = EXCLUDED.score,
+            failures_json = EXCLUDED.failures_json,
+            evidence_json = EXCLUDED.evidence_json
+        `, [
+          evalRunId,
+          result.layer,
+          result.passed === true,
+          result.deterministic !== false,
+          normalizeScore(result.score),
+          JSON.stringify(sanitizeArray(result.failures)),
+          JSON.stringify(sanitizeRecord(result.evidence || {})),
+        ]);
+      }
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    }
+  });
+}
+
+export async function listAgentEvalLayerResults(evalRunId: string): Promise<AgentEvalLayerResult[]> {
+  if (!evalRunId.trim()) return [];
+  return withPostgresClient(async (client) => {
+    const result = await client.query(`
+      SELECT layer, passed, deterministic, score, failures_json, evidence_json
+      FROM agent_eval_layer_results
+      WHERE eval_run_id = $1
+      ORDER BY layer
+    `, [evalRunId]);
+    return result.rows.map((row: Record<string, unknown>) => ({
+      layer: String(row.layer) as AgentEvalLayer,
+      passed: row.passed === true,
+      deterministic: row.deterministic !== false,
+      score: normalizeScore(row.score),
+      failures: sanitizeArray(row.failures_json).map(String),
+      evidence: sanitizeRecord(row.evidence_json),
+    }));
   });
 }
 

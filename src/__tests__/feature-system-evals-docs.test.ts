@@ -33,6 +33,7 @@ describe("feature-system eval documentation coverage", () => {
   it("keeps every feature eval doc grounded in project facts and explicit eval gaps", () => {
     const evalDocs = readdirSync(evalDir)
       .filter((file) => /^\d{2}-.+-Evals\.md$/.test(file))
+      .filter((file) => !file.startsWith("29-"))
       .sort();
 
     expect(evalDocs).toHaveLength(27);
@@ -75,5 +76,15 @@ describe("feature-system eval documentation coverage", () => {
     expect(existsSync(jobDiscoveryEvalCopy)).toBe(true);
     expect(index).toContain("27 岗位发现 Agent 化实施任务");
     expect(index).toContain("27-%E5%B2%97%E4%BD%8D%E5%8F%91%E7%8E%B0Agent");
+  });
+
+  it("keeps the production browser acceptance catalog as a separate release-level eval", () => {
+    const catalog = readEvalDoc("29-生产全量页面与对话旅程验收-Evals.md");
+
+    expect(catalog).toContain("28 个功能域");
+    expect(catalog).toContain("8 条关键跨任务长链路");
+    expect(catalog).toContain("只读事实核验");
+    expect(catalog).toContain(".gstack/qa-reports");
+    expect(catalog).toContain("不能用本地 Vitest、API 200");
   });
 });
