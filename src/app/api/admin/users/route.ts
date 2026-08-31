@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDataRepositories } from '@/lib/data-repositories';
 import { requireAdmin } from '@/lib/security/auth-guards';
+import { safeUserDisplayName } from '@/lib/user-display-name';
 
 export async function GET(request: NextRequest) {
   try {
@@ -8,11 +9,16 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status');
+    const includeSummary = searchParams.get('includeSummary') === '1';
 
     const repos = getDataRepositories();
-    const users = await repos.users.list(
-      status && ['pending', 'active', 'rejected'].includes(status) ? status : undefined,
-    );
+    const normalizedStatus = status && ['pending', 'active', 'rejected'].includes(status)
+      ? status
+      : undefined;
+    const users = await repos.users.list(normalizedStatus);
+    const allUsers = includeSummary && normalizedStatus
+      ? await repos.users.list()
+      : users;
     const recoveryRequests = actor.role === 'superadmin'
       ? await repos.passwordRecoveryRequests.listPending()
       : [];
@@ -20,13 +26,13 @@ export async function GET(request: NextRequest) {
       recoveryRequests.map((recovery) => [recovery.userId, recovery]),
     );
 
-    return NextResponse.json({
+    const response = {
       users: users.map((u) => {
         const recovery = recoveryByUserId.get(u.id);
         return {
           id: u.id,
           username: u.username,
-          displayName: u.display_name,
+          displayName: safeUserDisplayName(u.display_name, u.username),
           email: u.email,
           role: u.role,
           status: u.status,
@@ -40,7 +46,16 @@ export async function GET(request: NextRequest) {
           } : {}),
         };
       }),
-    });
+      ...(includeSummary ? {
+        summary: {
+          all: allUsers.length,
+          pending: allUsers.filter((user) => user.status === 'pending').length,
+          active: allUsers.filter((user) => user.status === 'active').length,
+          rejected: allUsers.filter((user) => user.status === 'rejected').length,
+        },
+      } : {}),
+    };
+    return NextResponse.json(response);
   } catch (err) {
     const authError = err as { status?: unknown; code?: unknown; message?: unknown };
     if (authError.status === 401 || authError.status === 403) {

@@ -323,11 +323,11 @@ describe("job discovery agent evals - regression", () => {
   });
 
   it("R8 continuous job discovery remains out of MVP implementation", () => {
-    const proposal = source("openspec/changes/agentify-job-discovery-workbench/proposal.md");
-    const tasks = source("openspec/changes/agentify-job-discovery-workbench/tasks.md");
+    const evals = source("docs/feature-system/evals/27-岗位发现Agent化实施任务与Evals.md");
+    const discoverPage = source("src/app/discover/page.tsx");
 
-    expect(proposal).toContain("持续岗位发现");
-    expect(tasks).toContain("Continuous job discovery remains out of MVP implementation");
+    expect(evals).toContain("### R8. 持续岗位发现不进入 MVP");
+    expect(discoverPage).not.toContain("/api/discover/schedules");
   });
 
   it("R9 JD card evaluation handoff loads saved JD and forces the evaluate agent", () => {

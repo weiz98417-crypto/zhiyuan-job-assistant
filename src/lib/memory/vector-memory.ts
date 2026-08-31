@@ -46,6 +46,7 @@ export interface MemoryEmbeddingConfig {
   apiUrl: string;
   apiKey: string;
   model: string;
+  apiDimension: number;
   dimension: number;
   maxRetries: number;
 }
@@ -133,6 +134,7 @@ export function resolveMemoryEmbeddingConfig(
 ): MemoryEmbeddingConfig {
   const provider = normalizeProvider(env.MEMORY_EMBEDDING_PROVIDER || (env.NODE_ENV === "test" ? "mock" : "disabled"));
   const dimension = Number(env.MEMORY_EMBEDDING_DIMENSION || MEMORY_EMBEDDING_DIMENSION);
+  const apiDimension = Number(env.MEMORY_EMBEDDING_API_DIMENSION || dimension);
 
   if (!Number.isInteger(dimension) || dimension <= 0) {
     throw new Error(`Invalid MEMORY_EMBEDDING_DIMENSION: ${env.MEMORY_EMBEDDING_DIMENSION}`);
@@ -140,12 +142,16 @@ export function resolveMemoryEmbeddingConfig(
   if (dimension !== MEMORY_EMBEDDING_DIMENSION) {
     throw new Error(`Memory embedding dimension mismatch: expected ${MEMORY_EMBEDDING_DIMENSION}, got ${dimension}`);
   }
+  if (!Number.isInteger(apiDimension) || apiDimension <= 0 || apiDimension > dimension) {
+    throw new Error(`Invalid MEMORY_EMBEDDING_API_DIMENSION: ${env.MEMORY_EMBEDDING_API_DIMENSION}`);
+  }
 
   return {
     provider,
-    apiUrl: env.MEMORY_EMBEDDING_API_URL || "",
-    apiKey: env.MEMORY_EMBEDDING_API_KEY || env.DASHSCOPE_API_KEY || "",
-    model: env.MEMORY_EMBEDDING_MODEL || (provider === "mock" ? "mock-embedding-1536" : ""),
+    apiUrl: env.MEMORY_EMBEDDING_API_URL?.trim() || "",
+    apiKey: env.MEMORY_EMBEDDING_API_KEY?.trim() || env.DASHSCOPE_API_KEY?.trim() || "",
+    model: env.MEMORY_EMBEDDING_MODEL?.trim() || (provider === "mock" ? "mock-embedding-1536" : ""),
+    apiDimension,
     dimension,
     maxRetries: clampInteger(Number(env.MEMORY_EMBEDDING_MAX_RETRIES || 2), 0, 5),
   };
@@ -186,7 +192,7 @@ export function createEmbeddingProvider(
         body: JSON.stringify({
           model: config.model,
           input: texts,
-          dimensions: config.dimension,
+          dimensions: config.apiDimension,
         }),
       });
       if (!response.ok) {
@@ -199,10 +205,15 @@ export function createEmbeddingProvider(
       if (embeddings.length !== texts.length) {
         throw new Error(`Embedding API returned ${embeddings.length} vectors for ${texts.length} inputs`);
       }
-      for (const embedding of embeddings) validateEmbeddingDimension(embedding, config.dimension);
-      return embeddings;
+      for (const embedding of embeddings) validateEmbeddingDimension(embedding, config.apiDimension);
+      return embeddings.map((embedding) => padEmbeddingDimension(embedding, config.dimension));
     },
   };
+}
+
+function padEmbeddingDimension(embedding: number[], dimension: number): number[] {
+  if (embedding.length === dimension) return embedding;
+  return [...embedding, ...Array.from({ length: dimension - embedding.length }, () => 0)];
 }
 
 export function chunkMemorySource(input: MemorySourceInput): MemoryChunkInput[] {

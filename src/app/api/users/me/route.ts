@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getDataRepositories } from '@/lib/data-repositories';
 import { requireAuthenticated } from '@/lib/security/auth-guards';
+import { safeUserDisplayName } from '@/lib/user-display-name';
 
 export async function GET() {
   let payload;
@@ -34,7 +35,7 @@ export async function GET() {
     return NextResponse.json({
       id: user.id,
       username: user.username,
-      displayName: user.display_name,
+      displayName: safeUserDisplayName(user.display_name, user.username),
       email: user.email,
       role: user.role,
       status: user.status,

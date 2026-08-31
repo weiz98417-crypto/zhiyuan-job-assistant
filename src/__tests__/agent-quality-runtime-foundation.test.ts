@@ -510,12 +510,15 @@ describe("agent run ledger and task contracts", () => {
 describe("SQLite archive policy", () => {
   const originalDriver = process.env.DB_DRIVER;
   const originalLegacy = process.env.ALLOW_SQLITE_LEGACY;
+  const originalDataDir = process.env.DATA_DIR;
 
   afterEach(() => {
     if (originalDriver === undefined) delete process.env.DB_DRIVER;
     else process.env.DB_DRIVER = originalDriver;
     if (originalLegacy === undefined) delete process.env.ALLOW_SQLITE_LEGACY;
     else process.env.ALLOW_SQLITE_LEGACY = originalLegacy;
+    if (originalDataDir === undefined) delete process.env.DATA_DIR;
+    else process.env.DATA_DIR = originalDataDir;
     vi.resetModules();
   });
 
@@ -529,8 +532,15 @@ describe("SQLite archive policy", () => {
   });
 
   it("opens SQLite as a read-only archive when explicitly requested", async () => {
+    const archiveDir = fs.mkdtempSync(path.join(os.tmpdir(), "zhiyuan-sqlite-archive-"));
+    cleanupPaths.push(archiveDir);
+    const seed = new Database(path.join(archiveDir, "zhiyuan.db"));
+    seed.exec("CREATE TABLE archive_probe (id INTEGER)");
+    seed.close();
+
     process.env.DB_DRIVER = "postgres";
     process.env.ALLOW_SQLITE_LEGACY = "readonly";
+    process.env.DATA_DIR = archiveDir;
     vi.resetModules();
 
     const archive = await import("@/lib/server-db");

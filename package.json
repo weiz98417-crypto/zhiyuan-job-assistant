@@ -32,6 +32,7 @@
     "migrate:postgres": "node scripts/migrate-sqlite-to-postgres.mjs",
     "check:postgres-migration": "node scripts/check-postgres-migration.mjs",
     "backfill:memory": "node scripts/backfill-memory.mjs",
+    "retry:memory": "node scripts/backfill-memory.mjs --retry-failed",
     "eval:memory": "vitest run src/__tests__/memory-eval-harness.test.ts",
     "eval:agent-runtime": "vitest run src/__tests__/agent-runtime-regressions.eval.test.ts",
     "e2e:agent-tasks": "vitest run src/__tests__/agent-task-runtime.e2e.test.ts src/__tests__/server-agent-loop-gate.test.ts src/__tests__/durable-orchestrator-engine.test.ts",

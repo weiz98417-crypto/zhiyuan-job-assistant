@@ -28,6 +28,15 @@ interface CurrentUser {
   role: UserRole;
 }
 
+interface UserSummary {
+  all: number;
+  pending: number;
+  active: number;
+  rejected: number;
+}
+
+const EMPTY_SUMMARY: UserSummary = { all: 0, pending: 0, active: 0, rejected: 0 };
+
 type SecureAction =
   | { kind: 'reset'; target: UserItem }
   | { kind: 'role'; target: UserItem; role: UserRole }
@@ -46,6 +55,7 @@ export default function AdminUsersPage() {
   const { showToast } = useToast();
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [users, setUsers] = useState<UserItem[]>([]);
+  const [summary, setSummary] = useState<UserSummary>(EMPTY_SUMMARY);
   const [filter, setFilter] = useState('all');
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -77,11 +87,17 @@ export default function AdminUsersPage() {
   async function loadUsers(statusFilter?: string) {
     setLoading(true);
     try {
-      const query = statusFilter ? `?status=${encodeURIComponent(statusFilter)}` : '';
-      const response = await fetch(`/api/admin/users${query}`, { cache: 'no-store' });
+      const params = new URLSearchParams({ includeSummary: '1' });
+      if (statusFilter) params.set('status', statusFilter);
+      const response = await fetch(`/api/admin/users?${params}`, { cache: 'no-store' });
       if (response.status === 401) return void await handleUnauthorized();
       const data = await responseData(response);
-      if (response.ok && Array.isArray(data.users)) setUsers(data.users as UserItem[]);
+      if (response.ok && Array.isArray(data.users)) {
+        setUsers(data.users as UserItem[]);
+        if (data.summary && typeof data.summary === 'object') {
+          setSummary(data.summary as unknown as UserSummary);
+        }
+      }
       else showToast(typeof data.error === 'string' ? data.error : '加载用户失败', 'error');
     } catch {
       showToast('网络异常，未能刷新用户列表', 'error');
@@ -219,10 +235,6 @@ export default function AdminUsersPage() {
     }
   }
 
-  const pendingCount = users.filter((user) => user.status === 'pending').length;
-  const activeCount = users.filter((user) => user.status === 'active').length;
-  const rejectedCount = users.filter((user) => user.status === 'rejected').length;
-
   return (
     <div className="space-y-5">
       {secureAction && (
@@ -321,10 +333,10 @@ export default function AdminUsersPage() {
 
       <div className="flex flex-wrap gap-2" role="tablist" aria-label="账户状态筛选">
         {[
-          ['all', `全部 · ${users.length}`],
-          ['pending', `待审批 · ${pendingCount}`],
-          ['active', `已通过 · ${activeCount}`],
-          ['rejected', `已拒绝 · ${rejectedCount}`],
+          ['all', `全部 · ${summary.all}`],
+          ['pending', `待审批 · ${summary.pending}`],
+          ['active', `已通过 · ${summary.active}`],
+          ['rejected', `已拒绝 · ${summary.rejected}`],
         ].map(([key, label]) => (
           <button
             key={key}
@@ -339,7 +351,54 @@ export default function AdminUsersPage() {
         ))}
       </div>
 
-      <div className="overflow-x-auto border-y border-[var(--color-border)] bg-[var(--color-surface)]">
+      <div
+        data-testid="admin-user-mobile-list"
+        className="space-y-3 md:hidden"
+      >
+        {loading ? (
+          <div className="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-12 text-center text-sm text-[var(--color-muted)]">加载中...</div>
+        ) : users.length === 0 ? (
+          <div className="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-12 text-center text-sm text-[var(--color-muted)]">暂无数据</div>
+        ) : users.map((user) => {
+          const isSelf = user.id === currentUser?.id;
+          return (
+            <article key={user.id} className="min-w-0 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+              <div className="flex min-w-0 items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="break-words font-semibold text-[var(--color-text)]">{user.displayName}</div>
+                  <div className="break-all text-xs text-[var(--color-muted)]">{user.username}{isSelf ? ' · 当前账号' : ''}</div>
+                </div>
+                <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
+                  <Badge>{roleLabel[user.role]}</Badge>
+                  <Badge>{statusLabel[user.status]}</Badge>
+                </div>
+              </div>
+              {user.passwordRecovery && (
+                <div className="mt-2 text-xs font-medium text-amber-700">
+                  密码找回申请 · {formatDate(user.passwordRecovery.requestedAt)}
+                </div>
+              )}
+              <dl className="mt-3 grid min-w-0 grid-cols-1 gap-2 text-xs text-[var(--color-text-soft)] min-[360px]:grid-cols-2">
+                <UserDetail label="邮箱" value={user.email || '—'} />
+                <UserDetail label="注册时间" value={formatDate(user.createdAt)} />
+                <UserDetail label="最近登录" value={user.lastLoginAt ? formatDate(user.lastLoginAt) : '从未登录'} />
+              </dl>
+              <div className="mt-4 border-t border-[var(--color-divider)] pt-3">
+                <UserActions
+                  user={user}
+                  currentUser={currentUser}
+                  actionLoading={actionLoading}
+                  changeStatus={changeStatus}
+                  openSecureAction={openSecureAction}
+                  setDeleteTarget={setDeleteTarget}
+                />
+              </div>
+            </article>
+          );
+        })}
+      </div>
+
+      <div className="hidden md:block overflow-x-auto border-y border-[var(--color-border)] bg-[var(--color-surface)]">
         <table className="w-full min-w-[980px] border-collapse text-sm">
           <thead>
             <tr className="bg-[var(--color-bg)] text-left text-xs text-[var(--color-muted)]">
@@ -355,7 +414,6 @@ export default function AdminUsersPage() {
               <tr><td colSpan={7} className="px-4 py-12 text-center text-[var(--color-muted)]">暂无数据</td></tr>
             ) : users.map((user) => {
               const isSelf = user.id === currentUser?.id;
-              const privileged = user.role !== 'member';
               return (
                 <tr key={user.id} className="border-b border-[var(--color-divider)] last:border-0">
                   <td className="px-4 py-3">
@@ -373,49 +431,14 @@ export default function AdminUsersPage() {
                   <td className="px-4 py-3 text-xs text-[var(--color-text-soft)]">{formatDate(user.createdAt)}</td>
                   <td className="px-4 py-3 text-xs text-[var(--color-text-soft)]">{user.lastLoginAt ? formatDate(user.lastLoginAt) : '从未登录'}</td>
                   <td className="px-4 py-3">
-                    <div className="flex flex-wrap gap-1.5">
-                      {user.status !== 'active' && !isSelf && (
-                        <ActionButton onClick={() => void changeStatus(user, 'active')} loading={actionLoading === user.id}>
-                          <Check size={13} />通过
-                        </ActionButton>
-                      )}
-                      {user.status !== 'rejected' && !isSelf && (
-                        <ActionButton onClick={() => void changeStatus(user, 'rejected')} loading={actionLoading === user.id} danger>
-                          <X size={13} />拒绝
-                        </ActionButton>
-                      )}
-                      {user.status === 'active' && !isSelf && (
-                        <ActionButton onClick={() => openSecureAction({ kind: 'reset', target: user })} loading={actionLoading === user.id}>
-                          <KeyRound size={13} />{user.passwordRecovery ? '处理找回' : '重置密码'}
-                        </ActionButton>
-                      )}
-                      {currentUser?.role === 'superadmin' && !isSelf && user.role === 'member' && (
-                        <>
-                          <ActionButton onClick={() => openSecureAction({ kind: 'role', target: user, role: 'admin' })} loading={actionLoading === user.id}>升为管理员</ActionButton>
-                          <ActionButton onClick={() => openSecureAction({ kind: 'role', target: user, role: 'superadmin' })} loading={actionLoading === user.id}>升为超级管理员</ActionButton>
-                        </>
-                      )}
-                      {currentUser?.role === 'superadmin' && !isSelf && user.role === 'admin' && (
-                        <>
-                          <ActionButton onClick={() => openSecureAction({ kind: 'role', target: user, role: 'member' })} loading={actionLoading === user.id}>降为成员</ActionButton>
-                          <ActionButton onClick={() => openSecureAction({ kind: 'role', target: user, role: 'superadmin' })} loading={actionLoading === user.id}>升为超级管理员</ActionButton>
-                        </>
-                      )}
-                      {currentUser?.role === 'superadmin' && !isSelf && user.role === 'superadmin' && (
-                        <ActionButton onClick={() => openSecureAction({ kind: 'role', target: user, role: 'admin' })} loading={actionLoading === user.id}>降为管理员</ActionButton>
-                      )}
-                      {!isSelf && (
-                        <ActionButton
-                          onClick={() => privileged
-                            ? openSecureAction({ kind: 'delete', target: user })
-                            : setDeleteTarget(user)}
-                          loading={actionLoading === user.id}
-                          danger
-                        >
-                          <Trash2 size={13} />删除
-                        </ActionButton>
-                      )}
-                    </div>
+                    <UserActions
+                      user={user}
+                      currentUser={currentUser}
+                      actionLoading={actionLoading}
+                      changeStatus={changeStatus}
+                      openSecureAction={openSecureAction}
+                      setDeleteTarget={setDeleteTarget}
+                    />
                   </td>
                 </tr>
               );
@@ -423,6 +446,81 @@ export default function AdminUsersPage() {
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+function UserDetail({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-[var(--color-muted)]">{label}</dt>
+      <dd className="break-words text-[var(--color-text-soft)]">{value}</dd>
+    </div>
+  );
+}
+
+function UserActions({
+  user,
+  currentUser,
+  actionLoading,
+  changeStatus,
+  openSecureAction,
+  setDeleteTarget,
+}: {
+  user: UserItem;
+  currentUser: CurrentUser | null;
+  actionLoading: string | null;
+  changeStatus: (target: UserItem, status: UserStatus) => Promise<void>;
+  openSecureAction: (action: SecureAction) => void;
+  setDeleteTarget: (target: UserItem) => void;
+}) {
+  const isSelf = user.id === currentUser?.id;
+  const privileged = user.role !== 'member';
+  const loading = actionLoading === user.id;
+
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {user.status !== 'active' && !isSelf && (
+        <ActionButton onClick={() => void changeStatus(user, 'active')} loading={loading}>
+          <Check size={13} />通过
+        </ActionButton>
+      )}
+      {user.status !== 'rejected' && !isSelf && (
+        <ActionButton onClick={() => void changeStatus(user, 'rejected')} loading={loading} danger>
+          <X size={13} />拒绝
+        </ActionButton>
+      )}
+      {user.status === 'active' && !isSelf && (
+        <ActionButton onClick={() => openSecureAction({ kind: 'reset', target: user })} loading={loading}>
+          <KeyRound size={13} />{user.passwordRecovery ? '处理找回' : '重置密码'}
+        </ActionButton>
+      )}
+      {currentUser?.role === 'superadmin' && !isSelf && user.role === 'member' && (
+        <>
+          <ActionButton onClick={() => openSecureAction({ kind: 'role', target: user, role: 'admin' })} loading={loading}>升为管理员</ActionButton>
+          <ActionButton onClick={() => openSecureAction({ kind: 'role', target: user, role: 'superadmin' })} loading={loading}>升为超级管理员</ActionButton>
+        </>
+      )}
+      {currentUser?.role === 'superadmin' && !isSelf && user.role === 'admin' && (
+        <>
+          <ActionButton onClick={() => openSecureAction({ kind: 'role', target: user, role: 'member' })} loading={loading}>降为成员</ActionButton>
+          <ActionButton onClick={() => openSecureAction({ kind: 'role', target: user, role: 'superadmin' })} loading={loading}>升为超级管理员</ActionButton>
+        </>
+      )}
+      {currentUser?.role === 'superadmin' && !isSelf && user.role === 'superadmin' && (
+        <ActionButton onClick={() => openSecureAction({ kind: 'role', target: user, role: 'admin' })} loading={loading}>降为管理员</ActionButton>
+      )}
+      {!isSelf && (
+        <ActionButton
+          onClick={() => privileged
+            ? openSecureAction({ kind: 'delete', target: user })
+            : setDeleteTarget(user)}
+          loading={loading}
+          danger
+        >
+          <Trash2 size={13} />删除
+        </ActionButton>
+      )}
     </div>
   );
 }

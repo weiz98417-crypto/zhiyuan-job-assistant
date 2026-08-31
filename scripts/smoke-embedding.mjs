@@ -7,10 +7,11 @@ const DIMENSION = 1536;
 
 async function main() {
   const provider = (process.env.MEMORY_EMBEDDING_PROVIDER || "disabled").trim();
-  const apiUrl = process.env.MEMORY_EMBEDDING_API_URL || "";
-  const apiKey = process.env.MEMORY_EMBEDDING_API_KEY || process.env.DASHSCOPE_API_KEY || "";
-  const model = process.env.MEMORY_EMBEDDING_MODEL || "";
+  const apiUrl = process.env.MEMORY_EMBEDDING_API_URL?.trim() || "";
+  const apiKey = process.env.MEMORY_EMBEDDING_API_KEY?.trim() || process.env.DASHSCOPE_API_KEY?.trim() || "";
+  const model = process.env.MEMORY_EMBEDDING_MODEL?.trim() || "";
   const dimension = Number(process.env.MEMORY_EMBEDDING_DIMENSION || DIMENSION);
+  const apiDimension = Number(process.env.MEMORY_EMBEDDING_API_DIMENSION || dimension);
 
   if (provider !== "openai-compatible") {
     throw new Error("MEMORY_EMBEDDING_PROVIDER must be openai-compatible for this smoke test");
@@ -20,6 +21,9 @@ async function main() {
   }
   if (dimension !== DIMENSION) {
     throw new Error(`Embedding dimension mismatch: expected ${DIMENSION}, got ${dimension}`);
+  }
+  if (!Number.isInteger(apiDimension) || apiDimension <= 0 || apiDimension > dimension) {
+    throw new Error(`Invalid MEMORY_EMBEDDING_API_DIMENSION: ${process.env.MEMORY_EMBEDDING_API_DIMENSION || ""}`);
   }
 
   const response = await fetch(apiUrl, {
@@ -31,7 +35,7 @@ async function main() {
     body: JSON.stringify({
       model,
       input: ["优秀AI产品经理简历：负责RAG知识库、Agent流程设计和数据指标体系建设。"],
-      dimensions: dimension,
+      dimensions: apiDimension,
     }),
   });
 
@@ -42,15 +46,19 @@ async function main() {
 
   const payload = await response.json();
   const embedding = payload?.data?.[0]?.embedding;
-  if (!Array.isArray(embedding) || embedding.length !== dimension) {
-    throw new Error(`Embedding dimension mismatch: expected ${dimension}, got ${Array.isArray(embedding) ? embedding.length : "non-array"}`);
+  if (!Array.isArray(embedding) || embedding.length !== apiDimension) {
+    throw new Error(`Embedding API dimension mismatch: expected ${apiDimension}, got ${Array.isArray(embedding) ? embedding.length : "non-array"}`);
   }
+  const storedEmbedding = embedding.length === dimension
+    ? embedding
+    : [...embedding, ...Array.from({ length: dimension - embedding.length }, () => 0)];
 
   console.log(JSON.stringify({
     ok: true,
     provider,
     model,
-    dimension: embedding.length,
+    apiDimension: embedding.length,
+    storageDimension: storedEmbedding.length,
   }));
 }
 

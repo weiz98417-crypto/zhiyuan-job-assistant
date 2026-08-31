@@ -120,6 +120,31 @@ describe("vector memory chunking and embeddings", () => {
     expect(authorization).toBe("Bearer test-secret");
     expect(JSON.stringify(requestBody)).not.toContain("test-secret");
   });
+
+  it("pads a smaller provider vector without changing its semantic coordinates", async () => {
+    const nativeEmbedding = createDeterministicEmbedding("生产向量迁移").slice(0, 1024);
+    let requestedDimension = 0;
+    const fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
+      requestedDimension = Number(JSON.parse(String(init?.body || "{}"))?.dimensions);
+      return new Response(JSON.stringify({
+        data: [{ embedding: nativeEmbedding }],
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }) as typeof fetch;
+    const provider = createEmbeddingProvider(resolveMemoryEmbeddingConfig({
+      MEMORY_EMBEDDING_PROVIDER: "openai-compatible",
+      MEMORY_EMBEDDING_API_URL: "https://example.invalid/v1/embeddings",
+      MEMORY_EMBEDDING_MODEL: "embedding-3",
+      MEMORY_EMBEDDING_API_KEY: "test-secret",
+      MEMORY_EMBEDDING_API_DIMENSION: "1024",
+    }), fetchImpl);
+
+    const [embedding] = await provider.embed(["生产向量迁移"]);
+
+    expect(requestedDimension).toBe(1024);
+    expect(embedding).toHaveLength(1536);
+    expect(embedding.slice(0, 1024)).toEqual(nativeEmbedding);
+    expect(embedding.slice(1024)).toEqual(Array.from({ length: 512 }, () => 0));
+  });
 });
 
 describe("vector memory retrieval boundaries", () => {

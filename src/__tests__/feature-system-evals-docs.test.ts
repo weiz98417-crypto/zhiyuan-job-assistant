@@ -36,7 +36,7 @@ describe("feature-system eval documentation coverage", () => {
       .filter((file) => !file.startsWith("29-"))
       .sort();
 
-    expect(evalDocs).toHaveLength(27);
+    expect(evalDocs).toHaveLength(28);
 
     for (const file of evalDocs) {
       const doc = readEvalDoc(file);

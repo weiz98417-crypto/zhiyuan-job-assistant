@@ -215,7 +215,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, ease: [0.19, 1, 0.22, 1] }}
-          className={`h-full min-w-0 overflow-x-hidden flex flex-col px-[var(--space-page)] py-[var(--space-section)] ${
+          className={`h-full min-w-0 overflow-x-hidden flex flex-col px-[var(--space-page)] py-[var(--space-section)] pb-[calc(5rem+env(safe-area-inset-bottom))] lg:pb-[var(--space-section)] ${
             isWorkspacePage ? "w-full max-w-none" : "max-w-[1600px]"
           }`}
         >
@@ -224,13 +224,11 @@ export default function AppShell({ children }: { children: ReactNode }) {
       </main>
 
       {/* Mobile Bottom Tab Bar */}
-      <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-[var(--color-surface)] border-t border-[var(--color-border)] flex justify-around py-2 px-1 z-50">
+      <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-[var(--color-surface)] border-t border-[var(--color-border)] flex justify-around pt-2 pb-[calc(.5rem+env(safe-area-inset-bottom))] px-1 z-50">
         {MOBILE_ITEMS.map((item) => (
-          <NavItem key={item.href} {...item} />
+          <NavItem key={item.href} {...item} mobile />
         ))}
       </nav>
-      {/* Mobile bottom padding */}
-      <div className="lg:hidden h-16" />
     </div>
     </ToastProvider>
   );

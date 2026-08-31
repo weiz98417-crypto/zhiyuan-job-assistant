@@ -55,9 +55,12 @@ async function main() {
   const client = await pool.connect();
   try {
     await client.query("CREATE EXTENSION IF NOT EXISTS vector");
-    const sources = await loadSources(client, args);
-    const chunks = sources.flatMap(chunkSource);
-    console.log(`Memory backfill sources: ${sources.length}`);
+    const sources = args.retryFailed ? [] : await loadSources(client, args);
+    const chunks = args.retryFailed
+      ? await loadFailedChunks(client, args)
+      : sources.flatMap(chunkSource);
+    if (args.retryFailed) console.log(`Memory failed chunks selected: ${chunks.length}`);
+    else console.log(`Memory backfill sources: ${sources.length}`);
     console.log(`Memory backfill chunks: ${chunks.length}`);
 
     if (args.dryRun) {
@@ -70,12 +73,19 @@ async function main() {
     let embedded = 0;
     let failed = 0;
 
-    for (const chunk of chunks) {
-      const result = await embedChunk(chunk, config);
-      await upsertChunk(client, chunk, result);
-      written += 1;
-      if (result.status === "embedded") embedded += 1;
-      if (result.status === "failed") failed += 1;
+    for (let offset = 0; offset < chunks.length; offset += config.batchSize) {
+      const batch = chunks.slice(offset, offset + config.batchSize);
+      const results = await embedChunkBatch(batch, config);
+      for (let index = 0; index < batch.length; index += 1) {
+        const result = results[index];
+        await upsertChunk(client, batch[index], result);
+        written += 1;
+        if (result.status === "embedded") embedded += 1;
+        if (result.status === "failed") failed += 1;
+      }
+      if (written % 100 < batch.length || written === chunks.length) {
+        console.log(`Memory backfill progress: ${written}/${chunks.length}`);
+      }
     }
 
     console.log(`Memory backfill written: ${written}`);
@@ -285,35 +295,61 @@ function chunkSource(source) {
   });
 }
 
-async function embedChunk(chunk, config) {
+async function embedChunkBatch(chunks, config) {
   let lastError = "";
   for (let attempt = 0; attempt <= config.maxRetries; attempt += 1) {
     try {
-      const embedding = await createEmbedding(chunk.chunkText, config);
-      return {
+      const embeddings = await createEmbeddings(chunks.map((chunk) => chunk.chunkText), config);
+      return embeddings.map((embedding) => ({
         status: "embedded",
         embedding,
         model: config.model,
         dimension: DIMENSION,
         failureReason: "",
         retryCount: attempt,
-      };
+      }));
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
     }
   }
-  return {
+  return chunks.map(() => ({
     status: "failed",
     embedding: null,
     model: config.model,
     dimension: DIMENSION,
     failureReason: lastError.slice(0, 500),
     retryCount: config.maxRetries,
-  };
+  }));
 }
 
-async function createEmbedding(text, config) {
-  if (config.provider === "mock") return deterministicEmbedding(text);
+async function loadFailedChunks(client, options) {
+  const params = [];
+  const clauses = ["embedding_status = 'failed'"];
+  if (options.userId) {
+    params.push(options.userId);
+    clauses.push(`user_id = $${params.length}`);
+  }
+  params.push(options.limit || 100000);
+  const result = await client.query(`
+    SELECT user_id, source_type, source_id, chunk_index, chunk_text, content_hash, metadata_json
+    FROM memory_chunks
+    WHERE ${clauses.join(" AND ")}
+    ORDER BY updated_at ASC, id ASC
+    LIMIT $${params.length}
+  `, params);
+  return result.rows.map((row) => ({
+    userId: row.user_id,
+    sourceType: row.source_type,
+    sourceId: String(row.source_id),
+    chunkIndex: Number(row.chunk_index),
+    chunkText: row.chunk_text,
+    contentHash: row.content_hash,
+    metadata: parseJson(row.metadata_json) || {},
+  }));
+}
+
+async function createEmbeddings(texts, config) {
+  if (config.provider === "mock") return texts.map(deterministicEmbedding);
   if (config.provider === "disabled") throw new Error("Memory embedding provider is disabled");
   if (!config.apiUrl || !config.apiKey || !config.model) {
     throw new Error("MEMORY_EMBEDDING_API_URL, MEMORY_EMBEDDING_API_KEY, and MEMORY_EMBEDDING_MODEL are required");
@@ -327,8 +363,8 @@ async function createEmbedding(text, config) {
     },
     body: JSON.stringify({
       model: config.model,
-      input: [text],
-      dimensions: DIMENSION,
+      input: texts,
+      dimensions: config.apiDimension,
     }),
   });
   if (!response.ok) {
@@ -337,9 +373,20 @@ async function createEmbedding(text, config) {
   }
 
   const payload = await response.json();
-  const embedding = payload?.data?.[0]?.embedding;
-  validateEmbedding(embedding);
-  return embedding;
+  const embeddings = Array.isArray(payload?.data)
+    ? [...payload.data]
+      .sort((left, right) => Number(left.index || 0) - Number(right.index || 0))
+      .map((item) => item.embedding)
+    : [];
+  if (embeddings.length !== texts.length) {
+    throw new Error(`Embedding API returned ${embeddings.length} vectors for ${texts.length} inputs`);
+  }
+  return embeddings.map((embedding) => {
+    validateEmbedding(embedding, config.apiDimension);
+    return embedding.length === DIMENSION
+      ? embedding
+      : [...embedding, ...Array.from({ length: DIMENSION - embedding.length }, () => 0)];
+  });
 }
 
 async function upsertChunk(client, chunk, result) {
@@ -391,11 +438,17 @@ function resolveEmbeddingConfig(env) {
   if (dimension !== DIMENSION) {
     throw new Error(`Memory embedding dimension mismatch: expected ${DIMENSION}, got ${dimension}`);
   }
+  const apiDimension = Number(env.MEMORY_EMBEDDING_API_DIMENSION || dimension);
+  if (!Number.isInteger(apiDimension) || apiDimension <= 0 || apiDimension > dimension) {
+    throw new Error(`Invalid MEMORY_EMBEDDING_API_DIMENSION: ${env.MEMORY_EMBEDDING_API_DIMENSION || ""}`);
+  }
   return {
     provider,
-    apiUrl: env.MEMORY_EMBEDDING_API_URL || "",
-    apiKey: env.MEMORY_EMBEDDING_API_KEY || env.DASHSCOPE_API_KEY || "",
-    model: env.MEMORY_EMBEDDING_MODEL || (provider === "mock" ? "mock-embedding-1536" : ""),
+    apiUrl: env.MEMORY_EMBEDDING_API_URL?.trim() || "",
+    apiKey: env.MEMORY_EMBEDDING_API_KEY?.trim() || env.DASHSCOPE_API_KEY?.trim() || "",
+    model: env.MEMORY_EMBEDDING_MODEL?.trim() || (provider === "mock" ? "mock-embedding-1536" : ""),
+    apiDimension,
+    batchSize: clampInteger(Number(env.MEMORY_EMBEDDING_BATCH_SIZE || 16), 1, 64),
     maxRetries: clampInteger(Number(env.MEMORY_EMBEDDING_MAX_RETRIES || 2), 0, 5),
   };
 }
@@ -415,10 +468,11 @@ function expandSourceTypes(values) {
 }
 
 function parseArgs(argv) {
-  const parsed = { dryRun: false, limit: 0, userId: "", sources: [] };
+  const parsed = { dryRun: false, retryFailed: false, limit: 0, userId: "", sources: [] };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--dry-run") parsed.dryRun = true;
+    else if (arg === "--retry-failed") parsed.retryFailed = true;
     else if (arg === "--limit") parsed.limit = Number(argv[++index] || 0);
     else if (arg.startsWith("--limit=")) parsed.limit = Number(arg.slice("--limit=".length));
     else if (arg === "--user") parsed.userId = argv[++index] || "";
@@ -468,9 +522,9 @@ function deterministicEmbedding(text) {
   return vector.map((value) => Number((value / norm).toFixed(8)));
 }
 
-function validateEmbedding(embedding) {
-  if (!Array.isArray(embedding) || embedding.length !== DIMENSION) {
-    throw new Error(`Embedding dimension mismatch: expected ${DIMENSION}, got ${Array.isArray(embedding) ? embedding.length : "non-array"}`);
+function validateEmbedding(embedding, dimension = DIMENSION) {
+  if (!Array.isArray(embedding) || embedding.length !== dimension) {
+    throw new Error(`Embedding dimension mismatch: expected ${dimension}, got ${Array.isArray(embedding) ? embedding.length : "non-array"}`);
   }
   for (const value of embedding) {
     if (!Number.isFinite(value)) throw new Error("Embedding contains non-finite values");

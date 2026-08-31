@@ -195,7 +195,7 @@ export default function AdminAgentRunsPage() {
     .reduce((sum, item) => sum + (status.runsByStatus[item] || 0), 0);
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 [overflow-wrap:anywhere]">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="font-[family-name:var(--font-display)] text-2xl font-bold text-[var(--color-text)]">Durable Agent Runtime</h2>
