@@ -17,6 +17,7 @@ import type { ClientAgentDefinition } from "@/lib/agent/orchestrator/client";
 import { inferPreferredDocumentTypeFromText, type ImageDocumentType, type ImageIntakeResult } from "@/lib/agent/image-intake";
 import { buildImageIntakeStatusText, buildImageIntakeToolSummary, routeImageIntake } from "@/lib/agent/image-intake-router";
 import { routeAgentTask } from "@/lib/agent/task-routing";
+import { resolveIntentEnvelope } from "@/lib/agent/intent-envelope";
 import { collectArtifactRefsFromSafePayloads, TASK_JOURNEY_GRAPH_VERSION, type AgentArtifactRef } from "@/lib/agent/task-journey";
 import {
   createAgentTaskContract,
@@ -1527,12 +1528,42 @@ function AgentPageInner() {
             : !shouldBypassConversationLocks && currentSessionForRun?.interviewState?.planSnapshot
             ? "interview"
             : undefined;
+        // M2: structured intent routing — one envelope call decides the task.
+        // Clarification renders directly; resolved tasks flow into admission.
+        const envelopeResolution = await resolveIntentEnvelope({
+          content,
+          agentId: forcedAgentId || "general",
+          imageIntake,
+          preferredDocumentType,
+          forcedAgentId,
+        });
+        if (envelopeResolution.kind === "clarify") {
+          const clarifyMessage: AgentMessage = {
+            role: "assistant",
+            content: envelopeResolution.question,
+            timestamp: new Date().toISOString(),
+          };
+          const nextMessages = projectAgentMessages([...updated, clarifyMessage]);
+          setMessages(nextMessages);
+          setStreaming(false);
+          setPhase(null);
+          if (currentSessionId && !hideUserMessage) {
+            try { persistMessages([...updated, clarifyMessage]); } catch { /* ok */ }
+            if (currentSessionForRun) {
+              await updateSession(currentSessionId, { messages: [...currentSessionForRun.messages, { ...userMsg }, clarifyMessage] });
+            }
+            setSessions(await listSessions());
+          }
+          return;
+        }
         let routeDecision = routeAgentTask({
           agentId: forcedAgentId || "general",
           content,
           imageIntake,
           preferredDocumentType,
           activeTask: activeGuidedSessionForRun,
+          envelopeTask: shouldBypassConversationLocks ? null : envelopeResolution.envelope.primaryTask,
+          envelopeAudit: envelopeResolution.envelope.audit,
         });
         const routeForcedAgentId = forcedAgentId || (routeDecision.taskType ? taskAgentId(routeDecision.taskType) : undefined);
         const interviewState = shouldBypassConversationLocks ? undefined : currentSessionForRun?.interviewState;

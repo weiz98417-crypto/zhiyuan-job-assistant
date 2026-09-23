@@ -1,7 +1,7 @@
 export type NegatedWriteTarget = "resume" | "profile" | "reference_resume";
 
 const NEGATION = "(?:不要|不用|无需|不需要|不必|别|禁止|取消)";
-const WRITE_ACTION = "(?:自动|静默)?(?:优化|修改|改写|润色|重写|生成|创建|保存|写入|应用|撤销|回滚|导入|同步|替换|记录|沉淀|提取|刷新|完善|加入|建立)";
+const WRITE_ACTION = "(?:自动|静默)?(?:优化|修改|改写|润色|重写|生成|创建|保存|写入|应用|撤销|回滚|导入|同步|替换|记录|沉淀|提取|刷新|完善|加入|建立|更新)";
 
 const SUBJECTS: Record<NegatedWriteTarget, string> = {
   resume: "(?:我的|当前|现在|已有)?(?:简历|履历|resume|cv)",

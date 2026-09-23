@@ -125,6 +125,10 @@ export function routeAgentTask(input: {
   imageIntake?: ImageIntakeResult | null;
   preferredDocumentType?: ImageDocumentType;
   activeTask?: GuidedSessionState | null;
+  /** M2: resolved IntentEnvelope primary task; replaces the regex intent chain. */
+  envelopeTask?: AgentTaskType | null;
+  /** M2: envelope write constraints recorded on the routing audit. */
+  envelopeAudit?: string[];
 }): AgentTaskRouteDecision {
   const { agentId, content, imageIntake, preferredDocumentType, activeTask } = input;
   const imageDecision = imageIntake ? routeImageIntake(content, imageIntake) : undefined;
@@ -133,8 +137,9 @@ export function routeAgentTask(input: {
   const requestedTaskType = fromImage || fromImageClarification || inferRequestedTaskFromText(content);
   const nonSemanticInput = isNonSemanticInput(content);
   const negatedWriteTarget = detectNegatedWriteIntent(content);
+  const envelopeAuditPrefix = (input.envelopeAudit || []).join("|");
 
-  if (negatedWriteTarget) {
+  if (negatedWriteTarget && !input.envelopeTask) {
     if (isSelfPositioningIntent(content)) {
       return buildRouteDecision({
         taskType: "career_positioning_guidance",
@@ -240,6 +245,17 @@ export function routeAgentTask(input: {
   }
 
   const documentType = imageIntake?.documentType || preferredDocumentType;
+
+  // M2: a resolved IntentEnvelope overrides the whole regex intent chain —
+  // primary task comes from the structured LLM call (or its audited fallback),
+  // while session locks and image layers above have already had their say.
+  if (input.envelopeTask) {
+    return buildRouteDecision({
+      taskType: input.envelopeTask,
+      imageDecision,
+      auditSummary: `envelope:${input.envelopeTask}${envelopeAuditPrefix ? `|${envelopeAuditPrefix}` : ""}`,
+    });
+  }
 
   if (isSelfPositioningIntent(content)) {
     return buildRouteDecision({

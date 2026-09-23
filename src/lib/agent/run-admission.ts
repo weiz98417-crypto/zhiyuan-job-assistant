@@ -14,6 +14,7 @@ import {
 } from "@/lib/agent/task-routing";
 import type { ArtifactKind } from "@/lib/agent/task-journey";
 import type { AgentRunSnapshot, DurableRunInput } from "@/lib/agent/runtime/durable-agent-run";
+import type { IntentEnvelopeResolution } from "@/lib/agent/intent-envelope";
 
 export type AgentRunAdmissionKind =
   | "continue_current_run"
@@ -44,6 +45,8 @@ export interface AgentRunAdmissionInput {
   input: DurableRunInput;
   entryHints?: AgentRunEntryHints;
   activeRun?: Pick<AgentRunSnapshot, "id" | "taskType" | "status"> | null;
+  /** M2: resolved IntentEnvelope (structured LLM routing) for this turn. */
+  envelope?: IntentEnvelopeResolution;
 }
 
 export interface AgentRunAdmissionDecision {
@@ -103,11 +106,32 @@ export function admitAgentRun(input: AgentRunAdmissionInput): AgentRunAdmissionD
   }
 
   const evidence = admissionEvidence(input.entryHints);
+  // M2: envelope clarification wins before any routing — ask one precise
+  // question, never guess the task from regex.
+  if (input.envelope?.kind === "clarify") {
+    return {
+      kind: "clarify",
+      taskType: null,
+      agentId: null,
+      contract: null,
+      route: null,
+      primaryGoal: null,
+      constraints: ["clarification_required"],
+      evidence: [...admissionEvidence(input.entryHints), ...input.envelope.envelope.audit],
+      safeMessage: input.envelope.question,
+    };
+  }
+  const envelopeTask = input.envelope?.kind === "resolved"
+    ? input.envelope.envelope.primaryTask
+    : null;
+  const envelopeAudit = input.envelope?.kind === "resolved" ? input.envelope.envelope.audit : [];
   const route = routeAgentTask({
     agentId: normalizedHintAgentId(input.entryHints?.agentId, evidence),
     content,
     activeTask: guidedSessionForActiveRun(input.activeRun),
     preferredDocumentType: input.entryHints?.imageDocumentType,
+    envelopeTask,
+    envelopeAudit,
   });
   const taskType = route.taskType;
   if (!taskType) {

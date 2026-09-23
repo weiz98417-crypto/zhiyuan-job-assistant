@@ -6,6 +6,7 @@ import {
 } from "@/lib/agent/runtime/runtime-factory";
 import { resolveAgentRuntimeAssignment } from "@/lib/agent/runtime/runtime-mode";
 import { admitAgentRun } from "@/lib/agent/run-admission";
+import { resolveIntentEnvelope } from "@/lib/agent/intent-envelope";
 
 export async function GET(request: Request) {
   try {
@@ -62,10 +63,16 @@ export async function POST(request: Request) {
       images: Array.isArray(body.input?.images) ? body.input.images.map(String) : undefined,
       ...(body.input?.persistInConversation === false ? { persistInConversation: false } : {}),
     };
+    // M2: structured intent routing — one envelope call decides the task.
+    const envelope = await resolveIntentEnvelope({
+      content,
+      agentId: stringField(body.entryHints?.agentId) || stringField(body.agentId) || undefined,
+    });
     const admission = admitAgentRun({
       conversationId: conversationId ?? null,
       input,
       activeRun,
+      envelope,
       entryHints: {
         agentId: stringField(body.entryHints?.agentId) || stringField(body.agentId) || undefined,
         taskType: stringField(body.taskType) || undefined,
