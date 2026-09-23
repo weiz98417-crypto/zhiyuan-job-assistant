@@ -96,6 +96,10 @@ const SAFE_PAYLOAD_TYPES = new Set([
   "role_preference",
   "export_artifact",
   "download",
+  "handoff",
+  "handoff_denied",
+  "delegation",
+  "delegation_denied",
 ]);
 
 const SAFE_PAYLOAD_FIELDS: Record<string, readonly string[]> = {
@@ -136,6 +140,10 @@ const SAFE_PAYLOAD_FIELDS: Record<string, readonly string[]> = {
   role_preference: ["role", "reason", "evidence", "confidence", "status", "readBackVerified"],
   export_artifact: ["artifactId", "downloadUrl", "filename", "size", "sha256", "readBackVerified", "version", "hash"],
   download: ["artifactId", "downloadUrl", "filename", "size", "sha256", "readBackVerified", "version", "hash"],
+  handoff: ["agentId", "fromTask", "toTask", "reason"],
+  handoff_denied: ["reason"],
+  delegation: ["delegationId", "agentId", "goal", "state", "findings", "keyPoints"],
+  delegation_denied: ["reason"],
 };
 
 const SAFE_NESTED_FIELDS = new Set([

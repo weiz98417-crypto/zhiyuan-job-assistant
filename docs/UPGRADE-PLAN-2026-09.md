@@ -9,6 +9,14 @@
 - 生产问题清单（13 条冻结 PE2E）：`docs/agent-production-e2e-issues-2026-08-30.md`
 - 代码事实探查（三份）：legacy 路径可达性 / child run 现状 / 记忆子系统现状（2026-09-24，本仓库 dev 分支 @ 44049e1）
 
+## 实施状态（2026-09-24）
+
+- M1 ✅ 提交 d32e18c；M2 ✅ d3686c0；M3 ✅ bffc53b；M4 ✅ 4fc546d；M5 ✅ 7286cb8；M6a ✅（本提交，交接/委派安全卡视图）
+- M6b（shadcn/assistant-ui 前端重建）：待视觉稿后独立发布
+- M5 Mastra 会话层（working/observational memory）：独立发布（新增依赖 + thread 迁移）
+- M4 已知简化：委派以内联子 loop + 事件归因实现，child run 行待 store 支持按 id 认领后启用
+- 生产发布动作：AGENT_RUNTIME_MODE=worker_all；观察期 7 天后移除 escape hatch
+
 ## 五条总原则
 
 1. **里程碑串行**：每个里程碑独立合并、可发布、可回滚；master 任何时刻可发布。
