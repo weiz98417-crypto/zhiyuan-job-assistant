@@ -1137,3 +1137,88 @@ BEGIN
     ALTER TABLE cv_data ADD CONSTRAINT cv_data_user_id_key UNIQUE (user_id);
   END IF;
 END $$;
+
+-- ── M5 layered memory (ADR-0025): bi-temporal fact ledger ──
+-- Episodes are append-only raw signals; facts carry validity windows and are
+-- invalidated (never overwritten) when new evidence contradicts them.
+
+CREATE TABLE IF NOT EXISTS memory_episodes (
+  id BIGSERIAL PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  source_type TEXT NOT NULL,
+  source_id TEXT NOT NULL,
+  content_json JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_memory_episodes_user_time
+  ON memory_episodes (user_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS memory_facts (
+  id BIGSERIAL PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  partition TEXT NOT NULL DEFAULT 'core',
+  subject TEXT NOT NULL,
+  predicate TEXT NOT NULL,
+  object_json JSONB NOT NULL,
+  canonical_text TEXT NOT NULL,
+  confidence REAL NOT NULL DEFAULT 0.6,
+  importance REAL NOT NULL DEFAULT 0.5,
+  valid_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  invalid_at TIMESTAMPTZ,
+  invalidation_reason TEXT,
+  superseded_by BIGINT REFERENCES memory_facts(id),
+  source_episode_id BIGINT REFERENCES memory_episodes(id),
+  decision TEXT NOT NULL DEFAULT 'ADD',
+  decision_reason TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_memory_facts_user_partition_valid
+  ON memory_facts (user_id, partition, valid_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_facts_canonical
+  ON memory_facts (user_id, canonical_text);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_facts_unique_open_fact
+  ON memory_facts (user_id, partition, subject, predicate)
+  WHERE invalid_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS memory_fact_chunks (
+  fact_id BIGINT NOT NULL REFERENCES memory_facts(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL,
+  chunk_index INTEGER NOT NULL DEFAULT 0,
+  embedding vector(1536),
+  embedding_status TEXT NOT NULL DEFAULT 'pending',
+  content TEXT NOT NULL,
+  PRIMARY KEY (fact_id, chunk_index)
+);
+CREATE INDEX IF NOT EXISTS idx_memory_fact_chunks_hnsw
+  ON memory_fact_chunks USING hnsw (embedding vector_cosine_ops)
+  WITH (m = 16, ef_construction = 64);
+
+-- Structured job-seeking profile: typed topic/sub-topic fields, pure SQL —
+-- never vectorized (Memobase-style profile core).
+CREATE TABLE IF NOT EXISTS profile_blocks (
+  id BIGSERIAL PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  topic TEXT NOT NULL,
+  sub_topic TEXT NOT NULL,
+  value_json JSONB NOT NULL,
+  label TEXT,
+  confidence REAL NOT NULL DEFAULT 0.6,
+  source TEXT NOT NULL DEFAULT 'agent',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (user_id, topic, sub_topic)
+);
+CREATE INDEX IF NOT EXISTS idx_profile_blocks_user_topic
+  ON profile_blocks (user_id, topic);
+
+-- Memory partitions (MemCube-style): named namespaces with explicit
+-- readable/writable lists replace per-task policy rules.
+CREATE TABLE IF NOT EXISTS memory_partitions (
+  id BIGSERIAL PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  partition TEXT NOT NULL,
+  description TEXT,
+  readable_agents TEXT[] NOT NULL DEFAULT '{}',
+  writable_agents TEXT[] NOT NULL DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (user_id, partition)
+);

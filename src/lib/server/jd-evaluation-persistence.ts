@@ -112,6 +112,35 @@ async function recordEvaluationMemoryBestEffort(
       text: reportText,
       metadata: { reportNum: result.reportNum, company: input.company, role: input.role, source: "jd-evaluation-persistence" },
     });
+    // M5: record the evaluation in the bi-temporal fact ledger (audit chain:
+    // episode -> facts). Deterministic decisions only — evaluation facts are
+    // append-mostly and read-back verified above.
+    try {
+      const { recordEpisode, recordFact } = await import("@/lib/memory/fact-ledger");
+      const episodeId = await recordEpisode(
+        { userId: input.userId },
+        {
+          sourceType: "jd_evaluation",
+          sourceId: String(result.reportNum),
+          content: { company: input.company, role: input.role, score: input.score, reportNum: result.reportNum },
+        },
+      );
+      await recordFact(
+        { userId: input.userId },
+        {
+          partition: "evaluation",
+          subject: input.company || "unknown-company",
+          predicate: "evaluated",
+          object: { role: input.role, score: input.score, reportNum: result.reportNum },
+          canonicalText: `${input.company} ${input.role} JD 评估完成，得分 ${input.score}/5，报告 #${result.reportNum}。`,
+          confidence: 0.9,
+          importance: input.score < 2.5 ? 0.75 : 0.55,
+        },
+        { episodeId, useLlmDecision: false },
+      );
+    } catch (ledgerError) {
+      console.warn("[jd-evaluation-persistence] fact ledger write failed (non-fatal):", ledgerError);
+    }
     const memoryItemId = await createMemoryItem({
       userId: input.userId,
       memoryType: "jd_evaluation_observation",
