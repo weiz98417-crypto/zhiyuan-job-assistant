@@ -2,6 +2,8 @@ import { randomUUID } from "crypto";
 import { orchestrateGen } from "@/lib/agent/orchestrator";
 import type { SSEEvent } from "@/lib/agent/loop/types";
 import type { ModelRecoveryPolicy } from "@/lib/agent/loop/types";
+import type { InterviewSessionState } from "@/types";
+import type { InterviewRebindResolution } from "@/lib/agent/interview-rebind-policy";
 import type {
   DurableAgentRunService,
 } from "@/lib/agent/runtime/durable-agent-run";
@@ -12,6 +14,7 @@ import type {
 import {
   compactExecutionConversation,
   loadExecutionConversation,
+  parseInterviewState,
   reconcileExecutionRunGates,
   saveExecutionConversation,
   type ExecutionConversationMessage,
@@ -26,6 +29,7 @@ import {
   type AgentTaskContract,
 } from "@/lib/agent/task-contract";
 import { buildCareerPositioningFallback } from "@/lib/agent/career-positioning-result";
+import { buildServerRunContextDirectives } from "@/lib/agent/runtime/server-run-context-directives";
 import type { VerifiedActionResult } from "@/lib/agent/verified-action";
 import { projectDurableUiEvent } from "@/lib/agent/runtime/run-event-projection";
 import { projectToolResultForUser } from "@/lib/agent/surface-projection";
@@ -48,6 +52,11 @@ type Orchestrate = (input: {
   modelRecovery?: ModelRecoveryPolicy;
   frozenToolCall?: { name: string; args: Record<string, unknown> };
   signal: AbortSignal;
+  /** M1 gap closure: server-derived interview session state for the loop's tool policy. */
+  interviewState?: InterviewSessionState;
+  interviewRebindAction?: InterviewRebindResolution;
+  /** Server-rebuilt prompt context sections (interview binding / rebind / guided). */
+  promptContextInjection?: string;
 }) => AsyncIterable<Record<string, unknown> & { type: string }>;
 
 export interface DurableOrchestratorExecutionEngineOptions {
@@ -221,6 +230,16 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
     } | null = null;
     const completedCriteria = new Set<string>();
     const contract = asTaskContract(rebuiltContext.contract);
+    // M1 gap closure: rebuild the interview/guided prompt context server-side
+    // (previously assembled by the browser for the deleted legacy loop).
+    // Forced non-interview agents skip interview binding, mirroring the old
+    // client's explicitForcedAgentId bypass.
+    const directives = await buildServerRunContextDirectives({
+      principal,
+      conversationId: input.run.conversationId,
+      content: latestInput,
+      bypassConversationLocks: input.run.agentId !== "interview",
+    }).catch(() => undefined);
     const stream = this.orchestrate({
       content: latestInput,
       messages: executionContext.messages,
@@ -232,6 +251,11 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
       fencingToken: input.run.fencingToken,
       taskContract: contract,
       modelRecovery,
+      interviewState: directives?.interviewState,
+      interviewRebindAction: directives?.interviewRebindAction || undefined,
+      promptContextInjection: directives
+        ? `${directives.interviewContext}${directives.rebindContext}${directives.guidedDirective}`
+        : undefined,
       frozenToolCall: latestApprovedGate
         ? {
             name: String(latestApprovedGate.request?.toolName || latestApprovedGate.toolName),
@@ -701,5 +725,8 @@ function defaultOrchestrate(input: Parameters<Orchestrate>[0]): AsyncIterable<SS
     frozenToolCall: input.frozenToolCall,
     durable: true,
     forcedAgentId: input.agentId,
+    interviewState: input.interviewState,
+    interviewRebindAction: input.interviewRebindAction?.action,
+    promptContextInjection: input.promptContextInjection,
   });
 }

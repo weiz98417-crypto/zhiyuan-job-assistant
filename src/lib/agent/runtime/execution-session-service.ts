@@ -102,7 +102,7 @@ export async function saveExecutionConversation(
   if (!updated) throw new Error("Agent Conversation not found");
 }
 
-function parseInterviewState(value: unknown): InterviewSessionState | undefined {
+export function parseInterviewState(value: unknown): InterviewSessionState | undefined {
   if (!value) return undefined;
   try {
     const parsed = typeof value === "string" ? JSON.parse(value) : value;

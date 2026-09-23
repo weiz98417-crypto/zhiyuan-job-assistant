@@ -1,14 +1,6 @@
-import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
-import { getCurrentUser } from "@/lib/auth";
 import { orchestrateGen } from "@/lib/agent/orchestrator";
-import { agentLoopServer } from "@/lib/agent/loop/server-runner";
 import type { SSEEvent } from "@/lib/agent/loop/types";
-import { getAgentById } from "@/lib/agent/registry";
-import registry from "@/lib/agent/tools";
-import type { AgentTaskContract } from "@/lib/agent/task-contract";
-import type { InterviewRebindAction } from "@/lib/agent/interview-rebind-policy";
-import type { InterviewSessionState } from "@/types";
 
 export const maxDuration = 180; // 3 minutes for complex agents
 
@@ -16,32 +8,30 @@ function sse(event: SSEEvent): string {
   return `data: ${JSON.stringify(event)}\n\n`;
 }
 
+/**
+ * M1 (ADR-0023): the directMode legacy loop (browser-supplied system prompt +
+ * agent id → agentLoopServer) is deleted. The worker owns all production run
+ * execution; this route now only serves the eval-script orchestrateGen bypass
+ * (scripts/eval-agent.mjs), which never runs in the user request path.
+ */
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
+    const body = await request.json().catch(() => ({}));
+    const directInput = body as { systemPrompt?: string; agentId?: string };
+    if (directInput.systemPrompt || directInput.agentId) {
+      return NextResponse.json(
+        { success: false, error: "directMode 已随 M1 cutover 移除：所有 Agent Run 由 durable worker 执行（ADR-0023）。" },
+        { status: 410 },
+      );
+    }
+
     const { messages } = body as {
       messages?: { role: string; content: string; images?: string[] }[];
     };
-
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return NextResponse.json({ success: false, error: "消息列表不能为空" }, { status: 400 });
     }
-
     const userMessage = messages[messages.length - 1]?.content || "";
-    const directInput = body as {
-      systemPrompt?: string;
-      agentId?: string;
-      runId?: string;
-      interviewState?: InterviewSessionState;
-      interviewRebindAction?: InterviewRebindAction;
-      taskContract?: AgentTaskContract | null;
-    };
-    const directAgent = directInput.agentId ? getAgentById(directInput.agentId) : undefined;
-    const directMode = Boolean(directInput.systemPrompt && directAgent);
-    const currentUser = directMode ? await currentUserOrNull() : null;
-    if (directMode && !currentUser) {
-      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
-    }
 
     const encoder = new TextEncoder();
     let aborted = false;
@@ -51,31 +41,11 @@ export async function POST(request: Request) {
         request.signal.addEventListener("abort", () => { aborted = true; });
 
         try {
-          const toolWhitelist = directAgent?.toolNames.length
-            ? directAgent.toolNames
-            : registry.toOpenAITools().map((tool) => tool.function.name);
-          const runner = directMode
-            ? agentLoopServer({
-                agent: directAgent,
-                systemPrompt: directInput.systemPrompt!,
-                messages,
-                tools: registry.toOpenAITools(toolWhitelist),
-                signal: request.signal,
-                interviewState: directInput.interviewState,
-                interviewRebindAction: directInput.interviewRebindAction,
-                taskContract: directInput.taskContract,
-                executionContext: {
-                  principal: { userId: currentUser!.userId },
-                  runId: directInput.runId || `legacy-${randomUUID()}`,
-                  allowlist: toolWhitelist,
-                  signal: request.signal,
-                },
-              })
-            : orchestrateGen(userMessage, {
-                sessionId: null,
-                messages,
-                signal: request.signal,
-              });
+          const runner = orchestrateGen(userMessage, {
+            sessionId: null,
+            messages,
+            signal: request.signal,
+          });
           for await (const event of runner) {
             if (aborted) break;
             controller.enqueue(encoder.encode(sse(event as SSEEvent)));
@@ -105,13 +75,5 @@ export async function POST(request: Request) {
   } catch (err) {
     const message = err instanceof Error ? err.message : "未知错误";
     return NextResponse.json({ success: false, error: `Agent 运行失败: ${message}` }, { status: 500 });
-  }
-}
-
-async function currentUserOrNull() {
-  try {
-    return await getCurrentUser();
-  } catch {
-    return null;
   }
 }

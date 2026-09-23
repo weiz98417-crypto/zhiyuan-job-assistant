@@ -22,7 +22,7 @@ import {
   inferCompletedCriteriaFromToolResult,
   resolveTaskContractRunOutcome,
 } from "@/lib/agent/task-contract";
-import { buildConfirmedImageResumeImportToolCall, buildRequiredResumeDraftToolCall } from "@/lib/agent/loop/client-runner";
+import { buildRequiredResumeDraftToolCall } from "@/lib/agent/loop/server-runner";
 import { RESUME_RUNTIME_INCIDENT_20260717 } from "@/__tests__/fixtures/agent-resume-runtime-regression-fixtures";
 
 afterEach(() => {
@@ -124,24 +124,6 @@ describe("agent runtime regression evals", () => {
       resumeDocument: { id: "resume-image", chunks: [{ id: "chunk-image-0" }] },
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("imports the full confirmed image resume instead of a guided-session excerpt", () => {
-    const sourceText = `${"完整图片简历事实。".repeat(2600)}TAIL-IMAGE-IMPORT`;
-    const call = buildConfirmedImageResumeImportToolCall({
-      userText: "确认，保存到我的简历",
-      sourceText,
-      images: ["data:image/png;base64,original-image"],
-      allowedTools: ["read_file", "import_resume"],
-    });
-
-    expect(call?.name).toBe("import_resume");
-    const args = JSON.parse(call?.arguments || "{}");
-    expect(args.source).toBe("image_ocr");
-    expect(args.originalImages).toEqual(["data:image/png;base64,original-image"]);
-    expect(args.text).toBe(sourceText);
-    expect(args.text).toContain("TAIL-IMAGE-IMPORT");
-    expect(args.text.length).toBeGreaterThan(20000);
   });
 
   it("regression: a current-resume API failure is not disguised as a filesystem error", async () => {
@@ -247,7 +229,7 @@ describe("agent runtime regression evals", () => {
     const forcedCall = buildRequiredResumeDraftToolCall({
       contract,
       userText: RESUME_RUNTIME_INCIDENT_20260717.optimizeRequest,
-      successfulTools: ["read_file"],
+      successfulTools: new Set(["read_file"]),
       allowedTools: ["read_file", "optimize_resume_section", "create_resume_edit_proposal"],
     });
 
@@ -267,7 +249,7 @@ describe("agent runtime regression evals", () => {
     const forcedCall = buildRequiredResumeDraftToolCall({
       contract,
       userText: "<tool_result name=\"read_file\">已读取 3194 字简历正文</tool_result>",
-      successfulTools: ["read_file"],
+      successfulTools: new Set(["read_file"]),
       allowedTools: ["read_file", "optimize_resume_section"],
     });
 

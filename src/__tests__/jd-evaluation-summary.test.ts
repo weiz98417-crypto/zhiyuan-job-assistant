@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatJDEvaluationSummary } from "@/lib/agent/loop/client-runner";
+import { formatJDEvaluationSummary } from "@/lib/agent/tools/action/jd-evaluation-summary";
 
 describe("formatJDEvaluationSummary", () => {
   it("uses risk-bearing A-G blocks instead of resume advice table lines", () => {

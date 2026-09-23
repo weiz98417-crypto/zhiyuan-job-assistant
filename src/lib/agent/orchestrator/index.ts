@@ -14,6 +14,8 @@ import { classifyIntentLLM, isValidAgent } from "@/lib/agent/classify-intent-llm
 // loadAgentMD imported dynamically to avoid bundling fs into client
 import type { AgentDefinition, AgentPromptContext } from "@/lib/agent/registry/types";
 import type { SSEEvent } from "@/lib/agent/loop/types";
+import type { InterviewSessionState } from "@/types";
+import type { InterviewRebindAction } from "@/lib/agent/interview-rebind-policy";
 import registry from "@/lib/agent/tools";
 import { resolveImageIntakeAgentId, type ImageDocumentType, type ImageIntakeResult } from "@/lib/agent/image-intake";
 import type { ExecutionPrincipal } from "@/lib/agent/runtime/durable-agent-run";
@@ -40,6 +42,11 @@ export interface OrchestratorContext {
   durable?: boolean;
   modelRecovery?: ModelRecoveryPolicy;
   frozenToolCall?: { name: string; args: Record<string, unknown> };
+  /** M1 gap closure: server-derived interview state for the loop's tool policy. */
+  interviewState?: InterviewSessionState;
+  interviewRebindAction?: InterviewRebindAction;
+  /** M1 gap closure: server-rebuilt prompt sections (interview/rebind/guided). */
+  promptContextInjection?: string;
 }
 
 export interface OrchestratorResult {
@@ -185,7 +192,8 @@ export async function* orchestrateGen(
   const memCtx = ctx.durable
     ? { semanticInjection: "", agentStateInjection: "" }
     : await (await import("@/lib/agent/memory/coordinator")).buildContext(ctx.sessionId, ctx.messages);
-  const systemPrompt = buildSystemPrompt(soul.body, promptCtx, memCtx);
+  const systemPrompt = buildSystemPrompt(soul.body, promptCtx, memCtx)
+    + (ctx.durable && ctx.promptContextInjection ? ctx.promptContextInjection : "");
 
   // Phase 4: Select model based on tier
   const effectiveModel = modelTier === "pro" && agent.modelPro
@@ -214,6 +222,8 @@ export async function* orchestrateGen(
     taskContract: ctx.taskContract,
     modelRecovery: ctx.modelRecovery,
     frozenToolCall: ctx.frozenToolCall,
+    interviewState: ctx.interviewState,
+    interviewRebindAction: ctx.interviewRebindAction,
     executionContext: ctx.principal && ctx.runId
       ? {
           principal: ctx.principal,

@@ -59,7 +59,24 @@ export function projectDurableUiEvent(
     };
   }
   if (type === "persist_done") {
-    return { type, readBackVerified: event.readBackVerified === true };
+    // M1 gap closure: keep the report card fields (user-visible, non-sensitive)
+    // so the browser observer can render the JD persistence completion card.
+    return {
+      type,
+      readBackVerified: event.readBackVerified === true,
+      ...(event.readBackError ? { readBackError: safeIdentifier(event.readBackError) || "read-back failed" } : {}),
+      reportNum: Number.isFinite(Number(event.reportNum)) ? Number(event.reportNum) : 0,
+      company: typeof event.company === "string" ? event.company.slice(0, 120) : "",
+      role: typeof event.role === "string" ? event.role.slice(0, 120) : "",
+      score: Number.isFinite(Number(event.score)) ? Number(event.score) : 0,
+    };
+  }
+  if (type === "search_start" || type === "search_result") {
+    return {
+      type,
+      block: safeIdentifier(event.block),
+      ...(Number.isFinite(Number(event.progress)) ? { progress: Number(event.progress) } : {}),
+    };
   }
   return { type };
 }

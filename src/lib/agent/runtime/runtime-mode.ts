@@ -15,50 +15,29 @@ export interface AgentRuntimeAssignment {
   cohortBucket: number;
 }
 
-const READ_ONLY_TASKS = new Set([
-  "resume_query",
-  "general_chat",
-  "system_diagnostics",
-]);
+let warnedAboutLegacyMode = false;
 
 export function getAgentRuntimeRolloutConfig(): AgentRuntimeRolloutConfig {
-  const rawMode = String(process.env.AGENT_RUNTIME_MODE || "legacy").trim();
-  const mode: AgentRuntimeMode = ["legacy", "shadow", "worker_readonly", "worker_all"].includes(rawMode)
-    ? rawMode as AgentRuntimeMode
-    : "legacy";
-  const percentage = clampPercentage(Number(process.env.AGENT_RUNTIME_PERCENTAGE || 0));
-  const allowlist = String(process.env.AGENT_RUNTIME_ALLOWLIST || "")
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-  return { mode, percentage, allowlist };
+  const rawMode = String(process.env.AGENT_RUNTIME_MODE || "").trim();
+  // M1 (ADR-0023): worker_all is the only supported mode. Historical values are
+  // accepted for forward compatibility but resolve to worker_all with a warning.
+  if (rawMode && rawMode !== "worker_all" && !warnedAboutLegacyMode) {
+    warnedAboutLegacyMode = true;
+    console.warn(`[runtime-mode] AGENT_RUNTIME_MODE=${rawMode} is no longer supported since M1; using worker_all.`);
+  }
+  return { mode: "worker_all", percentage: 0, allowlist: [] };
 }
 
 export function resolveAgentRuntimeAssignment(
   userId: string,
-  taskType: string,
+  _taskType: string,
   config = getAgentRuntimeRolloutConfig(),
 ): AgentRuntimeAssignment {
   const cohortBucket = stableCohortBucket(userId);
-  const selected = config.allowlist.includes(userId) || cohortBucket < clampPercentage(config.percentage);
-  if (config.mode === "legacy" || !selected) {
-    return { mode: config.mode, owner: "legacy", shadow: false, cohortBucket };
-  }
-  if (config.mode === "shadow") {
-    return { mode: config.mode, owner: "legacy", shadow: true, cohortBucket };
-  }
-  if (config.mode === "worker_readonly" && !READ_ONLY_TASKS.has(taskType)) {
-    return { mode: config.mode, owner: "legacy", shadow: false, cohortBucket };
-  }
   return { mode: config.mode, owner: "worker", shadow: false, cohortBucket };
 }
 
 export function stableCohortBucket(userId: string): number {
   const prefix = createHash("sha256").update(userId).digest("hex").slice(0, 8);
   return (Number.parseInt(prefix, 16) % 10_000) / 100;
-}
-
-function clampPercentage(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.max(0, Math.min(100, value));
 }

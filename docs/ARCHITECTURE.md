@@ -61,8 +61,9 @@ Key modules:
 | `src/lib/agent/tool-governance.ts` | Classifies tool side effects, task contract policies, allowed agents, read-back requirements, and route conflicts. |
 | `src/lib/agent/task-routing.ts` | Central routing matrix for text intent, image document type, memory policy task, and allowed tools. |
 | `src/lib/agent/runtime/durable-run-client.ts` | Browser command/query adapter, SSE cursor resume, and polling fallback. |
-| `src/lib/agent/loop/client-runner.ts` | Transitional legacy-mode adapter retained during staged rollout. |
-| `src/lib/agent/loop/server-runner.ts` | Shared model/tool cycle used by the Worker orchestrator and legacy mode during migration. |
+| `src/lib/ai/model-gateway.ts` | Single model fallback chain, streaming parse, and tool-call reassembly for loop, think proxy, and classifier. |
+| `src/lib/agent/runtime/server-run-context-directives.ts` | Server-side rebuild of interview binding, rebind, and guided prompt context for worker runs. |
+| `src/lib/agent/loop/server-runner.ts` | Shared model/tool cycle used by the Worker orchestrator; the sole loop implementation since M1. |
 | `src/lib/agent/loop/tool-policy.ts` | Guardrails for interview rebinding, raw report leakage, and tool misuse. |
 | `src/components/MarkdownRenderer.tsx` | Sanitized Markdown rendering for readable chat output. |
 

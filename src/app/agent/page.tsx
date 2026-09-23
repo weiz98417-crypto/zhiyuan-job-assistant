@@ -13,8 +13,7 @@ import { DEFAULT_SUGGESTIONS } from "@/components/agent/SuggestionChips";
 import type { SuggestionChip } from "@/components/agent/SuggestionChips";
 import { logInteraction } from "@/lib/agent/memory";
 import { migrateExploreToAgent } from "@/lib/agent/migrate";
-import { orchestrate, type ClientAgentDefinition } from "@/lib/agent/orchestrator/client";
-import { agentLoopRemote } from "@/lib/agent/loop/remote-runner";
+import type { ClientAgentDefinition } from "@/lib/agent/orchestrator/client";
 import { inferPreferredDocumentTypeFromText, type ImageDocumentType, type ImageIntakeResult } from "@/lib/agent/image-intake";
 import { buildImageIntakeStatusText, buildImageIntakeToolSummary, routeImageIntake } from "@/lib/agent/image-intake-router";
 import { routeAgentTask } from "@/lib/agent/task-routing";
@@ -230,6 +229,16 @@ type LastToolResultInfo = {
   uiPayload?: Record<string, unknown>;
   verifiedAction?: VerifiedActionResult;
 };
+
+/**
+ * M1 escape hatch (AGENT_LEGACY_ESCAPE_HATCH): the directMode legacy loop was
+ * deleted; while this flag is set the run route serves a transitional in-process
+ * loop for the cutover observation window only. It is removed together with the
+ * window (ADR-0023).
+ */
+function isLegacyEscapeHatchEnabled(): boolean {
+  return typeof window !== "undefined" && window.sessionStorage.getItem("agent_legacy_escape_hatch") === "1";
+}
 
 function waitForStatusPaint(ms = CONTEXT_COMPRESSION_STATUS_MS): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -874,6 +883,34 @@ function AgentPageInner() {
           } else if (eventType === "tool_error") {
             setExecutingTool(undefined);
             setPhase("reflecting");
+          } else if (eventType === "persist_done") {
+            // M1 gap closure: JD evaluation persistence card (was legacy-only).
+            setCompletionInfo({
+              reportNum: Number(event.reportNum || 0),
+              company: String(event.company || ""),
+              role: String(event.role || ""),
+              score: Number(event.score || 0),
+            });
+          } else if (eventType === "search_start") {
+            const block = String(event.block || "");
+            if (block) {
+              setEvalProgress((current) => (
+                current.some((entry) => entry.block === block)
+                  ? current
+                  : [...current, { block, label: block, status: "running" as const }]
+              ));
+            }
+          } else if (eventType === "search_result") {
+            const block = String(event.block || "");
+            if (block) {
+              setEvalProgress((current) => {
+                const index = current.findIndex((entry) => entry.block === block);
+                if (index === -1) return current;
+                const next = [...current];
+                next[index] = { ...next[index], status: "done" };
+                return next;
+              });
+            }
           } else if (eventType === "done") {
             setExecutingTool(undefined);
           }
@@ -1555,6 +1592,10 @@ function AgentPageInner() {
               input: { content, images, persistInConversation: !hideUserMessage },
               entryHints: {
                 ...(routeForcedAgentId ? { agentId: routeForcedAgentId } : {}),
+                ...(["jd", "offer", "resume"].includes(String(imageIntake?.documentType))
+                  ? { imageDocumentType: imageIntake!.documentType as "jd" | "offer" | "resume" }
+                  : {}),
+                ...(journeyArtifacts.length > 0 ? { journeyArtifacts } : {}),
                 source: "agent_chat",
               },
             });
@@ -1575,9 +1616,24 @@ function AgentPageInner() {
               return;
             }
             const createdRun = created?.run || null;
-            if (created?.assignment.owner === "worker" && createdRun) {
+            if (createdRun && created?.assignment.owner !== "worker" && !isLegacyEscapeHatchEnabled()) {
+              // M1 cutover: worker_all is the only supported mode; a non-worker
+              // owner here means server flags are stale — fail loudly instead of
+              // silently downgrading to the removed legacy loop.
+              throw new Error(`Agent runtime 返回了不支持的执行模式：${created?.assignment.owner ?? "unknown"}。请将服务端 AGENT_RUNTIME_MODE 设置为 worker_all。`);
+            }
+            if (createdRun) {
               workerOwnedRun = true;
               durableRunId = createdRun.id;
+              const activeAgentId = routeForcedAgentId || (taskType ? taskAgentId(taskType) : "general");
+              setActiveAgent({
+                id: activeAgentId,
+                name: taskType ? taskLabelZh(taskType) : "通用助手",
+                description: "",
+                toolNames: [],
+                priority: 0,
+                suggestions: [],
+              });
               setActiveRunNotice({
                 ...activeNoticeFromRun(createdRun),
                 phase: "understanding",
@@ -1589,742 +1645,43 @@ function AgentPageInner() {
             }
           } catch (error) {
             if (error instanceof DurableRunOwnershipUnknownError) throw error;
+            if ((error as { userFacing?: boolean })?.userFacing) throw error;
             durableRunId = null;
           }
         }
 
-        const { agent, systemPrompt } = await orchestrate(routedContent, {
-          sessionId: currentSessionId,
-          messages: sessionMessages,
-          memoryDigest,
-          agentState,
-          imageIntake,
-          preferredDocumentType,
-          forcedAgentId: routeForcedAgentId,
-        });
-
-        const interviewContext = interviewState?.planSnapshot
-          ? `\n\n## Active Interview Session
-This chat is running a mock interview. Treat the following snapshot as the source of truth and do not silently switch materials.
-Company: ${interviewState.planSnapshot.jdSnapshot?.company || "unknown"}
-Role: ${interviewState.planSnapshot.jdSnapshot?.role || "unknown"}
-Mode: ${interviewState.planSnapshot.mode}
-Difficulty: ${interviewState.planSnapshot.difficulty}
-Focus areas: ${interviewState.planSnapshot.focusAreas.join(", ") || "none"}
-Allow follow-ups: ${interviewState.planSnapshot.allowFollowUps ? "yes" : "no"}
-Answered user turns: ${countAnsweredInterviewRounds(interviewState)}
-
-JD snapshot excerpt:
-${(interviewState.planSnapshot.jdSnapshot?.body || "").slice(0, 1600) || "No JD snapshot available."}
-
-Resume snapshot excerpt:
-${(interviewState.planSnapshot.resumeSnapshot?.body || "").slice(0, 1600) || "No resume snapshot available."}
-
-Rules:
-- This JD and resume remain binding across the whole mock interview, including after the user corrects your format.
-- Ask exactly one interview question per assistant turn. Never list a batch of questions.
-- Before the question, include four concise coaching lines: 题型, 考察点, JD 关联, 简历关联.
-- Then ask exactly one question and stop. Wait for the user's answer.
-- Attach follow-ups to the current question and the original JD/resume snapshot.
-- Do not ask the user to repost JD/resume unless the snapshot is empty and no recent JD can be read.`
-          : "";
-        const rebindContext = rebindResolution
-          ? `\n\n${formatInterviewRebindRuntimeDirective(rebindResolution)}`
-          : "";
-
-        setActiveAgent(agent);
-
-        if (!routeDecision.taskType) {
-          routeDecision = routeAgentTask({
-            agentId: agent.id,
-            content,
-            imageIntake,
-            preferredDocumentType,
-            activeTask: activeGuidedSessionForRun,
-          });
-          taskType = routeDecision.taskType;
-        }
-        const guidedDirective = buildGuidedSessionRuntimeDirective({
-          activeTask: activeGuidedSessionForRun,
-          requiresSwitchConfirmation: routeDecision.requiresClarification && Boolean(activeGuidedSessionForRun),
-          clarificationQuestion: routeDecision.clarificationQuestion,
-        });
-        const activeSystemPrompt = `${systemPrompt}${interviewContext}${rebindContext}${guidedDirective}`;
-        const addContractCriteria = (criteria: string[]) => {
-          if (!activeTaskContract) return;
-          for (const criterion of criteria) {
-            if (activeTaskContract.successCriteria.includes(criterion)) {
-              completedContractCriteria.add(criterion);
-            }
-          }
-        };
-
-        const recordRunStep = (input: {
-          phase: string;
-          toolName?: string;
-          status?: string;
-          inputSummary?: string;
-          outputSummary?: string;
-          verifier?: unknown;
-          error?: unknown;
-        }) => {
-          if (!durableRunId) return;
-          const runId = durableRunId;
-          setActiveRunNotice((prev) =>
-            prev?.id === runId
-              ? {
-                  ...prev,
-                  phase: input.phase,
-                  toolName: input.toolName || prev.toolName,
-                  verifierSummary: input.verifier ? truncateLedgerText(input.verifier, 140) : prev.verifierSummary,
-                  guidedTaskId: activeGuidedSessionForRun?.taskId || prev.guidedTaskId,
-                  guidedTaskPhase: activeGuidedSessionForRun?.phase || prev.guidedTaskPhase,
-                  status: input.phase === "verifying" ? "verifying" : input.phase === "repairing" ? "repairing" : prev.status,
-                }
-              : prev,
+        // ── M1 cutover: the legacy in-browser fallback loop is deleted. ──
+        // Runs are only created for turns the server could admit; everything
+        // that used to fall through to the directMode loop is now refused with
+        // guidance instead of silently executing a second, drifting engine.
+        if (isLegacyEscapeHatchEnabled()) {
+          const escapeError = new Error(
+            "AGENT_LEGACY_ESCAPE_HATCH 已启用，但 legacy 执行路径已在 M1 移除。请在服务端确认 AGENT_RUNTIME_MODE=worker_all 并关闭 escape hatch。",
           );
-        };
-
-        const updateRunStatus = async (
-          status: AgentRunStatus,
-          patch: { result?: unknown; error?: unknown } = {},
-        ) => {
-          if (!durableRunId) return;
-          const runId = durableRunId;
-          setActiveRunNotice((prev) => (prev?.id === runId ? { ...prev, status } : prev));
-          if (TERMINAL_DURABLE_RUN_STATUSES.has(status)) {
-            window.setTimeout(() => {
-              setActiveRunNotice((prev) => (prev?.id === runId ? null : prev));
-            }, 2500);
-          }
-        };
-
-        let toolResultInfo: LastToolResultInfo | null = null;
-        const toolResultHistory: LastToolResultInfo[] = [];
-        let assistantText = "";
-        let nextOfferState = agentState?.offer;
-        let resumeSectionSaveSucceeded = false;
-        let resumeEditAppliedSucceeded = false;
-        let resumeEditRolledBackSucceeded = false;
-
-        const msgList = updated.map((m, index) => ({
-          role: m.role,
-          content: m.content,
-          images: m.images,
-        }));
-
-        let firstEvent = true;
-        for await (const event of agentLoopRemote(
-          activeSystemPrompt,
-          msgList,
-          controller.signal,
-          {
-            agentId: agent.id,
-            interviewState,
-            interviewRebindAction: rebindResolution?.action,
-            taskContract: activeTaskContract,
-          },
-        )) {
-          if (firstEvent) { setStartTime(Date.now()); firstEvent = false; }
-          switch (event.type) {
-            case "phase": {
-              setPhase(event.phase);
-              if (event.phase) recordRunStep({ phase: event.phase, status: "running" });
-              break;
-            }
-            case "intent": break;
-            case "agent_switch": break;
-            case "thinking_content": setThinkingContent(sanitizeSafeReasoningSummary(event.content)); break;
-            case "tool_call":
-              setExecutingTool(event.name);
-              setResultQuality(null);
-              recordRunStep({
-                phase: "executing",
-                toolName: event.name,
-                status: "running",
-                inputSummary: summarizeLedgerParams(event.params),
-              });
-              break;
-            case "tool_result": {
-              const uiPayload = (event as { uiPayload?: Record<string, unknown> }).uiPayload;
-              const verifiedAction = (event as { verifiedAction?: VerifiedActionResult }).verifiedAction;
-              toolResultInfo = { name: event.name, result: event.result, success: event.success, data: event.data, uiPayload, verifiedAction };
-              toolResultHistory.push(toolResultInfo);
-              const readBackRequirement = getReadBackRequirementStatus(event.name, {
-                success: event.success,
-                data: event.data,
-                uiPayload,
-                verifiedAction,
-              });
-              if (activeTaskContract) {
-                addContractCriteria(inferCompletedCriteriaFromToolResult(activeTaskContract, {
-                  toolName: event.name,
-                  toolSuccess: event.success,
-                  data: event.data,
-                  uiPayload,
-                  verifiedAction,
-                  readBackVerified: uiPayload?.readBackVerified === true,
-                }));
-              }
-              recordRunStep({
-                phase: "verifying",
-                toolName: event.name,
-                status: event.success ? "succeeded" : "failed",
-                outputSummary: truncateLedgerText(event.result),
-                verifier: {
-                  success: event.success,
-                  hasUiPayload: Boolean(uiPayload),
-                  readBackRequirement,
-                  verifiedAction: verifiedAction
-                    ? {
-                        success: verifiedAction.success,
-                        action: verifiedAction.action,
-                        readBack: verifiedAction.readBack,
-                        verifier: verifiedAction.verifier,
-                        evidence: {
-                          targetType: verifiedAction.evidence?.targetType,
-                          targetId: verifiedAction.evidence?.targetId,
-                          targetField: verifiedAction.evidence?.targetField,
-                          expectedHash: verifiedAction.evidence?.expectedHash,
-                          readBackHash: verifiedAction.evidence?.readBackHash,
-                          versionId: verifiedAction.evidence?.versionId,
-                          validators: verifiedAction.evidence?.validators?.map((check) => ({
-                            phase: check.phase,
-                            ok: check.ok,
-                            code: check.code,
-                            message: check.message,
-                          })),
-                        },
-                      }
-                    : undefined,
-                  completedCriteria: Array.from(completedContractCriteria),
-                },
-              });
-              if ((event.name === "apply_resume_edit_proposal" || event.name === "save_resume_section") && event.success) {
-                resumeSectionSaveSucceeded = true;
-              }
-              if (event.name === "apply_resume_edit_proposal" && event.success) {
-                resumeEditAppliedSucceeded = true;
-              }
-              if (event.name === "rollback_resume_edit_proposal" && event.success) {
-                resumeEditRolledBackSucceeded = true;
-              }
-              const offerPayload = uiPayload;
-              if (offerPayload?.type === "offer_evaluation" || offerPayload?.type === "offer_report") {
-                nextOfferState = {
-                  activeOfferId: Number(offerPayload.offerId || offerPayload.activeOfferId || 0) || nextOfferState?.activeOfferId,
-                  activeOfferReportId: Number(offerPayload.reportId || offerPayload.reportNum || 0) || nextOfferState?.activeOfferReportId,
-                  lastUserIntent: "evaluate",
-                  lastEvaluationSummary: {
-                    company: String(offerPayload.company || ""),
-                    role: String(offerPayload.role || ""),
-                    overallScore: Number(offerPayload.overallScore || 0),
-                    verdict: String(offerPayload.verdict || "proceed_cautiously") as "accept" | "accept_after_negotiation" | "proceed_cautiously" | "decline",
-                    summary: String(offerPayload.summary || ""),
-                  },
-                  missingInfo: Array.isArray(offerPayload.missingInfo) ? (offerPayload.missingInfo as string[]) : nextOfferState?.missingInfo,
-                  redFlags: Array.isArray(offerPayload.redFlags) ? (offerPayload.redFlags as string[]) : nextOfferState?.redFlags,
-                  updatedAt: new Date().toISOString(),
-                };
-              } else if (offerPayload?.type === "offer_negotiation_strategy") {
-                nextOfferState = {
-                  ...(nextOfferState || {}),
-                  lastUserIntent: "negotiate",
-                  activeOfferReportId: Number(offerPayload.reportId || nextOfferState?.activeOfferReportId || 0) || nextOfferState?.activeOfferReportId,
-                  updatedAt: new Date().toISOString(),
-                };
-              } else if (offerPayload?.type === "offer_hr_question_list") {
-                nextOfferState = {
-                  ...(nextOfferState || {}),
-                  lastUserIntent: "ask_hr",
-                  activeOfferReportId: Number(offerPayload.reportId || nextOfferState?.activeOfferReportId || 0) || nextOfferState?.activeOfferReportId,
-                  updatedAt: new Date().toISOString(),
-                };
-              }
-              // Project tools through the user-safe surface; raw result/data never enters the transcript.
-              setMessages((prev) => {
-                const copy = [...prev];
-                const safeView = projectToolResultForUser({
-                  toolName: event.name,
-                  success: event.success,
-                  uiPayload,
-                });
-                if (safeView.kind === "silent") return copy;
-                const item = applyItem({
-                  type: "completed",
-                  itemId: `${turnItemPrefixRef.current}:tool:${event.name}:${itemSequenceRef.current + 1}`,
-                  content: safeView.summary,
-                  toolView: safeView,
-                });
-                const toolMsg: AgentMessage = {
-                  role: "tool",
-                  itemId: item?.itemId,
-                  content: safeView.summary,
-                  toolResult: {
-                    success: event.success,
-                    uiPayload: safeView.uiPayload,
-                    safeView,
-                  },
-                  toolName: event.name,
-                  timestamp: new Date().toISOString(),
-                };
-                copy.push(toolMsg);
-                return projectAgentMessages(copy);
-              });
-              break;
-            }
-            case "tool_error":
-              console.warn(`[agent] tool error: ${event.name} -> ${event.error}`);
-              recordRunStep({
-                phase: event.recoverable ? "repairing" : "verifying",
-                toolName: event.name,
-                status: "failed",
-                error: { message: truncateLedgerText(event.error), recoverable: event.recoverable },
-              });
-              break;
-            case "result_quality":
-              setResultQuality(event.quality);
-              recordRunStep({
-                phase: "verifying",
-                status: event.quality === "good" ? "succeeded" : "failed",
-                verifier: { quality: event.quality },
-              });
-              break;
-            case "text": {
-              assistantText += event.content;
-              streamContentRef.current = assistantText;
-              setStreamText(assistantText);
-              if (assistantText.trim()) {
-                const item = applyItem({
-                  type: "delta",
-                  itemId: `${turnItemPrefixRef.current}:assistant`,
-                  content: event.content,
-                });
-                setMessages((current) => {
-                  const next = [...current];
-                  const last = next[next.length - 1];
-                  const assistant: AgentMessage = { ...assistantMsg, itemId: item?.itemId, content: assistantText };
-                  if (last?.role === "assistant" && last.timestamp === assistantMsg.timestamp) {
-                    next[next.length - 1] = assistant;
-                  } else if (!last || last.role !== "assistant" || last.content !== assistantText) {
-                    next.push(assistant);
-                  }
-                  return next;
-                });
-              }
-              break;
-            }
-            case "block_start":
-              setEvalProgress(prev => {
-                const filtered = prev.filter(p => p.block !== event.block);
-                return [...filtered, { block: event.block, label: event.label || event.block, status: "running" }];
-              });
-              break;
-            case "block_done":
-              setEvalProgress(prev => prev.map(p => p.block === event.block ? { ...p, status: "done" } : p));
-              break;
-            case "score":
-              setEvalProgress(prev => prev.map(p => p.block === event.block ? { ...p, score: event.score } : p));
-              break;
-            case "overall_score": break;
-            case "search_start":
-              // Show risk scan / external search as a progress step
-              if (event.source === "risk-scan" || event.source === "web") {
-                setEvalProgress(prev => {
-                  const filtered = prev.filter(p => p.block !== "search");
-                  return [...filtered, { block: "search", label: `🔍 ${event.query.slice(0, 12)}`, status: "running" }];
-                });
-              }
-              break;
-            case "search_result":
-              setEvalProgress(prev => prev.map(p => p.block === "search" ? { ...p, status: "done", score: event.count } : p));
-              break;
-            case "persist_done":
-              if (event.readBackVerified) {
-                setCompletionInfo({
-                  reportNum: event.reportNum,
-                  company: event.company,
-                  role: event.role,
-                  score: event.score,
-                });
-              } else {
-                setCompletionInfo(null);
-              }
-              if (activeTaskContract?.taskType === "jd_evaluation") {
-                addContractCriteria(["report persisted"]);
-                if (event.readBackVerified) {
-                  addContractCriteria(["saved report read-back verification passes"]);
-                }
-                recordRunStep({
-                  phase: "verifying",
-                  toolName: "evaluate_jd_full",
-                  status: event.readBackVerified ? "succeeded" : "failed",
-                  verifier: {
-                    reportNum: event.reportNum,
-                    readBackVerified: event.readBackVerified === true,
-                    readBackError: event.readBackError || "",
-                    completedCriteria: Array.from(completedContractCriteria),
-                  },
-                });
-              }
-              break;
-            case "done": break;
-          }
+          (escapeError as Error & { userFacing?: boolean }).userFacing = true;
+          throw escapeError;
         }
-
-        // ── Finalize ──
-        if (routeDecision.requiresClarification && activeTaskContract) {
-          addContractCriteria(["clarification question asked"]);
-        }
-        const careerPositioningArtifact = activeTaskContract?.taskType === "career_positioning_guidance"
-          ? buildCareerPositioningArtifact(updated)
-          : null;
-        const careerPositioningFallback = activeTaskContract?.taskType === "career_positioning_guidance"
-          ? buildCareerPositioningFallback({
-              messages: updated,
-              assistantText,
-              toolResult: toolResultInfo,
-            })
-          : null;
-        if (activeTaskContract?.taskType === "career_positioning_guidance" && (assistantText.trim() || careerPositioningFallback)) {
-          addContractCriteria(["next question or guidance response generated"]);
-        }
-        if (activeTaskContract?.taskType === "resume_query" && assistantText.trim()) {
-          addContractCriteria(["answer generated"]);
-        }
-        if (activeTaskContract?.taskType === "interview_coaching" && assistantText.trim()) {
-          if (interviewState?.planSnapshot) addContractCriteria(["JD/resume context bound"]);
-          addContractCriteria(["one question generated", "session state updated without losing context"]);
-        }
-        const contractRunOutcome = activeTaskContract
-          ? resolveTaskContractRunOutcome(activeTaskContract, Array.from(completedContractCriteria), {
-              requiresClarification: routeDecision.requiresClarification,
-              hasAssistantResponse: Boolean(assistantText.trim()),
-              hasUserVisibleArtifact: Boolean(
-                toolResultInfo
-                && projectToolResultForUser({
-                  toolName: toolResultInfo.name,
-                  success: toolResultInfo.success,
-                  uiPayload: toolResultInfo.uiPayload,
-                }).kind !== "silent",
-              ),
-            })
-          : null;
-        const contractGateResult = contractRunOutcome?.gate || null;
-        const contractGateFailed = contractRunOutcome?.status === "failed";
-        if (contractGateFailed && activeTaskContract && contractGateResult) {
-          recordRunStep({
-            phase: "verifying",
-            status: "failed",
-            verifier: {
-              contract: activeTaskContract,
-              completedCriteria: contractGateResult.completedCriteria,
-              unmetCriteria: contractGateResult.unmetCriteria,
-            },
-            error: {
-              message: `Task contract unmet: ${contractGateResult.unmetCriteria.join(", ")}`,
-            },
-          });
-        }
-        const lastToolSafeView = toolResultInfo
-          ? projectToolResultForUser({
-              toolName: toolResultInfo.name,
-              success: toolResultInfo.success,
-              uiPayload: toolResultInfo.uiPayload,
-            })
-          : null;
-        const fallbackAssistantContent = contractRunOutcome?.status === "waiting_user"
-          ? contractRunOutcome.safeMessage || "已生成待确认内容，请确认下一步。"
-          : toolResultInfo && !toolResultInfo.success
-            ? lastToolSafeView?.summary || "操作未能完成，请稍后重试。"
-            : lastToolSafeView?.kind === "silent"
-              ? ""
-              : "操作完成。";
-        let finalAssistantContent = sanitizeUnsupportedResumeSaveClaim(
-          careerPositioningFallback || assistantText || fallbackAssistantContent,
-          resumeSectionSaveSucceeded && !contractGateFailed,
-        );
-        if (contractRunOutcome?.replaceAssistantMessage && contractRunOutcome.safeMessage) {
-          finalAssistantContent = contractRunOutcome.safeMessage;
-        }
-        const shouldAwaitCareerPositioningConfirmation = Boolean(
-          activeTaskContract?.taskType === "career_positioning_guidance" &&
-          careerPositioningArtifact &&
-          !contractGateFailed &&
-          /(定位卡|定位假设|目标方向|阶段性结果)/.test(finalAssistantContent) &&
-          /(确认|认可|保存|写入求职画像)/.test(finalAssistantContent),
-        );
-        const finalRunStatus: AgentRunStatus = contractRunOutcome?.status
-          || (routeDecision.requiresClarification
-            ? "waiting_user"
-            : toolResultInfo && !toolResultInfo.success
-              ? "failed"
-              : "succeeded");
-        streamContentRef.current = finalAssistantContent;
-        setStreamText(finalAssistantContent);
+        setStreaming(false);
         setPhase(null);
-        setExecutingTool(undefined);
-        setEvalProgress([]);
-
-        const hasVisibleToolResult = Boolean(lastToolSafeView && lastToolSafeView.kind !== "silent");
-        if (assistantText.trim() || hasVisibleToolResult || careerPositioningFallback?.trim()) {
-          // Build final assistant
-          const finalAssistant: AgentMessage = {
-            ...assistantMsg,
-            content: finalAssistantContent,
-          };
-
-          setMessages((prev) => {
-            const copy = [...prev];
-            const last = copy[copy.length - 1];
-            if (last && last.role === "assistant") {
-              copy[copy.length - 1] = finalAssistant;
-            } else {
-              copy.push(finalAssistant);
-            }
-            return copy;
-          });
-
-          // Save to current session
-          if (currentSessionId) {
-            const currentSession = await getSession(currentSessionId);
-            if (currentSession) {
-              const currentAgentState = currentSession.agentState || currentSessionForRun?.agentState || {};
-              const fullMessages = [...currentSession.messages];
-              // Tag user message with agent_id
-              const taggedUserMsg = agent.id !== "general"
-                ? { ...userMsg, agent_id: agent.id }
-                : userMsg;
-              if (!hideUserMessage) fullMessages.push(taggedUserMsg);
-              const persistedImageIntakeToolMessage = imageIntakeToolMessage as AgentMessage | null;
-              if (!hideUserMessage && persistedImageIntakeToolMessage) {
-                fullMessages.push({
-                  ...persistedImageIntakeToolMessage,
-                  agent_id: agent.id !== "general" ? agent.id : undefined,
-                });
-              }
-              const persistedToolMessages: AgentMessage[] = toolResultHistory
-                .map((result) => projectToolResultForUser({
-                  toolName: result.name,
-                  success: result.success,
-                  uiPayload: result.uiPayload,
-                }))
-                .filter((view) => view.kind !== "silent")
-                .map((view) => ({
-                  role: "tool" as const,
-                  content: view.summary,
-                  toolName: view.toolName,
-                  toolResult: view,
-                  agent_id: agent.id !== "general" ? agent.id : undefined,
-                  timestamp: new Date().toISOString(),
-                }));
-              fullMessages.push(...persistedToolMessages);
-              const taggedAssistant = agent.id !== "general"
-                ? { ...finalAssistant, agent_id: agent.id }
-                : finalAssistant;
-              fullMessages.push(taggedAssistant);
-
-              let nextInterviewState = hideUserMessage
-                ? updateInterviewStateWithAssistantMessage(currentSession.interviewState, taggedAssistant)
-                : updateInterviewStateWithExchange(
-                    currentSession.interviewState,
-                    taggedUserMsg,
-                    taggedAssistant,
-                  );
-              for (const persistedToolMessage of persistedToolMessages) {
-                nextInterviewState = updateInterviewStateWithToolResult(
-                  nextInterviewState || currentSession.interviewState,
-                  persistedToolMessage,
-                );
-              }
-              if (nextInterviewState && !hideUserMessage && shouldPersistInterviewRecap(taggedUserMsg.content)) {
-                nextInterviewState = persistInterviewRecap(nextInterviewState, taggedAssistant.content);
-              }
-              const isFirstUserMsg = currentSession.messages.filter((m) => m.role === "user").length === 0;
-              const memoryDigest = await generateMemoryDigestWithStatus(
-                fullMessages,
-                currentSession.memoryDigest || currentSessionForRun?.memoryDigest,
-              );
-
-              // Set title from FIRST user message (not current message)
-              const needsTitle =
-                !currentSession.interviewState?.planSnapshot &&
-                (isFirstUserMsg ||
-                  !currentSession.title ||
-                  currentSession.title === "新对话" ||
-                  currentSession.title === "新的对话");
-              let sessionTitle: string | undefined;
-              if (needsTitle) {
-                const firstUserMsg = fullMessages.find((m) => m.role === "user");
-                const titleText = firstUserMsg ? firstUserMsg.content.trim() : content.trim();
-                sessionTitle = makeSessionTitle(titleText);
-              }
-              const shouldClearReferenceResumeSave =
-                (toolResultInfo?.name === "save_reference_resume" && toolResultInfo.success) ||
-                Boolean(pendingReferenceResumeSaveForRun && isPendingReferenceResumeSaveCancelled(content));
-              const nextReferenceResumeSave = shouldClearReferenceResumeSave
-                ? undefined
-                : currentAgentState.referenceResumeSave as ReferenceResumeSaveSessionState | undefined;
-              let nextGuidedSession: GuidedSessionState | undefined =
-                (currentAgentState.guidedSession && typeof currentAgentState.guidedSession === "object"
-                  ? currentAgentState.guidedSession as GuidedSessionState
-                  : undefined);
-              const confirmedSwitchAway =
-                Boolean(activeGuidedSession && routeDecision.taskType !== activeGuidedSession.taskType && isConfirmedGuidedTaskSwitch(content));
-              const cancelledActiveGuidedTask =
-                Boolean(activeGuidedSession && isExplicitGuidedTaskCancel(content) && !confirmedSwitchAway);
-              const completedReferenceResumeSave =
-                taskType === "reference_resume_save" &&
-                toolResultInfo?.name === "save_reference_resume" &&
-                toolResultInfo.success === true;
-              const shouldKeepLockForSwitchConfirmation =
-                Boolean(activeGuidedSession && routeDecision.requiresClarification);
-              const imageDecisionForState = imageIntake ? routeImageIntake(content, imageIntake) : undefined;
-              const shouldKeepImageClarification =
-                Boolean(imageDecisionForState && (imageDecisionForState.route === "clarify_intent" || imageDecisionForState.route === "retry_image"));
-              const imageClarificationTaskType =
-                imageDecisionForState
-                  ? (imageDecisionForState.documentType === "jd"
-                      ? "jd_evaluation"
-                      : imageDecisionForState.documentType === "offer"
-                        ? "offer_evaluation"
-                        : imageDecisionForState.documentType === "resume"
-                          ? routeDecision.taskType || "resume_query"
-                          : taskType)
-                  : taskType;
-              const completedGuidedBusinessTask =
-                (taskType === "jd_evaluation" && toolResultInfo?.name === "evaluate_jd_full" && toolResultInfo.success === true && !contractGateFailed) ||
-                (taskType === "offer_evaluation" && toolResultInfo?.name === "evaluate_offer" && toolResultInfo.success === true && !contractGateFailed) ||
-                (taskType === "resume_edit" && (resumeEditAppliedSucceeded || resumeEditRolledBackSucceeded));
-              if (
-                completedReferenceResumeSave ||
-                completedGuidedBusinessTask ||
-                (cancelledActiveGuidedTask && !shouldKeepLockForSwitchConfirmation) ||
-                confirmedSwitchAway
-              ) {
-                nextGuidedSession = finishGuidedSession(
-                  activeGuidedSession || nextGuidedSession,
-                  completedReferenceResumeSave || completedGuidedBusinessTask ? "completed" : "cancelled",
-                  completedReferenceResumeSave
-                    ? "优秀简历已保存并完成读回校验"
-                    : completedGuidedBusinessTask
-                      ? `${taskLabelZh(taskType)}已完成并通过校验`
-                      : "用户结束或切换了当前引导任务",
-                );
-              } else if (shouldKeepImageClarification && imageClarificationTaskType && isGuidedTaskType(imageClarificationTaskType)) {
-                nextGuidedSession = startOrContinueGuidedSession({
-                  existing: activeGuidedSessionForRun || nextGuidedSession,
-                  taskType: imageClarificationTaskType,
-                  agentId: taskAgentId(imageClarificationTaskType),
-                  allowedTools: routeDecision.allowedTools.slice(0, 20),
-                  phase: imageDecisionForState?.route === "retry_image" ? "image_retry" : "image_intent_clarification",
-                  expectedInput: imageDecisionForState?.clarificationQuestion || imageDecisionForState?.retryHint || "确认图片内容要走哪个求职任务",
-                  summary: `等待图片任务澄清：${taskLabelZh(imageClarificationTaskType)}`,
-                  documentType: imageDecisionForState?.documentType,
-                  imageRoute: imageDecisionForState?.route,
-                  imageQuality: imageDecisionForState?.quality,
-                  imageConfidence: imageDecisionForState?.confidence,
-                  sourceText: imageIntake?.extractedText,
-                  source: "image_clarification",
-                });
-              } else if (shouldAwaitCareerPositioningConfirmation && careerPositioningArtifact) {
-                nextGuidedSession = startOrContinueGuidedSession({
-                  existing: activeGuidedSessionForRun || nextGuidedSession,
-                  taskType: "career_positioning_guidance",
-                  agentId: "profile",
-                  allowedTools: routeDecision.allowedTools.slice(0, 20),
-                  phase: "awaiting_positioning_confirmation",
-                  expectedInput: "回复“确认”保存定位结果到求职画像，或直接说明要调整的地方",
-                  summary: `等待确认定位卡：${careerPositioningArtifact.targetRoles[0]?.role || "自我定位"}`,
-                  source: "career_positioning",
-                  sourceText: JSON.stringify(careerPositioningArtifact),
-                });
-              } else if (taskType && isGuidedTaskType(taskType)) {
-                nextGuidedSession = startOrContinueGuidedSession({
-                  existing: activeGuidedSession || nextGuidedSession,
-                  taskType,
-                  agentId: taskAgentId(taskType),
-                  allowedTools: routeDecision.allowedTools.slice(0, 20),
-                  phase: taskType === "career_positioning_guidance"
-                    ? "career_direction_discovery"
-                    : taskType === "interview_coaching"
-                      ? "one_question_loop"
-                      : taskType === "resume_edit"
-                        ? contractRunOutcome?.status === "waiting_user" ? "awaiting_resume_draft_confirmation" : "resume_optimization"
-                        : "role_category_confirmation",
-                  expectedInput: taskType === "resume_edit" && contractRunOutcome?.status === "waiting_user"
-                    ? "选择一个优化方案并确认创建修改提案，或说明需要继续调整的地方"
-                    : undefined,
-                  summary: taskType === "resume_edit" && contractRunOutcome?.status === "waiting_user"
-                    ? "等待确认简历优化草稿"
-                    : taskLabelZh(taskType),
-                  source: activeGuidedSessionForRun?.source || "agent_state",
-                  sourceText: activeGuidedSessionForRun?.sourceText,
-                });
-              } else if (activeGuidedSessionForRun && !routeDecision.requiresClarification) {
-                nextGuidedSession = activeGuidedSessionForRun;
-              }
-              await updateSession(currentSessionId, {
-                messages: fullMessages,
-                title: sessionTitle,
-                memoryDigest: memoryDigest ?? undefined,
-                interviewState: nextInterviewState,
-                agentState: {
-                  ...currentAgentState,
-                  offer: nextOfferState,
-                  referenceResumeSave: nextReferenceResumeSave,
-                  guidedSession: nextGuidedSession,
-                },
-              });
-              triggerSessionAnomalyReview({
-                sessionId: currentSessionId,
-                messages: fullMessages,
-                activeTask: nextGuidedSession || activeGuidedSession,
-                recentRuns: durableRunId
-                  ? [{ id: durableRunId, task_type: taskType || "", agent_id: agent.id, status: finalRunStatus }]
-                  : [],
-              });
-              // Refresh sessions list
-              setSessions(await listSessions());
-            }
+        setMessages((current) => {
+          const next = [...current];
+          const lastIndex = next.length - 1;
+          if (next[lastIndex]?.role === "assistant" && !next[lastIndex]?.content) {
+            next[lastIndex] = {
+              ...next[lastIndex],
+              content: "这个请求没有创建可执行的 Agent 任务。请换个说法，或到岗位发现工作台直接发起扫描。",
+            };
+          } else if (!next[lastIndex] || next[lastIndex]?.role !== "assistant") {
+            next.push({
+              role: "assistant",
+              content: "这个请求没有创建可执行的 Agent 任务。请换个说法，或到岗位发现工作台直接发起扫描。",
+              timestamp: new Date().toISOString(),
+            });
           }
+          return next;
+        });
+        return;
 
-          // Auto-trigger profile update after each completed agent exchange
-          triggerProfileUpdate({ force: true }).catch(() => {});
-          if (resumeEditAppliedSucceeded) {
-            await refreshLatestRollbackProposal();
-          }
-          if (resumeEditRolledBackSucceeded) {
-            setLatestRollbackProposal(null);
-          }
-
-          // Best-effort legacy persist
-          if (!hideUserMessage) {
-            try { persistMessages([...updated, finalAssistant]); } catch { /* ok */ }
-          }
-          await updateRunStatus(finalRunStatus, {
-            result: {
-              assistantLength: finalAssistantContent.length,
-              lastTool: toolResultInfo
-                ? { name: toolResultInfo.name, success: toolResultInfo.success }
-                : null,
-              contract: contractGateResult
-                ? {
-                    canClaimSuccess: contractGateResult.canClaimSuccess,
-                    completedCriteria: contractGateResult.completedCriteria,
-                    unmetCriteria: contractGateResult.unmetCriteria,
-                  }
-                : null,
-            },
-            error: contractGateFailed && contractGateResult
-              ? { message: `Task contract unmet: ${contractGateResult.unmetCriteria.join(", ")}` }
-              : undefined,
-          });
-        } else {
-          await updateRunStatus("failed", {
-            error: { message: "Agent loop completed without assistant output or tool result." },
-          });
-        }
       } catch (err: unknown) {
         if (err instanceof DOMException && err.name === "AbortError") return;
         const errorMsg = err instanceof Error ? err.message : "未知错误";

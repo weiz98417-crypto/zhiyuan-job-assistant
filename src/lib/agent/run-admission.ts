@@ -12,6 +12,7 @@ import {
   routeAgentTask,
   type AgentTaskRouteDecision,
 } from "@/lib/agent/task-routing";
+import type { ArtifactKind } from "@/lib/agent/task-journey";
 import type { AgentRunSnapshot, DurableRunInput } from "@/lib/agent/runtime/durable-agent-run";
 
 export type AgentRunAdmissionKind =
@@ -26,6 +27,16 @@ export interface AgentRunEntryHints {
   agentId?: string;
   taskType?: string;
   source?: string;
+  /** M1 gap closure: client-side image intake routing result (hint only; server routes authoritatively). */
+  imageDocumentType?: "jd" | "offer" | "resume";
+  /** M1 gap closure: journey artifact refs collected from the current conversation. */
+  journeyArtifacts?: Array<{
+    artifactId: string;
+    kind: string;
+    version: string;
+    hash: string;
+    stale?: boolean;
+  }>;
 }
 
 export interface AgentRunAdmissionInput {
@@ -55,6 +66,10 @@ const ROUTING_HINT_AGENT_IDS = new Set([
   "offer",
   "interview",
   "profile",
+]);
+
+const ARTIFACT_KINDS = new Set<string>([
+  "jd", "resume", "offer", "report", "draft", "profile", "application", "export",
 ]);
 
 const AGENT_TASK_TYPES = new Set<AgentTaskType>([
@@ -92,6 +107,7 @@ export function admitAgentRun(input: AgentRunAdmissionInput): AgentRunAdmissionD
     agentId: normalizedHintAgentId(input.entryHints?.agentId, evidence),
     content,
     activeTask: guidedSessionForActiveRun(input.activeRun),
+    preferredDocumentType: input.entryHints?.imageDocumentType,
   });
   const taskType = route.taskType;
   if (!taskType) {
@@ -109,7 +125,7 @@ export function admitAgentRun(input: AgentRunAdmissionInput): AgentRunAdmissionD
   }
 
   const agentId = taskAgentId(taskType);
-  const contract = createServerOwnedContract(taskType, content, route);
+  const contract = createServerOwnedContract(taskType, content, route, input.entryHints?.journeyArtifacts);
   const primaryGoal = taskLabelZh(taskType);
   const constraints = route.requiresClarification
     ? ["clarification_required"]
@@ -172,8 +188,18 @@ function createServerOwnedContract(
   taskType: AgentTaskType,
   target: string,
   route: AgentTaskRouteDecision,
+  journeyArtifacts?: AgentRunEntryHints["journeyArtifacts"],
 ): AgentTaskContract {
   const requiresClarification = route.requiresClarification;
+  const validArtifacts: Array<{ artifactId: string; kind: ArtifactKind; version: string; hash: string }> = (journeyArtifacts || [])
+    .filter((artifact) => artifact.artifactId && artifact.kind && artifact.version && artifact.hash && !artifact.stale)
+    .filter((artifact) => ARTIFACT_KINDS.has(artifact.kind))
+    .map((artifact) => ({
+      artifactId: artifact.artifactId,
+      kind: artifact.kind as ArtifactKind,
+      version: artifact.version,
+      hash: artifact.hash,
+    }));
   return createAgentTaskContract({
     taskType,
     target,
@@ -188,6 +214,9 @@ function createServerOwnedContract(
       blockedReason: route.blockedReason,
       auditSummary: route.auditSummary,
     },
+    journey: validArtifacts.length > 0
+      ? { graphVersion: "task-journey/v1", artifacts: validArtifacts }
+      : undefined,
   });
 }
 

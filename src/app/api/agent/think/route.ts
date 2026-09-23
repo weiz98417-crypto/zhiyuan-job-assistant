@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { ZHIPU_API_URL, ZHIPU_FALLBACK_MODEL } from "@/lib/zhipu";
+import { attemptModel, getThinkModelChain, type ModelChainEntry } from "@/lib/ai/model-gateway";
 
 const MAX_MESSAGES = 30;
 const MAX_MSG_LEN = 50000;
@@ -24,33 +24,20 @@ function isExpectedStreamStop(error: unknown): boolean {
   return name === "AbortError" || code === "ABORT_ERR" || /aborted|cancelled|canceled/i.test(message);
 }
 
-// Model fallback chain: DeepSeek → Zhipu
-const MODEL_CHAIN = [
-  { model: "deepseek-v4-flash", url: "https://api.deepseek.com/chat/completions", keyEnv: "DEEPSEEK_API_KEY" },
-  { model: ZHIPU_FALLBACK_MODEL, url: ZHIPU_API_URL, keyEnv: "ZHIPU_API_KEY" },
-];
+// Model fallback chain (via ModelGateway): DeepSeek → Zhipu
+const MODEL_CHAIN = getThinkModelChain();
 
 async function fetchWithFallback(
   bodyFn: (model: string) => Record<string, unknown>,
 ): Promise<{ response: Response; modelUsed: string }> {
   let lastError = "";
-  for (const { model, url, keyEnv } of MODEL_CHAIN) {
-    const apiKey = process.env[keyEnv];
-    if (!apiKey) continue; // Skip if no key configured
-
-    const body = bodyFn(model);
-    let response: Response | null = null;
-    for (let attempt = 0; attempt < 2; attempt++) {
-      response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify(body),
-      });
-      if (response.ok) return { response, modelUsed: model };
-      lastError = `${response.status}`;
-      if (response.status !== 429 && response.status !== 503) break;
-      await new Promise((r) => setTimeout(r, 1000));
-    }
+  for (const entry of MODEL_CHAIN) {
+    // Long-generation friendly: the timeout covers connect + headers only in
+    // practice for streams, but keep it well above max_tokens 16384 budgets
+    // so long answers are not cut mid-stream (matches the 180s route norm).
+    const { response, lastError: entryError } = await attemptModel(entry, bodyFn(entry.model), undefined, 180_000);
+    if (response) return { response, modelUsed: entry.model };
+    lastError = entryError;
   }
   throw new Error(`All models failed. Last error: ${lastError}`);
 }

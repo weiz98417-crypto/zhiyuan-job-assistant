@@ -15,6 +15,16 @@ export interface DurableRunCreateCommand {
   entryHints?: {
     agentId?: string;
     source?: string;
+    /** M1 gap closure: image intake routing hint for server-side admission. */
+    imageDocumentType?: "jd" | "offer" | "resume";
+    /** M1 gap closure: journey artifact refs from the current conversation. */
+    journeyArtifacts?: Array<{
+      artifactId: string;
+      kind: string;
+      version: string;
+      hash: string;
+      stale?: boolean;
+    }>;
   };
   taskType?: string;
   agentId?: string;

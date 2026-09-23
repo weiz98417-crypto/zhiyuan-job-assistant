@@ -2,18 +2,14 @@
  * classifyIntentLLM — LLM 驱动的意图分类器
  *
  * 替换原有的正则 intentPatterns 匹配，使用 DeepSeek V4 Flash 做 JSON 分类。
- * 3 秒超时 → 降级到正则 fallback。
+ * 超时 → 降级到正则 fallback。模型调用统一走 ModelGateway。
  */
 
 import type { AgentDefinition } from "./registry/types";
-import { ZHIPU_API_URL, ZHIPU_FALLBACK_MODEL } from "@/lib/zhipu";
+import { complete, getThinkModelChain } from "@/lib/ai/model-gateway";
 
-// ── MODEL_CHAIN（与 server-runner.ts 同步）──
-
-const MODEL_CHAIN = [
-  { model: "deepseek-v4-flash", url: "https://api.deepseek.com/chat/completions", keyEnv: "DEEPSEEK_API_KEY" },
-  { model: ZHIPU_FALLBACK_MODEL, url: ZHIPU_API_URL, keyEnv: "ZHIPU_API_KEY" },
-];
+// ── 分类器短链（flash 优先，zhipu 兜底）──
+const CLASSIFIER_CHAIN = getThinkModelChain();
 
 export interface IntentResult {
   agentId: string;
@@ -76,47 +72,19 @@ ${agentList}
 输出（仅JSON，不要有任何其他字符）：`;
 }
 
-/** 调用 LLM 分类，带 3 秒超时 */
+/** 调用 LLM 分类（每模型 8 秒超时，失败即换下一个，与旧实现一致） */
 async function callClassifier(prompt: string): Promise<string> {
-  for (const { model, url, keyEnv } of MODEL_CHAIN) {
-    const apiKey = process.env[keyEnv];
-    if (!apiKey) continue;
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => { console.log("[classifier] timeout for", model); controller.abort(); }, 8000);
-
-    try {
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify({
-          model,
-          messages: [{ role: "user", content: prompt }],
-          temperature: 0.1,
-          max_tokens: 1024, // enough for reasoning + JSON answer
-          stream: false,
-        }),
-        signal: controller.signal,
-      });
-
-      if (!res.ok) {
-        console.warn("[classifier]", model, "HTTP", res.status);
-        continue;
-      }
-
-      const json = await res.json();
-      const msg = json.choices?.[0]?.message;
-      const text = (msg?.content || msg?.reasoning_content || "").trim();
-      if (text) return text;
-    } catch {
-      // Timeout or network error → try next model
-    } finally {
-      clearTimeout(timeout);
-    }
-  }
-
-  console.warn("[classifier] all models failed for intent classification");
-  throw new Error("All classifier models failed");
+  const result = await complete({
+    messages: [{ role: "user", content: prompt }],
+    temperature: 0.1,
+    maxTokens: 1024, // enough for reasoning + JSON answer
+    stream: false,
+    chain: CLASSIFIER_CHAIN,
+    timeoutMs: 8_000,
+  });
+  const text = result.text;
+  if (!text) throw new Error("Classifier returned empty content");
+  return text;
 }
 
 /** 解析 LLM 输出为 IntentResult */
@@ -210,4 +178,4 @@ ${agentList}
 输出仅 JSON（不要有其他字符）：{"agentId": "...", "reason": "一句话中文"}`;
 }
 
-export { buildClassifierPrompt, detectModelTier, MODEL_CHAIN };
+export { buildClassifierPrompt, detectModelTier, CLASSIFIER_CHAIN };

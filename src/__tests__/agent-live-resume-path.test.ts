@@ -7,15 +7,12 @@ function source(file: string): string {
 }
 
 describe("live resume-edit user path", () => {
-  it("creates the durable run before optional orchestration work", () => {
+  it("creates the durable run and never falls back to a client-side orchestration loop", () => {
     const page = source("src/app/agent/page.tsx");
     const sendMessage = page.slice(page.indexOf("const sendMessage = useCallback"));
 
     expect(sendMessage.indexOf("createDurableAgentRunClient({")).toBeGreaterThan(-1);
-    expect(sendMessage.indexOf("await orchestrate(routedContent")).toBeGreaterThan(-1);
-    expect(sendMessage.indexOf("createDurableAgentRunClient({")).toBeLessThan(
-      sendMessage.indexOf("await orchestrate(routedContent"),
-    );
+    expect(sendMessage).not.toContain("await orchestrate(routedContent");
   });
 
   it("uses thinking-orbs and keeps elapsed time in the activity track", () => {

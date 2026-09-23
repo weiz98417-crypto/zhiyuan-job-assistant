@@ -70,6 +70,8 @@ export async function POST(request: Request) {
         agentId: stringField(body.entryHints?.agentId) || stringField(body.agentId) || undefined,
         taskType: stringField(body.taskType) || undefined,
         source: stringField(body.entryHints?.source) || undefined,
+        imageDocumentType: parseImageDocumentType(body.entryHints?.imageDocumentType),
+        journeyArtifacts: parseJourneyArtifacts(body.entryHints?.journeyArtifacts),
       },
     });
     if (admission.kind === "reject") {
@@ -138,6 +140,36 @@ async function currentUserOrNull() {
 
 function stringField(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+const IMAGE_DOCUMENT_TYPES = new Set(["jd", "offer", "resume"]);
+
+function parseImageDocumentType(value: unknown): "jd" | "offer" | "resume" | undefined {
+  return typeof value === "string" && IMAGE_DOCUMENT_TYPES.has(value)
+    ? value as "jd" | "offer" | "resume"
+    : undefined;
+}
+
+function parseJourneyArtifacts(value: unknown): Array<{
+  artifactId: string;
+  kind: string;
+  version: string;
+  hash: string;
+  stale?: boolean;
+}> | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const artifacts = value
+    .slice(0, 12)
+    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+    .map((item) => ({
+      artifactId: stringField(item.artifactId).slice(0, 120),
+      kind: stringField(item.kind).slice(0, 40),
+      version: stringField(item.version).slice(0, 80),
+      hash: stringField(item.hash).slice(0, 200),
+      ...(item.stale === true ? { stale: true as const } : {}),
+    }))
+    .filter((item) => item.artifactId && item.kind && item.version && item.hash);
+  return artifacts.length > 0 ? artifacts : undefined;
 }
 
 function parseOptionalNumber(value: string | null): number | undefined {

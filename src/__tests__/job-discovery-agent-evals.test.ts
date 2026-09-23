@@ -235,18 +235,10 @@ describe("job discovery agent evals - regression", () => {
     expect(intent?.agentId).toBe("general");
     expect(decision.taskType).toBe("job_search");
     expect(decision.allowedTools).toContain("scan_portals");
-    expect(page.indexOf("let routeDecision = routeAgentTask")).toBeLessThan(page.indexOf("await orchestrate"));
+    // M1 cutover: client-side routing (with scan_portals allowlist) happens
+    // before durable run creation; no browser-side orchestrate call remains.
+    expect(page.indexOf("let routeDecision = routeAgentTask")).toBeLessThan(page.indexOf("createDurableAgentRunClient({"));
     expect(page).toContain("const routeForcedAgentId = forcedAgentId || (routeDecision.taskType ? taskAgentId(routeDecision.taskType) : undefined)");
-  });
-
-  it("R0b job search forces scan_portals instead of allowing free-form chat", () => {
-    const runner = source("src/lib/agent/loop/client-runner.ts");
-
-    expect(runner).toContain('runtimeContext?.taskContract?.taskType === "job_search"');
-    expect(runner).toContain('name: "scan_portals"');
-    expect(runner).toContain("buildForcedJobSearchParams(latestUserText(ctx))");
-    expect(runner).toContain('tc.name === "scan_portals" && toolResult.success');
-    expect(runner).toContain("已生成岗位发现确认卡");
   });
 
   it("R0c job discovery cards satisfy the job_search contract gate", () => {

@@ -67,7 +67,10 @@ export async function getProfileInsightsForUser(principal: ExecutionPrincipal) {
     getAgentReadService().getProfile(principal),
     assembleAgentMemoryContext({
       userId: principal.userId,
-      task: "career_positioning",
+      // fix: "career_positioning" is not an AgentMemoryTask — it resolved to
+      // DEFAULT_DENY and zeroed semantic recall. profile_growth is the mapped
+      // task for career positioning (see task-routing mapAgentTaskToMemoryTask).
+      task: "profile_growth",
       agentId: "profile",
       query: "用户求职偏好 技能 薪资 岗位 行业 底线",
       budgetChars: 1200,

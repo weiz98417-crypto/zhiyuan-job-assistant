@@ -13,7 +13,7 @@ import { executeTool, formatToolResult, getTool } from "@/lib/agent/tools";
 import type { ToolExecutionContext, ToolResult, ErrorCategory } from "@/lib/agent/tools/types";
 import type { AgentDefinition } from "@/lib/agent/registry/types";
 import { enforceToolPolicy, inferCompanyFromMessages, isToolAllowedInMode } from "./tool-policy";
-import { ZHIPU_API_URL, ZHIPU_FALLBACK_MODEL } from "@/lib/zhipu";
+import { ModelGatewayError, getDefaultModelChain, parseToolCallStream, streamChat, type GatewayMessage, type ModelChainEntry } from "@/lib/ai/model-gateway";
 import type { InterviewSessionState } from "@/types";
 import type { InterviewRebindAction } from "@/lib/agent/interview-rebind-policy";
 import { requiresReadBackVerification } from "@/lib/agent/tools/readback-verification";
@@ -93,13 +93,29 @@ function inferDecodeTextFromMessages(messages: DeepSeekMessage[]): string | null
   return null;
 }
 
-/* ── LLM API with fallback ── */
+function latestUserText(messages: DeepSeekMessage[]): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg.role !== "user") continue;
+    const text = msg.content?.trim();
+    if (text) return text;
+  }
+  return "";
+}
 
-const MODEL_CHAIN = [
-  { provider: "deepseek", model: "deepseek-v4-flash", url: "https://api.deepseek.com/chat/completions", keyEnv: "DEEPSEEK_API_KEY" },
-  { provider: "deepseek", model: "deepseek-v4-pro", url: "https://api.deepseek.com/chat/completions", keyEnv: "DEEPSEEK_API_KEY" },
-  { provider: "zhipu", model: ZHIPU_FALLBACK_MODEL, url: ZHIPU_API_URL, keyEnv: "ZHIPU_API_KEY" },
-];
+/* ── LLM API：统一走 ModelGateway ── */
+
+function resolveLoopChain(modelPreference?: string, modelRecovery?: ModelRecoveryPolicy): ModelChainEntry[] {
+  const chain = getDefaultModelChain();
+  const preferredProvider = chain.find((candidate) => candidate.model === modelPreference)?.provider;
+  const eligible = modelRecovery?.switchProvider && preferredProvider
+    ? chain.filter((candidate) => candidate.provider !== preferredProvider)
+    : chain;
+  if (modelPreference && !modelRecovery?.switchProvider) {
+    return [...eligible].sort((a) => (a.model === modelPreference ? -1 : 1));
+  }
+  return eligible;
+}
 
 interface DeepSeekMessage {
   role: string;
@@ -119,6 +135,48 @@ interface NativeToolCall {
   arguments: string;
 }
 
+/* ── Forced tool call builders (ported from the deleted client-runner) ──
+ * Enforced product rule: a resume_edit run must produce a confirmable draft
+ * before it may end. The remaining first-iteration forced calls from the
+ * legacy loop land here as Task Program stages in M3. */
+
+function inferResumeOptimizationSection(text: string): string {
+  if (/个人概述|个人总结|简介|summary/i.test(text)) return "summary";
+  if (/项目经验|项目经历|项目|projects?/i.test(text)) return "projects";
+  if (/技能|技术栈|skills?/i.test(text)) return "skills";
+  if (/教育背景|教育经历|学历|education/i.test(text)) return "education";
+  return "experience";
+}
+
+export function buildRequiredResumeDraftToolCall(input: {
+  contract?: AgentTaskContract | null;
+  userText: string;
+  successfulTools: Set<string>;
+  allowedTools?: string[];
+}): NativeToolCall | null {
+  if (input.contract?.taskType !== "resume_edit") return null;
+  const instruction = input.contract.target.trim() || input.userText.trim();
+  if (!input.successfulTools.has("read_file")) return null;
+  if ([
+    "optimize_resume_section",
+    "create_resume_edit_proposal",
+    "apply_resume_edit_proposal",
+    "save_resume_section",
+  ].some((toolName) => input.successfulTools.has(toolName))) return null;
+  if (input.allowedTools?.length && !input.allowedTools.includes("optimize_resume_section")) return null;
+
+  return {
+    id: `forced-optimize-resume-section-${Date.now()}`,
+    name: "optimize_resume_section",
+    arguments: JSON.stringify({
+      section: inferResumeOptimizationSection(instruction),
+      instruction,
+      operation: "full",
+      effort: 3,
+    }),
+  };
+}
+
 async function callLLM(
   messages: DeepSeekMessage[],
   systemPrompt: string,
@@ -126,99 +184,20 @@ async function callLLM(
   modelPreference?: string,
   modelRecovery?: ModelRecoveryPolicy,
 ): Promise<{ text: string; toolCalls: NativeToolCall[] }> {
-  let lastError = "";
-  const preferredProvider = MODEL_CHAIN.find((candidate) => candidate.model === modelPreference)?.provider;
-  const eligibleModels = modelRecovery?.switchProvider && preferredProvider
-    ? MODEL_CHAIN.filter((candidate) => candidate.provider !== preferredProvider)
-    : MODEL_CHAIN;
-  const chain = modelPreference && !modelRecovery?.switchProvider
-    ? [...eligibleModels].sort((a) => a.model === modelPreference ? -1 : 1)
-    : eligibleModels;
-  for (const { model, url, keyEnv } of chain) {
-    const apiKey = process.env[keyEnv];
-    if (!apiKey) continue;
-
-    const body: Record<string, unknown> = {
-      model,
-      messages: [
-        ...(systemPrompt ? [{ role: "system", content: systemPrompt }] : []),
-        ...messages.map(({ images: _images, ...message }) => message),
-      ],
-      temperature: 0.7,
-      max_tokens: 16384,
-      stream: true,
-    };
-    if (tools?.length) body.tools = tools;
-
-    let response: Response | null = null;
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        response = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-          body: JSON.stringify(body),
-          signal: AbortSignal.timeout(60_000),
-        });
-      } catch (err) {
-        lastError = `${model} network: ${err instanceof Error ? err.message : String(err)}`;
-        break; // Network error → try next model
-      }
-      if (response.ok) break;
-      lastError = `${model} ${response.status}`;
-      if (response.status !== 429 && response.status !== 503) break;
-      await new Promise((r) => setTimeout(r, 1000));
-    }
-
-    if (!response?.ok) continue;
-
-    // Parse streaming response (same logic as before)
-
-  // Parse streaming response
-  const reader = response.body!.getReader();
-  const decoder = new TextDecoder();
-  let fullText = "";
-  const toolCallFragments = new Map<number, { id: string; name: string; arguments: string }>();
-  let buffer = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() || "";
-    for (const line of lines) {
-      if (!line.startsWith("data: ")) continue;
-      const data = line.slice(6);
-      if (data === "[DONE]") continue;
-      try {
-        const parsed = JSON.parse(data);
-        const delta = parsed.choices?.[0]?.delta;
-        if (delta?.content) fullText += delta.content;
-        if (delta?.tool_calls) {
-          for (const tc of delta.tool_calls) {
-            const idx = tc.index ?? 0;
-            if (!toolCallFragments.has(idx)) {
-              toolCallFragments.set(idx, { id: "", name: "", arguments: "" });
-            }
-            const frag = toolCallFragments.get(idx)!;
-            if (tc.id) frag.id = tc.id;
-            if (tc.function?.name) frag.name += tc.function.name;
-            if (tc.function?.arguments) frag.arguments += tc.function.arguments;
-          }
-        }
-      } catch { /* skip */ }
-    }
-  }
-
-  const nativeToolCalls = Array.from(toolCallFragments.values());
-  const dsml = extractDsmlToolCalls(fullText);
+  const result = await streamChat({
+    messages: messages as GatewayMessage[],
+    systemPrompt,
+    tools,
+    stream: true,
+    preferredModel: modelPreference && !modelRecovery?.switchProvider ? modelPreference : undefined,
+    chain: resolveLoopChain(modelPreference, modelRecovery),
+  });
+  const parsed = await parseToolCallStream(result.response);
+  const dsml = extractDsmlToolCalls(parsed.text);
   return {
     text: dsml.text,
-    toolCalls: nativeToolCalls.length > 0 ? nativeToolCalls : dsml.toolCalls,
+    toolCalls: parsed.toolCalls.length > 0 ? parsed.toolCalls : dsml.toolCalls,
   };
-  }
-
-  throw new Error(`All models failed (last: ${lastError})`);
 }
 
 /* ── Agent Loop ── */
@@ -265,6 +244,7 @@ export async function* agentLoopServer(opts: {
   const MAX_AUTO_RETRY = 2;
   const recentCalls: { name: string; params: string; result: string }[] = [];
   const intermediateSteps: { tool: string; params: string; category: ErrorCategory; summary: string }[] = [];
+  const successfulTools = new Set<string>();
   let frozenToolCall = opts.frozenToolCall;
 
   while (state.iteration < config.maxIterations) {
@@ -328,18 +308,35 @@ export async function* agentLoopServer(opts: {
     }
 
     if (toolCalls.length === 0) {
-      state.phase = "responding";
-      yield { type: "phase", phase: "responding" };
-
-      const responseText = thinkText.trim();
-      if (responseText) {
-        yield { type: "text", content: responseText };
+      // Enforced product rule (ADR-0019 deterministic Program, pre-M3 stopgap):
+      // a resume_edit run must produce a confirmable draft before it may end.
+      const requiredDraftCall = buildRequiredResumeDraftToolCall({
+        contract: taskContract,
+        userText: latestUserText(ctx),
+        successfulTools,
+        allowedTools: toolWhitelist,
+      });
+      if (requiredDraftCall) {
+        toolCalls = [requiredDraftCall];
+        ctx.push({
+          role: "user",
+          content: "<!-- system:resume-draft-required -->当前是简历优化任务。已读取简历但尚未生成可确认草稿，请先生成优化方案，再等待用户选择；不要直接结束任务。",
+        });
+        state.contextSize = estimateTokens(ctx);
       } else {
-        yield { type: "text", content: "操作完成。" };
-      }
+        state.phase = "responding";
+        yield { type: "phase", phase: "responding" };
 
-      ctx.push({ role: "assistant", content: thinkText });
-      break;
+        const responseText = thinkText.trim();
+        if (responseText) {
+          yield { type: "text", content: responseText };
+        } else {
+          yield { type: "text", content: "操作完成。" };
+        }
+
+        ctx.push({ role: "assistant", content: thinkText });
+        break;
+      }
     }
 
     // Execute tool calls
@@ -420,6 +417,28 @@ export async function* agentLoopServer(opts: {
               type: "run_directive",
               directive: outcome.runDirective,
               reason: outcome.observation?.userSafeSummary,
+            };
+          }
+          // M1 gap closure: emit the JD persistence completion card for the
+          // browser observer. Legacy synthesized this while draining the tool
+          // stream; the durable path already verified read-back server-side.
+          if (
+            tc.name === "evaluate_jd_full"
+            && toolResult.success
+            && toolResult.data
+            && typeof toolResult.data === "object"
+            && Number((toolResult.data as Record<string, unknown>).reportNum) > 0
+            && (toolResult.data as Record<string, unknown>).reportReadBackVerified !== false
+            && (toolResult.data as Record<string, unknown>).jdReadBackVerified !== false
+          ) {
+            const d = toolResult.data as Record<string, unknown>;
+            yield {
+              type: "persist_done",
+              reportNum: Number(d.reportNum || 0),
+              company: typeof d.company === "string" ? d.company : "",
+              role: typeof d.role === "string" ? d.role : "",
+              score: Number(d.overallScore || 0),
+              readBackVerified: true,
             };
           }
         } else {
@@ -514,6 +533,7 @@ export async function* agentLoopServer(opts: {
       const category = resolveErrorCategory(toolResult);
       if (toolResult.success) {
         state.consecutiveFailures = 0;
+        successfulTools.add(tc.name);
       } else if (category !== "policy_denied") {
         state.consecutiveFailures++;
       }

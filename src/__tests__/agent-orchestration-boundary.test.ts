@@ -39,7 +39,7 @@ describe("Agent orchestration browser boundary", () => {
 
     expect(pageSource).toContain('from "@/lib/agent/orchestrator/client"');
     expect(pageSource).not.toContain('from "@/lib/agent/orchestrator"');
-    expect(pageSource).toContain('from "@/lib/agent/loop/remote-runner"');
+    expect(pageSource).not.toContain('from "@/lib/agent/loop/remote-runner"');
     expect(pageSource).not.toContain('from "@/lib/agent/loop/client-runner"');
     expect(chatSource).not.toContain('from "@/lib/agent/registry"');
   });
@@ -84,42 +84,5 @@ describe("Agent orchestration browser boundary", () => {
     }));
 
     expect(response.status).toBe(401);
-  });
-
-  it("streams fallback loop events from the server without loading tool handlers", async () => {
-    const encoder = new TextEncoder();
-    const stream = new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.enqueue(encoder.encode('data: {"type":"phase","phase":"understanding"}\n'));
-        controller.enqueue(encoder.encode('\ndata: {"type":"text","content":"继续执行"}\n\n'));
-        controller.enqueue(encoder.encode('data: {"type":"done"}\n\n'));
-        controller.close();
-      },
-    });
-    const fetchMock = vi.fn(async () => new Response(stream, {
-      status: 200,
-      headers: { "Content-Type": "text/event-stream" },
-    }));
-    vi.stubGlobal("fetch", fetchMock);
-    const { agentLoopRemote } = await import("@/lib/agent/loop/remote-runner");
-    const events = [];
-
-    for await (const event of agentLoopRemote(
-      "system",
-      [{ role: "user", content: "继续" }],
-      undefined,
-      { agentId: "general" },
-    )) {
-      events.push(event);
-    }
-
-    expect(events).toEqual([
-      { type: "phase", phase: "understanding" },
-      { type: "text", content: "继续执行" },
-      { type: "done" },
-    ]);
-    expect(fetchMock).toHaveBeenCalledWith("/api/agent/run", expect.objectContaining({
-      method: "POST",
-    }));
   });
 });
