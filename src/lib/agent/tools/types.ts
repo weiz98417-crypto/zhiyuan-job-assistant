@@ -141,6 +141,24 @@ export interface ToolDefinition<TParams = Record<string, unknown>> {
   /** Durable execution contract. Missing metadata keeps the tool out of model exposure. */
   capability?: ToolCapability;
   presentation?: ToolPresentation;
+  /**
+   * M3 loop protocol: the tool declares its own aftermath so the loop stays
+   * generic. Missing outcome keeps legacy loop behavior.
+   */
+  outcome?: ToolOutcome;
+}
+
+export interface ToolOutcome {
+  /** A successful call ends the run: the loop responds with llmSummary and stops. */
+  terminal?: boolean;
+  /** Text the loop replies with on terminal success (defaults to llmSummary/formatted). */
+  terminalResponse?: (result: ToolResult) => string | undefined;
+  /** A successful call pauses the run waiting for the next user turn. */
+  waitsForUser?: (result: ToolResult) => boolean;
+  /** Don't feed tool payload back into model context (download-style confirmations). */
+  suppressLlmContext?: boolean;
+  /** Per-tool instruction appended to the model context after the result. */
+  followup?: string;
 }
 
 // Re-export AgentToolParam for convenience (maps to ToolParameter)

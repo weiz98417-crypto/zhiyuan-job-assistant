@@ -99,6 +99,7 @@ function formatResult(result: ToolResult): string {
 
 export const downloadReportPDF: ToolDefinition = {
   name: "download_report_pdf",
+  outcome: { suppressLlmContext: true },
   description: "将评估报告导出为 PDF 下载文件，并在返回成功前校验 PDF 字节大小和 SHA-256。",
   parameters: {
     reportNum: { type: "number", required: true, description: "报告编号" },

@@ -21,6 +21,16 @@ type ScanPortalsParams = JobDiscoveryRunInput & {
 
 export const scanPortals: ToolDefinition<ScanPortalsParams> = {
   name: "scan_portals",
+  outcome: {
+    terminal: true,
+    terminalResponse: (result) => {
+      const uiType = result.uiPayload?.type;
+      if (uiType === "job_discovery_confirmation") return "已生成岗位发现确认卡，请确认条件后开始扫描。";
+      if (uiType === "job_discovery_run") return "岗位发现任务已开始，进度卡会展示当前扫描状态。";
+      if (uiType === "job_discovery_batch" || uiType === "job_discovery_detail") return "已返回一批岗位机会，详情可在卡片中打开。";
+      return result.llmSummary || "岗位发现已更新。";
+    },
+  },
   description: "通过岗位发现系统创建或恢复真实扫描任务，并返回结构化岗位发现状态。",
   category: "action",
   matchHints: ["岗位发现", "开始岗位发现", "帮我找岗位", "搜职位", "扫一批 JD", "换一批"],

@@ -17,7 +17,8 @@ import { ModelGatewayError, getDefaultModelChain, parseToolCallStream, streamCha
 import type { InterviewSessionState } from "@/types";
 import type { InterviewRebindAction } from "@/lib/agent/interview-rebind-policy";
 import { requiresReadBackVerification } from "@/lib/agent/tools/readback-verification";
-import type { AgentTaskContract } from "@/lib/agent/task-contract";
+import { inferCompletedCriteriaFromToolResult, type AgentTaskContract } from "@/lib/agent/task-contract";
+import { createTaskProgramStopGuard } from "@/lib/agent/task-program";
 import { enforceToolGovernance } from "@/lib/agent/tool-governance";
 import { executeGovernedRuntimeTool } from "@/lib/agent/runtime/governed-tool-runtime";
 import { extractDsmlToolCalls } from "@/lib/agent/loop/dsml-tool-calls";
@@ -245,6 +246,8 @@ export async function* agentLoopServer(opts: {
   const recentCalls: { name: string; params: string; result: string }[] = [];
   const intermediateSteps: { tool: string; params: string; category: ErrorCategory; summary: string }[] = [];
   const successfulTools = new Set<string>();
+  const completedProgramCriteria = new Set<string>();
+  let stopGuardNudged = false;
   let frozenToolCall = opts.frozenToolCall;
 
   while (state.iteration < config.maxIterations) {
@@ -308,8 +311,29 @@ export async function* agentLoopServer(opts: {
     }
 
     if (toolCalls.length === 0) {
-      // Enforced product rule (ADR-0019 deterministic Program, pre-M3 stopgap):
-      // a resume_edit run must produce a confirmable draft before it may end.
+      // M3 stop-guard (ADR-0019): a deterministic Program may not end while any
+      // success criterion is unmet. One nudge, then an explicit incomplete
+      // response — the model never gets to claim success past this gate.
+      const stopGuard = taskContract ? createTaskProgramStopGuard(taskContract.taskType) : null;
+      const missingCriteria = stopGuard
+        ? stopGuard.missingCriteria(completedProgramCriteria)
+        : [];
+      if (stopGuard && missingCriteria.length > 0 && !stopGuardNudged) {
+        stopGuardNudged = true;
+        ctx.push({ role: "user", content: stopGuard.nudgeMessage(missingCriteria) });
+        state.contextSize = estimateTokens(ctx);
+        continue;
+      }
+      if (stopGuard && missingCriteria.length > 0) {
+        state.phase = "responding";
+        yield { type: "phase", phase: "responding" };
+        yield { type: "text", content: stopGuard.incompleteResponse(missingCriteria) };
+        ctx.push({ role: "assistant", content: stopGuard.incompleteResponse(missingCriteria) });
+        break;
+      }
+
+      // Enforced product rule: a resume_edit run must produce a confirmable
+      // draft before it may end.
       const requiredDraftCall = buildRequiredResumeDraftToolCall({
         contract: taskContract,
         userText: latestUserText(ctx),
@@ -486,15 +510,21 @@ export async function* agentLoopServer(opts: {
         }
       }
 
+      // M3 loop protocol: outcome-driven wait_user (falls back to the legacy
+      // name check for tools that have not declared an outcome).
+      const outcomeMeta = getTool(tc.name)?.outcome;
+      const waitsForUser = outcomeMeta?.waitsForUser
+        ? outcomeMeta.waitsForUser(toolResult) === true
+        : shouldWaitForUserAfterToolResult(tc.name, toolResult.data);
       if (
         toolResult.success
-        && shouldWaitForUserAfterToolResult(tc.name, toolResult.data)
+        && waitsForUser
       ) {
         durableRunDirective = "wait_user";
         yield {
           type: "run_directive",
           directive: "wait_user",
-          reason: tc.name === "mine_profile" ? "等待用户回答当前画像问题" : "等待用户回答当前面试题",
+          reason: "等待用户回答当前问题",
         };
       }
 
@@ -534,8 +564,35 @@ export async function* agentLoopServer(opts: {
       if (toolResult.success) {
         state.consecutiveFailures = 0;
         successfulTools.add(tc.name);
+        if (taskContract) {
+          for (const criterion of inferCompletedCriteriaFromToolResult(taskContract, {
+            toolName: tc.name,
+            toolSuccess: true,
+            data: toolResult.data,
+            uiPayload: toolResult.uiPayload,
+            verifiedAction: toolResult.verifiedAction,
+            readBackVerified: toolResult.uiPayload?.readBackVerified === true,
+          })) {
+            completedProgramCriteria.add(criterion);
+          }
+        }
       } else if (category !== "policy_denied") {
         state.consecutiveFailures++;
+      }
+
+      // M3 loop protocol: declared-terminal tools end the run with their own
+      // response instead of looping back through the model.
+      if (toolResult.success && outcomeMeta?.terminal) {
+        state.phase = "responding";
+        yield { type: "phase", phase: "responding" };
+        const response = outcomeMeta.terminalResponse?.(toolResult)
+          || toolResult.llmSummary
+          || formatted
+          || "操作完成。";
+        yield { type: "text", content: response };
+        ctx.push({ role: "assistant", content: response });
+        yield { type: "done" };
+        return;
       }
 
       // ── Error category dispatch ──
@@ -580,20 +637,16 @@ export async function* agentLoopServer(opts: {
             : quality === "irrelevant" ? "\n<!-- ⚠️ 搜索结果不相关（可能是同名文化作品等），请换更精确的关键词重新搜索。不要直接回复用户。 -->"
             : "");
 
-      if (tc.name === "export_file" || tc.name === "download_report_pdf") {
+      if (outcomeMeta?.suppressLlmContext) {
         const d = (toolResult.data as { filename?: string }) || {};
         ctx.push({ role: "user", content: `<!-- tool:${tc.name} result -->已导出文件: ${d.filename || "download"}。用户设备已自动下载。` });
       } else {
         const llmText = getLLMContext(toolResult, tc.name);
+        const followup = outcomeMeta?.followup
+          || "【请基于以上工具结果简洁回答。不要扩写成长报告；缺关键信息时只问缺的那一项。】";
         ctx.push({
           role: "user",
-          content: `<!-- tool:${tc.name} result -->\n${llmText}${hint}\n\n${tc.name === "get_report_detail"
-            ? "【聊天框只输出一句摘要和提示用户点击报告卡片。禁止输出完整 A-G 报告正文。】"
-            : tc.name === "read_file" || tc.name === "get_profile"
-              ? "【只说明已读取简历/画像，并继续完成用户原任务。不要把简历全文粘贴到聊天框。】"
-              : tc.name === "update_report_metadata"
-                ? "【只确认已更新报告信息。不要重新评估，不要输出完整报告。】"
-                : "【请基于以上工具结果简洁回答。不要扩写成长报告；缺关键信息时只问缺的那一项。】"}`,
+          content: `<!-- tool:${tc.name} result -->\n${llmText}${hint}\n\n${followup}`,
         });
       }
       state.contextSize = estimateTokens(ctx);

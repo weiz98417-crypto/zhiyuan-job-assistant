@@ -270,6 +270,13 @@ function scoreFormat(result: ToolResult): string {
 
 export const generateInterviewQuestions: ToolDefinition = {
   name: "generate_interview_questions",
+  outcome: {
+    waitsForUser: (result) => {
+      const data = result.data && typeof result.data === "object" ? result.data as Record<string, unknown> : {};
+      return Array.isArray(data.questions) && data.questions.length > 0;
+    },
+    followup: "【面试题已由 UI 卡片展示。你只允许输出一句话：请开始回答这一题。不要复述题目，不要输出题型/考察点/JD关联/简历关联，不要说已读取文件。】",
+  },
   description: "根据 JD、简历和面试模式生成下一道面试题。真实模拟必须一次只生成/展示 1 道题，等待用户回答后再继续。",
   parameters: {
     jdText: { type: "string", required: false, description: "JD 正文，有则基于 JD 出题。" },

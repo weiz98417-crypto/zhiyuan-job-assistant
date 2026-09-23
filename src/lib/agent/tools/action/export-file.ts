@@ -235,6 +235,7 @@ function formatResult(result: ToolResult): string {
 
 export const exportFile: ToolDefinition = {
   name: "export_file",
+  outcome: { suppressLlmContext: true },
   description: "导出内容为文件并触发浏览器下载。支持 md / html / txt 格式。",
   parameters: {
     content: { type: "string", required: true, description: "文件内容" },

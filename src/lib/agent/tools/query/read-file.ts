@@ -296,6 +296,9 @@ function formatResult(result: ToolResult): string {
 
 export const readFile: ToolDefinition = {
   name: "read_file",
+  outcome: {
+    followup: "【不要说明读取过程，直接继续完成用户原任务。不要说“已读取/我先读取/加载完毕/让我再读”。不要把简历全文粘贴到聊天框。】",
+  },
   description:
     "读取项目文件或数据资源。路由: 含'参考简历'→参考简历库; '我的简历'→完整简历文本;" +
     " 文件路径→服务端读取。支持 offset/limit 续读和 section 定向读。",

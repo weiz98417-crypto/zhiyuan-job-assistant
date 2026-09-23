@@ -247,6 +247,7 @@ function formatResult(result: ToolResult): string {
 
 export const saveResumeSection: ToolDefinition = {
   name: "save_resume_section",
+  outcome: { terminal: true },
   description: "兼容旧流程的安全保存入口：不会直接覆盖 CV，只会创建待审批简历修改提案；用户确认后必须通过 apply_resume_edit_proposal 写入。",
   parameters: {
     section: { type: "string", required: true, description: "板块名称：工作经历/项目经验/技能/个人概述/教育背景" },

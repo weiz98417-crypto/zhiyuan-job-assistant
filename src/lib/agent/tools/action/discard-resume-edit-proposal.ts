@@ -148,6 +148,7 @@ function formatResult(result: ToolResult): string {
 
 export const discardResumeEditProposal: ToolDefinition = {
   name: "discard_resume_edit_proposal",
+  outcome: { terminal: true },
   description: "在用户拒绝某个简历修改提案时，将 pending 提案标记为废弃，并通过回读确认 CV 不会被改动。",
   parameters: {
     proposalId: { type: "string", required: true, description: "要废弃的简历修改提案 id，例如 rep_xxx" },

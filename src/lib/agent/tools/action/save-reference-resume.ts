@@ -228,6 +228,10 @@ function formatResult(result: ToolResult): string {
 
 export const saveReferenceResume: ToolDefinition = {
   name: "save_reference_resume",
+  outcome: {
+    terminal: true,
+    terminalResponse: (result) => result.llmSummary || "优秀简历已保存。",
+  },
   description: "将用户上传、粘贴或识别出的优秀简历保存到参考简历库。保存前必须确认岗位方向；可选择 private 私有或 team 局域网共享。",
   matchHints: [
     "保存优秀简历",

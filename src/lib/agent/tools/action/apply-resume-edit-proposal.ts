@@ -179,6 +179,7 @@ function formatResult(result: ToolResult): string {
 
 export const applyResumeEditProposal: ToolDefinition = {
   name: "apply_resume_edit_proposal",
+  outcome: { terminal: true },
   description: "在用户明确批准某个简历修改提案后，将该提案事务性写入 CV，并做回读校验。不要用它创建新内容，只能应用已有 proposalId。",
   parameters: {
     proposalId: { type: "string", required: true, description: "要应用的简历修改提案 id，例如 rep_xxx" },

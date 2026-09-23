@@ -148,6 +148,9 @@ function formatResult(result: ToolResult): string {
 export const getProfile: ToolDefinition = {
   toolCtxCap: 800,
   name: "get_profile",
+  outcome: {
+    followup: "【不要说明读取过程，直接继续完成用户原任务。不要说“已读取/我先读取/加载完毕/让我再读”。不要把简历全文粘贴到聊天框。】",
+  },
   description: "获取用户完整求职画像和简历全文。支持 section 参数按需只获取特定板块（summary/experience/projects/education/skills）。",
   parameters: {
     section: { type: "string", required: false, description: "只获取指定板块: summary/experience/projects/education/skills。不传则获取全部摘要" },

@@ -106,7 +106,10 @@ function formatResult(result: ToolResult): string {
 }
 
 export const getReportDetail: ToolDefinition = {
-  name: "get_report_detail", description: "获取评估报告详情或列出所有报告。list=true 时不需 reportNum。",
+  name: "get_report_detail",
+  outcome: {
+    followup: "【聊天框只输出一句摘要和提示用户点击报告卡片。禁止输出完整 A-G 报告正文。】",
+  }, description: "获取评估报告详情或列出所有报告。list=true 时不需 reportNum。",
   parameters: {
     reportNum: { type: "number", required: false, description: "报告编号（list=true 时不需要）" },
     list: { type: "boolean", required: false, description: "true=列出最近 20 份报告摘要（发现模式）" },

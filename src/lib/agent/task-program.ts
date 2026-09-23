@@ -49,6 +49,60 @@ export function bindTaskProgram(taskType: AgentTaskType): TaskProgramBinding {
   };
 }
 
+/* ── M3: runtime stop-guard ──
+ * A deterministic program may not end while any success criterion is unmet.
+ * The loop asks the tracker before responding; one program directive nudges
+ * the model toward the missing facts, and a second unmet stop is downgraded
+ * to an explicit task-incomplete response instead of a success claim. */
+
+export interface TaskProgramStopGuard {
+  missingCriteria(completedCriteria: Iterable<string>): string[];
+  nudgeMessage(missing: string[]): string;
+  incompleteResponse(missing: string[]): string;
+}
+
+export function createTaskProgramStopGuard(taskType: AgentTaskType): TaskProgramStopGuard | null {
+  const taskProgram = TASK_PROGRAM_REGISTRY[taskType];
+  if (!taskProgram || taskProgram.executionDepth !== "deterministic") return null;
+  const criteria = taskProgram.successCriteria;
+  const label = TASK_LABELS[taskType];
+  return {
+    missingCriteria(completedCriteria) {
+      const completed = new Set(completedCriteria);
+      return criteria.filter((criterion) => !completed.has(criterion));
+    },
+    nudgeMessage(missing) {
+      return [
+        "<!-- system:program-stop-guard -->",
+        `当前「${label}」是确定性任务，以下完成判据还没有满足，不能直接结束：`,
+        ...missing.map((criterion) => `- ${criterion}`),
+        "请继续执行能推进这些判据的下一个动作（读取材料 / 发起确认或批准 / 执行工具 / 校验读回）。不要向用户宣称任务已完成。",
+      ].join("\n");
+    },
+    incompleteResponse(missing) {
+      return [
+        `「${label}」还没有完成，我先不把它标记为成功。缺少的部分：`,
+        ...missing.map((criterion) => `- ${criterion}`),
+        "请补充材料或确认后继续；已产生的中间结果不会丢。",
+      ].join("\n");
+    },
+  };
+}
+
+const TASK_LABELS: Record<AgentTaskType, string> = {
+  general_chat: "通用咨询",
+  career_positioning_guidance: "职业定位",
+  resume_query: "简历查询",
+  resume_edit: "简历优化",
+  jd_evaluation: "JD 评估",
+  offer_evaluation: "Offer 评估",
+  interview_coaching: "模拟面试",
+  profile_update: "画像更新",
+  reference_resume_save: "优秀简历沉淀",
+  file_export: "文件导出",
+  job_search: "岗位发现",
+};
+
 function program(
   id: AgentTaskType,
   executionDepth: TaskProgramExecutionDepth,

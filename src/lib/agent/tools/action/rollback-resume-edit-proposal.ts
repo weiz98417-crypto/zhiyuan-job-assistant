@@ -177,6 +177,7 @@ function formatResult(result: ToolResult): string {
 
 export const rollbackResumeEditProposal: ToolDefinition = {
   name: "rollback_resume_edit_proposal",
+  outcome: { terminal: true },
   description: "在用户要求撤销已应用的简历修改时，将该 proposal 的原始内容事务性恢复到 CV，并做回读校验。仅能回滚 applied 提案。",
   parameters: {
     proposalId: { type: "string", required: true, description: "要回滚的已应用简历修改提案 id，例如 rep_xxx" },

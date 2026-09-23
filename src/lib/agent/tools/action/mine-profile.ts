@@ -189,6 +189,12 @@ function formatResult(result: ToolResult): string {
 
 export const mineProfile: ToolDefinition = {
   name: "mine_profile",
+  outcome: {
+    waitsForUser: (result) => {
+      const data = result.data && typeof result.data === "object" ? result.data as Record<string, unknown> : {};
+      return data.done !== true && typeof data.prompt === "string" && data.prompt.trim().length > 0;
+    },
+  },
   description: "启动或推进求职画像挖掘 SOP 流程。action=start 开始/恢复，action=answer 提交回答，action=stage_prompt 获取当前阶段引导语，action=complete 触发画像写入，action=reset 重置",
   parameters: {
     action: { type: "string", required: true, description: "操作: start（开始/继续），answer（提交当前阶段回答），stage_prompt（获取当前阶段引导语），complete（完成并写入画像），reset（重置）" },

@@ -286,6 +286,9 @@ function formatResult(result: ToolResult): string {
 
 export const updateReportMetadata: ToolDefinition = {
   name: "update_report_metadata",
+  outcome: {
+    followup: "【只确认已更新报告信息。不要重新评估，不要输出完整报告。】",
+  },
   description: "修改已保存评估报告的基础信息，例如公司、岗位、类型、合法性备注或关键词。用于补充/更正报告信息，不会重新评估、重新打分或消耗大模型评估额度。",
   matchHints: ["修改报告", "更正报告", "补充公司", "公司是", "改成", "不要重新评估"],
   parameters: {
