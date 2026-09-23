@@ -9,7 +9,8 @@
 import type { LoopConfig, LoopState, SSEEvent, AgentPhase, ResultQuality, ModelRecoveryPolicy } from "./types";
 import { DEFAULT_LOOP_CONFIG } from "./types";
 import { isGarbledText } from "./text-quality";
-import { executeTool, formatToolResult, getTool } from "@/lib/agent/tools";
+import { executeTool, formatToolResult, getTool, registry } from "@/lib/agent/tools";
+import { getAgentById } from "@/lib/agent/registry";
 import type { ToolExecutionContext, ToolResult, ErrorCategory } from "@/lib/agent/tools/types";
 import type { AgentDefinition } from "@/lib/agent/registry/types";
 import { enforceToolPolicy, inferCompanyFromMessages, isToolAllowedInMode } from "./tool-policy";
@@ -225,9 +226,13 @@ export async function* agentLoopServer(opts: {
   modelRecovery?: ModelRecoveryPolicy;
   frozenToolCall?: { name: string; args: Record<string, unknown> };
 }): AsyncGenerator<SSEEvent> {
-  const { systemPrompt, messages, config = DEFAULT_LOOP_CONFIG, tools, agent, signal, interviewState, interviewRebindAction, taskContract, executionContext, modelRecovery } = opts;
-  const modelPreference = agent?.model;
-  const toolWhitelist = agent?.toolNames?.length ? agent.toolNames : undefined;
+  const { systemPrompt, messages, config = DEFAULT_LOOP_CONFIG, signal, interviewState, interviewRebindAction, taskContract, executionContext, modelRecovery } = opts;
+  // M4: agent identity is mutable — transfer_to_agent hands responsibility to
+  // another specialist mid-run (handoff swaps prompt context and tool table).
+  let agent = opts.agent;
+  let tools = opts.tools;
+  let modelPreference = agent?.model;
+  let toolWhitelist = agent?.toolNames?.length ? agent.toolNames : undefined;
   const state: LoopState = {
     iteration: 0,
     consecutiveFailures: 0,
@@ -593,6 +598,33 @@ export async function* agentLoopServer(opts: {
         ctx.push({ role: "assistant", content: response });
         yield { type: "done" };
         return;
+      }
+
+      // M4: governed handoff — a successful transfer_to_agent swaps the
+      // responsible agent (prompt soul + tool table) within the same run.
+      const handoff = (toolResult.success
+        && toolResult.data
+        && typeof toolResult.data === "object"
+        && (toolResult.data as Record<string, unknown>).handoff) as
+        | { agentId: string; toTask?: string; reason?: string }
+        | undefined;
+      if (handoff) {
+        const nextAgent = getAgentById(handoff.agentId);
+        if (nextAgent) {
+          agent = nextAgent;
+          modelPreference = agent.model;
+          const nextToolNames = agent.toolNames?.length ? agent.toolNames : agent.tools.map((t) => t.name);
+          toolWhitelist = nextToolNames;
+          tools = registry.toOpenAITools(nextToolNames, executionContext?.workerId !== undefined)
+            .filter((t) => nextToolNames.includes(t.function.name));
+          yield { type: "agent_switch", agentId: agent.id, agentName: agent.name };
+          ctx.push({
+            role: "user",
+            content: `<!-- system:handoff -->主责已交接给 ${agent.name}。交接原因：${handoff.reason || ""}。请以当前主责身份继续完成用户目标。`,
+          });
+          state.contextSize = estimateTokens(ctx);
+          continue;
+        }
       }
 
       // ── Error category dispatch ──

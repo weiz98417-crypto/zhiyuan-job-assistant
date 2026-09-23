@@ -47,6 +47,8 @@ import { downloadReportPDF } from "./action/download-report-pdf";
 import { updateReportMetadata } from "./action/update-report-metadata";
 import { trackApplicationTool } from "./action/track-application";
 import { updateApplicationStatusTool } from "./action/update-application-status";
+import { transferToAgent } from "./action/transfer-to-agent";
+import { delegateResearch } from "./action/delegate-research";
 
 // Interview tools
 import { generateInterviewQuestions, scoreInterviewAnswer } from "./interview-tools";
@@ -110,6 +112,8 @@ registry.register(downloadReportPDF);
 registry.register(updateReportMetadata);
 registry.register(trackApplicationTool);
 registry.register(updateApplicationStatusTool);
+registry.register(transferToAgent);
+registry.register(delegateResearch);
 
 // Interview tools
 registry.register(generateInterviewQuestions);

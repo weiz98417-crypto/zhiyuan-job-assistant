@@ -126,6 +126,9 @@ export async function POST(request: Request) {
         input,
         contract: admission.contract,
         runtimeMode: assignment.mode === "worker_readonly" ? "worker_readonly" : "worker_all",
+        // M4: child runs attribute through parent_run_id (depth/limits enforced
+        // by the stores). The HTTP surface is the only door that was missing.
+        ...(parseParentRunId(body.parentRunId) ? { parentRunId: parseParentRunId(body.parentRunId) } : {}),
       },
     );
     return NextResponse.json(
@@ -155,6 +158,11 @@ function parseImageDocumentType(value: unknown): "jd" | "offer" | "resume" | und
   return typeof value === "string" && IMAGE_DOCUMENT_TYPES.has(value)
     ? value as "jd" | "offer" | "resume"
     : undefined;
+}
+
+function parseParentRunId(value: unknown): string | undefined {
+  const id = typeof value === "string" ? value.trim() : "";
+  return id ? id.slice(0, 80) : undefined;
 }
 
 function parseJourneyArtifacts(value: unknown): Array<{

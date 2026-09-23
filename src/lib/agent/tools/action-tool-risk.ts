@@ -22,6 +22,20 @@ export interface ActionToolRiskRecord {
 
 export const ACTION_TOOL_RISK_AUDIT: ActionToolRiskRecord[] = [
   {
+    toolName: "transfer_to_agent",
+    risk: "read-only",
+    targets: [],
+    summary: "Transfers run responsibility along a legal task-journey edge; no data writes.",
+    requiresVerifiedWrite: false,
+  },
+  {
+    toolName: "delegate_research",
+    risk: "read-only",
+    targets: [],
+    summary: "Inline read-only research subtask with an intersected allowlist; never writes user data.",
+    requiresVerifiedWrite: false,
+  },
+  {
     toolName: "analyze_jd_risks",
     risk: "read-only",
     targets: [],

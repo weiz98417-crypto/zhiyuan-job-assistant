@@ -56,6 +56,8 @@ const SERVER_EXECUTION_TOOLS = new Set([
   "search_place",
   "get_directions",
   "search_jobs",
+  "transfer_to_agent",
+  "delegate_research",
 ]);
 
 const WORKER_BACKGROUND_TOOLS = new Set([
