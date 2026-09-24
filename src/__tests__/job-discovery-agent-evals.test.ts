@@ -235,10 +235,10 @@ describe("job discovery agent evals - regression", () => {
     expect(intent?.agentId).toBe("general");
     expect(decision.taskType).toBe("job_search");
     expect(decision.allowedTools).toContain("scan_portals");
-    // M1 cutover: client-side routing (with scan_portals allowlist) happens
-    // before durable run creation; no browser-side orchestrate call remains.
-    expect(page.indexOf("let routeDecision = routeAgentTask")).toBeLessThan(page.indexOf("const created = earlyCreatedRun || await createDurableAgentRunClient({"));
-    expect(page).toContain("const routeForcedAgentId = forcedAgentId || (routeDecision.taskType ? taskAgentId(routeDecision.taskType) : undefined)");
+    // 0.11.0-A: the browser no longer routes — the turn is submitted with
+    // hints and the worker's envelope decides the task.
+    expect(page).not.toContain("routeAgentTask({");
+    expect(page).toContain("const created = earlyCreatedRun || await createDurableAgentRunClient({");
   });
 
   it("R0c job discovery cards satisfy the job_search contract gate", () => {

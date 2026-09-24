@@ -30,6 +30,7 @@ import {
 } from "@/lib/agent/task-contract";
 import { buildCareerPositioningFallback } from "@/lib/agent/career-positioning-result";
 import { buildServerRunContextDirectives } from "@/lib/agent/runtime/server-run-context-directives";
+import { buildContractForTask } from "@/lib/agent/run-admission";
 import type { VerifiedActionResult } from "@/lib/agent/verified-action";
 import { projectDurableUiEvent } from "@/lib/agent/runtime/run-event-projection";
 import { inferJDResumeMatchingDirective } from "@/lib/agent/jd-resume-scope-intent";
@@ -276,7 +277,55 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
       data?: unknown;
     } | null = null;
     const completedCriteria = new Set<string>();
-    const contract = asTaskContract(rebuiltContext.contract);
+    let contract = asTaskContract(rebuiltContext.contract);
+    // 0.11.0-A: the intent envelope is the first worker step. It may redirect
+    // the run to the real task (in-run handoff via agent_switch) or turn an
+    // ambiguous turn into a clarification contract; both are recorded as
+    // events so the UI and the audit trail see the same decision.
+    let envelopeAgentId: string | undefined;
+    try {
+      const { resolveIntentEnvelope } = await import("@/lib/agent/intent-envelope");
+      const { taskAgentId: envelopeTaskAgentId } = await import("@/lib/agent/guided-session-state");
+      const envelope = await resolveIntentEnvelope({
+        content: latestInput,
+        agentId: input.run.agentId || undefined,
+      }).catch(() => undefined);
+      if (envelope) {
+        await this.options.runtime.recordEvent({
+          runId: input.run.id,
+          workerId: input.run.ownerId!,
+          fencingToken: input.run.fencingToken,
+          eventType: "run.ui_event",
+          payload: {
+            event: {
+              type: "intent",
+              agentId: envelope.envelope.primaryTask ? envelopeTaskAgentId(envelope.envelope.primaryTask) : undefined,
+              audit: envelope.envelope.audit.join("|"),
+              clarify: envelope.kind === "clarify",
+            },
+          },
+        } as never);
+        if (envelope.kind === "clarify" || !envelope.envelope.primaryTask) {
+          contract = {
+            ...buildContractForTask("general_chat", latestInput),
+            successCriteria: ["clarification question asked"],
+          };
+        } else if (
+          // Only a confident source may redirect the contract; the regex
+          // fallback records its guess as audit but never mutates the run.
+          (envelope.source === "llm" || envelope.source === "fast_path")
+          && envelope.envelope.primaryTask !== contract?.taskType
+          && envelope.envelope.confidence !== "low"
+          && !(Array.isArray(contract?.successCriteria)
+            && contract.successCriteria.includes("clarification question asked"))
+        ) {
+          contract = buildContractForTask(envelope.envelope.primaryTask, latestInput);
+          envelopeAgentId = envelopeTaskAgentId(envelope.envelope.primaryTask);
+        }
+      }
+    } catch {
+      // Envelope failures must never block execution — the admitted contract stands.
+    }
     // M1 gap closure: rebuild the interview/guided prompt context server-side
     // (previously assembled by the browser for the deleted legacy loop).
     // Forced non-interview agents skip interview binding, mirroring the old
@@ -702,20 +751,26 @@ function jdSourceKeyForMessage(message: { content: string; images?: string[] }):
   if (images.length > 0) return `image:${hashJDSource(images.join("\n"))}`;
   const jdId = message.content.match(/\bjdId\s*[=:：]\s*(\d+)/i)?.[1];
   if (jdId) return `id:${jdId}`;
-  const text = message.content.replace(/\s+/g, " ").trim();
-  const urlMatch = /https?:\/\/[^\s)）]+/i.exec(text);
+  // 0.11.0-A: detection runs on the original text (structure regexes need
+  // spacing/punctuation); only the identity hash is normalized so the same JD
+  // retyped with different whitespace/punctuation/casing keeps its preference.
+  const rawText = message.content.replace(/\s+/g, " ").trim();
+  const identityText = rawText
+    .replace(/[\s，。；！？、,:：;；!！?？]+/g, "")
+    .toLowerCase();
+  const urlMatch = /https?:\/\/[^\s)）]+/i.exec(rawText);
   if (urlMatch) {
     const url = urlMatch[0];
-    const urlIntroducedAsJD = /(?:\bJD\b|岗位|职位|招聘|job|position)(?:信息|发布)?(?:链接|地址|网址|页面|url)?\s*[:：]\s*$/i.test(text.slice(0, urlMatch.index));
+    const urlIntroducedAsJD = /(?:\bJD\b|岗位|职位|招聘|job|position)(?:信息|发布)?(?:链接|地址|网址|页面|url)?\s*[:：]\s*$/i.test(rawText.slice(0, urlMatch.index));
     const jobPostingUrl = /\/(?:jobs?|job_detail|positions?|careers?)(?:[/?#_-]|$)|[?&](?:jobid|jdId|positionId)=/i.test(url);
-    if (text === url || urlIntroducedAsJD || jobPostingUrl) {
+    if (rawText === url || urlIntroducedAsJD || jobPostingUrl) {
       return `url:${hashJDSource(url.replace(/[.,，。；;!?！?]+$/, "").toLowerCase())}`;
     }
   }
-  if (text.length < 50) return undefined;
-  const hasJDStructure = /(?:\bJD\b|岗位职责|任职要求|职位描述|工作内容|招聘要求|工作职责|岗位要求|job description|responsibilit(?:y|ies)|requirements?|qualifications?|about the role)\s*[:：]|(?:岗位职责|任职要求|职位描述|工作内容|招聘要求|工作职责|岗位要求)\s*是(?!否|不)|we are hiring|you will be responsible/i.test(text);
+  if (rawText.length < 50) return undefined;
+  const hasJDStructure = /(?:\bJD\b|岗位职责|任职要求|职位描述|工作内容|招聘要求|工作职责|岗位要求|job description|responsibilit(?:y|ies)|requirements?|qualifications?|about the role)\s*[:：]|(?:岗位职责|任职要求|职位描述|工作内容|招聘要求|工作职责|岗位要求)\s*是(?!否|不)|we are hiring|you will be responsible/i.test(rawText);
   if (!hasJDStructure) return undefined;
-  return `text:${hashJDSource(text)}`;
+  return `text:${hashJDSource(identityText)}`;
 }
 
 function hashJDSource(value: string): string {

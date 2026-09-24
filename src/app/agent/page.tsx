@@ -16,11 +16,8 @@ import { migrateExploreToAgent } from "@/lib/agent/migrate";
 import type { ClientAgentDefinition } from "@/lib/agent/orchestrator/client";
 import { inferPreferredDocumentTypeFromText, type ImageDocumentType, type ImageIntakeResult } from "@/lib/agent/image-intake";
 import { buildImageIntakeStatusText, buildImageIntakeToolSummary, routeImageIntake } from "@/lib/agent/image-intake-router";
-import { routeAgentTask } from "@/lib/agent/task-routing";
-import { resolveIntentEnvelope } from "@/lib/agent/intent-envelope";
-import { collectArtifactRefsFromSafePayloads, TASK_JOURNEY_GRAPH_VERSION, type AgentArtifactRef } from "@/lib/agent/task-journey";
+import { collectArtifactRefsFromSafePayloads, type AgentArtifactRef } from "@/lib/agent/task-journey";
 import {
-  createAgentTaskContract,
   createResumeBaseSnapshot,
   inferCompletedCriteriaFromToolResult,
   resolveTaskContractRunOutcome,
@@ -112,7 +109,6 @@ import {
   resolveActiveGuidedSession,
   startOrContinueGuidedSession,
   taskAgentId,
-  taskLabelZh,
   type GuidedSessionState,
 } from "@/lib/agent/guided-session-state";
 import type { ResumeEditProposalDTO } from "@/lib/agent/resume-edit-proposals";
@@ -364,21 +360,6 @@ async function persistCareerPositioningArtifact(
   return { role, readBackVerified };
 }
 
-function buildRunTarget(
-  content: string,
-  agentId: string,
-  imageIntake?: ImageIntakeResult | null,
-): string {
-  const structured = imageIntake?.structured || {};
-  const company = typeof structured.company === "string" ? structured.company : "";
-  const role = typeof structured.role === "string" ? structured.role : "";
-  const structuredTarget = [company, role].filter(Boolean).join(" / ");
-  if (structuredTarget) return truncateLedgerText(structuredTarget, 120);
-  if (imageIntake?.documentType && imageIntake.documentType !== "unknown") {
-    return `${imageIntake.documentType}:${agentId}`;
-  }
-  return truncateLedgerText(content || agentId, 120) || agentId;
-}
 
 function activeNoticeFromRun(run: AgentRunSnapshot): ActiveRunNotice {
   const contract = run.contract && typeof run.contract === "object" && !Array.isArray(run.contract)
@@ -440,7 +421,8 @@ async function extractReadOnlyPdfContext(attachments: string[]): Promise<{
       const fileResponse = await fetch(dataUri);
       const formData = new FormData();
       formData.append("file", await fileResponse.blob(), "resume.pdf");
-      const response = await fetch("/api/agent/document-extract", { method: "POST", body: formData });
+      // 0.11.0-A: a hung PDF extraction must not stall the whole turn.
+      const response = await fetch("/api/agent/document-extract", { method: "POST", body: formData, signal: AbortSignal.timeout(30_000) });
       const payload = await response.json().catch(() => ({}));
       if (response.ok && payload.success && typeof payload.data?.text === "string" && payload.data.text.trim()) {
         readableCount += 1;
@@ -503,21 +485,6 @@ function triggerSessionAnomalyReview(input: {
   }).catch(() => {});
 }
 
-async function loadTaskBaseSnapshot(taskType: AgentTaskType): Promise<AgentTaskBaseSnapshot> {
-  if (taskType !== "resume_edit") return {};
-  const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 5_000);
-  try {
-    const res = await fetch("/api/cv/data", { cache: "no-store", signal: controller.signal });
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok || !json.success) return {};
-    return createResumeBaseSnapshot(json.data);
-  } catch {
-    return {};
-  } finally {
-    window.clearTimeout(timeout);
-  }
-}
 
 async function loadInterviewMaterialRecords(): Promise<InterviewMaterialRecord[]> {
   const [jdResult, refResult] = await Promise.allSettled([
@@ -1528,7 +1495,9 @@ function AgentPageInner() {
               requestId: createRequestId,
               conversationId: currentSessionId,
               input: { content, images: runAttachments, persistInConversation: !hideUserMessage },
-              entryHints: { agentId: explicitForcedAgentId || taskAgentId(directImageTask), source: "agent_chat" },
+              entryHints: {
+                ...({ imageDocumentType: "resume" as const }),
+                ...(journeyArtifacts.length > 0 ? { journeyArtifacts } : {}), agentId: explicitForcedAgentId || taskAgentId(directImageTask), source: "agent_chat" },
             });
             if (!isCurrentTurn()) return;
             if (earlyCreatedRun?.admission?.kind === "defer_switch") {
@@ -1825,157 +1794,67 @@ function AgentPageInner() {
             : !shouldBypassConversationLocks && currentSessionForRun?.interviewState?.planSnapshot
             ? "interview"
             : undefined;
-        // M2: structured intent routing — one envelope call decides the task.
-        // Clarification renders directly; resolved tasks flow into admission.
-        const envelopeResolution = await resolveIntentEnvelope({
-          content,
-          agentId: forcedAgentId || "general",
-          imageIntake,
-          preferredDocumentType,
-          forcedAgentId,
+        // 0.11.0-A: the browser no longer routes. The turn goes straight to
+        // run creation with hints; the worker's envelope decides the task and
+        // streams intent/agent_switch events back. Labels update from events.
+        const routeForcedAgentId = forcedAgentId;
+        const interviewState = shouldBypassConversationLocks ? undefined : currentSessionForRun?.interviewState;
+        if (!earlyCreatedRun) rememberCreateRequest();
+        const created = earlyCreatedRun || await createDurableAgentRunClient({
+          requestId: createRequestId,
+          conversationId: currentSessionId,
+          input: { content, images: runAttachments, persistInConversation: !hideUserMessage },
+          entryHints: {
+            ...(routeForcedAgentId ? { agentId: routeForcedAgentId } : {}),
+            ...(["jd", "offer", "resume"].includes(String(imageIntake?.documentType))
+              ? { imageDocumentType: imageIntake!.documentType as "jd" | "offer" | "resume" }
+              : {}),
+            ...(journeyArtifacts.length > 0 ? { journeyArtifacts } : {}),
+            source: "agent_chat",
+          },
         });
-        if (envelopeResolution.kind === "clarify") {
-          const clarifyMessage: AgentMessage = {
-            role: "assistant",
-            content: envelopeResolution.question,
-            timestamp: new Date().toISOString(),
-          };
-          const nextMessages = projectAgentMessages([...updated, clarifyMessage]);
-          setMessages(nextMessages);
+        if (!isCurrentTurn()) return;
+        if (created?.admission?.kind === "defer_switch") {
           setStreaming(false);
           setPhase(null);
-          if (currentSessionId && !hideUserMessage) {
-            try { persistMessages([...updated, clarifyMessage]); } catch { /* ok */ }
-            if (currentSessionForRun) {
-              await updateSession(currentSessionId, { messages: [...currentSessionForRun.messages, { ...userMsg }, clarifyMessage] });
+          setMessages((current) => {
+            const next = [...current];
+            const lastIndex = next.length - 1;
+            if (next[lastIndex]?.role === "assistant" && !next[lastIndex]?.content) {
+              next[lastIndex] = {
+                ...next[lastIndex],
+                content: created.admission?.safeMessage || "当前任务尚未到达安全切换点，请先完成、取消或暂停它。",
+              };
             }
-            setSessions(await listSessions());
-          }
+            return next;
+          });
           return;
         }
-        const routeDecision = routeAgentTask({
-          agentId: forcedAgentId || "general",
-          content,
-          hasImages: imageDataUris.length > 0,
-          imageIntake,
-          preferredDocumentType,
-          activeTask: activeGuidedSessionForRun,
-          envelopeTask: shouldBypassConversationLocks ? null : envelopeResolution.envelope.primaryTask,
-          envelopeAudit: envelopeResolution.envelope.audit,
-        });
-        const routeForcedAgentId = forcedAgentId || (routeDecision.taskType ? taskAgentId(routeDecision.taskType) : undefined);
-        const interviewState = shouldBypassConversationLocks ? undefined : currentSessionForRun?.interviewState;
-        let activeTaskContract: AgentTaskContract | null = null;
-        const completedContractCriteria = new Set<string>();
-        const taskType = routeDecision.taskType;
-        if (taskType) {
-          try {
-            const baseSnapshot = await loadTaskBaseSnapshot(taskType);
-            if (!isCurrentTurn()) return;
-            const runAgentId = routeForcedAgentId || taskAgentId(taskType);
-            const contract = createAgentTaskContract({
-              taskType,
-              target: buildRunTarget(content, runAgentId, imageIntake),
-              requiresUserApproval: taskType === "resume_edit",
-              successCriteria: routeDecision.requiresClarification
-                ? ["clarification question asked"]
-                : undefined,
-              validators: routeDecision.requiresClarification
-                ? ["user_intent_clarification"]
-                : undefined,
-              routing: {
-                contractPolicy: routeDecision.contractPolicy,
-                memoryTask: routeDecision.memoryTask,
-                allowedTools: routeDecision.allowedTools.slice(0, 20),
-                requiresClarification: routeDecision.requiresClarification,
-                clarificationQuestion: routeDecision.clarificationQuestion,
-                blockedReason: routeDecision.blockedReason,
-                auditSummary: routeDecision.auditSummary,
-                activeTaskId: activeGuidedSessionForRun?.taskId,
-                activeTaskType: activeGuidedSessionForRun?.taskType,
-                activeTaskPhase: activeGuidedSessionForRun?.phase,
-                routeLocked: Boolean(activeGuidedSessionForRun),
-              },
-              journey: {
-                graphVersion: TASK_JOURNEY_GRAPH_VERSION,
-                artifacts: [
-                  ...journeyArtifacts,
-                  ...(baseSnapshot.baseVersion && baseSnapshot.baseHash
-                    ? [{
-                        artifactId: "active-resume",
-                        kind: "resume" as const,
-                        version: baseSnapshot.baseVersion,
-                        hash: baseSnapshot.baseHash,
-                      }]
-                    : []),
-                ].slice(-12),
-              },
-              ...baseSnapshot,
-            });
-            activeTaskContract = contract;
-            if (taskType === "interview_coaching" && interviewState?.planSnapshot) {
-              completedContractCriteria.add("JD/resume context bound");
-            }
-            if (!earlyCreatedRun) rememberCreateRequest();
-            const created = earlyCreatedRun || await createDurableAgentRunClient({
-              requestId: createRequestId,
-              conversationId: currentSessionId,
-              input: { content, images: runAttachments, persistInConversation: !hideUserMessage },
-              entryHints: {
-                ...(routeForcedAgentId ? { agentId: routeForcedAgentId } : {}),
-                ...(["jd", "offer", "resume"].includes(String(imageIntake?.documentType))
-                  ? { imageDocumentType: imageIntake!.documentType as "jd" | "offer" | "resume" }
-                  : {}),
-                ...(journeyArtifacts.length > 0 ? { journeyArtifacts } : {}),
-                source: "agent_chat",
-              },
-            });
-            if (!isCurrentTurn()) return;
-            if (created?.admission?.kind === "defer_switch") {
-              setStreaming(false);
-              setPhase(null);
-              setMessages((current) => {
-                const next = [...current];
-                const lastIndex = next.length - 1;
-                if (next[lastIndex]?.role === "assistant" && !next[lastIndex]?.content) {
-                  next[lastIndex] = {
-                    ...next[lastIndex],
-                    content: created.admission?.safeMessage || "当前任务尚未到达安全切换点，请先完成、取消或暂停它。",
-                  };
-                }
-                return next;
-              });
-              return;
-            }
-            const createdRun = created?.run || null;
-            if (createdRun && created?.assignment.owner !== "worker") {
-              throw new Error(`Agent runtime 返回了不支持的执行模式：${created?.assignment.owner ?? "unknown"}。请将服务端 AGENT_RUNTIME_MODE 设置为 worker_all。`);
-            }
-            if (createdRun) {
-              clearCreateRequest();
-              workerOwnedRun = true;
-              durableRunId = createdRun.id;
-              const activeAgentId = routeForcedAgentId || (taskType ? taskAgentId(taskType) : "general");
-              setActiveAgent({
-                id: activeAgentId,
-                name: taskType ? taskLabelZh(taskType) : "通用助手",
-                description: "",
-                toolNames: [],
-                priority: 0,
-                suggestions: [],
-              });
-              setActiveRunNotice({
-                ...activeNoticeFromRun(createdRun),
-                phase: "understanding",
-                guidedTaskId: activeGuidedSessionForRun?.taskId,
-                guidedTaskPhase: activeGuidedSessionForRun?.phase,
-              });
-              abortRef.current = null;
-              return;
-            }
-          } catch (error) {
-            throw error;
-          }
+        const createdRun = created?.run || null;
+        if (createdRun && created?.assignment.owner !== "worker") {
+          throw new Error(`Agent runtime 返回了不支持的执行模式：${created?.assignment.owner ?? "unknown"}。请将服务端 AGENT_RUNTIME_MODE 设置为 worker_all。`);
+        }
+        if (createdRun) {
+          clearCreateRequest();
+          workerOwnedRun = true;
+          durableRunId = createdRun.id;
+          const admittedAgentId = (createdRun as { agentId?: string }).agentId;
+          setActiveAgent({
+            id: admittedAgentId || routeForcedAgentId || "general",
+            name: admittedAgentId ? admittedAgentId : (routeForcedAgentId || "通用助手"),
+            description: "",
+            toolNames: [],
+            priority: 0,
+            suggestions: [],
+          });
+          setActiveRunNotice({
+            ...activeNoticeFromRun(createdRun),
+            phase: "understanding",
+            guidedTaskId: activeGuidedSessionForRun?.taskId,
+            guidedTaskPhase: activeGuidedSessionForRun?.phase,
+          });
+          abortRef.current = null;
+          return;
         }
 
         setStreaming(false);
