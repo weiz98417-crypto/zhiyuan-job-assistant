@@ -2418,15 +2418,11 @@ function AgentPageInner() {
           currentSessionId={currentSessionId}
           messages={messages}
           streaming={streaming}
-          streamText={streamText}
           phase={phase}
-          executingTool={executingTool}
           thinkingContent={thinkingContent}
-          activeAgentId={activeAgent?.id}
           startTime={startTime}
           evalProgress={evalProgress}
           completionInfo={completionInfo}
-                  programProgress={programProgress}
           resultQuality={resultQuality}
           runStatus={activeRunNotice?.status}
           contextArtifacts={activeRunNotice?.artifacts}

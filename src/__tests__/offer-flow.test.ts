@@ -301,18 +301,19 @@ describe("Offer Agent routing and tool contracts", () => {
   });
 
   it("Offer result cards keep follow-up actions in the current Agent Conversation", () => {
-    const source = readFileSync(path.join(process.cwd(), "src/components/agent/AgentChat.tsx"), "utf-8");
+    const cards = readFileSync(path.join(process.cwd(), "src/components/agent/AgentDomainCards.tsx"), "utf-8");
+    const toolCards = readFileSync(path.join(process.cwd(), "src/components/agent/assistant-ui/AgentToolCards.tsx"), "utf-8");
     const handoff = readFileSync(path.join(process.cwd(), "src/lib/agent/offer-handoff.ts"), "utf-8");
 
     expect(handoff).toContain("function buildOfferAgentHandoffUrl");
-    expect(source).toContain("function OfferResultCard");
-    expect(source).toContain('uiPayload?.type === "offer_evaluation" || uiPayload?.type === "offer_report"');
+    expect(cards).toContain("function OfferResultCard");
+    expect(toolCards).toContain('payload?.type === "offer_evaluation" || payload?.type === "offer_report"');
     expect(handoff).toContain('params.set("sessionId", String(sessionId))');
     expect(handoff).not.toContain('params.set("newSession", "1")');
     expect(handoff).toContain('params.set("offerReportId", String(reportId))');
-    expect(source).toContain('buildOfferAgentHandoffUrl(reportId, "negotiate", currentSessionId)');
-    expect(source).toContain('buildOfferAgentHandoffUrl(reportId, "ask_hr", currentSessionId)');
-    expect(source).toContain(">谈判策略<");
-    expect(source).toContain(">HR 问询<");
+    expect(cards).toContain('buildOfferAgentHandoffUrl(reportId, "negotiate", currentSessionId)');
+    expect(cards).toContain('buildOfferAgentHandoffUrl(reportId, "ask_hr", currentSessionId)');
+    expect(cards).toContain(">谈判策略<");
+    expect(cards).toContain(">HR 问询<");
   });
 });

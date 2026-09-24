@@ -1,3 +1,4 @@
+/** frozen_for_design 已在 0.11.0-D2(assistant-ui 换芯)随 A/B/C 落地全部解冻;保留类型以便未来新发现复用。 */
 export type ProductionAgentEvalDisposition = "guardrail" | "fixed_locally" | "frozen_for_design";
 
 export interface ProductionAgentEvalBacklogCase {
@@ -77,7 +78,7 @@ export const productionAgentEvalBacklog: ProductionAgentEvalBacklogCase[] = [
     expectedOutcome: "生成 A-G 评估并持久化报告",
     observedOutcome: "两次均因 source/evaluation/report 合同条件未满足而失败",
     sessionIds: [106, 107],
-    disposition: "frozen_for_design",
+    disposition: "guardrail",
   },
   {
     id: "PE2E-EXEC-002",
@@ -88,7 +89,7 @@ export const productionAgentEvalBacklog: ProductionAgentEvalBacklogCase[] = [
     expectedOutcome: "生成存在且非空的可下载文件",
     observedOutcome: "两次均因 export/file exists/file size 合同条件未满足而失败",
     sessionIds: [113, 114],
-    disposition: "frozen_for_design",
+    disposition: "guardrail",
   },
   {
     id: "PE2E-EXEC-003",
@@ -99,7 +100,7 @@ export const productionAgentEvalBacklog: ProductionAgentEvalBacklogCase[] = [
     expectedOutcome: "明确条件、必要时请求确认、创建扫描并读回结果",
     observedOutcome: "两次均直接合同失败，没有显示确认问题或扫描结果",
     sessionIds: [115, 116],
-    disposition: "frozen_for_design",
+    disposition: "guardrail",
   },
   {
     id: "PE2E-GATE-001",
@@ -110,7 +111,7 @@ export const productionAgentEvalBacklog: ProductionAgentEvalBacklogCase[] = [
     expectedOutcome: "确认输入被消费后恢复原 Run，写入并读回画像",
     observedOutcome: "确认 Turn 已 consumed，但 Run 长时间停在 waiting_user，且没有持久 Gate",
     sessionIds: [111],
-    disposition: "frozen_for_design",
+    disposition: "guardrail",
   },
   {
     id: "PE2E-GATE-002",
@@ -121,7 +122,7 @@ export const productionAgentEvalBacklog: ProductionAgentEvalBacklogCase[] = [
     expectedOutcome: "Gate approved 后恢复同一 Run，应用一次并读回新版本",
     observedOutcome: "Gate 已 approved，但 Run 仍为 waiting_user；取消后简历保持原文",
     sessionIds: [120, 121],
-    disposition: "frozen_for_design",
+    disposition: "guardrail",
   },
   {
     id: "PE2E-FLOW-001",
@@ -132,7 +133,7 @@ export const productionAgentEvalBacklog: ProductionAgentEvalBacklogCase[] = [
     expectedOutcome: "同一题收到反馈，然后再决定是否进入下一题",
     observedOutcome: "回答被消费后又生成一张“第 1 题”，没有承诺的反馈，再次 waiting_user",
     sessionIds: [118],
-    disposition: "frozen_for_design",
+    disposition: "guardrail",
   },
   {
     id: "PE2E-EXEC-004",
@@ -143,7 +144,7 @@ export const productionAgentEvalBacklog: ProductionAgentEvalBacklogCase[] = [
     expectedOutcome: "同类请求稳定进入一次审批 Gate，批准后仅保存一次",
     observedOutcome: "session 112 能打开 Gate；session 119 同类请求却直接合同失败，路径不稳定",
     sessionIds: [112, 119],
-    disposition: "frozen_for_design",
+    disposition: "guardrail",
   },
   {
     id: "PE2E-UI-001",

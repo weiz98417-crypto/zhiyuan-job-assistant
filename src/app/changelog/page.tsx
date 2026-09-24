@@ -10,6 +10,26 @@ export const metadata: Metadata = {
 
 const upcomingChanges = [
   {
+    title: "全新界面:纸鸢配色与双面板",
+    description: "界面换上纸鸢朱砂新配色,去掉旧黄色主题;报告和证据材料移入独立的\"分析台\"面板,聊天界面保持清爽;左侧旅程栏一眼看清每段求职任务的进度。",
+  },
+  {
+    title: "任务响应更快、更透明",
+    description: "发出任务后几乎立即开始执行并给出回执,不再出现\"点了没反应\";正在理解、执行、核对到输出的每个阶段都有清晰的进度提示,委派和交接也以卡片形式可见。",
+  },
+  {
+    title: "对话记录不再闪烁或错乱",
+    description: "刷新页面或切换会话时,对话以已保存的记录为准合并显示,正在生成的内容不会被覆盖、重复或回退。",
+  },
+  {
+    title: "输入与滚动体验升级",
+    description: "输入框随内容自动伸缩,Enter 发送、Shift+Enter 换行,支持 Ctrl+V 粘贴截图;长对话自动停留在最新消息,向上翻阅时不会被强行拉回底部。",
+  },
+  {
+    title: "高风险操作统一审批卡",
+    description: "写入画像、保存简历等敏感操作会弹出统一的批准/拒绝卡片,处理结果和历史状态一目了然。",
+  },
+  {
     title: "统一 AI 模型与图片识别",
     description: "回答、JD 和简历识图及岗位页提取统一使用 deepseek-flash；长图分段识别，部分图片超时仍可先分析已读内容。",
   },
@@ -47,7 +67,7 @@ export default function ChangelogPage() {
 
       <section aria-labelledby="upcoming-version" className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-[var(--shadow-sm)] sm:p-7">
         <div className="flex flex-wrap items-center gap-3">
-          <h2 id="upcoming-version" className="text-xl font-semibold text-[var(--color-text)]">V0.10.8</h2>
+          <h2 id="upcoming-version" className="text-xl font-semibold text-[var(--color-text)]">V0.11.0</h2>
           <span className="rounded-full bg-[var(--color-primary-muted)] px-3 py-1 text-xs font-medium text-[var(--color-text-soft)]">待发布</span>
         </div>
         <p className="mt-2 text-sm text-[var(--color-text-soft)]">以下改进正在本地验证，线上尚未更新。</p>

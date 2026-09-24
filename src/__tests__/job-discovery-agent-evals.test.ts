@@ -84,7 +84,7 @@ describe("job discovery agent evals - baseline", () => {
   });
 
   it("B3 run card shows scan progress and issue summary affordance", () => {
-    const chat = source("src/components/agent/AgentChat.tsx");
+    const chat = source("src/components/agent/AgentDomainCards.tsx");
 
     expect(chat).toContain("function JobDiscoveryRunCard");
     expect(chat).toContain("companiesDone");
@@ -95,7 +95,7 @@ describe("job discovery agent evals - baseline", () => {
   });
 
   it("B4 discovered jobs render as up to five result cards", () => {
-    const chat = source("src/components/agent/AgentChat.tsx");
+    const chat = source("src/components/agent/AgentDomainCards.tsx");
 
     expect(chat).toContain("function JobDiscoveryBatchCard");
     expect(chat).toContain("jobs.slice(0, 5)");
@@ -114,7 +114,7 @@ describe("job discovery agent evals - baseline", () => {
   it("B6 evaluation saves or reuses JD and enters existing Agent evaluation flow", () => {
     const route = source("src/app/api/scan/jobs/[id]/jd/route.ts");
     const discover = source("src/app/discover/page.tsx");
-    const chat = source("src/components/agent/AgentChat.tsx");
+    const chat = source("src/components/agent/AgentDomainCards.tsx");
     const helper = source("src/lib/job-discovery.ts");
 
     expect(route).toContain("attachJdToScanJobForUser");
@@ -151,7 +151,7 @@ describe("job discovery agent evals - boundary", () => {
       titleKeywords: ["AI 产品经理"],
       profileDerived: [{ field: "titleKeywords", label: "目标岗位", value: "AI 产品经理" }],
     });
-    const chat = source("src/components/agent/AgentChat.tsx");
+    const chat = source("src/components/agent/AgentDomainCards.tsx");
 
     expect(result.uiPayload?.profileDerived).toEqual([{ field: "titleKeywords", label: "目标岗位", value: "AI 产品经理" }]);
     expect(chat).toContain("这些条件来自你的求职画像");
@@ -185,7 +185,7 @@ describe("job discovery agent evals - boundary", () => {
   });
 
   it("E5 Chat does not render all results when scan has more than five jobs", () => {
-    expect(source("src/components/agent/AgentChat.tsx")).toContain("jobs.slice(0, 5)");
+    expect(source("src/components/agent/AgentDomainCards.tsx")).toContain("jobs.slice(0, 5)");
   });
 
   it("E6 weak duplicates are hinted, not blocked", () => {
@@ -277,7 +277,7 @@ describe("job discovery agent evals - regression", () => {
 
   it("R3 Discover and Chat share scan job status/detail semantics", () => {
     const page = source("src/app/discover/page.tsx");
-    const chat = source("src/components/agent/AgentChat.tsx");
+    const chat = source("src/components/agent/AgentDomainCards.tsx");
 
     expect(page).toContain("jobStatusBadge(job.status)");
     expect(page).toContain("fetchDiscoveryJobDetail(job)");
@@ -308,7 +308,7 @@ describe("job discovery agent evals - regression", () => {
   });
 
   it("R7 large error logs are summarized in Chat rather than rendered fully", () => {
-    const chat = source("src/components/agent/AgentChat.tsx");
+    const chat = source("src/components/agent/AgentDomainCards.tsx");
 
     expect(chat).toContain("function JobDiscoveryErrorCard");
     expect(chat).not.toContain("errorLog.map");

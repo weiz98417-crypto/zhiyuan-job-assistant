@@ -24,7 +24,7 @@ describe("job discovery recall v3 evals - baseline", () => {
 
   it("B2 exposes source, verification and match metadata on Discover and Agent cards", () => {
     const discover = source("src/app/discover/page.tsx");
-    const chat = source("src/components/agent/AgentChat.tsx");
+    const chat = source("src/components/agent/AgentDomainCards.tsx");
 
     for (const text of [discover, chat]) {
       expect(text).toContain("source_name");
