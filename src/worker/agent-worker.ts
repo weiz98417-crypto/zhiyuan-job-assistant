@@ -16,6 +16,8 @@ import registry from "@/lib/agent/tools";
 import { createBackgroundToolHandlers } from "@/lib/agent/runtime/background-tool-handlers";
 import { PostgresRunContextSource } from "@/lib/agent/runtime/postgres-run-context-source";
 import { reconcileGovernedRuntimeTools } from "@/lib/agent/runtime/governed-tool-runtime";
+import { expirePendingMemoryCandidates } from "@/lib/memory/admission";
+import { isPostgresConfigured } from "@/lib/postgres";
 
 dotenv.config({ path: ".env.local" });
 dotenv.config();
@@ -67,6 +69,7 @@ const retentionTimer = setInterval(() => {
   void Promise.all([
     retention.cleanup(),
     maintenance.expireWaitingUserRuns(),
+    isPostgresConfigured() ? expirePendingMemoryCandidates() : Promise.resolve(0),
   ]).catch((error) => {
     const message = error instanceof Error ? error.message : "runtime maintenance failed";
     console.error(`[agent-worker] ${message}`);

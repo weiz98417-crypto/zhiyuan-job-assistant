@@ -52,6 +52,7 @@ export interface ChatCompletionRequest {
   maxTokens?: number;
   /** Non-streaming: returns full text (classifier-style). */
   stream: false;
+  signal?: AbortSignal;
   /** Kept for existing callers; the gateway only uses deepseek-flash. */
   chain?: ModelChainEntry[];
   /** Per-attempt connect timeout. Classifier-style callers should keep this small. */
@@ -210,7 +211,7 @@ export async function complete(request: ChatCompletionRequest): Promise<ChatResu
   const chain = resolveChain();
   let lastError = "";
   for (const entry of chain) {
-    const outcome = await attemptModel(entry, buildBody(request, entry.model), undefined, request.timeoutMs ?? 30_000);
+    const outcome = await attemptModel(entry, buildBody(request, entry.model), request.signal, request.timeoutMs ?? 30_000);
     if (!outcome.response) {
       lastError = outcome.lastError;
       continue;

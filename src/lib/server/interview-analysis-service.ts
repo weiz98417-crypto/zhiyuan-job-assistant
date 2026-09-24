@@ -12,7 +12,9 @@ import {
 import { getDataRepositories } from "@/lib/data-repositories";
 import { llmRetry } from "@/lib/llm-retry";
 import { getDatabaseDriver, isPostgresConfigured } from "@/lib/postgres";
-import { addMemoryEvidence, createMemoryItem, listMemoryItems } from "@/lib/memory/postgres-memory";
+import { admitMemory } from "@/lib/memory/admission";
+
+const PENDING_CANDIDATE_STATUS = { status: "candidate" as const, readBackVerified: true as const };
 import { COACH_MODES, type AnswerScore, type CoachMode, type InterviewQuestion } from "@/types";
 
 const MODE_WEIGHTS: Record<CoachMode, Record<keyof AnswerScore["dimensions"], number>> = {
@@ -442,34 +444,30 @@ async function persistInterviewObservation(
   const fingerprint = createHash("sha256").update(`${question}\u0000${answer}`).digest("hex");
   const canonicalText = `Interview answer scored ${score.overall}/5 for question: ${question.slice(0, 120)}. [${fingerprint.slice(0, 12)}]`;
   try {
-    const existing = (await listMemoryItems({
+    const result = await admitMemory({
       userId: principal.userId,
-      memoryTypes: ["interview_observation"],
-      statuses: ["candidate", "active"],
-      limit: 200,
-    })).find((item) => item.canonical_text === canonicalText);
-    if (existing) return { status: "persisted", readBackVerified: true, id: existing.id };
-    const id = await createMemoryItem({
-      userId: principal.userId,
-      memoryType: "interview_observation",
-      canonicalText,
-      status: "candidate",
-      confidence: 0.6,
-      importance: score.overall < 3 ? 0.75 : 0.55,
-      sourceCount: 1,
-      metadata: { question, mode, suggestions: score.suggestions, fingerprint },
-    });
-    await addMemoryEvidence({
-      userId: principal.userId,
-      memoryItemId: id,
-      sourceType: "interview_answer",
+      agentId: "interview",
+      kind: "session_observation",
+      sourceType: "interview",
       sourceId: fingerprint,
-      quote: answer.slice(0, 800),
-      extractionMethod: "interview_answer_score",
-      confidence: 0.6,
-      metadata: { question, mode },
+      fact: {
+        partition: "core",
+        subject: `interview:${fingerprint}`,
+        predicate: "interview_observation",
+        object: { question, mode, score, suggestions: score.suggestions },
+        canonicalText,
+        confidence: 0.6,
+        importance: score.overall < 3 ? 0.75 : 0.55,
+      },
+      evidence: { quote: answer.slice(0, 800) },
     });
-    return { status: "persisted", readBackVerified: true, id };
+    return {
+      ...(result.outcome === "candidate" ? PENDING_CANDIDATE_STATUS : {}),
+      status: result.outcome === "candidate" ? "persisted" : result.outcome === "rejected" ? "skipped" : "failed",
+      readBackVerified: result.outcome === "candidate",
+      id: result.candidate?.id,
+      error: result.outcome === "rejected" ? result.reason : undefined,
+    };
   } catch (error) {
     return { status: "failed", readBackVerified: false, error: error instanceof Error ? error.message : String(error) };
   }

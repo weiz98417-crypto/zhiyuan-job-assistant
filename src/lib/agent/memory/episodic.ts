@@ -63,18 +63,15 @@ export async function generateSummary(
   }
 }
 
-const SUMMARY_PREFIX = "zhiyuan_summary_";
-
-/** Save summary to localStorage for session persistence */
 export async function saveSummary(
   sessionId: number,
   summary: string,
 ): Promise<void> {
-  if (!summary) return;
-  try { localStorage.setItem(`${SUMMARY_PREFIX}${sessionId}`, `[摘要] ${summary}`); } catch { /* best-effort */ }
+  void sessionId;
+  void summary;
 }
 
-/** Load summary for a session */
 export async function loadSummary(sessionId: number): Promise<string> {
-  try { return localStorage.getItem(`${SUMMARY_PREFIX}${sessionId}`) || ""; } catch { return ""; }
+  void sessionId;
+  return "";
 }

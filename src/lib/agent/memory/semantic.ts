@@ -1,6 +1,7 @@
 /**
- * Semantic Memory — cross-session structured fact extraction.
- * Uses localStorage for persistence (IndexedDB table not yet added to Dexie schema).
+ * Semantic extraction compatibility helpers.
+ * Durable memory is owned by the server governed ledger; these client helpers
+ * only preserve the extraction API used by legacy screens.
  */
 
 export interface SemanticFacts {
@@ -11,8 +12,6 @@ export interface SemanticFacts {
   dealbreakers: string[];
   preferences: Record<string, string>;
 }
-
-const SEMANTIC_KEY = "zhiyuan_semantic_facts";
 
 /** Extract structured facts from conversation via LLM */
 export async function extractFacts(
@@ -50,23 +49,12 @@ export async function extractFacts(
   } catch { return null; }
 }
 
-/** Save semantic facts to localStorage */
+/** Legacy compatibility hook. Governed memory candidates are server-owned. */
 export async function saveSemanticFacts(facts: SemanticFacts): Promise<void> {
-  try { localStorage.setItem(SEMANTIC_KEY, JSON.stringify(facts)); } catch { /* best-effort */ }
+  void facts;
 }
 
-/** Load semantic facts from localStorage */
+/** Legacy compatibility hook. Client memory is not an authority for Agent context. */
 export async function loadSemanticContext(): Promise<string> {
-  try {
-    const raw = localStorage.getItem(SEMANTIC_KEY);
-    if (!raw) return "";
-    const f: SemanticFacts = JSON.parse(raw);
-    const parts: string[] = [];
-    if (f.roles?.length) parts.push(`岗位偏好: ${f.roles.join("、")}`);
-    if (f.industries?.length) parts.push(`行业偏好: ${f.industries.join("、")}`);
-    if (f.salary?.min || f.salary?.max) parts.push(`薪资期望: ${f.salary.min || "?"}K-${f.salary.max || "?"}K`);
-    if (f.dealbreakers?.length) parts.push(`底线条件: ${f.dealbreakers.join("、")}`);
-    if (f.skills?.length) parts.push(`技能: ${f.skills.join("、")}`);
-    return parts.length ? `\n[已知用户偏好] ${parts.join(" | ")}` : "";
-  } catch { return ""; }
+  return "";
 }

@@ -13,12 +13,16 @@ function parseArgs(argv) {
   const args = {
     databaseUrl: process.env.DATABASE_URL || "",
     output: path.join("data", "backups", `postgres-backup-${timestamp}.json`),
+    retentionDays: process.env.POSTGRES_BACKUP_RETENTION_DAYS || "",
+    retentionVerified: String(process.env.POSTGRES_BACKUP_RETENTION_VERIFIED || "").toLowerCase() === "true",
   };
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--database-url") args.databaseUrl = readValue(argv, ++index, arg);
     else if (arg === "--output") args.output = readValue(argv, ++index, arg);
+    else if (arg === "--retention-days") args.retentionDays = readValue(argv, ++index, arg);
+    else if (arg === "--retention-verified") args.retentionVerified = true;
     else if (arg === "--help" || arg === "-h") {
       printHelp();
       process.exit(0);
@@ -42,6 +46,8 @@ function printHelp() {
 Options:
   --database-url <url>  PostgreSQL source. Defaults to DATABASE_URL.
   --output <path>       Backup JSON path. Defaults to data/backups/postgres-backup-<timestamp>.json.
+  --retention-days <n>  Maximum documented backup retention in days.
+  --retention-verified  Record that the production retention policy was read-only verified.
 `);
 }
 
@@ -68,6 +74,8 @@ function redactDatabaseUrl(databaseUrl) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!args.databaseUrl) throw new Error("DATABASE_URL is not configured.");
+  const retentionDays = Number(args.retentionDays);
+  if (args.retentionDays && (!Number.isInteger(retentionDays) || retentionDays < 0)) throw new Error("--retention-days must be a non-negative integer.");
 
   const pool = new Pool({ connectionString: args.databaseUrl, max: 1 });
   const client = await pool.connect();
@@ -78,6 +86,8 @@ async function main() {
       createdAt: new Date().toISOString(),
       databaseUrl: redactDatabaseUrl(args.databaseUrl),
       schema: "public",
+      retentionDays: args.retentionDays ? retentionDays : null,
+      retentionVerified: args.retentionVerified,
       tables: [],
     };
 

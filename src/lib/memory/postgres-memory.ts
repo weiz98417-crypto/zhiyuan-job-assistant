@@ -1,5 +1,6 @@
 import type { PoolClient } from "pg";
-import { withPostgresClient } from "../postgres";
+import type { ExecutionPrincipal } from "@/lib/agent/runtime/durable-agent-run";
+import { isPostgresConfigured, withPostgresClient } from "../postgres";
 import {
   buildMemoryRetrievalQuery,
   chunkMemorySource,
@@ -14,6 +15,8 @@ import {
   type MemorySourceFilter,
   type MemorySourceInput,
 } from "./vector-memory";
+import { createMastraSessionContract } from "@/lib/memory/mastra-adapter";
+import { assertMemoryGateOpen, assertMemoryWriteGateOpen } from "@/lib/memory/runtime-gates";
 
 export type MemoryItemStatus = "candidate" | "active" | "rejected" | "archived";
 
@@ -64,6 +67,7 @@ export interface MemoryItemRecord {
 }
 
 export async function createMemoryItem(input: MemoryItemInput): Promise<number> {
+  await assertMemoryWriteGateOpen();
   return withPostgresClient(async (client) => {
     const expected = {
       status: input.status || "candidate",
@@ -102,6 +106,7 @@ export async function createMemoryItem(input: MemoryItemInput): Promise<number> 
 }
 
 export async function addMemoryEvidence(input: MemoryEvidenceInput): Promise<number> {
+  await assertMemoryWriteGateOpen();
   return withPostgresClient(async (client) => {
     const expected = {
       sourceId: String(input.sourceId),
@@ -177,6 +182,7 @@ export async function indexMemorySourceBestEffort(
 
 export async function upsertEmbeddedMemoryChunks(chunks: EmbeddedMemoryChunk[]): Promise<number> {
   if (!chunks.length) return 0;
+  await assertMemoryWriteGateOpen();
 
   return withPostgresClient(async (client) => {
     await client.query("BEGIN");
@@ -235,6 +241,7 @@ export async function upsertEmbeddedMemoryChunks(chunks: EmbeddedMemoryChunk[]):
 }
 
 export async function retrieveMemorySnippets(input: RetrieveMemoryInput): Promise<MemorySnippet[]> {
+  await assertMemoryReadGateOpen();
   const embedding = input.queryEmbedding || await embedQuery(input.query || "", input.provider);
   const requestedLimit = input.limit ?? 8;
   const query = buildMemoryRetrievalQuery({
@@ -388,3 +395,308 @@ function clamp01(value: number): number {
   if (!Number.isFinite(value)) return 0.5;
   return Math.max(0, Math.min(1, value));
 }
+
+export async function assertMemoryReadGateOpen(): Promise<void> {
+  await assertMemoryGateOpen("read");
+}
+
+export interface SessionMemoryMessage { id?: string; role: string; content: string; createdAt?: string; metadata?: Record<string, unknown> }
+export interface SessionMemoryIdentity { userId: string; conversationId: number }
+export interface SessionMemoryAdapter { readonly provider: "postgres" | "mastra"; append(identity: SessionMemoryIdentity, messages: SessionMemoryMessage[], requestId?: string): Promise<void>; load(identity: SessionMemoryIdentity): Promise<SessionMemoryMessage[]>; eraseTarget(identity: SessionMemoryIdentity, targetText: string): Promise<{ redactedCount: number }> }
+export class SessionMemoryConfigurationError extends Error { constructor(message: string) { super(message); this.name = "SessionMemoryConfigurationError"; } }
+
+function assertSessionIdentity(identity: SessionMemoryIdentity): void {
+  if (!identity.userId?.trim() || !Number.isInteger(identity.conversationId) || identity.conversationId <= 0) {
+    throw new Error("Session memory requires a user and positive conversation id");
+  }
+}
+
+function normalizeSessionMessage(message: SessionMemoryMessage): SessionMemoryMessage {
+  if (!message.role?.trim() || typeof message.content !== "string") throw new Error("Session memory messages require role and content");
+  return { ...message, role: message.role.trim(), createdAt: message.createdAt || new Date().toISOString() };
+}
+
+function parseSessionMessages(value: unknown): SessionMemoryMessage[] {
+  if (typeof value === "string") {
+    try { value = JSON.parse(value); } catch { return []; }
+  }
+  return Array.isArray(value) ? value.filter((item): item is SessionMemoryMessage => Boolean(item && typeof item === "object")) : [];
+}
+
+function parseJsonObject(value: unknown): Record<string, unknown> {
+  if (typeof value === "string") {
+    try { value = JSON.parse(value); } catch { return {}; }
+  }
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function sessionMessageKey(message: SessionMemoryMessage): string {
+  return message.id || `${message.role}:${message.createdAt || ""}:${message.content}`;
+}
+
+function sessionMessageKeys(message: SessionMemoryMessage): string[] {
+  return [
+    sessionMessageKey(message),
+    `${message.role}:${message.createdAt || ""}:${message.content}`,
+  ];
+}
+
+const POSTGRES_SESSION_MEMORY_TYPE = "execution_conversation";
+
+function parseStoredSessionMessages(value: unknown): SessionMemoryMessage[] {
+  if (typeof value !== "string") return parseSessionMessages(value);
+  try { return parseSessionMessages(JSON.parse(value)); } catch { return []; }
+}
+
+function redactSessionValue(value: unknown, target: string): { value: unknown; redactedCount: number } {
+  if (typeof value === "string") {
+    const redactedCount = value.split(target).length - 1;
+    return redactedCount ? { value: value.split(target).join("[已删除]"), redactedCount } : { value, redactedCount: 0 };
+  }
+  if (Array.isArray(value)) {
+    let redactedCount = 0;
+    const next = value.map((item) => {
+      const result = redactSessionValue(item, target);
+      redactedCount += result.redactedCount;
+      return result.value;
+    });
+    return { value: next, redactedCount };
+  }
+  if (value && typeof value === "object") {
+    let redactedCount = 0;
+    const next: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value)) {
+      const result = redactSessionValue(item, target);
+      redactedCount += result.redactedCount;
+      next[key] = result.value;
+    }
+    return { value: next, redactedCount };
+  }
+  return { value, redactedCount: 0 };
+}
+
+function containsSessionText(value: unknown, target: string): boolean {
+  if (typeof value === "string") return value.includes(target);
+  if (Array.isArray(value)) return value.some((item) => containsSessionText(item, target));
+  if (value && typeof value === "object") return Object.values(value).some((item) => containsSessionText(item, target));
+  return false;
+}
+
+export class PostgresSessionMemoryAdapter implements SessionMemoryAdapter {
+  readonly provider = "postgres" as const;
+
+  async append(identity: SessionMemoryIdentity, messages: SessionMemoryMessage[], requestId?: string): Promise<void> {
+    assertSessionIdentity(identity);
+    await assertMemoryWriteGateOpen();
+    const normalized = messages.map(normalizeSessionMessage);
+    if (!normalized.length && !requestId) return;
+    await withPostgresClient(async (client) => {
+      await client.query("BEGIN");
+      try {
+        const result = await client.query(
+          "SELECT messages_json, agent_state_json FROM sessions WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL FOR UPDATE",
+          [identity.conversationId, identity.userId],
+        );
+        if (!result.rows[0]) throw new Error("Conversation does not belong to memory principal");
+        const derivedResult = await client.query(
+          `SELECT id, content
+           FROM session_memory
+           WHERE user_id=$1 AND session_id=$2 AND summary_type=$3
+           ORDER BY id DESC LIMIT 1 FOR UPDATE`,
+          [identity.userId, identity.conversationId, POSTGRES_SESSION_MEMORY_TYPE],
+        );
+        const derivedRow = derivedResult.rows[0] as { id?: number; content?: unknown } | undefined;
+        const current = derivedRow
+          ? parseStoredSessionMessages(derivedRow.content)
+          : parseSessionMessages(result.rows[0].messages_json);
+        const state = parseJsonObject(result.rows[0].agent_state_json);
+        const requestIds = Array.isArray(state.memoryRequestIds)
+          ? state.memoryRequestIds.filter((value): value is string => typeof value === "string")
+          : [];
+        if (requestId && requestIds.includes(requestId)) {
+          await client.query("COMMIT");
+          return;
+        }
+        const keyToIndex = new Map<string, number>();
+        current.forEach((message, index) => sessionMessageKeys(message).forEach((key) => keyToIndex.set(key, index)));
+        const merged = [...current];
+        let changed = false;
+        for (const message of normalized) {
+          const existingIndex = sessionMessageKeys(message).map((key) => keyToIndex.get(key)).find((index): index is number => index !== undefined);
+          if (existingIndex === undefined) {
+            sessionMessageKeys(message).forEach((key) => keyToIndex.set(key, merged.length));
+            merged.push(message);
+            changed = true;
+            continue;
+          }
+          const existing = merged[existingIndex];
+          if (JSON.stringify(existing) !== JSON.stringify(message)) {
+            merged[existingIndex] = message;
+            changed = true;
+          }
+        }
+        if (changed && derivedRow?.id) {
+          await client.query(
+            "UPDATE session_memory SET content=$1, created_at=COALESCE(created_at,NOW()) WHERE id=$2 AND user_id=$3",
+            [JSON.stringify(merged), derivedRow.id, identity.userId],
+          );
+        } else if (changed) {
+          await client.query(
+            `INSERT INTO session_memory (user_id, session_id, summary_type, content)
+             VALUES ($1,$2,$3,$4)`,
+            [identity.userId, identity.conversationId, POSTGRES_SESSION_MEMORY_TYPE, JSON.stringify(merged)],
+          );
+        }
+        if (requestId) {
+          const nextRequestIds = [...requestIds.filter((value) => value !== requestId), requestId].slice(-128);
+          await client.query(
+            "UPDATE sessions SET agent_state_json=$1::jsonb, updated_at=NOW() WHERE id=$2 AND user_id=$3 AND deleted_at IS NULL",
+            [JSON.stringify({ ...state, memoryLastRequestId: requestId, memoryRequestIds: nextRequestIds }), identity.conversationId, identity.userId],
+          );
+        }
+        const check = await client.query(
+          `SELECT content FROM session_memory
+           WHERE user_id=$1 AND session_id=$2 AND summary_type=$3
+           ORDER BY id DESC LIMIT 1`,
+          [identity.userId, identity.conversationId, POSTGRES_SESSION_MEMORY_TYPE],
+        );
+        const stored = parseStoredSessionMessages(check.rows[0]?.content);
+        for (const message of normalized) {
+          const matches = stored.some((candidate) => sessionMessageKeys(candidate).some((key) => sessionMessageKeys(message).includes(key)) && JSON.stringify(candidate) === JSON.stringify(message));
+          if (!matches) throw new Error("Session memory read-back verification failed");
+        }
+        const stateCheck = await client.query(
+          "SELECT agent_state_json FROM sessions WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL",
+          [identity.conversationId, identity.userId],
+        );
+        const checkedRequestIds = parseJsonObject(stateCheck.rows[0]?.agent_state_json).memoryRequestIds;
+        if (requestId && (!Array.isArray(checkedRequestIds) || !checkedRequestIds.includes(requestId))) throw new Error("Session memory request id read-back verification failed");
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      }
+    });
+  }
+
+  async load(identity: SessionMemoryIdentity): Promise<SessionMemoryMessage[]> {
+    assertSessionIdentity(identity);
+    await assertMemoryGateOpen("read");
+    return withPostgresClient(async (client) => {
+      const result = await client.query(
+        "SELECT messages_json FROM sessions WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL",
+        [identity.conversationId, identity.userId],
+      );
+      if (!result.rows[0]) throw new Error("Conversation does not belong to memory principal");
+      const derived = await client.query(
+        `SELECT content FROM session_memory
+         WHERE user_id=$1 AND session_id=$2 AND summary_type=$3
+         ORDER BY id DESC LIMIT 1`,
+        [identity.userId, identity.conversationId, POSTGRES_SESSION_MEMORY_TYPE],
+      );
+      const stored = parseStoredSessionMessages(derived.rows[0]?.content);
+      if (derived.rows[0]) return stored;
+      const legacy = parseSessionMessages(result.rows[0].messages_json);
+      if (!legacy.length) return [];
+      return legacy;
+    });
+  }
+
+  async eraseTarget(identity: SessionMemoryIdentity, targetText: string): Promise<{ redactedCount: number }> {
+    assertSessionIdentity(identity);
+    const target = targetText.trim();
+    if (!target) throw new Error("Target text is required for targeted session erasure");
+    return withPostgresClient(async (client) => {
+      await client.query("BEGIN");
+      try {
+        const conversation = await client.query(
+          "SELECT id FROM sessions WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL FOR UPDATE",
+          [identity.conversationId, identity.userId],
+        );
+        if (!conversation.rows[0]) throw new Error("Conversation does not belong to memory principal");
+        let redactedCount = 0;
+        const derivedRows = await client.query(
+          `SELECT id, content FROM session_memory
+           WHERE session_id=$1 AND user_id=$2 AND summary_type=$3
+           ORDER BY id DESC LIMIT 1 FOR UPDATE`,
+          [identity.conversationId, identity.userId, POSTGRES_SESSION_MEMORY_TYPE],
+        );
+        let current = parseStoredSessionMessages(derivedRows.rows[0]?.content);
+        if (!derivedRows.rows[0]) {
+          const raw = await client.query(
+            "SELECT messages_json FROM sessions WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL",
+            [identity.conversationId, identity.userId],
+          );
+          current = parseSessionMessages(raw.rows[0]?.messages_json);
+        }
+        const redacted = current.map((message) => {
+          const result = redactSessionValue(message, target);
+          redactedCount += result.redactedCount;
+          return result.value as SessionMemoryMessage;
+        });
+        if (redactedCount && derivedRows.rows[0]?.id) {
+          await client.query(
+            "UPDATE session_memory SET content=$1 WHERE id=$2 AND user_id=$3",
+            [JSON.stringify(redacted), derivedRows.rows[0].id, identity.userId],
+          );
+        } else if (redactedCount) {
+          await client.query(
+            `INSERT INTO session_memory (user_id, session_id, summary_type, content)
+             VALUES ($1,$2,$3,$4)`,
+            [identity.userId, identity.conversationId, POSTGRES_SESSION_MEMORY_TYPE, JSON.stringify(redacted)],
+          );
+        }
+        const derivedCheck = await client.query(
+          `SELECT content FROM session_memory
+           WHERE session_id=$1 AND user_id=$2 AND summary_type=$3
+           ORDER BY id DESC LIMIT 1`,
+          [identity.conversationId, identity.userId, POSTGRES_SESSION_MEMORY_TYPE],
+        );
+        if (containsSessionText(parseStoredSessionMessages(derivedCheck.rows[0]?.content), target)) {
+          throw new Error("Session memory erasure read-back still contains target");
+        }
+        await client.query("COMMIT");
+        return { redactedCount };
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      }
+    });
+  }
+}
+
+export interface MastraMemoryContract { append(input: { resourceId: string; threadId: string; messages: SessionMemoryMessage[]; requestId?: string }): Promise<void>; load(input: { resourceId: string; threadId: string }): Promise<SessionMemoryMessage[]>; eraseTarget?(input: { resourceId: string; threadId: string; targetText: string }): Promise<{ redactedCount: number }> }
+export class MastraSessionMemoryAdapter implements SessionMemoryAdapter {
+  readonly provider = "mastra" as const;
+  constructor(private readonly memory: MastraMemoryContract) {}
+  private map(identity: SessionMemoryIdentity): { resourceId: string; threadId: string } {
+    assertSessionIdentity(identity);
+    return { resourceId: identity.userId, threadId: `conversation:${identity.conversationId}` };
+  }
+  async append(identity: SessionMemoryIdentity, messages: SessionMemoryMessage[], requestId?: string): Promise<void> {
+    const mapped = this.map(identity);
+    if (isPostgresConfigured()) await assertMemoryWriteGateOpen();
+    await this.memory.append({ ...mapped, messages: messages.map(normalizeSessionMessage), requestId });
+  }
+  async load(identity: SessionMemoryIdentity): Promise<SessionMemoryMessage[]> {
+    if (isPostgresConfigured()) await assertMemoryGateOpen("read");
+    return this.memory.load(this.map(identity));
+  }
+  async eraseTarget(identity: SessionMemoryIdentity, targetText: string): Promise<{ redactedCount: number }> {
+    if (!this.memory.eraseTarget) throw new SessionMemoryConfigurationError("Mastra memory adapter does not support targeted erasure");
+    return this.memory.eraseTarget({ ...this.map(identity), targetText });
+  }
+}
+let configuredSessionMemoryAdapter: SessionMemoryAdapter | null = null;
+export function configureSessionMemoryAdapter(adapter: SessionMemoryAdapter | null): void { configuredSessionMemoryAdapter = adapter; }
+export function getSessionMemoryAdapter(): SessionMemoryAdapter {
+  if (configuredSessionMemoryAdapter) return configuredSessionMemoryAdapter;
+  const provider = (process.env.MEMORY_SESSION_PROVIDER || "postgres").trim().toLowerCase();
+  if (provider === "mastra") {
+    const adapter = new MastraSessionMemoryAdapter(createMastraSessionContract());
+    configuredSessionMemoryAdapter = adapter;
+    return adapter;
+  }
+  return new PostgresSessionMemoryAdapter();
+}
+export async function eraseConversationMemory(principal: ExecutionPrincipal, input: { conversationId: number; targetText: string }): Promise<{ provider: SessionMemoryAdapter["provider"]; redactedCount: number }> { const adapter = getSessionMemoryAdapter(); const result = await adapter.eraseTarget({ userId: principal.userId, conversationId: input.conversationId }, input.targetText); return { provider: adapter.provider, redactedCount: result.redactedCount }; }

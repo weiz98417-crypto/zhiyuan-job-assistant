@@ -26,6 +26,7 @@
 - 所有新增持久模型围绕已确认领域对象建模：Admission Decision evidence、Continuation Stimulus、Program stage 与 verified facts、Conversation Item，以及支持它们的 version、dedupe、owner 和 cursor 字段。
 - 每项 schema migration 必须是可重复运行的、显式版本化的，并为请求幂等、Conversation active Run、Artifact owner 与 version、Gate scope、Event 或 Item dedupe 建立必要约束和索引。
 - 数据回填只能生成有来源证据的兼容记录；无法可靠重建的历史状态必须标记 legacy，而不得伪造新的 Program 或 Item 事实。
+- 非终态旧 Run 在统一生产切换时保留身份，按持久证据映射到新 Program 状态并记录迁移来源。缺少必需事实时，在同一 Run 内重新读回或请求用户重新确认；无法补验时安全暂停并说明原因，不把缺口写成已完成。等待用户的旧 Run 不要求旧执行器长期存活。
 - feature flag 按目的区分 Admission shadow、Continuation kernel、Program vertical slice、Item dual-write、Item read switch 和 unified production cutover。每个开关记录 owner、cohort、观测指标、回退语义、最晚删除阶段。
 - dual-write 必须具备确定性 comparison key、差异分类与告警；新读路径未通过等价性门禁前不得对普通用户成为事实源。
 - 迁移期禁止新旧路径双重产生业务副作用。一个 Agent Run 在任意时刻只能由一个权威执行路径拥有，且同一 Agent Conversation 仍最多一个 active Run。
@@ -35,6 +36,7 @@
 ## Testing Decisions
 
 - 在空库、当前生产形状数据库和含 legacy 历史记录的样本库上验证 migration、回填、约束、索引和降级读取行为。
+- 覆盖切换前处于执行中、waiting_user 和 paused 的旧 Run：在安全点迁移，保留 Run 身份和原始绑定；验证缺失事实触发补验或安全暂停，用户返回后可在同一 Run 继续。
 - 对所有写 command 执行重复提交与并发测试，断言不会出现第二个 Stimulus、第二个 active Run、重复 Item 或重复业务副作用。
 - 为 dual-write 建立固定 comparison fixtures，覆盖 Event、Gate、Artifact、paused Run、Program stage 和 refresh read model，并对未解释差异失败。
 - 在 feature flag seam 测试 cohort 隔离、开关组合合法性、roll-forward 与受控 rollback；禁止没有删除条件或观测指标的开关进入生产。

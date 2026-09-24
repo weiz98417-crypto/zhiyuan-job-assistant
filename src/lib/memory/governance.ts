@@ -206,16 +206,15 @@ export async function updateMemoryItemStatus(
 ): Promise<boolean> {
   if (getDatabaseDriver() !== "postgres" || !isPostgresConfigured()) return false;
   return withPostgresClient(async (client) => Boolean((await client.query(
-    "UPDATE memory_items SET status=$1, updated_at=now() WHERE id=$2",
+    `UPDATE memory_items
+     SET status=$1,
+         metadata_json=CASE WHEN $1='active'
+           THEN jsonb_set(metadata_json, '{visibility}', '"team"'::jsonb)
+           ELSE metadata_json END,
+         updated_at=now()
+     WHERE id=$2
+       AND metadata_json->>'visibility' IN ('team_pending', 'team')`,
     [status, id],
-  )).rowCount));
-}
-
-export async function deleteMemoryItem(id: number): Promise<boolean> {
-  if (getDatabaseDriver() !== "postgres" || !isPostgresConfigured()) return false;
-  return withPostgresClient(async (client) => Boolean((await client.query(
-    "DELETE FROM memory_items WHERE id=$1",
-    [id],
   )).rowCount));
 }
 
@@ -234,6 +233,7 @@ async function listReferenceRows(): Promise<ReferenceRow[]> {
           u.username AS owner_username
         FROM reference_resumes rr
         LEFT JOIN users u ON u.id = rr.user_id
+        WHERE rr.visibility IN ('team_pending', 'team') OR rr.approved_by IS NOT NULL
         ORDER BY rr.created_at DESC
         LIMIT 500
       `);
@@ -248,6 +248,7 @@ async function listReferenceRows(): Promise<ReferenceRow[]> {
       u.username AS owner_username
     FROM reference_resumes rr
     LEFT JOIN users u ON u.id = rr.user_id
+    WHERE rr.visibility IN ('team_pending', 'team') OR rr.approved_by IS NOT NULL
     ORDER BY rr.created_at DESC
     LIMIT 500
   `).all() as ReferenceRow[];
@@ -325,8 +326,9 @@ async function listVectorGovernanceData(): Promise<{
           c.retry_count, c.embedding_model, c.updated_at
         FROM reference_resume_chunks c
         JOIN reference_resumes r ON r.id = c.reference_resume_id
-        WHERE c.embedding_status = 'failed'
-           OR (c.embedding_status = 'pending' AND c.updated_at < now() - interval '10 minutes')
+        WHERE (r.visibility IN ('team_pending', 'team') OR r.approved_by IS NOT NULL)
+          AND (c.embedding_status = 'failed'
+            OR (c.embedding_status = 'pending' AND c.updated_at < now() - interval '10 minutes'))
         ORDER BY c.updated_at DESC
         LIMIT 80
       `);
@@ -335,8 +337,9 @@ async function listVectorGovernanceData(): Promise<{
           c.id, c.source_id, c.source_type, c.user_id, c.embedding_status,
           c.failure_reason, c.retry_count, c.embedding_model, c.updated_at
         FROM memory_chunks c
-        WHERE c.embedding_status = 'failed'
-           OR (c.embedding_status = 'pending' AND c.updated_at < now() - interval '10 minutes')
+        WHERE c.metadata_json->>'visibility' IN ('team_pending', 'team')
+          AND (c.embedding_status = 'failed'
+            OR (c.embedding_status = 'pending' AND c.updated_at < now() - interval '10 minutes'))
         ORDER BY c.updated_at DESC
         LIMIT 80
       `);
@@ -361,6 +364,7 @@ async function listVectorGovernanceData(): Promise<{
         FROM memory_items mi
         LEFT JOIN memory_evidence me ON me.memory_item_id = mi.id
         WHERE mi.status = 'candidate'
+          AND mi.metadata_json->>'visibility' IN ('team_pending', 'team')
         GROUP BY mi.id
         ORDER BY
           mi.importance DESC,

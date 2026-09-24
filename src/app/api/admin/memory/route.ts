@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDataRepositories } from "@/lib/data-repositories";
 import { requireAdmin } from "@/lib/security/auth-guards";
 import {
-  deleteMemoryItem,
   deleteReferenceResumePreferDisable,
   listMemoryGovernanceOverview,
   updateMemoryItemStatus,
@@ -38,14 +37,18 @@ export async function PATCH(request: NextRequest) {
     if (!id || !action) {
       return NextResponse.json({ success: false, error: "Invalid id or action" }, { status: 400 });
     }
+    if (action === "delete_memory") {
+      return NextResponse.json({
+        success: false,
+        code: "MEMORY_ERASURE_UNAVAILABLE",
+        error: "暂不支持完整清除记忆；该请求未修改任何记忆。",
+      }, { status: 409 });
+    }
 
     if (action.endsWith("_memory")) {
       const result = await applyMemoryItemAction(id, action);
       if ("updated" in result && !result.updated) {
         return NextResponse.json({ success: false, error: "Memory item not found or not updated", data: result }, { status: 404 });
-      }
-      if ("deleted" in result && !result.deleted) {
-        return NextResponse.json({ success: false, error: "Memory item not found or not deleted", data: result }, { status: 404 });
       }
       return NextResponse.json({ success: true, data: result });
     }
@@ -53,6 +56,9 @@ export async function PATCH(request: NextRequest) {
     const repos = getDataRepositories();
     const existing = await repos.referenceResumes.get(id);
     if (!existing) {
+      return NextResponse.json({ success: false, error: "Reference resume not found" }, { status: 404 });
+    }
+    if (!["team_pending", "team"].includes(String(existing.visibility || "")) && !existing.approved_by) {
       return NextResponse.json({ success: false, error: "Reference resume not found" }, { status: 404 });
     }
 
@@ -130,9 +136,6 @@ async function applyMemoryItemAction(id: number, action: string) {
   }
   if (action === "restore_memory") {
     return { id, action, nextStatus: "candidate", updated: await updateMemoryItemStatus(id, "candidate") };
-  }
-  if (action === "delete_memory") {
-    return { id, action, deleted: await deleteMemoryItem(id) };
   }
   throw new Error("Unsupported action");
 }

@@ -29,6 +29,8 @@
     "check:jd-eval-partials": "node scripts/check-jd-eval-partials.mjs",
     "backup:postgres": "node scripts/backup-postgres.mjs",
     "restore:postgres": "node scripts/restore-postgres.mjs",
+    "migrate:memory-ledger": "node scripts/migrate-memory-ledger.mjs",
+    "check:memory-release-gates": "node scripts/check-memory-release-gates.mjs --strict",
     "migrate:postgres": "node scripts/migrate-sqlite-to-postgres.mjs",
     "check:postgres-migration": "node scripts/check-postgres-migration.mjs",
     "backfill:memory": "node scripts/backfill-memory.mjs",
@@ -58,6 +60,9 @@
   "dependencies": {
     "@ant-design/icons": "^6.3.2",
     "@libsql/client": "^0.17.3",
+    "@mastra/core": "^1.69.0",
+    "@mastra/memory": "^1.31.0",
+    "@mastra/pg": "^1.26.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@napi-rs/canvas": "^1.0.0",
     "@types/better-sqlite3": "^7.6.13",

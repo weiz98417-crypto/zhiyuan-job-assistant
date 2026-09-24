@@ -1,0 +1,3 @@
+# Delegated research declares whether its result is required or supporting
+
+Before creating a read-only child Agent Run, the parent Task Program declares whether the research result is required for success or supporting context. A child failure, timeout, or invalid structured result never becomes a verified fact: supporting research may be omitted with a clear limitation in the parent's answer, while missing required research leaves the parent Run recoverably waiting rather than claiming success. We chose this over treating every child failure as fatal or allowing the model to silently downgrade a required result, so optional research can improve an answer without making the user's core task brittle.

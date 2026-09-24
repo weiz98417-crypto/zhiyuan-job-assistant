@@ -64,19 +64,25 @@
 
 ### Requirement: Agent 偏好模型
 
-系统 SHALL 从用户反馈和行为中持续学习偏好，构建动态偏好模型，影响推荐排序。
+系统 SHALL 从用户反馈和行为中持续学习排序信号，构建动态偏好模型；推断信号不等于用户明确确认的求职偏好。
 
 #### Scenario: 从推荐反馈学习角色偏好
 
 - **WHEN** 用户 dismiss 一个推荐（role="后端工程师"）
-- **THEN** AgentPreferenceModel.rolePreferences["后端工程师"] 的 score 降低 0.1
-- **AND** confidence 根据交互次数重新计算
+- **THEN** 系统只记录低权重、短期的排序信号，不将其标为用户明确偏好
+- **AND** 重复且一致的反馈才可提出待确认的角色偏好，confidence 根据交互次数重新计算
 
-#### Scenario: 从推荐反馈学习公司偏好
+#### Scenario: 单次忽略岗位不形成公司黑名单
 
 - **WHEN** 用户 dismiss 一个推荐（company="某大厂"）
-- **THEN** AgentPreferenceModel.companyPreferences.disliked 数组加入该公司
-- **AND** 后续推荐中同公司岗位获得 -10 分的偏好惩罚
+- **THEN** 系统只记录该岗位的忽略反馈，不将该公司加入 `companyPreferences.disliked`
+- **AND** 后续同公司其他岗位仍可被推荐
+
+#### Scenario: 用户明确排除公司
+
+- **WHEN** 用户直接要求不再推荐某公司
+- **THEN** 系统将该公司记录为明确的当前求职偏好
+- **AND** 后续岗位发现与推荐遵守这一约束
 
 #### Scenario: 偏好不超过边界
 
@@ -93,9 +99,8 @@
 
 - **WHEN** 用户在 explore 页面完成对话总结
 - **AND** summarize 返回 targetRoles
-- **THEN** targetRoles 中 confidence ≥ 60 的角色写入 AgentPreferenceModel
-- **AND** source 标记为 "explore"
-- **AND** 手动设定的 goals（source="manual"）优先级高于探索总结
+- **THEN** targetRoles 中 confidence ≥ 60 的模型推断可作为来源为 "explore" 的待确认候选
+- **AND** 用户确认前不得写成明确求职偏好或覆盖手动设定的 goals
 
 #### Scenario: 偏好随时间衰减
 

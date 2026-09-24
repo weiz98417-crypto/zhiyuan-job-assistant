@@ -267,7 +267,7 @@ export default function AdminMemoryPage() {
           />
           <FilterSelect label="方向" value={filters.roleCategory} options={roleOptions} onChange={(value) => setFilters((prev) => ({ ...prev, roleCategory: value }))} />
           <FilterSelect label="来源" value={filters.sourceType} options={sourceOptions} onChange={(value) => setFilters((prev) => ({ ...prev, sourceType: value }))} />
-          <FilterSelect label="可见性" value={filters.visibility} options={["private", "team_pending", "team", "disabled"]} onChange={(value) => setFilters((prev) => ({ ...prev, visibility: value }))} />
+          <FilterSelect label="可见性" value={filters.visibility} options={["team_pending", "team", "disabled"]} onChange={(value) => setFilters((prev) => ({ ...prev, visibility: value }))} />
           <FilterSelect label="状态" value={filters.status} options={["active", "pending", "disabled", "index_failed"]} onChange={(value) => setFilters((prev) => ({ ...prev, status: value }))} />
         </div>
         <button
@@ -649,7 +649,6 @@ function actionSuccessMessage(action: string) {
     reject_memory: "已拒绝候选记忆",
     disable_memory: "已归档候选记忆",
     restore_memory: "已恢复候选记忆",
-    delete_memory: "已删除候选记忆",
   };
   return messages[action] || "操作完成";
 }

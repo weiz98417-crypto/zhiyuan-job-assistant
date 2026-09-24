@@ -1,0 +1,3 @@
+# Legacy Runs migrate in place with evidence-backed revalidation
+
+Nonterminal Agent Runs keep their identity across the unified production cutover. Their Program state may advance under the new kernel only from persisted evidence; missing verified facts require read-back or renewed user confirmation within the same Run, and an unresolvable gap leaves the Run safely paused with a clear explanation. We chose this over keeping the legacy executor alive until every waiting Run ends: that would make legacy ownership permanent for users who return much later. Migration records retain the original binding and the evidence for each mapped fact rather than rewriting historical success.

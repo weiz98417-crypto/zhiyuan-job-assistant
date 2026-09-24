@@ -5,7 +5,6 @@ import {
   updateDecisionResponse,
   findDecisionsByEntity,
   updateRolePreference,
-  updateCompanyPreference,
 } from "@/lib/agent/memory";
 import type { AgentDecision } from "@/types";
 
@@ -93,7 +92,6 @@ export async function POST(request: Request) {
     // 3. Update preference model
     if (action === "dismissed") {
       await updateRolePreference(role, -0.1, "learned");
-      await updateCompanyPreference(company, "dislike");
     } else if (action === "accepted") {
       await updateRolePreference(role, 0.05, "learned");
     } else if (action === "clicked") {

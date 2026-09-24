@@ -1146,6 +1146,91 @@ BEGIN
   END IF;
 END $$;
 
+CREATE TABLE IF NOT EXISTS mastra_threads (
+  id TEXT PRIMARY KEY NOT NULL,
+  "resourceId" TEXT NOT NULL,
+  title TEXT NOT NULL,
+  metadata JSONB,
+  "createdAt" TIMESTAMP NOT NULL,
+  "updatedAt" TIMESTAMP NOT NULL,
+  "createdAtZ" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAtZ" TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS mastra_messages (
+  id TEXT PRIMARY KEY NOT NULL,
+  thread_id TEXT NOT NULL,
+  content TEXT NOT NULL,
+  role TEXT NOT NULL,
+  type TEXT NOT NULL,
+  "createdAt" TIMESTAMP NOT NULL,
+  "resourceId" TEXT,
+  "createdAtZ" TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS mastra_resources (
+  id TEXT PRIMARY KEY NOT NULL,
+  "workingMemory" TEXT,
+  metadata JSONB,
+  "createdAt" TIMESTAMP NOT NULL,
+  "updatedAt" TIMESTAMP NOT NULL,
+  "createdAtZ" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAtZ" TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS mastra_observational_memory (
+  id TEXT PRIMARY KEY NOT NULL,
+  "lookupKey" TEXT NOT NULL,
+  scope TEXT NOT NULL,
+  "resourceId" TEXT,
+  "threadId" TEXT,
+  "activeObservations" TEXT NOT NULL,
+  "activeObservationsPendingUpdate" TEXT,
+  "originType" TEXT NOT NULL,
+  config TEXT NOT NULL,
+  "generationCount" INTEGER NOT NULL,
+  "lastObservedAt" TIMESTAMP,
+  "lastReflectionAt" TIMESTAMP,
+  "pendingMessageTokens" INTEGER NOT NULL,
+  "totalTokensObserved" INTEGER NOT NULL,
+  "observationTokenCount" INTEGER NOT NULL,
+  "isObserving" BOOLEAN NOT NULL,
+  "isReflecting" BOOLEAN NOT NULL,
+  "observedMessageIds" JSONB,
+  "observedTimezone" TEXT,
+  "bufferedObservations" TEXT,
+  "bufferedObservationTokens" INTEGER,
+  "bufferedMessageIds" JSONB,
+  "bufferedReflection" TEXT,
+  "bufferedReflectionTokens" INTEGER,
+  "bufferedReflectionInputTokens" INTEGER,
+  "reflectedObservationLineCount" INTEGER,
+  "bufferedObservationChunks" JSONB,
+  "isBufferingObservation" BOOLEAN NOT NULL,
+  "isBufferingReflection" BOOLEAN NOT NULL,
+  "lastBufferedAtTokens" INTEGER NOT NULL,
+  "lastBufferedAtTime" TIMESTAMP,
+  metadata JSONB,
+  "createdAt" TIMESTAMP NOT NULL,
+  "updatedAt" TIMESTAMP NOT NULL,
+  "lastObservedAtZ" TIMESTAMPTZ DEFAULT NOW(),
+  "lastReflectionAtZ" TIMESTAMPTZ DEFAULT NOW(),
+  "lastBufferedAtTimeZ" TIMESTAMPTZ DEFAULT NOW(),
+  "createdAtZ" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAtZ" TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_om_lookup_key ON mastra_observational_memory ("lookupKey");
+CREATE INDEX IF NOT EXISTS mastra_threads_resourceid_createdat_idx ON mastra_threads ("resourceId", "createdAt" DESC);
+CREATE INDEX IF NOT EXISTS mastra_messages_thread_id_createdat_idx ON mastra_messages (thread_id, "createdAt" DESC);
+CREATE TABLE IF NOT EXISTS mastra_thread_state (
+  "threadId" TEXT NOT NULL,
+  type TEXT NOT NULL,
+  value JSONB NOT NULL DEFAULT '{}'::jsonb,
+  "createdAt" TIMESTAMP NOT NULL DEFAULT NOW(),
+  "updatedAt" TIMESTAMP NOT NULL DEFAULT NOW(),
+  "createdAtZ" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAtZ" TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY ("threadId", type)
+);
+CREATE INDEX IF NOT EXISTS mastra_thread_state_updated_idx ON mastra_thread_state ("updatedAtZ" DESC);
+
 -- ── M5 layered memory (ADR-0028): bi-temporal fact ledger ──
 -- Episodes are append-only raw signals; facts carry validity windows and are
 -- invalidated (never overwritten) when new evidence contradicts them.
@@ -1158,8 +1243,12 @@ CREATE TABLE IF NOT EXISTS memory_episodes (
   content_json JSONB NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE memory_episodes ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
 CREATE INDEX IF NOT EXISTS idx_memory_episodes_user_time
   ON memory_episodes (user_id, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_episodes_idempotency
+  ON memory_episodes (user_id, idempotency_key)
+  WHERE idempotency_key IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS memory_facts (
   id BIGSERIAL PRIMARY KEY,
@@ -1180,6 +1269,7 @@ CREATE TABLE IF NOT EXISTS memory_facts (
   decision_reason TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE memory_facts ADD COLUMN IF NOT EXISTS decision_id BIGINT;
 CREATE INDEX IF NOT EXISTS idx_memory_facts_user_partition_valid
   ON memory_facts (user_id, partition, valid_at DESC);
 CREATE INDEX IF NOT EXISTS idx_memory_facts_canonical
@@ -1188,18 +1278,52 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_facts_unique_open_fact
   ON memory_facts (user_id, partition, subject, predicate)
   WHERE invalid_at IS NULL;
 
-CREATE TABLE IF NOT EXISTS memory_fact_chunks (
-  fact_id BIGINT NOT NULL REFERENCES memory_facts(id) ON DELETE CASCADE,
-  user_id TEXT NOT NULL,
-  chunk_index INTEGER NOT NULL DEFAULT 0,
-  embedding vector(1536),
-  embedding_status TEXT NOT NULL DEFAULT 'pending',
-  content TEXT NOT NULL,
-  PRIMARY KEY (fact_id, chunk_index)
+CREATE TABLE IF NOT EXISTS memory_fact_decisions (
+  id BIGSERIAL PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  idempotency_key TEXT NOT NULL,
+  source_episode_id BIGINT NOT NULL REFERENCES memory_episodes(id),
+  partition TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  decision TEXT NOT NULL CHECK (decision IN ('ADD', 'UPDATE', 'DELETE', 'NOOP')),
+  decision_reason TEXT NOT NULL,
+  target_fact_id BIGINT REFERENCES memory_facts(id),
+  result_fact_id BIGINT REFERENCES memory_facts(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (user_id, idempotency_key)
 );
-CREATE INDEX IF NOT EXISTS idx_memory_fact_chunks_hnsw
-  ON memory_fact_chunks USING hnsw (embedding vector_cosine_ops)
-  WITH (m = 16, ef_construction = 64);
+CREATE INDEX IF NOT EXISTS idx_memory_fact_decisions_source
+  ON memory_fact_decisions (user_id, source_episode_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_fact_decisions_target
+  ON memory_fact_decisions (user_id, target_fact_id);
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'memory_facts_decision_id_fkey'
+      AND conrelid = 'memory_facts'::regclass
+  ) THEN
+    ALTER TABLE memory_facts
+      ADD CONSTRAINT memory_facts_decision_id_fkey
+      FOREIGN KEY (decision_id) REFERENCES memory_fact_decisions(id);
+  END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS memory_entities (
+  id BIGSERIAL PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  partition TEXT NOT NULL,
+  entity_key TEXT NOT NULL,
+  summary TEXT NOT NULL DEFAULT '',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (user_id, partition, entity_key)
+);
+CREATE TABLE IF NOT EXISTS memory_entity_facts (
+  entity_id BIGINT NOT NULL REFERENCES memory_entities(id) ON DELETE CASCADE,
+  fact_id BIGINT NOT NULL REFERENCES memory_facts(id) ON DELETE CASCADE,
+  PRIMARY KEY (entity_id, fact_id)
+);
+CREATE INDEX IF NOT EXISTS idx_memory_entity_facts_fact
+  ON memory_entity_facts (fact_id);
 
 -- Structured job-seeking profile: typed topic/sub-topic fields, pure SQL —
 -- never vectorized (Memobase-style profile core).
@@ -1215,8 +1339,54 @@ CREATE TABLE IF NOT EXISTS profile_blocks (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (user_id, topic, sub_topic)
 );
+ALTER TABLE profile_blocks ADD COLUMN IF NOT EXISTS review_due_at TIMESTAMPTZ;
+ALTER TABLE profile_blocks ADD COLUMN IF NOT EXISTS last_confirmed_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_profile_blocks_user_topic
   ON profile_blocks (user_id, topic);
+
+CREATE TABLE IF NOT EXISTS memory_profile_block_facts (
+  profile_block_id BIGINT NOT NULL REFERENCES profile_blocks(id) ON DELETE CASCADE,
+  fact_id BIGINT NOT NULL REFERENCES memory_facts(id) ON DELETE CASCADE,
+  PRIMARY KEY (profile_block_id, fact_id)
+);
+CREATE INDEX IF NOT EXISTS idx_memory_profile_block_facts_fact
+  ON memory_profile_block_facts (fact_id);
+
+CREATE TABLE IF NOT EXISTS memory_fact_chunks (
+  fact_id BIGINT NOT NULL REFERENCES memory_facts(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  chunk_index INTEGER NOT NULL DEFAULT 0,
+  embedding vector(1536),
+  embedding_status TEXT NOT NULL DEFAULT 'pending',
+  content TEXT NOT NULL,
+  PRIMARY KEY (fact_id, chunk_index)
+);
+CREATE INDEX IF NOT EXISTS idx_memory_fact_chunks_hnsw
+  ON memory_fact_chunks USING hnsw (embedding vector_cosine_ops)
+  WITH (m = 16, ef_construction = 64);
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'memory_fact_chunks_user_id_fkey'
+      AND conrelid = 'memory_fact_chunks'::regclass
+  ) THEN
+    ALTER TABLE memory_fact_chunks
+      ADD CONSTRAINT memory_fact_chunks_user_id_fkey
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+  END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS memory_runtime_gates (
+  gate_name TEXT PRIMARY KEY,
+  state TEXT NOT NULL DEFAULT 'open' CHECK (state IN ('open', 'closed')),
+  reason TEXT NOT NULL DEFAULT '',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+INSERT INTO memory_runtime_gates (gate_name, state, reason)
+VALUES ('read', 'open', 'schema default'),
+       ('write', 'open', 'schema default'),
+       ('extract', 'open', 'schema default')
+ON CONFLICT (gate_name) DO NOTHING;
 
 -- Memory partitions (MemCube-style): named namespaces with explicit
 -- readable/writable lists replace per-task policy rules.
@@ -1230,3 +1400,98 @@ CREATE TABLE IF NOT EXISTS memory_partitions (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (user_id, partition)
 );
+
+CREATE TABLE IF NOT EXISTS memory_admission_candidates (
+  id BIGSERIAL PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK (kind IN ('conversation', 'remember_request', 'behavior')),
+  partition TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  predicate TEXT NOT NULL,
+  object_json JSONB NOT NULL,
+  canonical_text TEXT NOT NULL,
+  confidence REAL NOT NULL DEFAULT 0.6,
+  importance REAL NOT NULL DEFAULT 0.5,
+  source_type TEXT NOT NULL,
+  source_id TEXT NOT NULL,
+  evidence_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  sensitivity TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'rejected')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at TIMESTAMPTZ NOT NULL,
+  resolved_at TIMESTAMPTZ,
+  fact_id BIGINT REFERENCES memory_facts(id),
+  UNIQUE (user_id, kind, source_type, source_id, canonical_text)
+);
+CREATE INDEX IF NOT EXISTS idx_memory_admission_candidates_pending
+  ON memory_admission_candidates (user_id, status, expires_at);
+ALTER TABLE memory_admission_candidates ADD COLUMN IF NOT EXISTS confidence REAL NOT NULL DEFAULT 0.6;
+ALTER TABLE memory_admission_candidates ADD COLUMN IF NOT EXISTS importance REAL NOT NULL DEFAULT 0.5;
+ALTER TABLE memory_admission_candidates ADD COLUMN IF NOT EXISTS sensitivity TEXT NOT NULL DEFAULT 'none';
+UPDATE memory_admission_candidates SET sensitivity = 'none' WHERE sensitivity IS NULL;
+ALTER TABLE memory_admission_candidates ALTER COLUMN sensitivity SET DEFAULT 'none';
+ALTER TABLE memory_admission_candidates ALTER COLUMN sensitivity SET NOT NULL;
+
+CREATE TABLE IF NOT EXISTS memory_discovery_settings (
+  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  notice_acknowledged_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS memory_erasure_requests (
+  id BIGSERIAL PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  target_type TEXT NOT NULL,
+  target_id TEXT NOT NULL,
+  target_hash TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  scope_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  completed_layers_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  confirmed_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
+  last_error TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_memory_erasure_requests_user_status
+  ON memory_erasure_requests (user_id, status, created_at DESC);
+CREATE TABLE IF NOT EXISTS memory_erasure_suppressions (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  target_hash TEXT NOT NULL,
+  target_key TEXT,
+  source_type TEXT NOT NULL,
+  source_id TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  lifted_at TIMESTAMPTZ,
+  request_id BIGINT NOT NULL REFERENCES memory_erasure_requests(id) ON DELETE CASCADE,
+  PRIMARY KEY (user_id, target_hash, source_type, source_id)
+);
+ALTER TABLE memory_erasure_suppressions ADD COLUMN IF NOT EXISTS target_key TEXT;
+ALTER TABLE memory_erasure_suppressions ADD COLUMN IF NOT EXISTS lifted_at TIMESTAMPTZ;
+
+CREATE TABLE IF NOT EXISTS memory_support_grants (
+  id BIGSERIAL PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  support_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  scope_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  reason TEXT NOT NULL DEFAULT '',
+  expires_at TIMESTAMPTZ NOT NULL,
+  revoked_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (user_id, support_user_id, created_at)
+);
+CREATE INDEX IF NOT EXISTS idx_memory_support_grants_active
+  ON memory_support_grants (user_id, support_user_id, expires_at)
+  WHERE revoked_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS memory_support_access_audit (
+  id BIGSERIAL PRIMARY KEY,
+  grant_id BIGINT REFERENCES memory_support_grants(id) ON DELETE SET NULL,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  support_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  action TEXT NOT NULL,
+  scope_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_memory_support_access_audit_user
+  ON memory_support_access_audit (user_id, created_at DESC);

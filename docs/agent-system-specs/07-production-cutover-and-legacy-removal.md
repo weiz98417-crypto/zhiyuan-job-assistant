@@ -29,6 +29,7 @@
 - Phase 6 使用一次部署统一启用 Admission、Continuation、Task Program 和 Conversation Item read model。canary 仅用于风险观测与紧急回退，不表示按 module 逐步发布不同运行时语义。
 - 生产切换的必要条件包括：Admission goldens 全通过；Memory/Postgres 零 conformance 差异；所有确定性 Program 有完整 verified facts；每个明确目标有 durable Run；无双 active Run；Gate、Stimulus 与 Item 收敛；Artifact 读回正确；实时和刷新 Item 一致；101–120、短链路和核心长链路全通过；无 raw payload fallback。
 - 回退必须恢复到上一个完整、受支持的生产组合，并保存切换期新事实、Event Log 和 Evidence 以便诊断；不允许通过绕过 Run Admission、直接修改 Session Message 或关闭审计来“止血”。
+- 切换时旧 Run 的跨版本处理遵循 ADR-0029：已开始且不可安全中断的动作先到达安全点；等待用户或暂停的 Run 保留身份，由新内核基于证据续跑，证据不足则补验或安全暂停，不为等待中的 Run 无限期保留旧执行 ownership。
 - Phase 7 在稳定窗口结束后删除浏览器 Run 编排、客户端生产 execution loop、重复 adapter 状态语义、事后多份 Contract 判分、Session Message 事实源、页面 Gate 改写、hidden bootstrap prompt、raw payload 卡片分支以及已迁移任务的旧特判。
 - 每项删除必须先明确由哪个新 module 接管、哪些 Program 或旅程覆盖、哪些 feature flag 移除，并在删除后重跑 release manifest。
 

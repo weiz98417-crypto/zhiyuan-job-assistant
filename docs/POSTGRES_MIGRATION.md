@@ -76,7 +76,7 @@ The `runtime_sqlite_imports` gate must pass before SQLite can be treated as an a
 For local/LAN deployments, use the Node JSON backup when `pg_dump` or `psql` is not installed:
 
 ```powershell
-npm run backup:postgres -- --output data/backups/postgres-after-cutover.json
+npm run backup:postgres -- --output data/backups/postgres-after-cutover.json --retention-days 30 --retention-verified
 ```
 
 Restore is dry-run by default:
@@ -95,6 +95,15 @@ To replace an existing target database, require both explicit flags:
 
 ```powershell
 npm run restore:postgres -- --input data/backups/postgres-after-cutover.json --apply --allow-overwrite
+npm run restore:postgres -- --input data/backups/postgres-after-cutover.json --apply --allow-overwrite --evidence data/backups/postgres-restore-evidence.json
+```
+
+`--retention-verified` records a read-only check of the production backup policy; it does not claim that policy automatically. A strict memory release gate requires both these retention fields and the restore evidence produced after cross-layer erasure replay and read-back:
+
+```powershell
+$env:POSTGRES_BACKUP_EVIDENCE="data/backups/postgres-after-cutover.json"
+$env:POSTGRES_RESTORE_EVIDENCE="data/backups/postgres-restore-evidence.json"
+npm run check:memory-release-gates
 ```
 
 ## SQLite Archive Mode

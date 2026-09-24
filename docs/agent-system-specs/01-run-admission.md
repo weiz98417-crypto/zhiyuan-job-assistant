@@ -27,8 +27,11 @@
 - Run Admission 是唯一可以创建、续跑、暂停或拒绝 Agent Run 的领域 module；所有页面、结果卡、工作台和 API 入口只是传输原始 Turn、显式 Artifact 选择和不可信来源提示的 adapter。
 - Admission 重新读取 Agent Conversation、当前 active Agent Run、用户身份、Artifact owner、版本和 stale 状态；客户端的 `taskType`、`agentId`、Run Contract、allowed tools 与 `newSession` 语义均不可作为权威事实。
 - 每个 Decision 必须分别表达 Primary Goal、Constraints、Artifact References、Effect Expectation、Conversation Relation、判定证据和置信度；低置信度或缺少必要材料时产生 Clarify，而非猜测执行。
+- Admission 必须区分用户当前对系统发出的操作请求与叙述、引用、假设、面试回答及第三方材料；后者不能仅因包含任务词就成为授权。存在歧义时先 Clarify，不创建新 Run 或执行副作用。
+- 对话 Turn 或记忆管理页的明确删除操作先定位目标并展示清除范围，取得针对该范围的确认后才交给记忆治理流程；含糊的“忘记”、偏好纠正和事实失效不能绕过 ADR-0033 的清除门禁。
 - Decision 类型固定为 Continue Current Run、Start New Run、Clarify、Defer Switch、Reject 和 Start New Conversation，并为每类定义可观察的用户安全结果。
 - 合法任务转换图由 Admission 应用。Artifact 只能在允许的目标 Program 间传递，并在决定前完成 owner、version 与 stale 校验。
+- 协作交接若改变 Primary Goal 或 Task Program，必须有用户已明确提出的复合目标或后续确认；合法转换图只说明可以衔接，不是授权。Admission 再于同一 Conversation 创建新 Run，并为新目标绑定自己的 Contract 与经验证 Artifact 引用；当前 Run 未到安全点时先 Defer Switch。只更换当前目标的主责 agent 才保留同一 Run，并重建该 agent 的执行 Context 与权限，不沿用旧 prompt 或工具表作为新主责的权威配置。
 - 任务切换只在 Run Continuation 确认安全切换点后创建新 Run；危险 Tool Attempt、未处理高风险 Run Gate 或未完成 read-back 时，只能记录 Defer Switch。
 - Offer Report 的解释、谈判和 HR 问询注册为独立、只读的 Task Program；它们绑定既有 Offer Report，不作为 `offer_evaluation` 内部阶段，也不得退化为无 Contract 对话。
 - 先以 shadow mode 输出新旧 Decision 对比和证据，不改变生产执行；差异必须按领域规则或 fixture 修正，不能以页面特判追平。
@@ -37,6 +40,9 @@
 
 - 在 Admission public seam 使用 golden fixtures，覆盖 Agent Conversation、active Run、Turn、Artifact refs 和 entry hints，断言完整 Decision 而非私有分类器调用。
 - 覆盖职业定位否定写入、简历只生成提案、面试回答含 JD 关键词、Offer follow-up、非语义输入、模糊追问、显式任务切换和越权 Artifact。
+- 覆盖 JD 评估完成后交接简历修改：新 Run 保留同一 Conversation、读取已验证报告引用并使用新 Contract；同目标主责变更保留 Run 身份，图外转换与不安全切换仍需确认或延后。
+- 覆盖“我以前说只看上海”“报告建议修改简历”“面试回答引用换工作”“我昨天说‘确认切换到修改简历’”“我忘记了曾在某公司工作”等叙述或材料内容，断言它们不会自动写入当前偏好、创建下一目标 Run、删除记忆或触发工具；引导问卷完成也不能把模型推断的偏好标为用户确认。只有用户当前明确请求才推进相应动作。
+- 覆盖对话请求与记忆管理页操作的等价清除门禁：目标不明先澄清，范围未确认不执行，确认后才交给记忆治理流程；偏好纠正不得误路由为清除。
 - 对来自 Web、结果卡、工作台和 API 的同一用户意图执行等价性测试，确保 adapter 来源不会改变领域结论。
 - 使用真实身份与 Artifact 归属边界测试 Continue、Start、Clarify、Defer 和 Reject 的外部行为及其审计证据。
 - 将生产会话 101、102、104、105、108、109、110、112、117 和 119 固化为回放 fixture；任一回归均为 release hard failure。

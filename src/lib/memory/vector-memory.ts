@@ -363,6 +363,8 @@ export function buildMemoryRetrievalQuery(input: {
     "user_id = $2",
     "embedding_status = 'embedded'",
     "embedding IS NOT NULL",
+    "COALESCE(metadata_json->>'status', 'active') = 'active'",
+    "COALESCE(metadata_json->>'erasure_suppressed', 'false') <> 'true'",
   ];
 
   if (sourceTypes.length) {

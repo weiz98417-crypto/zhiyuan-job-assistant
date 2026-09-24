@@ -5,12 +5,26 @@ const boundaries = vi.hoisted(() => ({
   update: vi.fn(),
 }));
 
+const sessionMemory = vi.hoisted(() => ({
+  append: vi.fn(),
+  load: vi.fn(),
+}));
+
 vi.mock("@/lib/data-repositories", () => ({
   getDataRepositories: () => ({
     sessions: {
       get: boundaries.get,
       update: boundaries.update,
     },
+  }),
+}));
+
+vi.mock("@/lib/memory/postgres-memory", () => ({
+  getSessionMemoryAdapter: () => ({
+    provider: "postgres",
+    append: sessionMemory.append,
+    load: sessionMemory.load,
+    eraseTarget: vi.fn(),
   }),
 }));
 
@@ -28,6 +42,9 @@ describe("durable interview session persistence regression", () => {
       interview_state_json: "{}",
     });
     boundaries.update.mockResolvedValue(true);
+    sessionMemory.append.mockReset();
+    sessionMemory.load.mockReset();
+    sessionMemory.load.mockResolvedValue([]);
   });
 
   it("rebuilds answered rounds and the next question while saving Worker messages", async () => {

@@ -1,11 +1,14 @@
+import { createHash } from "node:crypto";
 import { getDataRepositories } from "@/lib/data-repositories";
 import type { ExecutionPrincipal } from "@/lib/agent/runtime/durable-agent-run";
 import { rebuildInterviewStateFromMessages } from "@/lib/agent/interview-session-state";
 import type { AgentMessage, InterviewSessionState } from "@/types";
 import type { DurableRunContextMaterial } from "@/lib/agent/runtime/run-context";
 import { reconcileRunGateMessages } from "@/lib/agent/run-gate-message-status";
+import { getSessionMemoryAdapter, type SessionMemoryMessage } from "@/lib/memory/postgres-memory";
 
 export interface ExecutionConversationMessage {
+  id?: string;
   role: string;
   content: string;
   images?: string[];
@@ -66,15 +69,25 @@ export async function loadExecutionConversation(
   if (conversationId === null) return [];
   const row = await getDataRepositories().sessions.get(conversationId, principal.userId);
   if (!row) return [];
-  const value = row.messages_json ?? row.messages;
-  if (Array.isArray(value)) return value as ExecutionConversationMessage[];
-  if (typeof value !== "string") return [];
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed as ExecutionConversationMessage[] : [];
-  } catch {
-    return [];
+  const adapter = getSessionMemoryAdapter();
+  const stored = await adapter.load({ userId: principal.userId, conversationId });
+  if (stored.length) return stored.map(fromSessionMemoryMessage);
+
+  const legacy = parseConversationMessages(row.messages_json ?? row.messages);
+  if (!legacy.length) return [];
+  await adapter.append(
+    { userId: principal.userId, conversationId },
+    legacy.map((message, index) => toSessionMemoryMessage(message, index)),
+    `legacy-session:${conversationId}`,
+  );
+  return (await adapter.load({ userId: principal.userId, conversationId })).map(fromSessionMemoryMessage);
+}
+
+function parseConversationMessages(value: unknown): ExecutionConversationMessage[] {
+  if (typeof value === "string") {
+    try { value = JSON.parse(value); } catch { return []; }
   }
+  return Array.isArray(value) ? value as ExecutionConversationMessage[] : [];
 }
 
 export async function saveExecutionConversation(
@@ -86,20 +99,52 @@ export async function saveExecutionConversation(
   const sessions = getDataRepositories().sessions;
   const row = await sessions.get(conversationId, principal.userId);
   if (!row) throw new Error("Agent Conversation not found");
+  await getSessionMemoryAdapter().append(
+    { userId: principal.userId, conversationId },
+    messages.map((message, index) => toSessionMemoryMessage(message, index)),
+  );
   const currentInterviewState = parseInterviewState(row.interview_state_json ?? row.interviewState);
   const interviewState = rebuildInterviewStateFromMessages(
     currentInterviewState,
     messages.flatMap(toAgentMessage),
   );
-  const updated = await sessions.update(
-    conversationId,
-    principal.userId,
-    {
-      messages,
-      ...(interviewState ? { interviewState } : {}),
-    },
-  );
+  const updated = interviewState
+    ? await sessions.update(conversationId, principal.userId, { interviewState })
+    : true;
   if (!updated) throw new Error("Agent Conversation not found");
+}
+
+function toSessionMemoryMessage(message: ExecutionConversationMessage, index: number): SessionMemoryMessage {
+  const metadata: Record<string, unknown> = {};
+  metadata.role = message.role;
+  if (message.images) metadata.images = [...message.images];
+  if (message.toolName) metadata.toolName = message.toolName;
+  if (message.toolResult !== undefined) metadata.toolResult = message.toolResult;
+  return {
+    id: message.id || createHash("sha256")
+      .update(`${message.role}\u0000${message.timestamp || ""}\u0000${index}`)
+      .digest("hex"),
+    role: message.role,
+    content: message.content,
+    createdAt: message.timestamp,
+    ...(Object.keys(metadata).length ? { metadata: { execution: metadata } } : {}),
+  };
+}
+
+function fromSessionMemoryMessage(message: SessionMemoryMessage): ExecutionConversationMessage {
+  const execution = message.metadata?.execution;
+  const metadata = execution && typeof execution === "object" && !Array.isArray(execution)
+    ? execution as Record<string, unknown>
+    : {};
+  return {
+    id: message.id,
+    role: typeof metadata.role === "string" ? metadata.role : message.role,
+    content: message.content,
+    images: Array.isArray(metadata.images) ? metadata.images.filter((value): value is string => typeof value === "string") : undefined,
+    toolName: typeof metadata.toolName === "string" ? metadata.toolName : undefined,
+    toolResult: metadata.toolResult,
+    timestamp: message.createdAt,
+  };
 }
 
 export function parseInterviewState(value: unknown): InterviewSessionState | undefined {
