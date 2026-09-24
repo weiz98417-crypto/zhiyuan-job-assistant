@@ -322,6 +322,14 @@ export async function* agentLoopServer(opts: {
     }
 
     const phase: AgentPhase = state.iteration === 1 ? "understanding" : "reflecting";
+    if (state.phase !== "responding") {
+      // 0.11.0-B: close the previous step and open the next one so the UI can
+      // show honest progress (phase transitions + criteria counters).
+      if (state.iteration > 1) {
+        yield { type: "step.finished", step: state.phase, criteriaDone: completedProgramCriteria.size, criteriaTotal: taskContract?.successCriteria.length ?? 0 };
+      }
+      yield { type: "step.started", step: phase, criteriaDone: completedProgramCriteria.size, criteriaTotal: taskContract?.successCriteria.length ?? 0 };
+    }
     state.phase = phase;
     yield { type: "phase", phase };
 
@@ -494,6 +502,8 @@ export async function* agentLoopServer(opts: {
       }
 
       const paramsKey = JSON.stringify(params);
+      let subagentStartedAt = 0;
+      let subagentMeta: { delegationId: string; agentId: string; goal: string } | null = null;
       const recent = requiresReadBackVerification(tc.name)
         ? undefined
         : recentCalls.find((c) => c.name === tc.name && c.params === paramsKey);
@@ -508,6 +518,19 @@ export async function* agentLoopServer(opts: {
         state.phase = "executing";
         yield { type: "phase", phase: "executing" };
         yield { type: "tool_call", name: tc.name, params };
+
+        // 0.11.0-B: declared subagent tools emit subagent lifecycle events so
+        // the UI can show who is researching what while the delegation runs.
+        subagentMeta = getTool(tc.name)?.outcome?.subagentOf?.(params) || null;
+        if (subagentMeta) {
+          yield {
+            type: "subagent.started",
+            delegationId: `${tc.name}-${Date.now()}`,
+            agentId: subagentMeta.agentId,
+            goal: subagentMeta.goal,
+          };
+        }
+        subagentStartedAt = subagentMeta ? Date.now() : 0;
 
         const durableExecution = Boolean(
           executionContext?.workerId
@@ -628,6 +651,27 @@ export async function* agentLoopServer(opts: {
       const waitsForUser = outcomeMeta?.waitsForUser
         ? outcomeMeta.waitsForUser(toolResult) === true
         : shouldWaitForUserAfterToolResult(tc.name, toolResult.data);
+      // 0.11.0-B: close the subagent lifecycle opened at tool_call time.
+      if (subagentStartedAt) {
+        const delegationId = `${tc.name}-${subagentStartedAt}`;
+        if (toolResult.success) {
+          const d = (toolResult.data && typeof toolResult.data === "object" ? toolResult.data : {}) as Record<string, unknown>;
+          yield {
+            type: "subagent.finished",
+            delegationId,
+            agentId: typeof d.targetAgentId === "string" ? d.targetAgentId : (subagentMeta?.agentId ?? ""),
+            findings: typeof d.findings === "string" ? d.findings : "",
+            keyPoints: Array.isArray(d.keyPoints) ? d.keyPoints : [],
+          };
+        } else {
+          yield {
+            type: "subagent.error",
+            delegationId,
+            agentId: subagentMeta?.agentId ?? "",
+            reason: toolResult.error || "委派子任务失败",
+          };
+        }
+      }
       if (
         toolResult.success
         && waitsForUser

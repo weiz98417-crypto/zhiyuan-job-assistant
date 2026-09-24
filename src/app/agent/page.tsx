@@ -589,6 +589,7 @@ function AgentPageInner() {
   const [mounted, setMounted] = useState(false);
   const [activeAgent, setActiveAgent] = useState<ClientAgentDefinition | null>(null);
   const [evalProgress, setEvalProgress] = useState<EvalBlockProgress[]>([]);
+  const [programProgress, setProgramProgress] = useState<{ done: number; total: number } | null>(null);
   const [completionInfo, setCompletionInfo] = useState<CompletionInfo | null>(null);
   const [resultQuality, setResultQuality] = useState<string | null>(null);
   const [sessionLoadError, setSessionLoadError] = useState<string | null>(null);
@@ -601,7 +602,8 @@ function AgentPageInner() {
   const abortRef = useRef<AbortController | null>(null);
   const streamContentRef = useRef("");
   const interviewBootstrapRef = useRef<number | null>(null);
-  const seenSignalKeys = useRef<Set<string>>(new Set());
+  const seenSignalKeys = useRef<Map<string, Set<string>>>(new Map());
+  const seenSignalSessionRef = useRef<string | null>(null);
   const handoffKeyRef = useRef<string>("");
   const handoffSessionCreateKeyRef = useRef<string>("");
   const createdHandoffSessionIdRef = useRef<number | null>(null);
@@ -748,6 +750,8 @@ function AgentPageInner() {
       currentSessionIdRef.current = id;
       setCurrentSessionId(id);
       setMessages(session.messages);
+      // 0.11.0-B: the header agent belongs to the conversation, not the app.
+      setActiveAgent(null);
     });
     return () => { cancelled = true; };
   }, [mounted, searchParams, currentSessionId, clearSessionActivity]);
@@ -1011,6 +1015,18 @@ function AgentPageInner() {
                 return next;
               });
             }
+          } else if (eventType === "agent_switch") {
+            // 0.11.0-B: the server decided who owns the task now — the header
+            // follows the event instead of the browser's pre-turn guess.
+            const nextAgentId = String(event.agentId || "");
+            if (nextAgentId) {
+              setActiveAgent({ id: nextAgentId, name: String(event.agentName || nextAgentId), description: "", toolNames: [], priority: 0, suggestions: [] });
+            }
+          } else if (eventType === "step.started" || eventType === "step.finished") {
+            const criteriaTotal = Number(event.criteriaTotal || 0);
+            const criteriaDone = Number(event.criteriaDone || 0);
+            if (criteriaTotal > 0) setProgramProgress({ done: criteriaDone, total: criteriaTotal });
+            else setProgramProgress(null);
           } else if (eventType === "done") {
             setExecutingTool(undefined);
           }
@@ -1241,12 +1257,20 @@ function AgentPageInner() {
 
       /* ── Auto-scan user message for profile signals ── */
       const sesId = currentSessionId ? String(currentSessionId) : "default";
-      const extracted = deduplicateSignals(scanMessage(content, sesId), seenSignalKeys.current);
+      // 0.11.0-B: signal dedup is per-conversation, not global.
+      if (seenSignalSessionRef.current !== sesId) {
+        seenSignalSessionRef.current = sesId;
+        seenSignalKeys.current = new Map();
+      }
+      const bucketKey = String(sesId ?? "default");
+      if (!seenSignalKeys.current.has(bucketKey)) seenSignalKeys.current.set(bucketKey, new Set());
+      const sessionSeen = seenSignalKeys.current.get(bucketKey)!;
+      const extracted = deduplicateSignals(scanMessage(content, sesId), sessionSeen);
 
       // If regex found few signals but message is substantial, add raw_context for LLM enrichment
       const rawCtx = maybeRawContext(content, extracted.length, sesId);
       if (rawCtx) {
-        const rawDeduped = deduplicateSignals([rawCtx], seenSignalKeys.current);
+        const rawDeduped = deduplicateSignals([rawCtx], sessionSeen);
         if (rawDeduped.length > 0) extracted.push(rawDeduped[0]);
       }
 
@@ -2417,6 +2441,7 @@ function AgentPageInner() {
           startTime={startTime}
           evalProgress={evalProgress}
           completionInfo={completionInfo}
+                  programProgress={programProgress}
           resultQuality={resultQuality}
           runStatus={activeRunNotice?.status}
           contextArtifacts={activeRunNotice?.artifacts}

@@ -69,6 +69,7 @@ interface AgentChatProps {
   evalProgress?: EvalBlockProgress[];
   /** Evaluation completion info (after persist) */
   completionInfo?: CompletionInfo | null;
+  programProgress?: { done: number; total: number } | null;
   /** Tool result quality (good/empty/irrelevant/garbled) — drives verification indicator */
   resultQuality?: string | null;
   /** Durable Run state used by the activity track. */
@@ -1137,6 +1138,51 @@ function AnimatedStreamText({ text }: { text: string }) {
 
 /* ── Eval Completion Notice ── */
 
+function AgentHandoffBanner({ payload }: { payload: Record<string, unknown> }) {
+  return (
+    <div className="flex items-center gap-2 px-3 py-2 my-1 rounded-xl text-xs border border-dashed"
+      style={{ background: "var(--surface-soft, #f2f0eb)", borderColor: "var(--hairline, #e8e5de)", color: "var(--muted, #76736b)" }}>
+      <span>⇄</span>
+      <span>
+        主责交接 → <b style={{ color: "var(--ink, #1f1e1b)" }}>{String(payload.agentName || payload.agentId || "")}</b>
+        {payload.reason ? <span className="ml-1">· {String(payload.reason)}</span> : null}
+      </span>
+    </div>
+  );
+}
+
+function AgentDelegationCard({ payload }: { payload: Record<string, unknown> }) {
+  const state = String(payload.state || (payload.findings ? "completed" : "running"));
+  const running = state === "running";
+  return (
+    <div className="card px-4 py-3 my-1 text-sm">
+      <div className="flex items-center gap-2 mb-1">
+        {running ? (
+          <span className="w-2 h-2 rounded-full animate-pulse" style={{ background: "var(--zhusha, #c0502f)" }} />
+        ) : (
+          <span className="rounded-md px-2 py-0.5 text-xs" style={{ background: "var(--surface-soft, #f2f0eb)", color: "var(--muted, #76736b)" }}>
+            {state === "failed" ? "委派失败" : "委派完成"}
+          </span>
+        )}
+        <span style={{ color: "var(--ink, #1f1e1b)" }}>
+          {running ? "正在让 " : ""}
+          <b>{String(payload.agentId || "")}</b>
+          {running ? " 研究：" : " 已回传："}
+          {String(payload.goal || "")}
+        </span>
+        <span className="ml-auto rounded-full px-2 py-0.5 text-xs" style={{ background: "var(--surface-soft, #f2f0eb)", color: "var(--muted, #76736b)" }}>
+          只读委派 · 不写数据
+        </span>
+      </div>
+      {!running && payload.findings ? (
+        <div className="text-xs mt-1" style={{ color: "var(--body, #3d3c38)" }}>{String(payload.findings)}</div>
+      ) : running ? (
+        <div className="text-xs mt-1" style={{ color: "var(--muted, #76736b)" }}>结论将回到本对话 · 不写入任何数据</div>
+      ) : null}
+    </div>
+  );
+}
+
 function EvalCompletionNotice({ info }: { info: CompletionInfo }) {
   return (
     <motion.div
@@ -2089,6 +2135,24 @@ function MessageBubble({
     }
     if (uiPayload?.type === "resume_draft") {
       return <ResumeDraftCard payload={uiPayload} onSend={onSend} />;
+    }
+    // 0.11.0-B: collaboration cards (handoff / delegation) render from the
+    // registered safe payload types instead of falling to the generic line.
+    if (uiPayload?.type === "handoff") {
+      return <div className={COMPACT_AGENT_CARD_CLASS}><AgentHandoffBanner payload={uiPayload} /></div>;
+    }
+    if (uiPayload?.type === "delegation") {
+      return <div className={COMPACT_AGENT_CARD_CLASS}><AgentDelegationCard payload={uiPayload} /></div>;
+    }
+    if (uiPayload?.type === "handoff_denied" || uiPayload?.type === "delegation_denied") {
+      return (
+        <div className={COMPACT_AGENT_CARD_CLASS}>
+          <div className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs" style={{ background: "var(--surface-soft, #f2f0eb)", color: "var(--muted, #76736b)" }}>
+            <span>⛔</span>
+            <span>{String(uiPayload.reason || "协作请求被治理策略拒绝")}</span>
+          </div>
+        </div>
+      );
     }
     if (uiPayload?.type === "run_gate") {
       return <RunGateCard payload={uiPayload} onDecision={onGateDecision} />;

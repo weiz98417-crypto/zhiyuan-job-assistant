@@ -69,7 +69,7 @@ function streamRunEvents(
             return `id: ${event.sequence}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
           }).join("");
           controller.enqueue(encoder.encode(frames || `: cursor ${cursor}\n\n`));
-          timer = setTimeout(() => void poll(), 1_000);
+          timer = setTimeout(poll, 250);
         } catch (error) {
           if (!closed) controller.error(error);
           closed = true;
