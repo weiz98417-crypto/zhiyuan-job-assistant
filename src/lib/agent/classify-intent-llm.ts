@@ -8,7 +8,7 @@
 import type { AgentDefinition } from "./registry/types";
 import { complete, getThinkModelChain } from "@/lib/ai/model-gateway";
 
-// ── 分类器短链（flash 优先，zhipu 兜底）──
+// ── 分类器使用统一的 deepseek-flash 网关 ──
 const CLASSIFIER_CHAIN = getThinkModelChain();
 
 export interface IntentResult {

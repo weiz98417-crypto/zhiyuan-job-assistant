@@ -4,7 +4,7 @@ import { checkApiKey, streamDeepSeekChunks, extractSectionsFromBuffer } from "@/
 import type { CoachMode, CoachMessage, QuestionPracticeContext } from "@/types";
 import { COACH_MODES } from "@/types";
 
-const DEFAULT_MODEL = "deepseek-v4-flash";
+const DEFAULT_MODEL = "deepseek-flash";
 
 const MODE_EXTRA_CONTEXT: Record<CoachMode, string> = {
   "project-review": "偏好数据驱动、产品感、快节奏决策。追问侧重：数据验证方式、跨团队协作、复盘反思深度。",
@@ -121,7 +121,6 @@ export async function POST(request: Request) {
 
         await streamDeepSeekChunks(
           {
-            model: DEFAULT_MODEL,
             messages: apiMessages,
             temperature: 0.5,
             max_tokens: 6000,

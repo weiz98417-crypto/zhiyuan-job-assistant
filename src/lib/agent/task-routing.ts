@@ -94,6 +94,12 @@ function isResumeProposalIntent(content: string): boolean {
   return /(简历|履历|resume|cv).{0,18}(优化|修改|改写|润色|重写).{0,18}(提案|草稿|建议)|(优化|修改|改写|润色|重写).{0,18}(提案|草稿|建议).{0,18}(简历|履历|resume|cv)/i.test(content);
 }
 
+function isResumeDiagnosisIntent(content: string): boolean {
+  return /(评估|分析|诊断|评价|测评|检查|审阅|看看|看下|看一下|给.*建议|提.*建议)/i.test(content)
+    && !isResumeEditIntent(content)
+    && !isReferenceResumeSaveIntent(content);
+}
+
 function isNonSemanticInput(content: string): boolean {
   const text = content.trim();
   return text.length > 0 && text.length <= 8 && /^[\p{P}\p{S}\s]+$/u.test(text);
@@ -112,6 +118,7 @@ function isSavedOfferReportAssistIntent(content: string): boolean {
 export function inferAgentTaskType(input: {
   agentId: string;
   content: string;
+  hasImages?: boolean;
   imageIntake?: ImageIntakeResult | null;
   preferredDocumentType?: ImageDocumentType;
   activeTask?: GuidedSessionState | null;
@@ -122,6 +129,7 @@ export function inferAgentTaskType(input: {
 export function routeAgentTask(input: {
   agentId: string;
   content: string;
+  hasImages?: boolean;
   imageIntake?: ImageIntakeResult | null;
   preferredDocumentType?: ImageDocumentType;
   activeTask?: GuidedSessionState | null;
@@ -130,11 +138,15 @@ export function routeAgentTask(input: {
   /** M2: envelope write constraints recorded on the routing audit. */
   envelopeAudit?: string[];
 }): AgentTaskRouteDecision {
-  const { agentId, content, imageIntake, preferredDocumentType, activeTask } = input;
+  const { agentId, content, hasImages, imageIntake, preferredDocumentType, activeTask } = input;
   const imageDecision = imageIntake ? routeImageIntake(content, imageIntake) : undefined;
   const fromImage = taskTypeFromImageDecision(imageDecision, content);
   const fromImageClarification = inferTaskFromImageClarificationReply(content, activeTask);
-  const requestedTaskType = fromImage || fromImageClarification || inferRequestedTaskFromText(content);
+  const requestedTaskType = fromImage
+    || fromImageClarification
+    || inferRequestedTaskFromText(content)
+    || (hasImages && agentId === "resume" && !isResumeEditIntent(content) && !isReferenceResumeSaveIntent(content)
+      ? "resume_diagnosis" : null);
   const nonSemanticInput = isNonSemanticInput(content);
   const negatedWriteTarget = detectNegatedWriteIntent(content);
   const envelopeAuditPrefix = (input.envelopeAudit || []).join("|");
@@ -155,8 +167,13 @@ export function routeAgentTask(input: {
       });
     }
     return buildRouteDecision({
-      taskType: negatedWriteTarget === "resume" ? "resume_query" : "general_chat",
+      taskType: negatedWriteTarget === "resume"
+        ? requestedTaskType === "resume_diagnosis" ? "resume_diagnosis" : "resume_query"
+        : "general_chat",
       imageDecision,
+      requiresClarification: imageDecision?.route === "retry_image" || imageDecision?.route === "clarify_intent",
+      clarificationQuestion: imageDecision?.retryHint || imageDecision?.clarificationQuestion,
+      blockedReason: imageDecision?.route === "retry_image" ? imageDecision.reason : undefined,
       auditSummary: `intent:negated_write:${negatedWriteTarget}`,
     });
   }
@@ -225,7 +242,7 @@ export function routeAgentTask(input: {
 
   if (imageDecision?.route === "clarify_intent" || imageDecision?.route === "retry_image") {
     const imageTaskType = imageDecision.documentType === "resume"
-      ? (requestedTaskType || "resume_query")
+      ? (requestedTaskType || (isResumeDiagnosisIntent(content) ? "resume_diagnosis" : "resume_query"))
       : taskTypeFromImageDocumentType(imageDecision.documentType) || requestedTaskType;
     return buildRouteDecision({
       taskType: imageTaskType,
@@ -327,7 +344,9 @@ export function routeAgentTask(input: {
       ? "file_export"
       : isResumeEditIntent(content)
         ? "resume_edit"
-        : "resume_query";
+        : isResumeDiagnosisIntent(content)
+          ? "resume_diagnosis"
+          : "resume_query";
     return buildRouteDecision({
       taskType,
       auditSummary: taskType === "resume_edit" ? "agent:resume:edit" : "agent:resume:read_only",
@@ -343,12 +362,15 @@ function taskTypeFromImageDecision(
   if (!imageDecision) return null;
   if (imageDecision.route === "evaluate_jd") return "jd_evaluation";
   if (imageDecision.route === "evaluate_offer") return "offer_evaluation";
+  if (imageDecision.route === "resume_diagnosis") return "resume_diagnosis";
   if (imageDecision.route === "resume_preview") {
     return isReferenceResumeSaveIntent(content)
       ? "reference_resume_save"
       : isResumeEditIntent(content)
         ? "resume_edit"
-        : "resume_query";
+        : isResumeDiagnosisIntent(content)
+          ? "resume_diagnosis"
+          : "resume_query";
   }
   return null;
 }
@@ -388,6 +410,7 @@ export function mapAgentTaskToMemoryTask(taskType: AgentTaskType | null): AgentM
     general_chat: "general_chat",
     career_positioning_guidance: "profile_growth",
     resume_query: "general_chat",
+    resume_diagnosis: "general_chat",
     resume_edit: "resume_optimization",
     jd_evaluation: "jd_evaluation",
     offer_evaluation: "offer_evaluation",

@@ -14,6 +14,7 @@ import { projectToolResultForUser } from "@/lib/agent/surface-projection";
 import type { AgentArtifactRef } from "@/lib/agent/task-journey";
 import { buildOfferAgentHandoffUrl } from "@/lib/agent/offer-handoff";
 import { countAnsweredInterviewRounds } from "@/lib/agent/interview-session-state";
+import { isNearChatBottom, shouldFollowChatScroll } from "@/lib/agent/chat-scroll";
 import AgentActivityTrack from "./AgentActivityTrack";
 
 import SuggestionChips from "./SuggestionChips";
@@ -100,6 +101,14 @@ interface PendingImage extends ImageMeta {
   previewUrl: string;
   type: string;
 }
+
+interface ChatDraft {
+  input: string;
+  images: PendingImage[];
+  evalPlaceholder: boolean;
+}
+
+const EMPTY_CHAT_DRAFT: ChatDraft = { input: "", images: [], evalPlaceholder: false };
 
 function estimateDataUrlBytes(src: string): number | undefined {
   const comma = src.indexOf(",");
@@ -798,22 +807,6 @@ function InterviewQuestionCard({ payload }: { payload: Record<string, unknown> }
           <p className="text-xs text-[var(--color-muted)]">请直接回答这一题。回答后我会按结构、具体性、亮点和时间控制给你反馈。</p>
         </div>
       </motion.div>
-    </div>
-  );
-}
-
-/* ── Thinking indicator ── */
-
-function ThinkingDots() {
-  return (
-    <div className="flex items-center gap-2 text-[var(--color-muted)] text-sm">
-      <Brain size={14} className="text-[var(--color-primary)] opacity-60" />
-      <span>思考中</span>
-      <span className="inline-flex gap-0.5">
-        <span className="w-1 h-1 rounded-full bg-[var(--color-primary)] animate-bounce [animation-delay:0ms]" />
-        <span className="w-1 h-1 rounded-full bg-[var(--color-primary)] animate-bounce [animation-delay:150ms]" />
-        <span className="w-1 h-1 rounded-full bg-[var(--color-primary)] animate-bounce [animation-delay:300ms]" />
-      </span>
     </div>
   );
 }
@@ -2066,11 +2059,6 @@ function MessageBubble({
   msg,
   isStreaming,
   streamText,
-  phase,
-  executingTool,
-  thinkingContent,
-  activeAgentId,
-  startTime,
   onSend,
   onGateDecision,
 }: {
@@ -2078,11 +2066,6 @@ function MessageBubble({
   msg: AgentMessage;
   isStreaming: boolean;
   streamText: string;
-  phase: AgentPhase;
-  executingTool?: string;
-  thinkingContent?: string;
-  activeAgentId?: string;
-  startTime?: number;
   onSend: (content: string) => Promise<void>;
   onGateDecision?: (gateId: string, decision: "approved" | "denied") => Promise<void>;
 }) {
@@ -2319,20 +2302,13 @@ function MessageBubble({
   const showStream = isStreaming || (isUser ? false : !msg.content && streamText);
 
   function renderStreamContent() {
-    if (!showStream) return null;
-
-    if (streamText) {
-      return <AnimatedStreamText text={streamText} />;
-    }
-
-    if (phase === "understanding") {
-      return <ThinkingDots />;
-    }
-
-    return <ThinkingDots />;
+    if (!showStream || !streamText) return null;
+    return <AnimatedStreamText text={streamText} />;
   }
 
   const streamContent = renderStreamContent();
+
+  if (showStream && !streamContent) return null;
 
   return (
     <motion.div
@@ -2400,9 +2376,7 @@ export default function AgentChat({
   streaming,
   streamText,
   phase,
-  executingTool,
   thinkingContent,
-  activeAgentId,
   startTime,
   evalProgress,
   completionInfo,
@@ -2416,18 +2390,36 @@ export default function AgentChat({
   onStop,
   emptyState,
 }: AgentChatProps) {
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const nearBottomRef = useRef(true);
+  const previousTranscriptRef = useRef<{ sessionId: number | null; userMessageCount: number } | null>(null);
+  const sendingSessionsRef = useRef(new Set<string>());
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [input, setInput] = useState("");
-  const [images, setImages] = useState<PendingImage[]>([]);
+  const [draftsBySession, setDraftsBySession] = useState<Record<string, ChatDraft>>({});
+  const [sendErrors, setSendErrors] = useState<Record<string, string>>({});
   const [plusPulse, setPlusPulse] = useState(false);
-  const [evalPlaceholder, setEvalPlaceholder] = useState(false);
+  const draftKey = currentSessionId === null ? "new" : String(currentSessionId);
+  const draft = draftsBySession[draftKey] || EMPTY_CHAT_DRAFT;
+  const { input, images, evalPlaceholder } = draft;
   const hasRealChat = messages.some((m) => m.role === "user");
 
+  const updateDraft = useCallback((key: string, update: (current: ChatDraft) => ChatDraft) => {
+    setDraftsBySession((current) => ({ ...current, [key]: update(current[key] || EMPTY_CHAT_DRAFT) }));
+  }, []);
+
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, streamText, phase, thinkingContent]);
+    const transcript = {
+      sessionId: currentSessionId,
+      userMessageCount: messages.filter((message) => message.role === "user").length,
+    };
+    if (shouldFollowChatScroll(previousTranscriptRef.current, transcript, nearBottomRef.current)) {
+      const container = scrollContainerRef.current;
+      if (container) container.scrollTop = container.scrollHeight;
+      nearBottomRef.current = true;
+    }
+    previousTranscriptRef.current = transcript;
+  }, [currentSessionId, messages, streamText, phase, thinkingContent, runStatus, evalProgress]);
 
   /* ── Image handling ── */
   const toBase64 = (file: File): Promise<string> =>
@@ -2458,26 +2450,23 @@ export default function AgentChat({
     });
 
   const addFiles = useCallback(async (files: File[]) => {
-    const newItems: typeof images = [];
+    const key = draftKey;
+    const newItems: PendingImage[] = [];
     for (const file of files) {
       if (!VALID_FILE_TYPES.includes(file.type)) continue;
       if (file.size > 5 * 1024 * 1024) continue;
-      if (images.length + newItems.length >= MAX_IMAGES) break;
+      if (newItems.length >= MAX_IMAGES) break;
       const id = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
       const base64 = await toBase64(file);
-      const previewUrl = file.type === "application/pdf" ? "" : URL.createObjectURL(file);
+      const previewUrl = file.type === "application/pdf" ? "" : base64;
       const meta = await loadFileMeta(file);
       newItems.push({ id, base64, previewUrl, name: file.name, ...meta });
     }
-    setImages((prev) => [...prev, ...newItems].slice(0, MAX_IMAGES));
-  }, [images.length]);
+    updateDraft(key, (current) => ({ ...current, images: [...current.images, ...newItems].slice(0, MAX_IMAGES) }));
+  }, [draftKey, updateDraft]);
 
   const removeImage = (id: string) => {
-    setImages((prev) => {
-      const item = prev.find((i) => i.id === id);
-      if (item?.previewUrl) URL.revokeObjectURL(item.previewUrl);
-      return prev.filter((i) => i.id !== id);
-    });
+    updateDraft(draftKey, (current) => ({ ...current, images: current.images.filter((item) => item.id !== id) }));
   };
 
   // Ctrl+V paste handler for screenshots
@@ -2502,18 +2491,30 @@ export default function AgentChat({
   const handleSend = async () => {
     const trimmed = input.trim();
     const hasContent = trimmed || images.length > 0;
-    if (!hasContent || streaming) return;
+    if (!hasContent || streaming || sendingSessionsRef.current.has(draftKey)) return;
 
+    const key = draftKey;
+    const outgoingDraft = draft;
     const content = trimmed;
     const outgoingImages = images.map((i) => i.base64);
-    images.forEach((item) => {
-      if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
-    });
-
-    setInput("");
-    setImages([]);
-    setEvalPlaceholder(false);
-    await onSend(content, outgoingImages);
+    sendingSessionsRef.current.add(key);
+    updateDraft(key, () => EMPTY_CHAT_DRAFT);
+    setSendErrors((current) => ({ ...current, [key]: "" }));
+    nearBottomRef.current = true;
+    if (scrollContainerRef.current) scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+    try {
+      await onSend(content, outgoingImages);
+    } catch {
+      updateDraft(key, (current) => ({
+        ...current,
+        input: [outgoingDraft.input, current.input].filter(Boolean).join("\n"),
+        images: [...outgoingDraft.images, ...current.images].slice(0, MAX_IMAGES),
+        evalPlaceholder: outgoingDraft.evalPlaceholder || current.evalPlaceholder,
+      }));
+      setSendErrors((current) => ({ ...current, [key]: "消息发送失败，内容已保留，请重试。" }));
+    } finally {
+      sendingSessionsRef.current.delete(key);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -2532,13 +2533,10 @@ export default function AgentChat({
 
   /* ── Chip select with hybrid mode for "评估JD" ── */
   const handleChipSelect = (prompt: string, label: string) => {
-    setInput(prompt);
+    updateDraft(draftKey, (current) => ({ ...current, input: prompt, evalPlaceholder: label === "评估JD" }));
     if (label === "评估JD") {
-      setEvalPlaceholder(true);
       setPlusPulse(true);
       setTimeout(() => setPlusPulse(false), 2000);
-    } else {
-      setEvalPlaceholder(false);
     }
   };
 
@@ -2547,16 +2545,20 @@ export default function AgentChat({
       <InterviewBindingBar state={interviewState} />
 
       {/* Messages */}
-      <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden py-4 space-y-4 cursor-default">
+      <div
+        ref={scrollContainerRef}
+        onScroll={(event) => { nearBottomRef.current = isNearChatBottom(event.currentTarget); }}
+        className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden py-4 space-y-4 cursor-default"
+      >
         {messages.filter((msg) => {
           if (msg.role === "assistant" && !msg.content.trim()) return false;
           if (msg.role === "tool" && msg.toolName === "evaluate_jd_full") return false;
           return true;
         }).map((msg, i, visibleMessages) => {
-          // Last assistant: this msg is assistant AND no assistant messages appear after it
           const isLastAssistant =
             msg.role === "assistant" && streaming &&
-            !visibleMessages.slice(i + 1).some(m => m.role === "assistant");
+            i === visibleMessages.length - 1 &&
+            (!msg.content.trim() || msg.content === streamText);
 
           // Agent source label: show when agent_id changes between messages
           const prevMsg = i > 0 ? visibleMessages[i - 1] : null;
@@ -2587,11 +2589,6 @@ export default function AgentChat({
                 msg={msg}
                 isStreaming={isLastAssistant}
                 streamText={isLastAssistant ? streamText : ""}
-                phase={isLastAssistant ? phase : null}
-                executingTool={isLastAssistant ? executingTool : undefined}
-                thinkingContent={isLastAssistant ? thinkingContent : undefined}
-                activeAgentId={isLastAssistant ? activeAgentId : undefined}
-                startTime={isLastAssistant ? startTime : undefined}
                 onSend={onSend}
                 onGateDecision={onGateDecision}
               />
@@ -2619,7 +2616,6 @@ export default function AgentChat({
 
         {!hasRealChat && !streaming && emptyState}
 
-        <div ref={messagesEndRef} />
       </div>
 
       {/* Input Area */}
@@ -2695,7 +2691,7 @@ export default function AgentChat({
           <textarea
             ref={inputRef}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(event) => updateDraft(draftKey, (current) => ({ ...current, input: event.target.value }))}
             onKeyDown={handleKeyDown}
             placeholder={
               streaming
@@ -2726,6 +2722,7 @@ export default function AgentChat({
         <p className="text-xs text-[var(--color-muted)] mt-1.5">
           Enter 发送 · Shift+Enter 换行 · 支持 Ctrl+V 粘贴截图
         </p>
+        {sendErrors[draftKey] && <p role="alert" className="mt-1 text-xs text-red-600">{sendErrors[draftKey]}</p>}
       </div>
     </div>
   );

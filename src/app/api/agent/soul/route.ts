@@ -35,7 +35,7 @@ export async function GET(request: Request) {
     // Context injection is best-effort
   }
 
-  const model = agent.model || "deepseek-v4-flash";
+  const model = agent.model || "deepseek-flash";
 
   return NextResponse.json({
     success: true,

@@ -33,7 +33,7 @@ function candidate(overrides: Partial<FactCandidate> = {}): FactCandidate {
   };
 }
 
-describe("fact ledger decision stage (M5, ADR-0025)", () => {
+describe("fact ledger decision stage (M5, ADR-0028)", () => {
   it("NOOP on an identical open fact (no duplicate insert)", () => {
     const ops = decideFactOperationsDeterministic([fact()], candidate({ canonicalText: "用户目标城市是北京", object: { city: "北京" } }));
     expect(ops).toHaveLength(1);

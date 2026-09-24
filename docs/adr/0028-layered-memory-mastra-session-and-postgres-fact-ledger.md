@@ -1,4 +1,4 @@
-# 0025 - Memory splits into a Mastra session layer and a self-built Postgres fact ledger
+# 0028 - Memory splits into a Mastra session layer and a self-built Postgres fact ledger
 
 Date: 2026-09-24
 

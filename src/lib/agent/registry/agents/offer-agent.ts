@@ -77,8 +77,8 @@ export const offerAgent: AgentDefinition = {
   knowledgeSubset: ["salary-benchmarks"],
   priority: 11,
   suggestions: OFFER_SUGGESTIONS,
-  model: "deepseek-v4-flash",
-  modelPro: "deepseek-v4-pro",
+  model: "deepseek-flash",
+  modelPro: "deepseek-flash",
 
   async buildSystemPrompt(ctx: AgentPromptContext): Promise<string> {
     return buildOfferPrompt(ctx);

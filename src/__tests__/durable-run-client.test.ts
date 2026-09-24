@@ -51,9 +51,12 @@ describe("Durable Agent Run browser adapter", () => {
   });
 
   it("retries an unconfirmed create with the same request id", async () => {
-    const fetchMock = vi.fn()
-      .mockRejectedValueOnce(new TypeError("connection reset"))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
+    let createAttempts = 0;
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+      if (url.startsWith("/api/agent/runs?")) return Response.json({ success: true, data: [] });
+      createAttempts += 1;
+      if (createAttempts === 1) throw new TypeError("connection reset");
+      return new Response(JSON.stringify({
         success: true,
         enabled: true,
         data: {
@@ -61,7 +64,8 @@ describe("Durable Agent Run browser adapter", () => {
           replayed: true,
           assignment: { mode: "worker_all", owner: "worker", shadow: false, cohortBucket: 5 },
         },
-      }), { status: 200, headers: { "Content-Type": "application/json" } }));
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     const result = await createDurableAgentRunClient({
@@ -73,17 +77,43 @@ describe("Durable Agent Run browser adapter", () => {
     });
 
     expect(result?.run?.id).toBe("run-1");
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls.map((call) => call[1]?.body)).toEqual([
+    const createCalls = fetchMock.mock.calls.filter((call) => call[0] === "/api/agent/runs");
+    expect(createCalls).toHaveLength(2);
+    expect(createCalls.map((call) => call[1]?.body)).toEqual([
       expect.stringContaining('"requestId":"request-stable"'),
       expect.stringContaining('"requestId":"request-stable"'),
     ]);
   });
 
+  it("recovers a completed continuation even when the Run has a different create request id", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.startsWith("/api/agent/runs?")) {
+        return Response.json({
+          success: true,
+          data: [{ id: "run-original", requestId: "create-request", status: "succeeded", runtimeMode: "worker_all" }],
+        });
+      }
+      throw new TypeError("connection reset");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await createDurableAgentRunClient({
+      requestId: "continuation-request",
+      conversationId: 12,
+      input: { content: "补充这份简历截图" },
+    });
+
+    expect(result).toMatchObject({ run: { id: "run-original", status: "succeeded" }, replayed: true });
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/agent/runs")).toHaveLength(1);
+  });
+
   it("bounds a stalled create request before retrying the same command", async () => {
     vi.useFakeTimers();
-    const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
-      if (fetchMock.mock.calls.length > 1) {
+    let createAttempts = 0;
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      if (url.startsWith("/api/agent/runs?")) return Promise.resolve(Response.json({ success: true, data: [] }));
+      createAttempts += 1;
+      if (createAttempts > 1) {
         return Promise.resolve(Response.json({
           success: true,
           enabled: true,
@@ -107,11 +137,12 @@ describe("Durable Agent Run browser adapter", () => {
       agentId: "resume",
       input: { content: "优化我的简历" },
     });
-    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(15_000);
 
     await expect(resultPromise).resolves.toMatchObject({ run: { id: "run-timeout" } });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls.map((call) => call[1]?.body)).toEqual([
+    const createCalls = fetchMock.mock.calls.filter((call) => call[0] === "/api/agent/runs");
+    expect(createCalls).toHaveLength(2);
+    expect(createCalls.map((call) => call[1]?.body)).toEqual([
       expect.stringContaining('"requestId":"request-timeout"'),
       expect.stringContaining('"requestId":"request-timeout"'),
     ]);
@@ -127,6 +158,20 @@ describe("Durable Agent Run browser adapter", () => {
       agentId: "resume",
       input: { content: "读取我的简历" },
     })).rejects.toBeInstanceOf(DurableRunOwnershipUnknownError);
+  });
+
+  it("keeps a retryable server failure in the unknown-ownership state", async () => {
+    const fetchMock = vi.fn(async (url: string) => url.startsWith("/api/agent/runs?")
+      ? Response.json({ success: true, data: [] })
+      : Response.json({ success: false, error: "temporarily unavailable" }, { status: 503 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(createDurableAgentRunClient({
+      requestId: "request-server-error",
+      conversationId: 12,
+      input: { content: "评估这份简历" },
+    })).rejects.toBeInstanceOf(DurableRunOwnershipUnknownError);
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/agent/runs")).toHaveLength(2);
   });
 
   it("queues follow-up input on the existing Run", async () => {
@@ -146,6 +191,54 @@ describe("Durable Agent Run browser adapter", () => {
       method: "POST",
       body: JSON.stringify({ requestId: "input-1", input: { content: "补充岗位范围" } }),
     }));
+  });
+
+  it("recovers a stalled follow-up by request id without posting it twice", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      if (url.startsWith("/api/agent/runs?")) {
+        return Promise.resolve(Response.json({
+          success: true,
+          data: [{ id: "run-1", status: "succeeded", runtimeMode: "worker_all" }],
+        }));
+      }
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const resultPromise = submitDurableAgentRunInputClient("run-1", {
+      requestId: "input-stalled",
+      input: { content: "继续评估这张图片", images: ["data:image/png;base64,c2FtcGxl"] },
+    });
+    await vi.advanceTimersByTimeAsync(15_000);
+
+    await expect(resultPromise).resolves.toMatchObject({ run: { id: "run-1", status: "succeeded" }, replayed: true });
+    const posts = fetchMock.mock.calls.filter(([url]) => url === "/api/agent/runs/run-1/inputs");
+    expect(posts).toHaveLength(1);
+    expect(fetchMock.mock.calls.some(([url]) => url.includes("requestId=input-stalled"))).toBe(true);
+  });
+
+  it("retries an unconfirmed follow-up using its original request id", async () => {
+    let submitAttempts = 0;
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+      if (url.startsWith("/api/agent/runs?")) return Response.json({ success: true, data: [] });
+      submitAttempts += 1;
+      if (submitAttempts === 1) throw new TypeError("connection reset");
+      return Response.json({ success: true, data: { run: { id: "run-1", status: "queued" }, replayed: true } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await submitDurableAgentRunInputClient("run-1", {
+      requestId: "input-retry",
+      input: { content: "继续分析" },
+    });
+
+    expect(result).toMatchObject({ run: { id: "run-1" }, replayed: true });
+    const posts = fetchMock.mock.calls.filter(([url]) => url === "/api/agent/runs/run-1/inputs");
+    expect(posts).toHaveLength(2);
+    expect(posts.map(([, init]) => JSON.parse(String(init?.body)).requestId)).toEqual(["input-retry", "input-retry"]);
   });
 
   it("requests cancellation as a durable command", async () => {

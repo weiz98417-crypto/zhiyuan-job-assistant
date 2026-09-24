@@ -1,5 +1,5 @@
 /**
- * 记忆事实账本（M5，ADR-0025）。
+ * 记忆事实账本（M5，ADR-0028）。
  *
  * 双时态事实账本：episodes append-only，facts 带 valid_at/invalid_at——
  * 新事实与开放事实矛盾时作废旧事实（invalid_at + superseded_by），永不覆盖。

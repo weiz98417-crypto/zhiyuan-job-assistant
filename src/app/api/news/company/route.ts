@@ -4,7 +4,7 @@ import { getDataRepositories } from "@/lib/data-repositories";
 import type { NewsCacheRow } from "@/lib/server-db";
 
 const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
-const MODEL = "deepseek-v4-flash";
+const MODEL = "deepseek-flash";
 
 async function generateCompanyNews(companies: string[]): Promise<{ title: string; summary: string; source_name: string }[]> {
   const apiKey = process.env.DEEPSEEK_API_KEY;

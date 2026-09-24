@@ -10,7 +10,7 @@ import { validateHandoff, validateDelegation } from "@/lib/agent/agent-collabora
 import { transferToAgent } from "@/lib/agent/tools/action/transfer-to-agent";
 import { delegateResearch } from "@/lib/agent/tools/action/delegate-research";
 
-describe("agent collaboration (M4, ADR-0024)", () => {
+describe("agent collaboration (M4, ADR-0027)", () => {
   describe("handoff validation", () => {
     it("allows a legal transition edge (resume_query -> jd_evaluation family)", () => {
       const result = validateHandoff({ currentTask: "resume_query", targetAgentId: "evaluate" });

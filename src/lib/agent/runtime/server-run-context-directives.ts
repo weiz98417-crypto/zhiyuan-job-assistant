@@ -1,5 +1,5 @@
 /**
- * 服务端 Run 上下文补齐（M1 缺口闭包，ADR-0023）。
+ * 服务端 Run 上下文补齐（M1 缺口闭包，ADR-0026）。
  *
  * legacy directMode 时代由浏览器 page.tsx 拼接的 interview/rebind/guided
  * 提示词上下文，现在统一在服务端从持久化会话状态重建——服务器是唯一事实源，

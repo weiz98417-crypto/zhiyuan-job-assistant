@@ -3,7 +3,7 @@ import { getDataRepositories } from "@/lib/data-repositories";
 import type { NewsCacheRow } from "@/lib/server-db";
 
 const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
-const MODEL = "deepseek-v4-flash";
+const MODEL = "deepseek-flash";
 
 /* ── RSS Sources (verified working URLs, curated for AI job seekers) ── */
 const SOURCES = [

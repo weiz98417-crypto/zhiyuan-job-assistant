@@ -121,7 +121,7 @@ describe("generic image intake routing", () => {
     expect(decision.clarificationQuestion).toContain("Offer");
   });
 
-  it("resume screenshot enters preview confirmation flow", () => {
+  it("resume screenshot evaluation enters read-only diagnosis", () => {
     const intake: ImageIntakeResult = {
       documentType: "resume",
       confidence: 0.88,
@@ -129,8 +129,8 @@ describe("generic image intake routing", () => {
       extractedText: "张三\n教育经历：硕士\n项目经历：AI 硬件与计算机视觉项目",
     };
 
-    const decision = routeImageIntake("这是我的简历", intake);
-    expect(decision.route).toBe("resume_preview");
+    const decision = routeImageIntake("请评估这份简历", intake);
+    expect(decision.route).toBe("resume_diagnosis");
   });
 
   it("resume screenshot plus excellent-resume save intent calls the reference save tool", () => {
@@ -236,5 +236,95 @@ describe("generic image intake routing", () => {
     expect(decision.retryHint).toContain("稍后");
     expect(decision.retryHint).not.toContain("更清晰");
     expect(decision.retryHint).not.toContain("裁剪到只保留正文");
+  });
+
+  it("continues JD evaluation when another uploaded image timed out", () => {
+    const intake: ImageIntakeResult = {
+      documentType: "jd",
+      confidence: 0.88,
+      quality: "clear",
+      extractedText: "岗位职责：负责数据产品规划、指标体系建设与跨团队落地。任职要求：熟悉 SQL、数据仓库和大模型应用。",
+      reason: "识别到 JD；第 2 张图片 OCR 超时",
+      errors: ["第 2 张：ocr_timeout"],
+      perImage: [
+        {
+          index: 0,
+          documentType: "jd",
+          confidence: 0.88,
+          extractedTextLength: 62,
+          reason: "原图识别完成",
+          candidate: "第 1 张原图",
+        },
+        {
+          index: 1,
+          documentType: "unknown",
+          confidence: 0,
+          extractedTextLength: 0,
+          reason: "OCR request timeout",
+          candidate: "第 2 张原图",
+        },
+      ],
+    };
+
+    const decision = routeImageIntake("帮我评估这个JD", intake);
+
+    expect(decision.route).toBe("evaluate_jd");
+    expect(decision.reason).toContain("部分图片超时");
+    expect(decision.retryHint).toContain("第 2 张图片");
+  });
+
+  it("continues resume diagnosis from usable text when another image timed out", () => {
+    const intake: ImageIntakeResult = {
+      documentType: "resume",
+      confidence: 0.86,
+      quality: "clear",
+      extractedText: "张三\n教育经历：硕士\n项目经历：负责 AI 产品从 0 到 1 落地，提升转化率 28%。",
+      errors: ["第 2 张：ocr_timeout"],
+      perImage: [
+        {
+          index: 0,
+          documentType: "resume",
+          confidence: 0.86,
+          extractedTextLength: 48,
+          reason: "第 1 张识别完成",
+        },
+        {
+          index: 1,
+          documentType: "unknown",
+          confidence: 0,
+          extractedTextLength: 0,
+          reason: "OCR request timeout",
+        },
+      ],
+    };
+
+    const decision = routeImageIntake("请评估这份简历", intake);
+
+    expect(decision.route).toBe("resume_diagnosis");
+    expect(decision.reason).toContain("部分图片超时");
+    expect(decision.retryHint).toContain("第 2 张图片");
+  });
+
+  it("does not report a missing page when a timed-out OCR candidate recovered", () => {
+    const intake: ImageIntakeResult = {
+      documentType: "jd",
+      confidence: 0.9,
+      quality: "clear",
+      extractedText: "岗位职责：负责数据产品规划和指标体系建设。任职要求：熟悉 SQL、数据仓库和跨团队沟通。",
+      errors: ["整图 OCR 超时，分段识别成功"],
+      perImage: [{
+        index: 0,
+        documentType: "jd",
+        confidence: 0.9,
+        extractedTextLength: 46,
+        reason: "分段识别成功",
+      }],
+    };
+
+    const decision = routeImageIntake("帮我评估这个JD", intake);
+
+    expect(decision.route).toBe("evaluate_jd");
+    expect(decision.reason).not.toContain("部分图片超时");
+    expect(decision.retryHint).toBeUndefined();
   });
 });

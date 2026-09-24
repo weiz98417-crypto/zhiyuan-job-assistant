@@ -38,7 +38,7 @@ src/lib
 
 ## Agent Runtime
 
-Production Agent execution is owned by a PostgreSQL-backed PM2 Worker. The browser creates an Agent Run, submits durable input or approval commands, and observes cursor-based events; closing the page or losing SSE does not cancel the Run. `legacy`, `shadow`, `worker_readonly`, and `worker_all` modes support staged rollout with exactly one execution owner per Run.
+Production Agent execution is owned by a PostgreSQL-backed PM2 Worker. The browser creates an Agent Run, submits durable input or approval commands, and observes cursor-based events; closing the page or losing SSE does not cancel the Run. The `0.10.8` release uses `worker_all` as the only production mode; historical runtime values are normalized to the Worker path for forward compatibility.
 
 The Runtime checkpoints before model calls and governed side effects. A Worker crash or classified failure therefore resumes the same Run from its latest safe checkpoint. Recovery decisions are bounded and persisted: retry transport/provider failures, repair parameters, compact oversized context, replan with another safe tool, reconcile uncertain effects, or wait for user input. The failed observation is injected into the next model context so a requeued Run does not blindly repeat the same path.
 
@@ -85,7 +85,7 @@ AgentChat prepares full-size image payloads
   v
 server-image-intake + image-intake-router
   |-- classify content: JD / offer / resume / unrelated / ambiguous
-  |-- OCR or vision extraction through Zhipu GLM vision
+  |-- OCR or vision extraction through DeepSeek deepseek-flash
   |-- compare user text intent with image content
   |
   v

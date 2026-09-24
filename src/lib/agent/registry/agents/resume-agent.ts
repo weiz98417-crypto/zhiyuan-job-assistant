@@ -104,7 +104,7 @@ export const resumeAgent: AgentDefinition = {
   knowledgeSubset: ["jd-signals"],
   priority: 12,
   suggestions: RESUME_SUGGESTIONS,
-  model: "deepseek-v4-pro",
+  model: "deepseek-flash",
 
   async buildSystemPrompt(ctx: AgentPromptContext): Promise<string> {
     return buildResumePrompt(ctx);

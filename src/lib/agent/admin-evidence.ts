@@ -67,14 +67,12 @@ export async function getAgentEvidenceView(runId: string): Promise<AgentEvidence
     const runResult = await client.query("SELECT * FROM agent_runs WHERE id = $1", [runId]);
     const run = runResult.rows[0] as Record<string, unknown> | undefined;
     if (!run) return null;
-    const [eventsResult, checkpointsResult, gatesResult, attemptsResult, reviewResult, candidateResult] = await Promise.all([
-      client.query("SELECT * FROM agent_run_events WHERE run_id = $1 ORDER BY sequence ASC", [runId]),
-      client.query("SELECT * FROM agent_run_checkpoints WHERE run_id = $1 ORDER BY snapshot_version ASC, id ASC", [runId]),
-      client.query("SELECT * FROM agent_run_gates WHERE run_id = $1 ORDER BY created_at ASC", [runId]),
-      client.query("SELECT * FROM agent_tool_attempts WHERE run_id = $1 ORDER BY attempt_sequence ASC", [runId]),
-      client.query("SELECT * FROM agent_run_reviews WHERE run_id = $1 ORDER BY reviewed_at DESC LIMIT 1", [runId]),
-      client.query("SELECT * FROM agent_eval_candidates WHERE run_id = $1 ORDER BY updated_at DESC LIMIT 1", [runId]),
-    ]);
+    const eventsResult = await client.query("SELECT * FROM agent_run_events WHERE run_id = $1 ORDER BY sequence ASC", [runId]);
+    const checkpointsResult = await client.query("SELECT * FROM agent_run_checkpoints WHERE run_id = $1 ORDER BY snapshot_version ASC, id ASC", [runId]);
+    const gatesResult = await client.query("SELECT * FROM agent_run_gates WHERE run_id = $1 ORDER BY created_at ASC", [runId]);
+    const attemptsResult = await client.query("SELECT * FROM agent_tool_attempts WHERE run_id = $1 ORDER BY attempt_sequence ASC", [runId]);
+    const reviewResult = await client.query("SELECT * FROM agent_run_reviews WHERE run_id = $1 ORDER BY reviewed_at DESC LIMIT 1", [runId]);
+    const candidateResult = await client.query("SELECT * FROM agent_eval_candidates WHERE run_id = $1 ORDER BY updated_at DESC LIMIT 1", [runId]);
     return {
       run: {
         id: String(run.id),

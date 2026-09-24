@@ -5,12 +5,20 @@
 ## Language
 
 **Agent Conversation**:
-用户与纸鸢持续交互的对话容器；它同时包含 Conversation Turn 和 Agent Run，一个 Run 可以引用同一 Conversation 中多个 Turn。
+用户与纸鸢持续交互的对话容器；它拥有自己的 Conversation Turn 和 Agent Run，一个 Run 可以引用同一 Conversation 中多个 Turn。切换对话不改变旧 Run 的执行，也不把旧 Run 的状态带入新对话。
 _Avoid_: Agent Run, 聊天页面, Session 状态
 
 **Conversation Turn**:
 Conversation 中一次用户输入及其对应交互的稳定记录；它可以发起新的 Agent Run，也可以为等待中的 Run 提供补充信息或批准。
 _Avoid_: Agent Run, API 请求, 模型轮次
+
+**JD 简历匹配策略**:
+一份 JD 及其重做分析、后续追问是否对照用户简历的约束。默认匹配；用户明确要求不匹配时，仅对这份 JD 生效，新 JD 恢复默认匹配。
+_Avoid_: 对话级简历开关, 永久求职偏好
+
+**简历诊断**:
+对一份简历本身的内容、结构、ATS 可读性、证据不足处和改进方向进行只读评估；没有 JD 也能完成，有 JD 时可附加岗位匹配，不自动修改简历。
+_Avoid_: 简历查询, 简历修改, JD 评估
 
 **Run Admission**:
 将 Conversation Turn、当前 Agent Run 与引用 Artifact 解析为继续当前 Run、在当前 Conversation 创建新 Run、请求澄清或拒绝的权威决定；它同时固定目标、约束与材料关系。

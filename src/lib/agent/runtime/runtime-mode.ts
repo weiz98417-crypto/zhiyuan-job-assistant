@@ -19,7 +19,7 @@ let warnedAboutLegacyMode = false;
 
 export function getAgentRuntimeRolloutConfig(): AgentRuntimeRolloutConfig {
   const rawMode = String(process.env.AGENT_RUNTIME_MODE || "").trim();
-  // M1 (ADR-0023): worker_all is the only supported mode. Historical values are
+  // M1 (ADR-0026): worker_all is the only supported mode. Historical values are
   // accepted for forward compatibility but resolve to worker_all with a warning.
   if (rawMode && rawMode !== "worker_all" && !warnedAboutLegacyMode) {
     warnedAboutLegacyMode = true;

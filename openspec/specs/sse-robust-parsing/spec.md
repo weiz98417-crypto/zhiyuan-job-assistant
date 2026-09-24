@@ -1,4 +1,4 @@
-> **STATUS: 已废弃（M1, ADR-0023）** — 本 spec 描述的浏览器端执行路径已在 M1 cutover 中删除，由 durable Worker 统一执行。本文件仅作历史参考，不再约束实现。
+> **STATUS: 已废弃（M1, ADR-0026）** — 本 spec 描述的浏览器端执行路径已在 M1 cutover 中删除，由 durable Worker 统一执行。本文件仅作历史参考，不再约束实现。
 
 # Spec: SSE Robust Parsing
 

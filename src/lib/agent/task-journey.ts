@@ -34,14 +34,22 @@ export const TASK_JOURNEY_GRAPH_VERSION = "task-journey/v1";
 
 const RULES: TaskTransitionRule[] = [
   ...rules("general_chat", ["career_positioning_guidance", "profile_update", "job_search", "jd_evaluation", "offer_evaluation", "resume_query", "resume_edit", "interview_coaching", "reference_resume_save", "file_export"], [], [], "none", "complete"),
+  ...rules("general_chat", ["resume_diagnosis"], [], [], "none", "complete"),
   ...rules("career_positioning_guidance", ["profile_update", "job_search", "resume_query", "resume_edit", "jd_evaluation", "offer_evaluation"], ["profile"], ["profile"], "context", "pause"),
+  ...rules("career_positioning_guidance", ["resume_diagnosis"], [], [], "context", "pause"),
   ...rules("job_search", ["jd_evaluation"], ["jd"], ["jd"], "context", "pause"),
   ...rules("jd_evaluation", ["resume_query", "resume_edit", "interview_coaching", "file_export", "job_search"], ["jd", "report"], ["jd", "report"], "context", "pause"),
+  ...rules("jd_evaluation", ["resume_diagnosis"], [], [], "context", "pause"),
   ...rules("resume_query", ["resume_edit", "jd_evaluation", "interview_coaching", "file_export"], ["resume"], ["resume"], "context", "pause"),
+  ...rules("resume_query", ["resume_diagnosis"], [], [], "context", "pause"),
+  ...rules("resume_diagnosis", ["general_chat", "resume_query", "resume_edit", "jd_evaluation", "interview_coaching", "file_export"], [], [], "context", "pause"),
   ...rules("resume_edit", ["jd_evaluation", "interview_coaching", "file_export", "resume_query"], ["resume", "jd", "report", "draft"], ["resume", "jd", "report", "draft"], "write", "pause"),
+  ...rules("resume_edit", ["resume_diagnosis"], [], [], "context", "pause"),
   ...rules("interview_coaching", ["interview_coaching", "job_search", "file_export"], ["jd", "resume"], ["jd", "resume"], "context", "pause"),
   ...rules("offer_evaluation", ["file_export", "general_chat"], ["offer", "report"], ["offer", "report"], "context", "pause"),
+  ...rules("offer_evaluation", ["resume_diagnosis"], [], [], "context", "pause"),
   ...rules("profile_update", ["job_search", "jd_evaluation", "resume_query", "resume_edit"], ["profile"], ["profile"], "context", "pause"),
+  ...rules("profile_update", ["resume_diagnosis"], [], [], "context", "pause"),
   ...rules("reference_resume_save", ["resume_query", "resume_edit", "jd_evaluation"], ["resume", "profile"], ["resume", "profile"], "context", "pause"),
   ...rules("file_export", ["general_chat"], ["export"], ["export"], "none", "complete"),
 ];

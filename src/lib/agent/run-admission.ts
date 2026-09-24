@@ -15,6 +15,7 @@ import {
 import type { ArtifactKind } from "@/lib/agent/task-journey";
 import type { AgentRunSnapshot, DurableRunInput } from "@/lib/agent/runtime/durable-agent-run";
 import type { IntentEnvelopeResolution } from "@/lib/agent/intent-envelope";
+import { inferJDResumeMatchingDirective } from "@/lib/agent/jd-resume-scope-intent";
 
 export type AgentRunAdmissionKind =
   | "continue_current_run"
@@ -79,6 +80,7 @@ const AGENT_TASK_TYPES = new Set<AgentTaskType>([
   "general_chat",
   "career_positioning_guidance",
   "resume_query",
+  "resume_diagnosis",
   "resume_edit",
   "jd_evaluation",
   "offer_evaluation",
@@ -128,6 +130,7 @@ export function admitAgentRun(input: AgentRunAdmissionInput): AgentRunAdmissionD
   const route = routeAgentTask({
     agentId: normalizedHintAgentId(input.entryHints?.agentId, evidence),
     content,
+    hasImages: Boolean(input.input.images?.length),
     activeTask: guidedSessionForActiveRun(input.activeRun),
     preferredDocumentType: input.entryHints?.imageDocumentType,
     envelopeTask,
@@ -237,6 +240,9 @@ function createServerOwnedContract(
       clarificationQuestion: route.clarificationQuestion,
       blockedReason: route.blockedReason,
       auditSummary: route.auditSummary,
+      ...(taskType === "jd_evaluation"
+        ? { jdMatchResume: inferJDResumeMatchingDirective(target) }
+        : {}),
     },
     journey: validArtifacts.length > 0
       ? { graphVersion: "task-journey/v1", artifacts: validArtifacts }

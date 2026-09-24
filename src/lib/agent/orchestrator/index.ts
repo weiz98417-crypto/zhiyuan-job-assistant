@@ -71,6 +71,13 @@ async function buildAgentContext(
   agent: AgentDefinition,
   ctx: OrchestratorContext,
 ): Promise<AgentPromptContext> {
+  if (ctx.taskContract?.taskType === "jd_evaluation" || ctx.taskContract?.taskType === "resume_diagnosis") {
+    return {
+      careerDNA: "",
+      currentMessages: ctx.messages,
+      agentKnowledge: durableKnowledgeForAgent(agent.knowledgeSubset || []),
+    };
+  }
   if (ctx.durable && ctx.principal) {
     const { getAgentReadService } = await import("@/lib/agent/runtime/agent-read-service");
     const profile = await getAgentReadService().getProfile(ctx.principal).catch(() => null);

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
-const MODEL = "deepseek-v4-flash";
+const MODEL = "deepseek-flash";
 const MAX_MESSAGES = 30;
 
 const SYSTEM_PROMPT = `你是纸鸢。一个朋友。

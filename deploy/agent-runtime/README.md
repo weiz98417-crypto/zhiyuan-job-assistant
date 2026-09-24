@@ -17,7 +17,7 @@ The production host is reached as `root@121.43.198.13` over the default SSH port
 
 `AGENT_ARTIFACT_DIR` must resolve to `/root/zhiyuan-job-assistant/shared/agent-artifacts` (or the equivalent `$APP_ROOT/shared/agent-artifacts`). The release and rollback scripts create and export this directory before preflight and PM2 reload. Both Web and Worker receive the same value from `ecosystem.config.cjs`; generated PDFs and other durable artifacts therefore survive release switches and rollback.
 
-Required production values include `DB_DRIVER=postgres`, `DATABASE_URL`, `AGENT_ARTIFACT_DIR`, and an explicit `AGENT_RUNTIME_MODE`. Start at `shadow`, then promote stable cohorts through `worker_readonly` and `worker_all`. A mode change applies to new Runs; never hand an already Worker-owned Run to legacy execution.
+Required production values include `DB_DRIVER=postgres`, `DATABASE_URL`, `AGENT_ARTIFACT_DIR`, and `AGENT_RUNTIME_MODE=worker_all`. The `0.10.8` release cuts all new Runs directly to the durable Worker; historical rollout values are rejected by the release preflight. Never hand an already Worker-owned Run to legacy execution.
 
 ## Release
 

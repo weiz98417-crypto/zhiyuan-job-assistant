@@ -4,7 +4,7 @@
 
 ## 输入
 
-- 架构评审报告（6 候选 + 13 框架调研）：`%TEMP%/architecture-review-2026-09-24-zhiyuan.html`（临时产物，可能被系统清理；关键结论已沉淀于本计划与 ADR-0023~0025）
+- 架构评审报告（6 候选 + 13 框架调研）：`%TEMP%/architecture-review-2026-09-24-zhiyuan.html`（临时产物，可能被系统清理；关键结论已沉淀于本计划与 ADR-0026~0028）
 - 多 Agent / A2A 专项报告：`%TEMP%/multi-agent-a2a-review-2026-09-24-zhiyuan.html`（同上）
 - 生产问题清单（13 条冻结 PE2E）：`docs/agent-production-e2e-issues-2026-08-30.md`
 - 代码事实探查（三份）：legacy 路径可达性 / child run 现状 / 记忆子系统现状（2026-09-24，本仓库 dev 分支 @ 44049e1）
@@ -15,7 +15,7 @@
 - M6b（shadcn/assistant-ui 前端重建）：待视觉稿后独立发布
 - M5 Mastra 会话层（working/observational memory）：独立发布（新增依赖 + thread 迁移）
 - M4 已知简化：委派以内联子 loop + 事件归因实现，child run 行待 store 支持按 id 认领后启用
-- 生产发布动作：AGENT_RUNTIME_MODE=worker_all；观察期 7 天后移除 escape hatch
+- 生产发布动作：`AGENT_RUNTIME_MODE=worker_all`；发布后观察 `execution_owner` 7 天
 
 ## 五条总原则
 
@@ -38,10 +38,10 @@
 
 ## M1 · 统一执行内核 + ModelGateway 收编
 
-**事实基线**：`client-runner.ts` 生产零调用（仅测试引用）；真实 legacy 路径 = `agentLoopRemote` → `/api/agent/run` directMode → `agentLoopServer`；`AGENT_RUNTIME_MODE` 代码默认 `legacy`。路径分叉有三个真实机制：① 正则解析不出 taskType 时整块跳过 durable 创建、直接落 legacy（page.tsx `if (taskType)`）；② `worker_readonly` 模式下非只读任务落 legacy；③ durable 创建异常时降级 legacy。注意：cohort 分桶按 userId 哈希、同一用户恒定同桶，**不是**分叉来源；session 112/119 的同类异果更可能来自自由 loop 的模型非确定性叠加两条路径的能力不对称（legacy 有 7 种 forced tool call、worker 没有）。
+**合并前事实基线**：`client-runner.ts` 生产零调用（仅测试引用）；真实 legacy 路径 = `agentLoopRemote` → `/api/agent/run` directMode → `agentLoopServer`；`AGENT_RUNTIME_MODE` 代码默认 `legacy`。路径分叉有三个真实机制：① 正则解析不出 taskType 时整块跳过 durable 创建、直接落 legacy（page.tsx `if (taskType)`）；② `worker_readonly` 模式下非只读任务落 legacy；③ durable 创建异常时降级 legacy。注意：cohort 分桶按 userId 哈希、同一用户恒定同桶，**不是**分叉来源；session 112/119 的同类异果更可能来自自由 loop 的模型非确定性叠加两条路径的能力不对称（legacy 有 7 种 forced tool call、worker 没有）。
 
 **动作**：
-1. 生产 runtime mode **不做预先验证**（决策 #21）：M1 发布即 cutover——随发布显式设置 `AGENT_RUNTIME_MODE=worker_all`，部署后用 `execution_owner` 列监控 7 天异常，`AGENT_LEGACY_ESCAPE_HATCH` 回滚 flag 作唯一安全网；观察期内出现 P0 回归则临时开 flag 恢复 directMode，观察期结束连同删除代码一并移除。
+1. 生产 runtime mode 在发布前由 preflight 验证为 `worker_all`：M1 发布即 cutover，部署后用 `execution_owner` 列监控 7 天异常。`0.10.8` 不保留 directMode 或 legacy escape hatch。
 2. 删除：`client-runner.ts`、`remote-runner.ts`、`/api/agent/run` directMode 分支、page.tsx 过时注释与 legacy 降级分支；`AGENT_RUNTIME_MODE` 收敛为仅 `worker_all`（保留读取兼容，写入警告）。
 3. 补齐 worker 五缺口：interviewState/interviewRebindAction 传递；服务端重建提示词上下文（interviewContext/rebindContext/guidedDirective）；contract 重建带上客户端 journey artifacts 与 resume baseVersion/baseHash；观察者补 persist_done / search_start / search_result / offer 状态推导；imageIntake 路由结果进入服务端 Run Admission。
 4. ModelGateway：`server-runner.callLLM`、`/api/agent/think`、`classify-intent-llm` 三份 MODEL_CHAIN/流解析/tool_call 重组收编为单一模块。
@@ -80,7 +80,7 @@
 
 **事实基线**：4 套并行记忆存储互不同步；写入无条件 INSERT 无冲突消解；纯向量检索无 ANN 索引无混合检索；`career_positioning` 掉入 DEFAULT_DENY；admin 不能编辑记忆文本。
 
-**架构（ADR-0025）**：
+**架构（ADR-0028）**：
 - **会话层 = Mastra Memory 直接引入**（`@mastra/core` + `@mastra/pg`）：resource=用户、thread=Conversation；working memory blocks + 语义召回 + observational memory（观察/反思双档，pi 派成品实现）。
 - **长期层 = 自研 Postgres 事实账本**：bi-temporal 三表（episodes append-only / entities 演化摘要 / facts 带 valid_at·invalid_at·source_episode_id），矛盾时作废而非覆盖；结构化求职画像（目标岗位/城市偏好/底线/黑名单等 topic/sub_topic 字段集，纯 SQL 不走向量）；记忆分区（MemCube 式命名空间 + 显式读写列表，取代任务型 memory-policy）；admin 增加编辑记忆文本与生命周期视图。
 - **写入管线**：确定性完成事件即时写（JD 评估完成、简历保存成功等带证据事实）+ 对话信号后台批量 flush（闲置/token 阈值）；提取升级为 Mem0 两段式（抽取候选 → 与相似旧事实比对 → ADD/UPDATE/DELETE/NOOP + 理由落库）。
@@ -139,6 +139,8 @@
 
 ## ADR
 
-- ADR-0023：durable worker 为唯一执行者（legacy 路径删除）
-- ADR-0024：治理式交接 + 只读委派的多 agent 协作
-- ADR-0025：分层记忆（Mastra 会话层 + Postgres 事实账本）
+`ADR-0023`–`ADR-0025` retain the `0.10.7` behavior decisions. The `dev` decisions for M1, M4, and M5 are renumbered as `ADR-0026`, `ADR-0027`, and `ADR-0028` respectively; all milestone references in this plan use the new numbers.
+
+- ADR-0026：durable worker 为唯一执行者（legacy 路径删除）
+- ADR-0027：治理式交接 + 只读委派的多 agent 协作
+- ADR-0028：分层记忆（Mastra 会话层 + Postgres 事实账本）

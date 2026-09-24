@@ -31,6 +31,7 @@ function mockRuntime() {
       replayed: false,
     })),
     listRuns: vi.fn(async () => []),
+    getRunByRequestId: vi.fn(async () => null),
     getRun: vi.fn(async () => ({
       id: "run-bootstrap",
       taskType: "interview_coaching",

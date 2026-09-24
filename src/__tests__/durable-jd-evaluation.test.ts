@@ -104,4 +104,39 @@ describe("durable JD evaluation", () => {
     );
     expect(latestBoundary.getLatestJd).toHaveBeenCalledOnce();
   });
+
+  it("keeps a no-resume directive for the same JD and restores the default for a new English JD", async () => {
+    const boundary = adapters();
+    const preferences = new Map<string, boolean>();
+    boundary.getResumeMatchingPreference = vi.fn(async (_principal, jdText) => preferences.get(jdText) ?? null);
+    boundary.setResumeMatchingPreference = vi.fn(async (_principal, jdText, matchResume) => {
+      preferences.set(jdText, matchResume);
+    });
+    const newEnglishJD = "We are hiring an AI product manager to own customer discovery, product strategy, launch planning, and cross-functional delivery across our software platform. Experience with analytics and AI products is preferred.";
+
+    const first = await runDurableJDEvaluation(
+      { userId: "user-1" },
+      { jdText: JD_TEXT, matchResume: false },
+      { adapters: boundary },
+    );
+    const repeated = await runDurableJDEvaluation(
+      { userId: "user-1" },
+      { jdText: JD_TEXT },
+      { adapters: boundary },
+    );
+    const newJD = await runDurableJDEvaluation(
+      { userId: "user-1" },
+      { jdText: newEnglishJD, language: "en" },
+      { adapters: boundary },
+    );
+
+    expect(first.matchResume).toBe(false);
+    expect(repeated.matchResume).toBe(false);
+    expect(newJD.matchResume).toBe(true);
+    expect(boundary.getResumeText).toHaveBeenCalledOnce();
+    expect(boundary.getMemoryContext).toHaveBeenCalledOnce();
+    expect(boundary.setResumeMatchingPreference).toHaveBeenCalledWith(
+      { userId: "user-1" }, JD_TEXT, false,
+    );
+  });
 });

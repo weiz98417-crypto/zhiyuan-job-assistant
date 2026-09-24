@@ -1,4 +1,4 @@
-# 0023 - The durable worker is the sole execution owner
+# 0026 - The durable worker is the sole execution owner
 
 Date: 2026-09-24
 

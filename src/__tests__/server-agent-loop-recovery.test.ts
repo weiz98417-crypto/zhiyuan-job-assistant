@@ -30,9 +30,8 @@ describe("durable server Agent Loop recovery", () => {
     expect(events.some((event) => event.type === "text" && event.content.includes("AI 请求失败"))).toBe(false);
   });
 
-  it("switches to a different provider after a switch-provider recovery decision", async () => {
+  it("keeps the supported DeepSeek model after a switch-provider recovery decision", async () => {
     vi.stubEnv("DEEPSEEK_API_KEY", "test-key");
-    vi.stubEnv("ZHIPU_API_KEY", "test-zhipu-key");
     const encoder = new TextEncoder();
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => new Response(
       new ReadableStream({
@@ -48,15 +47,15 @@ describe("durable server Agent Loop recovery", () => {
     const events = [];
 
     for await (const event of agentLoopServer({
-      agent: { model: "deepseek-v4-flash" } as never,
+      agent: { model: "deepseek-flash" } as never,
       systemPrompt: "You are a helpful agent.",
       messages: [{ role: "user", content: "继续原任务" }],
       modelRecovery: { switchProvider: true },
     })) events.push(event);
 
     const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
-    expect(requestBody.model).not.toMatch(/^deepseek-/);
-    expect(fetchMock.mock.calls[0]?.[0]).toContain("bigmodel.cn");
+    expect(requestBody.model).toBe("deepseek-flash");
+    expect(fetchMock.mock.calls[0]?.[0]).toContain("api.deepseek.com");
     expect(events).toContainEqual({ type: "text", content: "恢复成功" });
   });
 });

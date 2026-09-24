@@ -65,6 +65,7 @@ export function resolveImageIntakeAgentId(
   const decision = routeImageIntake(userText, intake ?? null);
   if (decision.route === "evaluate_jd") return "evaluate";
   if (decision.route === "evaluate_offer") return "offer";
+  if (decision.route === "resume_diagnosis") return "resume";
   if (decision.route === "resume_preview") return "resume";
 
   if (!intake) {

@@ -252,7 +252,7 @@ describe("agent task routing", () => {
     expect(decision.auditSummary).toBe("agent:offer:saved_report_assist");
   });
 
-  it("routes resume screenshots to read-only resume handling instead of JD or Offer evaluation when no edit is requested", () => {
+  it("routes resume screenshots to read-only diagnosis instead of JD or Offer evaluation", () => {
     const imageIntake: ImageIntakeResult = {
       documentType: "resume",
       confidence: 0.9,
@@ -266,10 +266,50 @@ describe("agent task routing", () => {
       imageIntake,
     });
 
-    expect(decision.taskType).toBe("resume_query");
-    expect(decision.allowedTools).toContain("read_file");
+    expect(decision.taskType).toBe("resume_diagnosis");
+    expect(decision.contractPolicy).toBe("read_only");
+    expect(decision.allowedTools).not.toContain("read_file");
     expect(decision.allowedTools).not.toContain("evaluate_jd_full");
     expect(decision.allowedTools).not.toContain("evaluate_offer");
+  });
+
+  it("keeps resume screenshot OCR failure recoverable in the same diagnosis task", () => {
+    const decision = routeAgentTask({
+      agentId: "general",
+      content: "评估这份简历，不要修改",
+      imageIntake: {
+        documentType: "resume",
+        confidence: 0,
+        quality: "unreadable",
+        extractedText: "",
+        reason: "OCR timeout",
+      },
+    });
+
+    expect(decision.taskType).toBe("resume_diagnosis");
+    expect(decision.requiresClarification).toBe(true);
+    expect(decision.clarificationQuestion).toContain("当前对话");
+    expect(decision.clarificationQuestion).toContain("粘贴简历文字");
+  });
+
+  it("keeps image-only follow-up in the active resume diagnosis", () => {
+    const decision = routeAgentTask({
+      agentId: "resume",
+      content: "请看这张清晰截图",
+      hasImages: true,
+      activeTask: {
+        taskId: "resume-diagnosis-run",
+        taskType: "resume_diagnosis",
+        agentId: "resume",
+        status: "waiting_user",
+        startedAt: "2026-09-23T00:00:00.000Z",
+        lastUpdatedAt: "2026-09-23T00:01:00.000Z",
+      },
+    });
+
+    expect(decision.taskType).toBe("resume_diagnosis");
+    expect(decision.requiresClarification).toBe(false);
+    expect(decision.contractPolicy).toBe("read_only");
   });
 
   it("routes self-positioning to guidance contract with guide/read tools only", () => {

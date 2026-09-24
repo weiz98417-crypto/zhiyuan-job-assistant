@@ -5,6 +5,8 @@ import {
   isDurableAgentRuntimeAvailable,
 } from "@/lib/agent/runtime/runtime-factory";
 import { admitAgentRun } from "@/lib/agent/run-admission";
+import type { AgentRunAdmissionDecision } from "@/lib/agent/run-admission";
+import { runReceipt } from "@/lib/agent/runtime/run-receipt";
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -16,7 +18,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     const body = await request.json().catch(() => ({}));
     const requestId = typeof body.requestId === "string" ? body.requestId.trim() : "";
-    const content = typeof body.input?.content === "string" ? body.input.content.trim() : "";
+    const images = Array.isArray(body.input?.images) ? body.input.images.map(String) : [];
+    const content = (typeof body.input?.content === "string" ? body.input.content.trim() : "")
+      || (images.length > 0 ? "请识别这张图片，并根据图片内容帮助我处理。" : "");
     if (!requestId) return NextResponse.json({ success: false, error: "requestId is required" }, { status: 400 });
     if (!content) return NextResponse.json({ success: false, error: "input.content is required" }, { status: 400 });
 
@@ -26,7 +30,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (!run) return NextResponse.json({ success: false, error: "Agent Run not found" }, { status: 404 });
     const input = {
       content,
-      images: Array.isArray(body.input?.images) ? body.input.images.map(String) : undefined,
+      images: images.length > 0 ? images : undefined,
       ...(body.input?.persistInConversation === false ? { persistInConversation: false } : {}),
     };
     const admission = admitAgentRun({
@@ -37,7 +41,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     });
     if (admission.kind !== "continue_current_run") {
       return NextResponse.json(
-        { success: false, error: admission.safeMessage || "Agent Run input does not continue the current goal", data: { admission } },
+        { success: false, error: admission.safeMessage || "Agent Run input does not continue the current goal", data: { admission: admissionReceipt(admission) } },
         { status: 409 },
       );
     }
@@ -48,12 +52,38 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       input,
     );
     return NextResponse.json(
-      { success: true, data: { ...result, admission } },
+      {
+        success: true,
+        data: {
+          run: runReceipt(result.run),
+          input: {
+            id: result.input.id,
+            runId: result.input.runId,
+            requestId: result.input.requestId,
+            status: result.input.status,
+            createdAt: result.input.createdAt,
+            consumedAt: result.input.consumedAt,
+          },
+          replayed: result.replayed,
+          admission: admissionReceipt(admission),
+        },
+      },
       { status: result.replayed ? 200 : 201 },
     );
   } catch (error) {
     return NextResponse.json({ success: false, error: String(error) }, { status: 500 });
   }
+}
+
+function admissionReceipt(admission: AgentRunAdmissionDecision) {
+  return {
+    kind: admission.kind,
+    taskType: admission.taskType,
+    agentId: admission.agentId,
+    currentRunId: admission.currentRunId,
+    safeMessage: admission.safeMessage,
+    evidence: admission.evidence,
+  };
 }
 
 async function currentUserOrNull() {

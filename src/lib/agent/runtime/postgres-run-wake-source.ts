@@ -17,7 +17,10 @@ export class PostgresRunWakeSource {
   private readonly fallbackPollMs: number;
   private readonly waiters = new Set<() => void>();
   private client: RunWakeClient | null = null;
+  private pendingClient: RunWakeClient | null = null;
   private connecting: Promise<RunWakeClient> | null = null;
+  private readonly errorHandlers = new WeakMap<RunWakeClient, () => void>();
+  private readonly releasedClients = new WeakSet<RunWakeClient>();
   private closed = false;
 
   constructor(options: PostgresRunWakeSourceOptions = {}) {
@@ -55,15 +58,20 @@ export class PostgresRunWakeSource {
     if (this.closed) return;
     this.closed = true;
     this.resolveWaiters();
+    if (this.connecting) {
+      try {
+        await this.connecting;
+      } catch {
+        return;
+      }
+    }
     const client = this.client;
     this.client = null;
     if (!client) return;
     try {
       await client.query("UNLISTEN agent_run_available");
     } finally {
-      client.removeListener("notification", this.onNotification);
-      client.removeListener("error", this.onError);
-      client.release();
+      this.releaseClient(client);
     }
   }
 
@@ -71,11 +79,28 @@ export class PostgresRunWakeSource {
     if (this.client) return this.client;
     if (this.connecting) return this.connecting;
     this.connecting = this.connect().then(async (client) => {
+      if (this.closed) {
+        client.release();
+        throw new Error("PostgreSQL wake source is closed");
+      }
+      this.pendingClient = client;
+      const onError = () => this.onClientError(client);
+      this.errorHandlers.set(client, onError);
       client.on("notification", this.onNotification);
-      client.on("error", this.onError);
-      await client.query("LISTEN agent_run_available");
-      this.client = client;
-      return client;
+      client.on("error", onError);
+      try {
+        await client.query("LISTEN agent_run_available");
+        if (this.closed || this.pendingClient !== client) {
+          throw new Error("PostgreSQL wake connection closed before LISTEN completed");
+        }
+        this.pendingClient = null;
+        this.client = client;
+        return client;
+      } catch (error) {
+        if (this.pendingClient === client) this.pendingClient = null;
+        this.releaseClient(client);
+        throw error;
+      }
     }).finally(() => {
       this.connecting = null;
     });
@@ -86,12 +111,21 @@ export class PostgresRunWakeSource {
     if (message.channel === "agent_run_available") this.resolveWaiters();
   };
 
-  private readonly onError = () => {
-    const client = this.client;
-    this.client = null;
-    client?.release();
+  private onClientError(client: RunWakeClient): void {
+    if (this.client === client) this.client = null;
+    if (this.pendingClient === client) this.pendingClient = null;
+    this.releaseClient(client);
     this.resolveWaiters();
-  };
+  }
+
+  private releaseClient(client: RunWakeClient): void {
+    if (this.releasedClients.has(client)) return;
+    this.releasedClients.add(client);
+    client.removeListener("notification", this.onNotification);
+    const onError = this.errorHandlers.get(client);
+    if (onError) client.removeListener("error", onError);
+    client.release();
+  }
 
   private resolveWaiters(): void {
     const waiters = Array.from(this.waiters);

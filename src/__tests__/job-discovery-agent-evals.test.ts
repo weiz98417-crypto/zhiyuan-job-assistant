@@ -237,7 +237,7 @@ describe("job discovery agent evals - regression", () => {
     expect(decision.allowedTools).toContain("scan_portals");
     // M1 cutover: client-side routing (with scan_portals allowlist) happens
     // before durable run creation; no browser-side orchestrate call remains.
-    expect(page.indexOf("let routeDecision = routeAgentTask")).toBeLessThan(page.indexOf("createDurableAgentRunClient({"));
+    expect(page.indexOf("let routeDecision = routeAgentTask")).toBeLessThan(page.indexOf("const created = earlyCreatedRun || await createDurableAgentRunClient({"));
     expect(page).toContain("const routeForcedAgentId = forcedAgentId || (routeDecision.taskType ? taskAgentId(routeDecision.taskType) : undefined)");
   });
 

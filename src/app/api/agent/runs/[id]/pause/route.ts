@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { getDurableAgentRuntime, isDurableAgentRuntimeAvailable } from "@/lib/agent/runtime/runtime-factory";
+import { runReceipt } from "@/lib/agent/runtime/run-receipt";
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -11,7 +12,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (!requestId) return NextResponse.json({ success: false, error: "requestId is required" }, { status: 400 });
     const { id } = await params;
     const run = await getDurableAgentRuntime().requestPause({ userId: user.userId }, id, requestId);
-    return NextResponse.json({ success: true, data: { run } });
+    return NextResponse.json({ success: true, data: { run: runReceipt(run) } });
   } catch (error) {
     return NextResponse.json({ success: false, error: String(error) }, { status: 500 });
   }

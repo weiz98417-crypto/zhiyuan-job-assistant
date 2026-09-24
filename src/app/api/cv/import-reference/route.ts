@@ -17,10 +17,9 @@ import {
 } from "@/lib/reference-resume-vector";
 import { stableHash } from "@/lib/memory/vector-memory";
 import { persistExcellentResumePatternsBestEffort } from "@/lib/excellent-resume-patterns";
-import { ZHIPU_API_URL, ZHIPU_VISION_MODEL } from "@/lib/zhipu";
+import { getDeepSeekApiKey, DEEPSEEK_API_URL, DEEPSEEK_VISION_MODEL } from "@/lib/deepseek-provider";
 
-const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
-const MODEL = "deepseek-v4-flash";
+const MODEL = "deepseek-flash";
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
 interface CVSection {
@@ -107,18 +106,18 @@ title 字段使用中文：个人概述、工作经历、项目经历、技能�
   return parsed.sections;
 }
 
-async function ocrWithZhipu(base64DataUri: string): Promise<string> {
-  const apiKey = process.env.ZHIPU_API_KEY;
-  if (!apiKey) throw new Error("未配置 ZHIPU_API_KEY，图片/PDF 解析需要智谱 API");
+async function ocrWithDeepSeek(base64DataUri: string): Promise<string> {
+  const apiKey = getDeepSeekApiKey();
+  if (!apiKey) throw new Error("未配置 DEEPSEEK_API_KEY，图片/PDF 解析需要 DeepSeek 视觉能力");
 
-  const response = await fetch(ZHIPU_API_URL, {
+  const response = await fetch(DEEPSEEK_API_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: ZHIPU_VISION_MODEL,
+      model: DEEPSEEK_VISION_MODEL,
       messages: [
         {
           role: "system",
@@ -140,13 +139,13 @@ async function ocrWithZhipu(base64DataUri: string): Promise<string> {
 
   if (!response.ok) {
     const errText = await response.text().catch(() => "");
-    console.error("Zhipu OCR error:", response.status, errText);
-    throw new Error(`智谱 OCR 失败: ${response.status}`);
+    console.error("DeepSeek OCR error:", response.status, errText);
+    throw new Error(`DeepSeek 视觉识别失败: ${response.status}`);
   }
 
   const data = await response.json();
   const text = data.choices?.[0]?.message?.content;
-  if (!text) throw new Error("智谱 OCR 返回为空");
+  if (!text) throw new Error("DeepSeek 视觉识别返回为空");
   return text;
 }
 
@@ -193,7 +192,7 @@ export async function POST(request: Request) {
         const base64 = fileBuffer.toString("base64");
         const dataUri = `data:${mimeType};base64,${base64}`;
         try {
-          rawText = await ocrWithZhipu(dataUri);
+          rawText = await ocrWithDeepSeek(dataUri);
           if (!rawText.trim()) {
             return NextResponse.json({ success: false, error: "图片中未识别到简历文本" }, { status: 400 });
           }

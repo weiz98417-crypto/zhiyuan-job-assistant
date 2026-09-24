@@ -1,5 +1,5 @@
 /**
- * transfer_to_agent — 主责交接（M4，ADR-0024）。
+ * transfer_to_agent — 主责交接（M4，ADR-0027）。
  *
  * 对模型是一个普通工具；成功结果携带 data.handoff，loop 据此切换主责 agent
  * （换系统提示词与工具表）。只能沿合法任务转换图的边走。

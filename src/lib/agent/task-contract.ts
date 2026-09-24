@@ -6,6 +6,7 @@ export type AgentTaskType =
   | "general_chat"
   | "career_positioning_guidance"
   | "resume_query"
+  | "resume_diagnosis"
   | "resume_edit"
   | "jd_evaluation"
   | "offer_evaluation"
@@ -36,6 +37,7 @@ export interface AgentTaskContract {
     activeTaskType?: string;
     activeTaskPhase?: string;
     routeLocked?: boolean;
+    jdMatchResume?: boolean;
   };
   journey?: {
     graphVersion: string;
@@ -78,6 +80,7 @@ const RUN_CONTRACT_ENFORCEMENT: Record<AgentTaskType, RunContractEnforcement> = 
   general_chat: "advisory",
   career_positioning_guidance: "advisory",
   resume_query: "advisory",
+  resume_diagnosis: "advisory",
   resume_edit: "verified_effect",
   jd_evaluation: "verified_effect",
   offer_evaluation: "verified_effect",
@@ -102,6 +105,9 @@ const DEFAULT_SUCCESS_CRITERIA: Record<AgentTaskType, string[]> = {
   ],
   resume_query: [
     "resume context read",
+    "answer generated",
+  ],
+  resume_diagnosis: [
     "answer generated",
   ],
   resume_edit: [
@@ -156,6 +162,7 @@ const DEFAULT_VALIDATORS: Record<AgentTaskType, string[]> = {
   general_chat: ["assistant_response"],
   career_positioning_guidance: ["guidance_response"],
   resume_query: ["read_only_resume_response"],
+  resume_diagnosis: ["read_only_resume_diagnosis"],
   resume_edit: ["base_hash", "document_field", "read_back_match", "no_placeholder_content"],
   jd_evaluation: ["source_content_present", "report_blocks_present", "read_back_match"],
   offer_evaluation: ["source_content_present", "offer_modules_present", "read_back_match"],
@@ -414,26 +421,56 @@ export function buildContractUnmetAssistantMessage(
   contract: AgentTaskContract,
   unmetCriteria: string[],
 ): string {
-  const unmet = unmetCriteria.slice(0, 3).join("、");
   if (contract.taskType === "resume_edit") {
-    return `这次我没有把修改结果写入简历，因为运行时校验还没全部通过：${unmet}。我已经阻止了“已保存”的成功提示，避免把不完整或未验证的内容写进简历。`;
+    return "这次简历修改还无法确认完成，我没有把它当作已保存的版本。你可以继续告诉我想调整的内容，我会在这里接着处理。";
   }
   if (contract.taskType === "career_positioning_guidance") {
-    return `这次自我定位引导还没有完成可验证的对话推进：${unmet}。我不会把它当成画像写入任务；请继续回答当前引导问题，或重新说“帮我做自我定位”。`;
+    return "这次自我定位引导没有完成。你可以继续回答刚才的问题，或告诉我想先讨论哪个方向。";
   }
   if (contract.taskType === "resume_query") {
-    return `这次我没有可靠读取到当前简历上下文：${unmet}。我不会把只读查询当成简历修改，也不会要求你确认草稿或写入简历。请重试“读取我的简历”。`;
+    return "我暂时没能读到你想讨论的简历。请粘贴简历文字、重新上传图片，或告诉我要查看哪一版，我会接着回答。";
+  }
+  if (contract.taskType === "resume_diagnosis") {
+    return "我暂时没能读清这份简历。请重发清晰截图或直接粘贴文字，我会在当前对话继续给你建议。";
   }
   if (contract.taskType === "jd_evaluation") {
-    return `这次 JD 评估没有完成可靠落库校验：${unmet}。请重新发送 JD 文本/原图，或稍后重试，我不会把这次结果当作已完成报告。`;
+    return unmetCriteria.includes("source content extracted or fetched")
+      ? "我暂时没能读出这份 JD。请发清晰截图、粘贴 JD 文字或提供链接，我会在这里继续分析。"
+      : "这次 JD 分析还无法确认完成。你可以继续在这里提问或补充 JD 内容，我会先核对现有结果再继续。";
   }
   if (contract.taskType === "reference_resume_save") {
-    return `这次优秀简历没有完成可靠读回校验：${unmet}。我不会把它当作已沉淀的长期记忆，请稍后重试或重新上传简历。`;
+    return "这份参考简历的保存状态暂时无法确认。请先不要重复提交；你可以继续在这里提问，我会先核对现有记录。";
   }
   if (contract.taskType === "offer_evaluation") {
-    return `这次 Offer 评估没有完成可靠落库校验：${unmet}。请重新发送 Offer 文本/截图，或稍后重试，我不会把这次结果当作已完成报告。`;
+    return unmetCriteria.includes("offer content extracted or fetched")
+      ? "我暂时没能读出这份 Offer。请发清晰截图或粘贴文字，我会在这里继续分析。"
+      : "这次 Offer 分析还无法确认完成。你可以继续在这里提问或补充内容，我会先核对现有结果再继续。";
   }
-  return `这次任务还没有满足成功条件：${unmet}。我不会把它标记为已完成，请补充信息或稍后重试。`;
+  return "这次处理还没有完成。你可以继续补充信息或告诉我下一步要做什么，我会在这里接着处理。";
+}
+
+export function shouldAwaitUserAfterContractUnmet(
+  contract: AgentTaskContract,
+  completedCriteria: string[],
+  unmetCriteria: string[],
+): boolean {
+  const completed = new Set(completedCriteria);
+  const unmet = new Set(unmetCriteria);
+  if (contract.taskType === "resume_query") return unmet.has("resume context read");
+  if (contract.taskType === "resume_diagnosis") return unmet.has("answer generated");
+  if (contract.taskType === "jd_evaluation") {
+    return unmet.has("source content extracted or fetched") || completed.has("report persisted");
+  }
+  if (contract.taskType === "offer_evaluation") {
+    return unmet.has("offer content extracted or fetched") || completed.has("offer/report persisted");
+  }
+  if (contract.taskType === "reference_resume_save") {
+    return unmet.has("source resume content present") || completed.has("reference resume persisted");
+  }
+  if (contract.taskType === "profile_update") {
+    return completed.has("candidate signals extracted") && unmet.has("profile or memory write read-back verification passes");
+  }
+  return false;
 }
 
 export function evaluateTaskContractCompletion(
@@ -491,6 +528,15 @@ export function resolveTaskContractRunOutcome(
       safeMessage: options.hasAssistantResponse
         ? undefined
         : "简历优化草稿已经生成，尚未写入当前简历。请查看方案后确认应用、继续调整或取消。",
+    };
+  }
+
+  if (shouldAwaitUserAfterContractUnmet(contract, gate.completedCriteria, gate.unmetCriteria)) {
+    return {
+      status: "waiting_user",
+      gate,
+      replaceAssistantMessage: true,
+      safeMessage: gate.safeMessage,
     };
   }
 

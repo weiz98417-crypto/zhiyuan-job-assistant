@@ -3,7 +3,7 @@ import { buildAskQuestionsPrompt } from "@/lib/judge-engine";
 import type { Operation } from "@/types";
 
 const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
-const MODEL = "deepseek-v4-pro";
+const MODEL = "deepseek-flash";
 
 export async function POST(request: Request) {
   try {

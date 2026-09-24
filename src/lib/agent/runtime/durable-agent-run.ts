@@ -237,6 +237,7 @@ export interface AgentRunStore {
     input: DurableRunInput,
   ): Promise<SubmitAgentRunInputResult>;
   getRun(principal: ExecutionPrincipal, runId: string): Promise<AgentRunSnapshot | null>;
+  getRunByRequestId(principal: ExecutionPrincipal, requestId: string): Promise<AgentRunSnapshot | null>;
   listPendingInputs(principal: ExecutionPrincipal, runId: string): Promise<AgentRunInputRecord[]>;
   consumeInputs(command: ConsumeAgentRunInputsCommand): Promise<void>;
   recordEvent(command: RecordAgentRunEventCommand): Promise<AgentRunEvent>;
@@ -353,6 +354,11 @@ export class DurableAgentRunService {
     return this.store.getRun(principal, runId);
   }
 
+  getRunByRequestId(principal: ExecutionPrincipal, requestId: string): Promise<AgentRunSnapshot | null> {
+    if (!requestId.trim()) throw new Error("Agent Run requestId is required");
+    return this.store.getRunByRequestId(principal, requestId);
+  }
+
   listPendingInputs(principal: ExecutionPrincipal, runId: string): Promise<AgentRunInputRecord[]> {
     return this.store.listPendingInputs(principal, runId);
   }
@@ -394,8 +400,12 @@ export class InMemoryAgentRunStore implements AgentRunStore {
     command: CreateAgentRunCommand,
   ): Promise<CreateAgentRunResult> {
     const requestKey = `${principal.userId}:${command.requestId}`;
-    const existing = this.runsByRequest.get(requestKey);
-    if (existing) return { run: { ...existing }, replayed: true };
+    const existing = this.runsByRequest.get(requestKey)
+      || this.runsById.get(this.inputsByRequest.get(requestKey)?.runId || "");
+    if (existing) {
+      if (existing.conversationId !== command.conversationId) throw new Error("Agent Run requestId belongs to another Conversation");
+      return { run: { ...existing, budgets: { ...existing.budgets } }, replayed: true };
+    }
 
     const conversationKey = command.conversationId === null
       ? null
@@ -748,10 +758,13 @@ export class InMemoryAgentRunStore implements AgentRunStore {
   ): Promise<SubmitAgentRunInputResult> {
     const run = this.runsById.get(runId);
     if (!run || run.userId !== principal.userId) throw new Error("Agent Run not found");
-    if (isTerminalAgentRunStatus(run.status)) throw new Error("Terminal Agent Run cannot accept input");
     const requestKey = `${principal.userId}:${requestId}`;
     const existing = this.inputsByRequest.get(requestKey);
-    if (existing) return { run: { ...run }, input: this.cloneInput(existing), replayed: true };
+    if (existing) {
+      if (existing.runId !== runId) throw new Error("Agent Run requestId belongs to another Run");
+      return { run: { ...run }, input: this.cloneInput(existing), replayed: true };
+    }
+    if (isTerminalAgentRunStatus(run.status)) throw new Error("Terminal Agent Run cannot accept input");
 
     const record: AgentRunInputRecord = {
       id: ++this.inputSequence,
@@ -775,6 +788,13 @@ export class InMemoryAgentRunStore implements AgentRunStore {
   async getRun(principal: ExecutionPrincipal, runId: string): Promise<AgentRunSnapshot | null> {
     const run = this.runsById.get(runId);
     return run && run.userId === principal.userId ? { ...run, budgets: { ...run.budgets } } : null;
+  }
+
+  async getRunByRequestId(principal: ExecutionPrincipal, requestId: string): Promise<AgentRunSnapshot | null> {
+    const requestKey = `${principal.userId}:${requestId}`;
+    const run = this.runsByRequest.get(requestKey)
+      || this.runsById.get(this.inputsByRequest.get(requestKey)?.runId || "");
+    return run ? { ...run, budgets: { ...run.budgets } } : null;
   }
 
   async listPendingInputs(principal: ExecutionPrincipal, runId: string): Promise<AgentRunInputRecord[]> {

@@ -1144,7 +1144,7 @@ async function callReviewLlmJudge(prompt: string): Promise<AgentRunLlmJudgeResul
   const apiKey = process.env.AGENT_RUN_REVIEW_LLM_API_KEY || process.env.DEEPSEEK_API_KEY || "";
   if (!apiKey) return null;
   const apiUrl = process.env.AGENT_RUN_REVIEW_LLM_API_URL || "https://api.deepseek.com/chat/completions";
-  const model = process.env.AGENT_RUN_REVIEW_LLM_MODEL || "deepseek-v4-flash";
+  const model = "deepseek-flash";
   let lastError: unknown = null;
 
   for (let attempt = 0; attempt < 2; attempt += 1) {

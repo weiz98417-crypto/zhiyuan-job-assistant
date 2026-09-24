@@ -75,7 +75,7 @@ export async function generateResumeDraftForAgent(
   const apiKey = process.env.DEEPSEEK_API_KEY?.trim();
   if (!apiKey) throw new Error("未配置 DEEPSEEK_API_KEY");
   const response = await llmRetry("https://api.deepseek.com/chat/completions", apiKey, {
-    model: process.env.DEEPSEEK_RESUME_MODEL?.trim() || "deepseek-v4-pro",
+    model: "deepseek-flash",
     messages: [
       {
         role: "system",
@@ -98,7 +98,7 @@ export async function generateResumeDraftForAgent(
     response_format: { type: "json_object" },
     thinking: { type: "disabled" },
     retries: 2,
-    fallbackModel: process.env.DEEPSEEK_FALLBACK_MODEL,
+    fallbackModel: "deepseek-flash",
     signal: options.signal,
     timeout: 180_000,
   });

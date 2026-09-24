@@ -195,7 +195,7 @@ async function generateReasons(
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: "deepseek-v4-flash",
+        model: "deepseek-flash",
         messages: [
           {
             role: "user",

@@ -1,9 +1,9 @@
 import type {
   AgentRunEvent,
   AgentRunGate,
+  AgentRunInputRecord,
   AgentRunSnapshot,
   DurableRunInput,
-  SubmitAgentRunInputResult,
 } from "@/lib/agent/runtime/durable-agent-run";
 import type { ConversationItem } from "@/lib/agent/item-projection";
 import type { AgentRuntimeAssignment } from "@/lib/agent/runtime/runtime-mode";
@@ -55,9 +55,32 @@ export interface DurableRunItemBatch {
 }
 
 export class DurableRunOwnershipUnknownError extends Error {
-  constructor() {
-    super("无法确认 Agent Run 的执行归属，请稍后重试；为避免重复执行，本次不会降级到本地运行。");
+  readonly requestId: string;
+
+  constructor(requestId: string) {
+    super("任务提交状态暂时无法确认，系统不会重复启动同一任务；请稍后在当前对话重试。");
     this.name = "DurableRunOwnershipUnknownError";
+    this.requestId = requestId;
+  }
+}
+
+export interface DurableRunInputSubmissionResponse {
+  run: AgentRunSnapshot;
+  input?: Pick<AgentRunInputRecord, "id" | "runId" | "requestId" | "status" | "createdAt" | "consumedAt">;
+  replayed: boolean;
+}
+
+export class DurableRunRequestError extends Error {
+  readonly status?: number;
+  readonly code?: string;
+  readonly retryable: boolean;
+
+  constructor(message: string, options: { status?: number; code?: string; retryable?: boolean } = {}) {
+    super(message);
+    this.name = "DurableRunRequestError";
+    this.status = options.status;
+    this.code = options.code;
+    this.retryable = options.retryable ?? false;
   }
 }
 
@@ -79,7 +102,9 @@ const RUN_EVENT_TYPES = [
   "run.gate_opened",
   "run.gate_resolved",
 ];
-const RUN_CREATE_REQUEST_TIMEOUT_MS = 5_000;
+const RUN_CREATE_REQUEST_TIMEOUT_MS = 15_000;
+const RUN_INPUT_REQUEST_TIMEOUT_MS = 15_000;
+const RUN_LOOKUP_REQUEST_TIMEOUT_MS = 5_000;
 
 interface JsonEnvelope<T> {
   success: boolean;
@@ -98,24 +123,66 @@ export async function createDurableAgentRunClient(
     ...(command.entryHints ? { entryHints: command.entryHints } : {}),
   };
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const result = await requestJson<DurableRunCreateResponse>("/api/agent/runs", {
-      method: "POST",
-      body: JSON.stringify(request),
-    }, RUN_CREATE_REQUEST_TIMEOUT_MS);
-    if (result?.data) return result.data;
+    try {
+      const result = await requestJson<DurableRunCreateResponse>("/api/agent/runs", {
+        method: "POST",
+        body: JSON.stringify(request),
+        headers: { "X-Agent-Request-Id": command.requestId },
+      }, RUN_CREATE_REQUEST_TIMEOUT_MS);
+      if (result?.data) return result.data;
+    } catch (error) {
+      if (error instanceof DurableRunRequestError && !error.retryable) throw error;
+    }
+
+    const recovered = await findDurableAgentRunByRequestIdClient(command.conversationId, command.requestId).catch(() => null);
+    if (recovered) {
+      return {
+        run: recovered,
+        replayed: true,
+        assignment: { mode: recovered.runtimeMode as AgentRuntimeAssignment["mode"], owner: "worker", shadow: false, cohortBucket: 0 },
+      };
+    }
   }
-  throw new DurableRunOwnershipUnknownError();
+  throw new DurableRunOwnershipUnknownError(command.requestId);
+}
+
+export async function findDurableAgentRunByRequestIdClient(
+  conversationId: number | null,
+  requestId: string,
+): Promise<AgentRunSnapshot | null> {
+  const params = new URLSearchParams({ activeOnly: "false", requestId });
+  if (conversationId !== null && conversationId !== undefined) params.set("conversationId", String(conversationId));
+  const result = await requestJson<AgentRunSnapshot[]>(`/api/agent/runs?${params.toString()}`, undefined, RUN_LOOKUP_REQUEST_TIMEOUT_MS);
+  return Array.isArray(result?.data)
+    ? result.data[0] || null
+    : null;
 }
 
 export async function submitDurableAgentRunInputClient(
   runId: string,
   command: { requestId: string; input: DurableRunInput },
-): Promise<SubmitAgentRunInputResult | null> {
-  const result = await requestJson<SubmitAgentRunInputResult>(
-    `/api/agent/runs/${encodeURIComponent(runId)}/inputs`,
-    { method: "POST", body: JSON.stringify(command) },
-  );
-  return result?.data || null;
+): Promise<DurableRunInputSubmissionResponse> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const result = await requestJson<DurableRunInputSubmissionResponse>(
+        `/api/agent/runs/${encodeURIComponent(runId)}/inputs`,
+        { method: "POST", body: JSON.stringify(command), headers: { "X-Agent-Request-Id": command.requestId } },
+        RUN_INPUT_REQUEST_TIMEOUT_MS,
+      );
+      if (result?.data) return result.data;
+    } catch (error) {
+      if (error instanceof DurableRunRequestError && !error.retryable && error.status !== 409) throw error;
+    }
+
+    const recovered = await findDurableAgentRunByRequestIdClient(null, command.requestId).catch(() => null);
+    if (recovered) {
+      if (recovered.id !== runId) {
+        throw new DurableRunRequestError("requestId belongs to another Run", { status: 409 });
+      }
+      return { run: recovered, replayed: true };
+    }
+  }
+  throw new DurableRunOwnershipUnknownError(command.requestId);
 }
 
 export async function requestDurableAgentRunCancelClient(
@@ -214,6 +281,7 @@ export function observeDurableAgentRun(
   const pollIntervalMs = Math.max(1, options.pollIntervalMs || 1_500);
 
   const deliver = (events: AgentRunEvent[]) => {
+    if (stopped) return;
     const next = events
       .filter((event) => event.sequence > cursor)
       .sort((left, right) => left.sequence - right.sequence);
@@ -231,7 +299,7 @@ export function observeDurableAgentRun(
       deliver(batch.events);
       cursor = Math.max(cursor, batch.cursor);
     } catch (error) {
-      options.onError?.(error);
+      if (!stopped) options.onError?.(error);
     } finally {
       polling = false;
       if (!stopped) timer = setTimeout(() => void poll(), pollIntervalMs);
@@ -253,7 +321,7 @@ export function observeDurableAgentRun(
       try {
         deliver([JSON.parse(message.data) as AgentRunEvent]);
       } catch (error) {
-        options.onError?.(error);
+        if (!stopped) options.onError?.(error);
       }
     };
     for (const type of RUN_EVENT_TYPES) {
@@ -295,9 +363,21 @@ async function requestJson<T>(
       },
     });
     const payload = await response.json().catch(() => ({})) as JsonEnvelope<T>;
-    return response.ok && payload.success ? payload : null;
-  } catch {
-    return null;
+    if (response.ok && payload.success) return payload;
+    const code = typeof payload.error === "string" ? payload.error : `HTTP_${response.status}`;
+    throw new DurableRunRequestError(
+      payload.error || `Agent Run request failed (${response.status})`,
+      { status: response.status, code, retryable: response.status === 408 || response.status === 425 || response.status === 429 || response.status >= 500 },
+    );
+  } catch (error) {
+    if (error instanceof DurableRunRequestError) throw error;
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new DurableRunRequestError("Agent Run request timed out", { code: "REQUEST_TIMEOUT", retryable: true });
+    }
+    throw new DurableRunRequestError(
+      error instanceof Error ? error.message : "Agent Run request failed",
+      { code: "NETWORK_ERROR", retryable: true },
+    );
   } finally {
     if (timeout) clearTimeout(timeout);
   }

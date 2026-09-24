@@ -27,11 +27,10 @@ npx playwright install chromium
 
 ### API Keys
 
-The REQUIRED keys are DeepSeek (AI evaluations) and Zhipu (JD screenshot OCR). Copy `.env.example` to `.env` and set:
+DeepSeek handles AI evaluations and screenshot recognition. Copy `.env.example` to `.env` and set:
 
 ```
 DEEPSEEK_API_KEY=your_key_here
-ZHIPU_API_KEY=your_key_here
 ```
 
 SerpAPI and Baidu Map keys are optional — Claude Code's built-in WebSearch covers most research needs. Only add them if you want MCP-based search.

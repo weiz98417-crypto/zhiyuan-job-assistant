@@ -4,6 +4,7 @@ import {
   getDurableAgentRuntime,
   isDurableAgentRuntimeAvailable,
 } from "@/lib/agent/runtime/runtime-factory";
+import { runReceipt } from "@/lib/agent/runtime/run-receipt";
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -16,7 +17,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     const { id } = await params;
     const run = await getDurableAgentRuntime().getRun({ userId: user.userId }, id);
     if (!run) return NextResponse.json({ success: false, error: "Run not found" }, { status: 404 });
-    return NextResponse.json({ success: true, data: { run } });
+    return NextResponse.json({ success: true, data: { run: runReceipt(run) } });
   } catch (error) {
     return NextResponse.json({ success: false, error: String(error) }, { status: 500 });
   }

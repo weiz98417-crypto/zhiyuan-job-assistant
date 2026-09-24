@@ -23,6 +23,55 @@ describe("Durable Agent Run", () => {
     expect(replay).toEqual({ ...first, replayed: true });
   });
 
+  it("keeps continuation request ids bound to their original Run after completion", async () => {
+    const runtime = new DurableAgentRunService(new InMemoryAgentRunStore());
+    const principal = { userId: "user-continuation" };
+    const command = {
+      requestId: "create-request",
+      conversationId: 42,
+      taskType: "resume_diagnosis",
+      agentId: "resume",
+      input: { content: "评估简历" },
+    };
+    const created = await runtime.createRun(principal, command);
+    const continuation = await runtime.submitInput(
+      principal,
+      created.run.id,
+      "continuation-request",
+      { content: "补充这份截图" },
+    );
+    const lease = await runtime.claimNextRun({ workerId: "worker-continuation" });
+    await runtime.transitionRun({
+      runId: created.run.id,
+      workerId: "worker-continuation",
+      fencingToken: lease!.fencingToken,
+      nextStatus: "failed",
+    });
+
+    const found = await runtime.getRunByRequestId(principal, "continuation-request");
+    const replayedCreate = await runtime.createRun(principal, {
+      ...command,
+      requestId: "continuation-request",
+      input: { content: "补充这份截图" },
+    });
+    const replayedInput = await runtime.submitInput(
+      principal,
+      created.run.id,
+      "continuation-request",
+      { content: "补充这份截图" },
+    );
+
+    expect(found).toMatchObject({ id: created.run.id, status: "failed" });
+    expect(replayedCreate).toMatchObject({ run: { id: created.run.id }, replayed: true });
+    expect(replayedInput).toMatchObject({ run: { id: created.run.id }, replayed: true });
+    expect(replayedInput.input.id).toBe(continuation.input.id);
+    await expect(runtime.createRun(principal, {
+      ...command,
+      requestId: "continuation-request",
+      conversationId: 43,
+    })).rejects.toThrow("another Conversation");
+  });
+
   it("allows only one nonterminal Run per Conversation", async () => {
     const runtime = new DurableAgentRunService(new InMemoryAgentRunStore());
     const base = {

@@ -14,11 +14,16 @@ import {
   type PersistJDEvaluationResult,
 } from "@/lib/server/jd-evaluation-persistence";
 import { scanJDRisks, type JDRiskSignal } from "@/lib/server/jd-risk-service";
+import {
+  getJDResumeMatchingPreference,
+  setJDResumeMatchingPreference,
+} from "@/lib/server/jd-resume-matching";
 
 export interface DurableJDEvaluationInput {
   jdText?: string;
   jdUrl?: string;
   cvText?: string;
+  matchResume?: boolean;
   targetCompany?: string;
   images?: string[];
   allowWebSearch?: boolean;
@@ -38,6 +43,8 @@ export interface DurableJDEvaluationAdapters {
   fetchJdUrl(url: string, signal?: AbortSignal): Promise<string>;
   getResumeText(principal: ExecutionPrincipal): Promise<string>;
   getMemoryContext(principal: ExecutionPrincipal, query: string): Promise<string>;
+  getResumeMatchingPreference?(principal: ExecutionPrincipal, jdText: string): Promise<boolean | null>;
+  setResumeMatchingPreference?(principal: ExecutionPrincipal, jdText: string, matchResume: boolean): Promise<void>;
   evaluate(input: ModelEvaluationInput): Promise<JDEvaluationResult>;
   scanRisks(jdText: string): Promise<JDRiskSignal[]>;
   persist(principal: ExecutionPrincipal, input: PersistJDEvaluationInput): Promise<PersistJDEvaluationResult>;
@@ -45,6 +52,7 @@ export interface DurableJDEvaluationAdapters {
 
 export interface DurableJDEvaluationResult extends Omit<JDEvaluationResult, "blocks">, PersistJDEvaluationResult {
   inputSource: "text" | "image" | "url" | "latest_saved_jd";
+  matchResume: boolean;
   jdText: string;
   risks: JDRiskSignal[];
   riskSignals: JDRiskSignal[];
@@ -68,25 +76,53 @@ export async function runDurableJDEvaluation(
   if (resolved.jdText.trim().length < 50) {
     throw new DurableJDEvaluationInputError("JD 文本太短，请提供至少 50 字的完整职位描述");
   }
+  const storedPreference = input.matchResume === undefined
+    ? await adapters.getResumeMatchingPreference?.(principal, resolved.jdText) ?? null
+    : null;
+  const matchResume = input.matchResume ?? storedPreference ?? true;
+  if (input.matchResume !== undefined) {
+    await adapters.setResumeMatchingPreference?.(principal, resolved.jdText, matchResume);
+  }
   const [resumeText, memoryContext, risks] = await Promise.all([
-    input.cvText?.trim()
+    !matchResume
+      ? Promise.resolve("")
+      : input.cvText?.trim()
       ? Promise.resolve(input.cvText.trim())
       : adapters.getResumeText(principal).catch(() => ""),
-    adapters.getMemoryContext(principal, `${resolved.company}\n${resolved.jdText.slice(0, 1200)}`).catch(() => ""),
+    matchResume
+      ? adapters.getMemoryContext(principal, `${resolved.company}\n${resolved.jdText.slice(0, 1200)}`).catch(() => "")
+      : Promise.resolve(""),
     adapters.scanRisks(resolved.jdText).catch(() => []),
   ]);
   const cvText = [
     resumeText,
     memoryContext ? `Long-term memory context:\n${memoryContext}` : "",
   ].filter(Boolean).join("\n\n");
-  const evaluation = await adapters.evaluate({
+  const evaluated = await adapters.evaluate({
     jdText: resolved.jdText,
     cvText,
+    matchResume,
     targetCompany: input.targetCompany?.trim() || resolved.company,
     language: input.language,
     riskContext: formatRiskContext(risks),
     signal: options.signal,
   });
+  const evaluation = matchResume ? evaluated : {
+    ...evaluated,
+    blocks: { ...evaluated.blocks, b: "按用户要求，本次未进行简历匹配。" },
+    scores: { ...evaluated.scores, b: 0 },
+    keywordCoverage: undefined,
+    skillGaps: undefined,
+    levelMatch: undefined,
+    differentiationTips: undefined,
+    fullMarkdown: JSON.stringify({
+      company: evaluated.company,
+      role: evaluated.role,
+      overallScore: evaluated.overallScore,
+      blocks: { ...evaluated.blocks, b: "按用户要求，本次未进行简历匹配。" },
+      scores: { ...evaluated.scores, b: 0 },
+    }),
+  };
   const blocks = toPersistedBlocks(evaluation);
   const persistence = await adapters.persist(principal, {
     company: evaluation.company,
@@ -107,6 +143,7 @@ export async function runDurableJDEvaluation(
     ...persistence,
     blocks,
     inputSource: resolved.source,
+    matchResume,
     jdText: resolved.jdText,
     risks,
     riskSignals: risks,
@@ -168,8 +205,8 @@ const defaultAdapters: DurableJDEvaluationAdapters = {
     const latest = (await getAgentReadService().listJds(principal))[0];
     return latest ? { body: latest.body, company: latest.company, role: latest.role } : null;
   },
-  async inspectImages(images) {
-    const result = await inspectDocumentImages(images, { preferredDocumentType: "jd" });
+  async inspectImages(images, signal) {
+    const result = await inspectDocumentImages(images, { preferredDocumentType: "jd", signal });
     const structured = result.structured && typeof result.structured === "object"
       ? result.structured as Record<string, unknown>
       : {};
@@ -206,6 +243,12 @@ const defaultAdapters: DurableJDEvaluationAdapters = {
       semanticTopK: 5,
     });
     return context.llmSummary || "";
+  },
+  getResumeMatchingPreference(principal, jdText) {
+    return getJDResumeMatchingPreference(principal.userId, jdText);
+  },
+  setResumeMatchingPreference(principal, jdText, matchResume) {
+    return setJDResumeMatchingPreference(principal.userId, jdText, matchResume);
   },
   evaluate: evaluateJobDescription,
   async scanRisks(jdText) {

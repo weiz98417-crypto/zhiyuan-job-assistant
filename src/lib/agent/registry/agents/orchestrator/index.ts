@@ -16,7 +16,7 @@ export const orchestratorAgent: AgentDefinition = {
   toolNames: [],
   priority: 99, // Highest, but not used because orchestrator doesn't participate in regex matching
   suggestions: [],
-  model: "deepseek-v4-flash",
+  model: "deepseek-flash",
 
   async buildSystemPrompt(ctx: AgentPromptContext): Promise<string> {
     const soul = await loadAgentMD("orchestrator");

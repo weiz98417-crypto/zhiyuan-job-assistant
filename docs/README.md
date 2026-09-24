@@ -17,6 +17,19 @@ Start here when you need to understand, run, or change Zhiyuan.
 | [SCRIPTS.md](SCRIPTS.md) | npm scripts and operational commands. |
 | [feature-system/evals/README.md](feature-system/evals/README.md) | Per-feature baseline, boundary, and regression eval specs for feature-system docs. |
 
+## Architecture Decision Records
+
+The `0.10.7` decisions remain `ADR-0023` through `ADR-0025`. The decisions introduced by the `dev` line are renumbered for the `0.10.8` integration so milestone references stay unambiguous:
+
+| ADR | Scope |
+| --- | --- |
+| [0023](adr/0023-agent-runs-remain-bound-to-their-conversation.md) | Agent Run remains bound to its conversation (`0.10.7`). |
+| [0024](adr/0024-jd-resume-matching-scope-follows-the-jd.md) | JD-scoped resume matching (`0.10.7`). |
+| [0025](adr/0025-resume-diagnosis-does-not-require-a-jd.md) | Resume diagnosis without a JD (`0.10.7`). |
+| [0026](adr/0026-worker-is-the-sole-execution-owner.md) | M1: durable worker is the sole execution owner. |
+| [0027](adr/0027-governed-multi-agent-handoff-and-delegation.md) | M4: governed handoff and read-only delegation. |
+| [0028](adr/0028-layered-memory-mastra-session-and-postgres-fact-ledger.md) | M5: Mastra session layer and Postgres fact ledger. |
+
 ## Operations
 
 | Document | Use it for |

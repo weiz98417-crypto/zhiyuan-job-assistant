@@ -3,6 +3,7 @@ import type { ImageDocumentType, ImageIntakeResult } from "@/lib/agent/image-int
 export type ImageIntakeRoute =
   | "evaluate_jd"
   | "evaluate_offer"
+  | "resume_diagnosis"
   | "resume_preview"
   | "describe_image"
   | "clarify_intent"
@@ -22,6 +23,7 @@ export interface ImageIntakeRoutingDecision {
 const JD_INTENT_RE = /(?:\bjd\b|job description|职位|岗位|招聘|任职要求|职责|评估.*jd|分析.*jd)/i;
 const OFFER_INTENT_RE = /(?:\boffer\b|录用|薪资|待遇|谈判|评估.*offer|分析.*offer)/i;
 const RESUME_INTENT_RE = /(?:\bcv\b|\bresume\b|简历|履历|评估.*简历|分析.*简历)/i;
+const RESUME_DIAGNOSIS_RE = /(?:评估|分析|诊断|评价|测评|检查|审阅|看看|看下|看一下|建议)/i;
 const GENERAL_INTENT_RE = /(?:评估|分析|看看|帮我|识别|处理|解读|判断|提取|总结)/i;
 
 const LOW_CONFIDENCE_THRESHOLD = 0.62;
@@ -101,6 +103,16 @@ function hasOcrTimeoutSignal(intake?: ImageIntakeResult | null): boolean {
   return /timeout|timed out|aborted|operation was aborted|超时|ocr_timeout/i.test(text);
 }
 
+function timedOutImageIndices(intake?: ImageIntakeResult | null): number[] {
+  return (intake?.perImage || [])
+    .filter((item) => item.extractedTextLength === 0 && /timeout|timed out|aborted|超时|ocr_timeout/i.test(item.reason || ""))
+    .map((item) => item.index + 1);
+}
+
+function partialOcrTimeoutHint(timedOutImages: number[]): string {
+  return `第 ${timedOutImages.join("、")} 张图片识别超时，未纳入本次评估；可在当前对话补发该页或粘贴文字。`;
+}
+
 function makeClarifyQuestion(documentType: ImageDocumentType, matchedIntent: ImageDocumentType | "general" | "unknown"): string {
   if (documentType === "resume") {
     return "我识别到这像是简历截图。我会先提取并预览内容，等你确认后再保存到简历里。";
@@ -132,12 +144,23 @@ export function routeImageIntake(
   const hasUsefulExtraction = extractedText.length >= 24 || hasStructuredData(intake);
   const weak = shouldRetry(intake);
   const pureImage = matchedIntent === "unknown";
+  const timedOut = hasOcrTimeoutSignal(intake);
+  const timedOutImages = timedOutImageIndices(intake);
+  const canContinueWithPartialText =
+    (documentType === "jd" || documentType === "offer" || documentType === "resume") &&
+    !weak && extractedText.length >= (documentType === "jd" ? 40 : 24);
+  const partialTimeoutHint = timedOutImages.length > 0 && canContinueWithPartialText
+    ? partialOcrTimeoutHint(timedOutImages)
+    : undefined;
+  const partialReason = partialTimeoutHint ? "；部分图片超时，本次仅基于已识别文字" : "";
 
-  if (hasOcrTimeoutSignal(intake)) {
+  if (timedOut && !canContinueWithPartialText) {
     return {
       route: "retry_image",
       reason: "OCR 服务处理这张图片时超时，不代表图片不清晰",
-      retryHint: "请稍后直接重试一次；系统会优先尝试长截图分段识别。若连续超时，再考虑粘贴 JD 文本或链接。",
+      retryHint: documentType === "resume" || matchedIntent === "resume"
+        ? "你可以在当前对话直接粘贴简历文字继续评估，也可以重传清晰原图。"
+        : "请稍后直接重试一次；若连续超时，可以粘贴原文或链接继续。",
       documentType,
       confidence,
       quality,
@@ -149,7 +172,9 @@ export function routeImageIntake(
     return {
       route: "retry_image",
       reason: "这张图像更像是聊天窗口里的小图预览，不是可稳定 OCR 的原始文档截图",
-      retryHint: "请在 DingTalk/微信/招聘 App 里先点开图片大图，再保存或复制原图上传。聊天窗口缩略图即使放大，也无法恢复完整 JD/Offer 文字。",
+      retryHint: documentType === "resume" || matchedIntent === "resume"
+        ? "请上传清晰的简历原图，或在当前对话粘贴简历文字继续评估。"
+        : "请先点开图片大图，再保存或复制原图上传；也可以直接粘贴文字继续。",
       documentType,
       confidence,
       quality,
@@ -169,10 +194,22 @@ export function routeImageIntake(
         matchedIntent,
       };
     }
+    if (RESUME_DIAGNOSIS_RE.test(userText)) {
+      return {
+        route: "resume_diagnosis",
+        reason: `识别到简历截图，按当前截图做只读诊断${partialReason}`,
+        retryHint: partialTimeoutHint,
+        documentType,
+        confidence,
+        quality,
+        matchedIntent,
+      };
+    }
     return {
       route: "resume_preview",
-      reason: "识别到简历截图，先预览并等待确认保存",
+      reason: `识别到简历截图，先预览并等待确认保存${partialReason}`,
       clarificationQuestion: makeClarifyQuestion(documentType, matchedIntent),
+      retryHint: partialTimeoutHint,
       documentType,
       confidence,
       quality,
@@ -230,7 +267,8 @@ export function routeImageIntake(
     if (documentType === "jd" && (matchedIntent === "jd" || matchedIntent === "general")) {
       return {
         route: "evaluate_jd",
-        reason: "JD 文本意图与 JD 图片一致，进入评估流程",
+        reason: `JD 文本意图与 JD 图片一致，进入评估流程${partialReason}`,
+        retryHint: partialTimeoutHint,
         documentType,
         confidence,
         quality,
@@ -241,7 +279,8 @@ export function routeImageIntake(
     if (documentType === "offer" && (matchedIntent === "offer" || matchedIntent === "general")) {
       return {
         route: "evaluate_offer",
-        reason: "Offer 文本意图与 Offer 图片一致，进入评估流程",
+        reason: `Offer 文本意图与 Offer 图片一致，进入评估流程${partialReason}`,
+        retryHint: partialTimeoutHint,
         documentType,
         confidence,
         quality,
@@ -267,7 +306,9 @@ export function routeImageIntake(
       return {
         route: "retry_image",
         reason: "图片识别置信度太低，建议换清晰原图",
-        retryHint: "请换一张更清晰的原始截图，或把图片裁剪到只保留正文区域。",
+        retryHint: matchedIntent === "resume"
+          ? "请在当前对话粘贴简历文字继续评估，或重传清晰的简历原图。"
+          : "请换一张更清晰的原始截图，或直接粘贴图片中的文字。",
         documentType,
         confidence,
         quality,
@@ -381,8 +422,16 @@ export function buildImageRouteAssistantReply(
     return [
       "我识别到这像是一份简历截图。先给你预览提取内容，确认后我再保存到简历里。",
       preview ? `\n提取预览：\n${preview}` : "\n但这张图里的文字还不够完整，建议换更清晰的原图或直接粘贴简历文本。",
+      decision.retryHint ? `\n${decision.retryHint}` : "",
       "\n要保存的话，回复「保存到简历」；如果需要修改，直接告诉我改哪里。",
     ].join("\n");
+  }
+
+  if (decision.route === "resume_diagnosis") {
+    return [
+      "我会先评估这张简历截图的内容、结构和 ATS 可读性，并给出具体修改建议。",
+      decision.retryHint,
+    ].filter(Boolean).join("\n\n");
   }
 
   if (decision.route === "describe_image") {
@@ -410,6 +459,7 @@ export function buildImageIntakeToolSummary(
     `confidence=${Math.round((decision.confidence || 0) * 100) / 100}`,
     `quality=${decision.quality || "unknown"}`,
     `reason=${decision.reason}`,
+    decision.retryHint ? `retryHint=${decision.retryHint}` : null,
     preview ? `preview=${preview}` : null,
   ].filter(Boolean).join("\n");
 }

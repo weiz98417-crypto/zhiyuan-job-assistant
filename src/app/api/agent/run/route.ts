@@ -9,7 +9,7 @@ function sse(event: SSEEvent): string {
 }
 
 /**
- * M1 (ADR-0023): the directMode legacy loop (browser-supplied system prompt +
+ * M1 (ADR-0026): the directMode legacy loop (browser-supplied system prompt +
  * agent id → agentLoopServer) is deleted. The worker owns all production run
  * execution; this route now only serves the eval-script orchestrateGen bypass
  * (scripts/eval-agent.mjs), which never runs in the user request path.
@@ -20,7 +20,7 @@ export async function POST(request: Request) {
     const directInput = body as { systemPrompt?: string; agentId?: string };
     if (directInput.systemPrompt || directInput.agentId) {
       return NextResponse.json(
-        { success: false, error: "directMode 已随 M1 cutover 移除：所有 Agent Run 由 durable worker 执行（ADR-0023）。" },
+        { success: false, error: "directMode 已随 M1 cutover 移除：所有 Agent Run 由 durable worker 执行（ADR-0026）。" },
         { status: 410 },
       );
     }

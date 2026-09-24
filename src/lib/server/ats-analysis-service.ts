@@ -20,7 +20,7 @@ export async function analyzeATSResume(
   const apiKey = process.env.DEEPSEEK_API_KEY?.trim();
   if (!apiKey) throw new Error("未配置 DEEPSEEK_API_KEY");
   const response = await llmRetry("https://api.deepseek.com/chat/completions", apiKey, {
-    model: process.env.DEEPSEEK_ATS_MODEL?.trim() || "deepseek-v4-flash",
+    model: "deepseek-flash",
     messages: [
       {
         role: "system",
@@ -32,7 +32,7 @@ export async function analyzeATSResume(
     temperature: 0.1,
     response_format: { type: "json_object" },
     retries: 2,
-    fallbackModel: process.env.DEEPSEEK_FALLBACK_MODEL,
+    fallbackModel: "deepseek-flash",
     signal: options.signal,
   });
   const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };

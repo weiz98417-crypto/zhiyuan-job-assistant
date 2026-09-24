@@ -1,4 +1,4 @@
-# 0024 - Multi-agent collaboration is governed handoff plus read-only delegation
+# 0027 - Multi-agent collaboration is governed handoff plus read-only delegation
 
 Date: 2026-09-24
 

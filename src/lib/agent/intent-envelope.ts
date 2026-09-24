@@ -63,6 +63,7 @@ const TASK_ENUM: readonly AgentTaskType[] = [
   "general_chat",
   "career_positioning_guidance",
   "resume_query",
+  "resume_diagnosis",
   "resume_edit",
   "jd_evaluation",
   "offer_evaluation",
@@ -77,6 +78,7 @@ const TASK_LABELS: Record<AgentTaskType, string> = {
   general_chat: "通用求职咨询",
   career_positioning_guidance: "职业定位辅导",
   resume_query: "查看/读取简历",
+  resume_diagnosis: "简历诊断（可不绑定 JD）",
   resume_edit: "修改简历（需提案+批准）",
   jd_evaluation: "JD 评估",
   offer_evaluation: "Offer 评估",
@@ -150,7 +152,7 @@ ${taskList}
 ## 判断规则
 - 先找用户想完成的主任务。"不要/不用 X" 是执行约束，不是主任务：用户说"不要更新画像，帮我做职业定位"→ primaryTask 是 career_positioning_guidance，画像写入约束由系统单独处理。
 - 引用材料里的词不是主任务："这个JD需要考代码吗"发生在面试里 → primaryTask 仍是 interview_coaching，JD 只是材料。
-- 看简历内容 → resume_query；要改简历 → resume_edit；评估岗位 → jd_evaluation；比较/分析录用条件 → offer_evaluation；找新岗位 → job_search；更新画像内容 → profile_update；保存别人的简历做参考 → reference_resume_save；导出/下载 → file_export；都不是 → general_chat。
+- 看简历内容 → resume_query；评估简历质量或截图（即使没有 JD）→ resume_diagnosis；要改简历 → resume_edit；评估岗位 → jd_evaluation；比较/分析录用条件 → offer_evaluation；找新岗位 → job_search；更新画像内容 → profile_update；保存别人的简历做参考 → reference_resume_save；导出/下载 → file_export；都不是 → general_chat。
 - 只在两个以上任务都可能且无法排序时才用 low；一般情况用 high 或 medium。
 
 ## 用户消息

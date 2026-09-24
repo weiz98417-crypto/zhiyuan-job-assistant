@@ -13,7 +13,7 @@ function sse(event: SSEEvent): string {
 /* ── DeepSeek streaming ── */
 
 const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
-const MODEL = "deepseek-v4-flash";
+const MODEL = "deepseek-flash";
 const MAX_MESSAGES = 30;
 
 async function callDeepSeekStream(
@@ -32,7 +32,7 @@ async function callDeepSeekStream(
     max_tokens: 2000,
     stream: true,
     retries: 1,
-    fallbackModel: process.env.DEEPSEEK_FALLBACK_MODEL,
+    fallbackModel: "deepseek-flash",
   });
 }
 

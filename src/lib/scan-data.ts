@@ -199,17 +199,15 @@ export async function getScanStatusForUser(scanId: string, userId: string) {
     const scan = scanResult.rows[0];
     if (!scan) return null;
 
-    const [companies, sourceRuns] = await Promise.all([
-      client.query(`
+    const companies = await client.query(`
       SELECT COALESCE(NULLIF(source_name, ''), company) AS company, COUNT(*)::int AS jobs_found
       FROM scan_jobs WHERE scan_id = $1
       GROUP BY COALESCE(NULLIF(source_name, ''), company)
-    `, [scanId]),
-      client.query(`
+    `, [scanId]);
+    const sourceRuns = await client.query(`
       SELECT source_name, source_type, status, attempted, parsed, matched, inserted, deduped, blocked_reason, error, metrics_json
       FROM scan_source_runs WHERE scan_id = $1 ORDER BY id ASC
-    `, [scanId]),
-    ]);
+    `, [scanId]);
     return formatScanStatus(scan, companies.rows, sourceRuns.rows);
   });
 }
@@ -225,17 +223,15 @@ export async function getActiveScanForUser(userId: string) {
     const scanId = result.rows[0]?.id;
     if (!scanId) return null;
     const scanResult = await client.query("SELECT * FROM scan_queue WHERE id = $1 AND user_id = $2 LIMIT 1", [scanId, userId]);
-    const [companies, sourceRuns] = await Promise.all([
-      client.query(`
+    const companies = await client.query(`
       SELECT COALESCE(NULLIF(source_name, ''), company) AS company, COUNT(*)::int AS jobs_found
       FROM scan_jobs WHERE scan_id = $1
       GROUP BY COALESCE(NULLIF(source_name, ''), company)
-    `, [scanId]),
-      client.query(`
+    `, [scanId]);
+    const sourceRuns = await client.query(`
       SELECT source_name, source_type, status, attempted, parsed, matched, inserted, deduped, blocked_reason, error, metrics_json
       FROM scan_source_runs WHERE scan_id = $1 ORDER BY id ASC
-    `, [scanId]),
-    ]);
+    `, [scanId]);
     return formatScanStatus(scanResult.rows[0], companies.rows, sourceRuns.rows);
   });
 }
@@ -283,16 +279,14 @@ export async function getScanHistoryForUser(userId: string, opts: { page?: numbe
   const page = opts.page || 1;
   const offset = (page - 1) * limit;
   return withPostgresClient(async (client) => {
-    const [total, scans] = await Promise.all([
-      client.query("SELECT COUNT(*) AS count FROM scan_queue WHERE user_id = $1", [userId]),
-      client.query(`
+    const total = await client.query("SELECT COUNT(*) AS count FROM scan_queue WHERE user_id = $1", [userId]);
+    const scans = await client.query(`
         SELECT sq.id, sq.created_at, sq.companies_done, sq.jobs_found, sq.jobs_new, sq.error_log,
                sq.title_positive_json, sq.title_negative_json, sq.location_filter, sq.max_results,
                (SELECT COUNT(*) FROM scan_jobs WHERE scan_id = sq.id)::int AS total_jobs
         FROM scan_queue sq WHERE sq.user_id = $1
         ORDER BY sq.created_at DESC LIMIT $2 OFFSET $3
-      `, [userId, limit, offset]),
-    ]);
+      `, [userId, limit, offset]);
 
     return {
       history: scans.rows.map(formatHistoryScan),

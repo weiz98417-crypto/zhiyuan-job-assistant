@@ -1,5 +1,5 @@
 /**
- * delegate_research — 研究委派（M4，ADR-0024）。
+ * delegate_research — 研究委派（M4，ADR-0027）。
  *
  * 主责 agent 把一个只读研究子任务交给目标 agent 的内联子 loop：子 loop 工具
  * 白名单 = 目标卡片只读集合 ∩ 委派方白名单（信任不继承）。委派审计记录在

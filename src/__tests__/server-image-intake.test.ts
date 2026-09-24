@@ -19,7 +19,7 @@ function ocrResponse(payload: Record<string, unknown>): Response {
 
 describe("server image intake", () => {
   beforeEach(() => {
-    process.env.ZHIPU_API_KEY = "test-key";
+    process.env.DEEPSEEK_API_KEY = "test-key";
     mocks.buildOCRImageCandidates.mockReset();
   });
 
@@ -92,5 +92,45 @@ describe("server image intake", () => {
     expect(result.extractedText).toContain("Benefits. Industry background.");
     expect(result.perImage?.[0]?.candidate).toContain("top");
     expect(result.perImage?.[0]?.extractedTextLength).toBeGreaterThan(longTop.length + longMiddle.length);
+  });
+
+  it("stops after a clear complete image instead of scanning every crop", async () => {
+    mocks.buildOCRImageCandidates.mockResolvedValue([
+      { label: "whole", kind: "full", dataUri: "data:image/jpeg;base64,whole" },
+      { label: "crop", kind: "thumbnail_crop", dataUri: "data:image/jpeg;base64,crop" },
+    ]);
+    const fetchMock = vi.fn(async () => ocrResponse({
+      documentType: "jd",
+      confidence: 0.93,
+      quality: "clear",
+      extractedText: "岗位职责和任职要求。".repeat(10),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { inspectDocumentImages } = await import("@/lib/server-image-intake");
+
+    const result = await inspectDocumentImages(["data:image/jpeg;base64,input"], { preferredDocumentType: "jd" });
+
+    expect(result.documentType).toBe("jd");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not start OCR when the scan has already been cancelled", async () => {
+    mocks.buildOCRImageCandidates.mockResolvedValue([
+      { label: "whole", kind: "full", dataUri: "data:image/jpeg;base64,whole" },
+    ]);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+    controller.abort();
+    const { inspectDocumentImages } = await import("@/lib/server-image-intake");
+
+    const result = await inspectDocumentImages(["data:image/jpeg;base64,input"], {
+      preferredDocumentType: "jd",
+      signal: controller.signal,
+    });
+
+    expect(result.documentType).toBe("unknown");
+    expect(result.errors?.[0]).toContain("总时限");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

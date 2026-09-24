@@ -5,13 +5,12 @@ import path from "path";
 import { getCurrentUser } from "@/lib/auth";
 import { getDataRepositories } from "@/lib/data-repositories";
 import { computeEvaluationOverallScore, extractEvaluationBlockScore } from "@/lib/evaluation-scoring";
-import { ZHIPU_API_URL, ZHIPU_VISION_MODEL } from "@/lib/zhipu";
+import { getDeepSeekApiKey, DEEPSEEK_API_URL, DEEPSEEK_VISION_MODEL } from "@/lib/deepseek-provider";
 import { buildOCRImageCandidates, normalizeImageDataUri } from "@/lib/server-image-variants";
 
 import { llmRetry, LLMError } from "@/lib/llm-retry";
 
-const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
-const DEEPSEEK_MODEL = "deepseek-v4-flash";
+const DEEPSEEK_MODEL = "deepseek-flash";
 const MAX_IMAGES = 5;
 
 const OCR_SYSTEM_PROMPT = `你是一个专业的招聘 JD 图片识别助手。用户上传一张图片（可能是职位描述截图），你需要提取其中的结构化信息。
@@ -127,7 +126,7 @@ async function streamLLM(
     max_tokens: blockKey === "f" ? 8000 : blockKey === "a" || blockKey === "b" ? 4000 : 3000,
     stream: true,
     retries: 1,
-    fallbackModel: process.env.DEEPSEEK_FALLBACK_MODEL,
+    fallbackModel: "deepseek-flash",
   });
 
   if (!res.ok) {
@@ -197,15 +196,13 @@ async function quickLLM(systemPrompt: string, userMessage: string, signal?: Abor
     max_tokens: 500,
     retries: 1,
     timeout: 15_000,
-    fallbackModel: process.env.DEEPSEEK_FALLBACK_MODEL,
+    fallbackModel: "deepseek-flash",
   });
 
   if (!res.ok) throw new Error(`DeepSeek API ${res.status}`);
   const data = await res.json();
   return data.choices?.[0]?.message?.content || "";
 }
-
-/* ── OCR: Zhipu GLM-4V ── */
 
 function assessJDText(body: string): { ok: boolean; reason?: string } {
   const text = body.replace(/\s+/g, " ").trim();
@@ -229,19 +226,19 @@ async function ocrSingleCandidate(
   signal?: AbortSignal,
   label = "图片",
 ): Promise<OCRSingleResult> {
-  const apiKey = process.env.ZHIPU_API_KEY;
-  if (!apiKey) return { company: "", role: "", body: "", skills: [], isJD: true, error: "ZHIPU_API_KEY not configured" };
+  const apiKey = getDeepSeekApiKey();
+  if (!apiKey) return { company: "", role: "", body: "", skills: [], isJD: true, error: "DEEPSEEK_API_KEY not configured" };
   const normalized = normalizeImageDataUri(base64);
   if (!normalized) {
     return { company: "", role: "", body: "", skills: [], isJD: true, error: `${label}: 图片数据不是有效 PNG/JPEG/WebP` };
   }
 
   try {
-    const res = await fetch(ZHIPU_API_URL, {
+    const res = await fetch(DEEPSEEK_API_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
-        model: ZHIPU_VISION_MODEL,
+        model: DEEPSEEK_VISION_MODEL,
         messages: [
           { role: "system", content: OCR_SYSTEM_PROMPT },
           {
@@ -261,7 +258,7 @@ async function ocrSingleCandidate(
 
     if (!res.ok) {
       const errText = await res.text().catch(() => "");
-      console.error("Zhipu OCR API error:", res.status, errText.slice(0, 500));
+      console.error("DeepSeek OCR API error:", res.status, errText.slice(0, 500));
       return {
         company: "",
         role: "",
