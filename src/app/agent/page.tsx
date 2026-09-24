@@ -18,6 +18,7 @@ import { inferPreferredDocumentTypeFromText, type ImageDocumentType, type ImageI
 import { buildImageIntakeStatusText, buildImageIntakeToolSummary, routeImageIntake } from "@/lib/agent/image-intake-router";
 import { collectArtifactRefsFromSafePayloads, type AgentArtifactRef } from "@/lib/agent/task-journey";
 import { mergeServerTranscript, type MergeableMessage } from "@/lib/agent/transcript-merge";
+import { AnalystCanvas, type AnalystCanvasPayload } from "@/components/agent/AnalystCanvas";
 import {
   createResumeBaseSnapshot,
   inferCompletedCriteriaFromToolResult,
@@ -563,6 +564,7 @@ function AgentPageInner() {
   const [activeAgent, setActiveAgent] = useState<ClientAgentDefinition | null>(null);
   const [evalProgress, setEvalProgress] = useState<EvalBlockProgress[]>([]);
   const [programProgress, setProgramProgress] = useState<{ done: number; total: number } | null>(null);
+  const [analystCanvas, setAnalystCanvas] = useState<{ open: boolean; maximized: boolean; payload: AnalystCanvasPayload | null }>({ open: false, maximized: false, payload: null });
   const [completionInfo, setCompletionInfo] = useState<CompletionInfo | null>(null);
   const [resultQuality, setResultQuality] = useState<string | null>(null);
   const [sessionLoadError, setSessionLoadError] = useState<string | null>(null);
@@ -967,6 +969,20 @@ function AgentPageInner() {
               company: String(event.company || ""),
               role: String(event.role || ""),
               score: Number(event.score || 0),
+            });
+            // 0.11.0-D: reports open the analyst face — evidence lives there,
+            // not in the chat column.
+            setAnalystCanvas({
+              open: true,
+              maximized: false,
+              payload: {
+                kind: "report",
+                title: [String(event.company || ""), String(event.role || "")].filter(Boolean).join(" · "),
+                subtitle: "JD 评估 · 读回校验通过",
+                score: Number(event.score || 0),
+                reportNum: Number(event.reportNum || 0),
+                readBackVerified: true,
+              },
             });
           } else if (eventType === "search_start") {
             const block = String(event.block || "");
@@ -2396,7 +2412,8 @@ function AgentPageInner() {
           </div>
         )}
 
-        {/* AgentChat */}
+        {/* 0.11.0-D dual canvas: chat face + analyst face */}
+        <div className="flex min-h-0 flex-1 gap-3">
         <AgentChat
           currentSessionId={currentSessionId}
           messages={messages}
@@ -2420,6 +2437,15 @@ function AgentPageInner() {
           onStop={handleStopStreaming}
           emptyState={null}
         />
+        {analystCanvas.open ? (
+          <AnalystCanvas
+            payload={analystCanvas.payload}
+            maximized={analystCanvas.maximized}
+            onClose={() => setAnalystCanvas((current) => ({ ...current, open: false, maximized: false }))}
+            onMaximize={() => setAnalystCanvas((current) => ({ ...current, maximized: !current.maximized }))}
+          />
+        ) : null}
+        </div>
       </div>
 
     </div>
