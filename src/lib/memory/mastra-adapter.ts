@@ -272,8 +272,7 @@ export function createMastraSessionContract(): MastraSessionContract {
       const target = input.targetText.trim();
       if (!target) throw new Error("Target text is required for targeted session erasure");
       const memory = await getMemory();
-      await memory.recall({ threadId: input.threadId, resourceId: input.resourceId, perPage: false, hideSignals: true });
-      const messagePage = await memory.listMessagesByResourceId({ resourceId: input.resourceId, perPage: false, page: 0 });
+      const messagePage = await memory.recall({ threadId: input.threadId, resourceId: input.resourceId, perPage: false, hideSignals: false });
       const messageIds = messagePage.messages
         .filter((message) => JSON.stringify(message).includes(target))
         .map((message) => message.id)
@@ -281,6 +280,7 @@ export function createMastraSessionContract(): MastraSessionContract {
       if (messageIds.length) {
         const deleteMessageVectors = (memory as unknown as { deleteMessageVectors?: (ids: string[]) => Promise<void> }).deleteMessageVectors;
         if (typeof deleteMessageVectors !== "function") throw new Error("Mastra message vector erasure is unavailable");
+        await memory.deleteMessages(messageIds);
         await deleteMessageVectors.call(memory, messageIds);
       }
       let redactedCount = 0;
@@ -315,6 +315,10 @@ export function createMastraSessionContract(): MastraSessionContract {
         redactedCount += 1;
       }
       await memory.settled();
+      const readBackMessages = await memory.recall({ threadId: input.threadId, resourceId: input.resourceId, perPage: false, hideSignals: false });
+      if (readBackMessages.messages.some((message) => JSON.stringify(message).includes(target))) {
+        throw new Error("Mastra message erasure read-back still contains target");
+      }
       const readBackWorkingMemory = await memory.getWorkingMemory({ threadId: input.threadId, resourceId: input.resourceId });
       if (readBackWorkingMemory?.includes(target)) throw new Error("Mastra working memory erasure read-back still contains target");
       const activeRecords = await Promise.all([

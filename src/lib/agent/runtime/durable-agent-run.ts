@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { transitionAgentRun } from "@/lib/agent/runtime/state-machine";
-import { nextAgentRunStatusForContinuationInput } from "@/lib/agent/runtime/run-continuation";
+import { acceptsContinuationInput, nextAgentRunStatusForContinuationInput } from "@/lib/agent/runtime/run-continuation";
 import {
   isTerminalAgentRunStatus,
   type AgentRunStatus,
@@ -765,6 +765,9 @@ export class InMemoryAgentRunStore implements AgentRunStore {
       return { run: { ...run }, input: this.cloneInput(existing), replayed: true };
     }
     if (isTerminalAgentRunStatus(run.status)) throw new Error("Terminal Agent Run cannot accept input");
+    if (!acceptsContinuationInput(run.status)) {
+      throw new Error("Agent Run is not accepting continuation input while execution is in progress");
+    }
 
     const record: AgentRunInputRecord = {
       id: ++this.inputSequence,

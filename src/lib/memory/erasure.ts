@@ -441,6 +441,8 @@ async function executePostgresErasureLayer(
         );
       }
       if (target) {
+        const { redactSessionMessagesForUser } = await import("@/lib/memory/postgres-memory");
+        await redactSessionMessagesForUser(client, userId, target.canonicalText);
         const executionRows = await client.query(
           `SELECT id, content FROM session_memory
            WHERE user_id=$1 AND summary_type='execution_conversation'
@@ -465,25 +467,25 @@ async function executePostgresErasureLayer(
         await client.query(
           `UPDATE memory_entities
            SET summary=replace(summary, $2, '[已清除]'), updated_at=now()
-           WHERE user_id=$1 AND summary LIKE '%' || $2 || '%'`,
+           WHERE user_id=$1 AND strpos(summary, $2) > 0`,
           [userId, target.canonicalText],
         );
         await client.query(
           `UPDATE profile_blocks
            SET value_json=replace(value_json::text, $2, '[已清除]')::jsonb, updated_at=now()
-           WHERE user_id=$1 AND value_json::text LIKE '%' || $2 || '%'`,
+           WHERE user_id=$1 AND strpos(value_json::text, $2) > 0`,
           [userId, target.canonicalText],
         );
         await client.query(
           `UPDATE session_memory
             SET content=replace(content, $2, '[已清除]')
             WHERE user_id=$1 AND summary_type <> 'execution_conversation'
-              AND content LIKE '%' || $2 || '%'`,
+              AND strpos(content, $2) > 0`,
           [userId, target.canonicalText],
         );
         await client.query(
           `DELETE FROM memory_chunks
-           WHERE user_id=$1 AND chunk_text LIKE '%' || $2 || '%'`,
+           WHERE user_id=$1 AND strpos(chunk_text, $2) > 0`,
           [userId, target.canonicalText],
         );
       }
@@ -556,11 +558,12 @@ async function verifyPostgresErasureReadBack(
     }
     if (target) {
       const checks: Array<[string, string, unknown[]]> = [
-        ["episodes", "SELECT 1 FROM memory_episodes WHERE user_id=$1 AND id=ANY($2::bigint[]) AND content_json::text LIKE '%' || $3 || '%' LIMIT 1", [userId, scope.episodeIds, target.canonicalText]],
-        ["entities", "SELECT 1 FROM memory_entities WHERE user_id=$1 AND summary LIKE '%' || $2 || '%' LIMIT 1", [userId, target.canonicalText]],
-        ["profiles", "SELECT 1 FROM profile_blocks WHERE user_id=$1 AND value_json::text LIKE '%' || $2 || '%' LIMIT 1", [userId, target.canonicalText]],
-        ["session_memory", "SELECT 1 FROM session_memory WHERE user_id=$1 AND content LIKE '%' || $2 || '%' LIMIT 1", [userId, target.canonicalText]],
-        ["chunks", "SELECT 1 FROM memory_chunks WHERE user_id=$1 AND chunk_text LIKE '%' || $2 || '%' LIMIT 1", [userId, target.canonicalText]],
+        ["episodes", "SELECT 1 FROM memory_episodes WHERE user_id=$1 AND id=ANY($2::bigint[]) AND strpos(content_json::text, $3) > 0 LIMIT 1", [userId, scope.episodeIds, target.canonicalText]],
+        ["entities", "SELECT 1 FROM memory_entities WHERE user_id=$1 AND strpos(summary, $2) > 0 LIMIT 1", [userId, target.canonicalText]],
+        ["profiles", "SELECT 1 FROM profile_blocks WHERE user_id=$1 AND strpos(value_json::text, $2) > 0 LIMIT 1", [userId, target.canonicalText]],
+        ["sessions", "SELECT 1 FROM sessions WHERE user_id=$1 AND deleted_at IS NULL AND strpos(messages_json::text, $2) > 0 LIMIT 1", [userId, target.canonicalText]],
+        ["session_memory", "SELECT 1 FROM session_memory WHERE user_id=$1 AND strpos(content, $2) > 0 LIMIT 1", [userId, target.canonicalText]],
+        ["chunks", "SELECT 1 FROM memory_chunks WHERE user_id=$1 AND strpos(chunk_text, $2) > 0 LIMIT 1", [userId, target.canonicalText]],
       ] as const;
       for (const [name, sql, params] of checks) {
         try {

@@ -71,7 +71,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       { status: result.replayed ? 200 : 201 },
     );
   } catch (error) {
-    return NextResponse.json({ success: false, error: String(error) }, { status: 500 });
+    const message = String(error);
+    const status = message.includes("not accepting continuation input") ? 409 : 500;
+    return NextResponse.json({ success: false, error: message }, { status });
   }
 }
 

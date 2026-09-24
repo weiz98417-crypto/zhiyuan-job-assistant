@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { getDataRepositories } from "@/lib/data-repositories";
+import { getDatabaseDriver, isPostgresConfigured } from "@/lib/postgres";
 import type { ExecutionPrincipal } from "@/lib/agent/runtime/durable-agent-run";
 import { rebuildInterviewStateFromMessages } from "@/lib/agent/interview-session-state";
 import type { AgentMessage, InterviewSessionState } from "@/types";
@@ -69,6 +70,9 @@ export async function loadExecutionConversation(
   if (conversationId === null) return [];
   const row = await getDataRepositories().sessions.get(conversationId, principal.userId);
   if (!row) return [];
+  if (!usesDurableSessionMemory()) {
+    return parseConversationMessages(row.messages_json ?? row.messages);
+  }
   const adapter = getSessionMemoryAdapter();
   const stored = await adapter.load({ userId: principal.userId, conversationId });
   if (stored.length) return stored.map(fromSessionMemoryMessage);
@@ -99,19 +103,31 @@ export async function saveExecutionConversation(
   const sessions = getDataRepositories().sessions;
   const row = await sessions.get(conversationId, principal.userId);
   if (!row) throw new Error("Agent Conversation not found");
-  await getSessionMemoryAdapter().append(
-    { userId: principal.userId, conversationId },
-    messages.map((message, index) => toSessionMemoryMessage(message, index)),
-  );
   const currentInterviewState = parseInterviewState(row.interview_state_json ?? row.interviewState);
   const interviewState = rebuildInterviewStateFromMessages(
     currentInterviewState,
     messages.flatMap(toAgentMessage),
   );
+  if (!usesDurableSessionMemory()) {
+    const updated = await sessions.update(conversationId, principal.userId, {
+      messages,
+      ...(interviewState ? { interviewState } : {}),
+    });
+    if (!updated) throw new Error("Agent Conversation not found");
+    return;
+  }
+  await getSessionMemoryAdapter().append(
+    { userId: principal.userId, conversationId },
+    messages.map((message, index) => toSessionMemoryMessage(message, index)),
+  );
   const updated = interviewState
     ? await sessions.update(conversationId, principal.userId, { interviewState })
     : true;
   if (!updated) throw new Error("Agent Conversation not found");
+}
+
+function usesDurableSessionMemory(): boolean {
+  return getDatabaseDriver() === "postgres" && isPostgresConfigured();
 }
 
 function toSessionMemoryMessage(message: ExecutionConversationMessage, index: number): SessionMemoryMessage {

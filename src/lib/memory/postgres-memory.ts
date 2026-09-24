@@ -482,6 +482,43 @@ function containsSessionText(value: unknown, target: string): boolean {
   return false;
 }
 
+export async function redactSessionMessagesForUser(
+  client: PoolClient,
+  userId: string,
+  targetText: string,
+): Promise<number> {
+  const target = targetText.trim();
+  if (!target) throw new Error("Target text is required for session source erasure");
+  const rows = await client.query(
+    "SELECT id, messages_json FROM sessions WHERE user_id=$1 AND deleted_at IS NULL FOR UPDATE",
+    [userId],
+  );
+  let redactedCount = 0;
+  for (const row of rows.rows) {
+    const current = parseSessionMessages(row.messages_json);
+    let rowRedactedCount = 0;
+    const redacted = current.map((message) => {
+      const result = redactSessionValue(message, target);
+      rowRedactedCount += result.redactedCount;
+      return result.value as SessionMemoryMessage;
+    });
+    if (!rowRedactedCount) continue;
+    await client.query(
+      "UPDATE sessions SET messages_json=$1, updated_at=NOW() WHERE id=$2 AND user_id=$3 AND deleted_at IS NULL",
+      [JSON.stringify(redacted), Number(row.id), userId],
+    );
+    redactedCount += rowRedactedCount;
+  }
+  const remaining = await client.query(
+    "SELECT id, messages_json FROM sessions WHERE user_id=$1 AND deleted_at IS NULL FOR UPDATE",
+    [userId],
+  );
+  if (remaining.rows.some((row) => containsSessionText(parseSessionMessages(row.messages_json), target))) {
+    throw new Error("Session source erasure read-back still contains target");
+  }
+  return redactedCount;
+}
+
 export class PostgresSessionMemoryAdapter implements SessionMemoryAdapter {
   readonly provider = "postgres" as const;
 
@@ -610,11 +647,17 @@ export class PostgresSessionMemoryAdapter implements SessionMemoryAdapter {
       await client.query("BEGIN");
       try {
         const conversation = await client.query(
-          "SELECT id FROM sessions WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL FOR UPDATE",
+          "SELECT id, messages_json FROM sessions WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL FOR UPDATE",
           [identity.conversationId, identity.userId],
         );
         if (!conversation.rows[0]) throw new Error("Conversation does not belong to memory principal");
         let redactedCount = 0;
+        const rawMessages = parseSessionMessages(conversation.rows[0].messages_json);
+        const redactedRaw = rawMessages.map((message) => {
+          const result = redactSessionValue(message, target);
+          redactedCount += result.redactedCount;
+          return result.value as SessionMemoryMessage;
+        });
         const derivedRows = await client.query(
           `SELECT id, content FROM session_memory
            WHERE session_id=$1 AND user_id=$2 AND summary_type=$3
@@ -622,28 +665,30 @@ export class PostgresSessionMemoryAdapter implements SessionMemoryAdapter {
           [identity.conversationId, identity.userId, POSTGRES_SESSION_MEMORY_TYPE],
         );
         let current = parseStoredSessionMessages(derivedRows.rows[0]?.content);
-        if (!derivedRows.rows[0]) {
-          const raw = await client.query(
-            "SELECT messages_json FROM sessions WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL",
-            [identity.conversationId, identity.userId],
-          );
-          current = parseSessionMessages(raw.rows[0]?.messages_json);
-        }
+        if (!derivedRows.rows[0]) current = rawMessages;
+        let derivedRedactedCount = 0;
         const redacted = current.map((message) => {
           const result = redactSessionValue(message, target);
-          redactedCount += result.redactedCount;
+          derivedRedactedCount += result.redactedCount;
           return result.value as SessionMemoryMessage;
         });
-        if (redactedCount && derivedRows.rows[0]?.id) {
+        if (derivedRedactedCount) redactedCount += derivedRedactedCount;
+        if (redactedCount && JSON.stringify(redactedRaw) !== JSON.stringify(rawMessages)) {
+          await client.query(
+            "UPDATE sessions SET messages_json=$1, updated_at=NOW() WHERE id=$2 AND user_id=$3 AND deleted_at IS NULL",
+            [JSON.stringify(redactedRaw), identity.conversationId, identity.userId],
+          );
+        }
+        if (derivedRedactedCount && derivedRows.rows[0]?.id) {
           await client.query(
             "UPDATE session_memory SET content=$1 WHERE id=$2 AND user_id=$3",
             [JSON.stringify(redacted), derivedRows.rows[0].id, identity.userId],
           );
-        } else if (redactedCount) {
+        } else if (derivedRedactedCount) {
           await client.query(
             `INSERT INTO session_memory (user_id, session_id, summary_type, content)
              VALUES ($1,$2,$3,$4)`,
-            [identity.userId, identity.conversationId, POSTGRES_SESSION_MEMORY_TYPE, JSON.stringify(redacted)],
+            [identity.userId, identity.conversationId, POSTGRES_SESSION_MEMORY_TYPE, JSON.stringify(redactedRaw)],
           );
         }
         const derivedCheck = await client.query(
@@ -654,6 +699,13 @@ export class PostgresSessionMemoryAdapter implements SessionMemoryAdapter {
         );
         if (containsSessionText(parseStoredSessionMessages(derivedCheck.rows[0]?.content), target)) {
           throw new Error("Session memory erasure read-back still contains target");
+        }
+        const rawCheck = await client.query(
+          "SELECT messages_json FROM sessions WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL",
+          [identity.conversationId, identity.userId],
+        );
+        if (containsSessionText(parseSessionMessages(rawCheck.rows[0]?.messages_json), target)) {
+          throw new Error("Session raw message erasure read-back still contains target");
         }
         await client.query("COMMIT");
         return { redactedCount };

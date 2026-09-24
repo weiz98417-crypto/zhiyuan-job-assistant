@@ -282,6 +282,26 @@ async function redactExecutionSessionMemory(client, userId, targetText) {
   }
 }
 
+async function redactRawSessionMessages(client, userId, targetText) {
+  const rows = await client.query(
+    `SELECT id, messages_json FROM sessions
+     WHERE user_id=$1 AND deleted_at IS NULL
+     FOR UPDATE`,
+    [userId],
+  );
+  for (const row of rows.rows) {
+    let parsed;
+    try { parsed = typeof row.messages_json === "string" ? JSON.parse(row.messages_json) : row.messages_json; } catch { parsed = null; }
+    if (!parsed || typeof parsed !== "object") continue;
+    const next = redactJsonValue(parsed, targetText);
+    if (JSON.stringify(next) === JSON.stringify(parsed)) continue;
+    await client.query(
+      "UPDATE sessions SET messages_json=$1, updated_at=NOW() WHERE id=$2 AND user_id=$3 AND deleted_at IS NULL",
+      [JSON.stringify(next), Number(row.id), userId],
+    );
+  }
+}
+
 function parseScope(value) {
   let scope = value;
   try { scope = typeof value === "string" ? JSON.parse(value) : value; } catch { scope = {}; }
@@ -304,7 +324,7 @@ async function replayCompletedErasures(client) {
   let replayed = 0;
   const evidence = [];
   const optionalTables = new Map();
-  for (const tableName of ["mastra_messages", "mastra_observational_memory", "mastra_resources", "mastra_threads", "mastra_thread_state", "memory_items", "memory_evidence", "memory_chunks", "session_memory"]) {
+  for (const tableName of ["sessions", "mastra_messages", "mastra_observational_memory", "mastra_resources", "mastra_threads", "mastra_thread_state", "memory_items", "memory_evidence", "memory_chunks", "session_memory"]) {
     optionalTables.set(tableName, await tableExists(client, tableName));
   }
   for (const request of requests.rows) {
@@ -318,6 +338,9 @@ async function replayCompletedErasures(client) {
       : [];
     const targetTexts = Array.from(new Set([...factRows, ...itemRows].map((row) => String(row.canonical_text || "")).filter(Boolean)));
     const episodeIds = Array.from(new Set([...scope.episodeIds, ...factRows.map((row) => Number(row.source_episode_id))].filter((id) => Number.isInteger(id) && id > 0)));
+    if ((scope.factIds.length || scope.itemIds.length) && targetTexts.length === 0) {
+      throw new Error(`restore erasure replay cannot recover target text for request ${request.id}; refusing to claim replay`);
+    }
     if (scope.factIds.length) {
       await client.query("UPDATE memory_admission_candidates SET fact_id=NULL WHERE user_id=$1 AND fact_id=ANY($2::bigint[])", [userId, scope.factIds]);
       await client.query("UPDATE memory_facts SET superseded_by=NULL WHERE user_id=$1 AND superseded_by=ANY($2::bigint[])", [userId, scope.factIds]);
@@ -336,19 +359,20 @@ async function replayCompletedErasures(client) {
       if (optionalTables.get("memory_items")) await client.query("DELETE FROM memory_items WHERE user_id=$1 AND id=ANY($2::bigint[])", [userId, scope.itemIds]);
     }
     for (const textValue of targetTexts) {
-      if (await tableExists(client, "memory_episodes")) await client.query("UPDATE memory_episodes SET content_json=replace(content_json::text,$1,'[已清除]')::jsonb WHERE user_id=$2 AND (id=ANY($3::bigint[]) OR content_json::text LIKE '%' || $1 || '%')", [textValue, userId, episodeIds]);
-      if (await tableExists(client, "memory_entities")) await client.query("UPDATE memory_entities SET summary=replace(summary,$1,'[已清除]'), updated_at=now() WHERE user_id=$2 AND summary LIKE '%' || $1 || '%'", [textValue, userId]);
-      if (await tableExists(client, "profile_blocks")) await client.query("UPDATE profile_blocks SET value_json=replace(value_json::text,$1,'[已清除]')::jsonb, updated_at=now() WHERE user_id=$2 AND value_json::text LIKE '%' || $1 || '%'", [textValue, userId]);
+      if (await tableExists(client, "memory_episodes")) await client.query("UPDATE memory_episodes SET content_json=replace(content_json::text,$1,'[已清除]')::jsonb WHERE user_id=$2 AND (id=ANY($3::bigint[]) OR strpos(content_json::text, $1) > 0)", [textValue, userId, episodeIds]);
+      if (await tableExists(client, "memory_entities")) await client.query("UPDATE memory_entities SET summary=replace(summary,$1,'[已清除]'), updated_at=now() WHERE user_id=$2 AND strpos(summary, $1) > 0", [textValue, userId]);
+      if (await tableExists(client, "profile_blocks")) await client.query("UPDATE profile_blocks SET value_json=replace(value_json::text,$1,'[已清除]')::jsonb, updated_at=now() WHERE user_id=$2 AND strpos(value_json::text, $1) > 0", [textValue, userId]);
       if (optionalTables.get("session_memory")) {
         await redactExecutionSessionMemory(client, userId, textValue);
-        await client.query("UPDATE session_memory SET content=replace(content,$1,'[已清除]') WHERE user_id=$2 AND summary_type <> 'execution_conversation' AND content LIKE '%' || $1 || '%'", [textValue, userId]);
+        await client.query("UPDATE session_memory SET content=replace(content,$1,'[已清除]') WHERE user_id=$2 AND summary_type <> 'execution_conversation' AND strpos(content, $1) > 0", [textValue, userId]);
       }
-      if (optionalTables.get("memory_chunks")) await client.query("DELETE FROM memory_chunks WHERE user_id=$1 AND chunk_text LIKE '%' || $2 || '%'", [userId, textValue]);
+      if (optionalTables.get("sessions")) await redactRawSessionMessages(client, userId, textValue);
+      if (optionalTables.get("memory_chunks")) await client.query("DELETE FROM memory_chunks WHERE user_id=$1 AND strpos(chunk_text, $2) > 0", [userId, textValue]);
       await client.query("DELETE FROM memory_admission_candidates WHERE user_id=$1 AND canonical_text=$2", [userId, textValue]);
       if (optionalTables.get("memory_evidence")) await client.query("DELETE FROM memory_evidence WHERE user_id=$1 AND memory_item_id IN (SELECT id FROM memory_items WHERE user_id=$1 AND canonical_text=$2)", [userId, textValue]);
       if (optionalTables.get("memory_items")) await client.query("DELETE FROM memory_items WHERE user_id=$1 AND canonical_text=$2", [userId, textValue]);
-      if (optionalTables.get("mastra_resources")) await client.query("UPDATE mastra_resources SET \"workingMemory\"=replace(COALESCE(\"workingMemory\",''),$1,'[已清除]') WHERE id=$2 AND \"workingMemory\" LIKE '%' || $1 || '%'", [textValue, userId]);
-      if (optionalTables.get("mastra_thread_state")) await client.query("UPDATE mastra_thread_state SET value=replace(value::text,$1,'[已清除]')::jsonb, \"updatedAtZ\"=NOW() WHERE \"threadId\" IN (SELECT id FROM mastra_threads WHERE \"resourceId\"=$2) AND value::text LIKE '%' || $1 || '%'", [textValue, userId]);
+      if (optionalTables.get("mastra_resources")) await client.query("UPDATE mastra_resources SET \"workingMemory\"=replace(COALESCE(\"workingMemory\",''),$1,'[已清除]') WHERE id=$2 AND strpos(COALESCE(\"workingMemory\",''), $1) > 0", [textValue, userId]);
+      if (optionalTables.get("mastra_thread_state")) await client.query("UPDATE mastra_thread_state SET value=replace(value::text,$1,'[已清除]')::jsonb, \"updatedAtZ\"=NOW() WHERE \"threadId\" IN (SELECT id FROM mastra_threads WHERE \"resourceId\"=$2) AND strpos(value::text, $1) > 0", [textValue, userId]);
       if (optionalTables.get("mastra_observational_memory")) await client.query("UPDATE mastra_observational_memory SET \"activeObservations\"=replace(\"activeObservations\",$1,'[已清除]'), \"activeObservationsPendingUpdate\"=replace(COALESCE(\"activeObservationsPendingUpdate\",''),$1,'[已清除]'), \"bufferedObservations\"=replace(COALESCE(\"bufferedObservations\",''),$1,'[已清除]'), \"bufferedReflection\"=replace(COALESCE(\"bufferedReflection\",''),$1,'[已清除]'), \"bufferedObservationChunks\"=CASE WHEN \"bufferedObservationChunks\" IS NULL THEN NULL ELSE replace(\"bufferedObservationChunks\"::text,$1,'[已清除]')::jsonb END WHERE \"resourceId\"=$2 OR \"threadId\" IN (SELECT id FROM mastra_threads WHERE \"resourceId\"=$2)", [textValue, userId]);
     }
     for (const source of scope.sourceRefs) {
@@ -376,7 +400,7 @@ async function replayCompletedErasures(client) {
 
 async function verifyReplay(client, replay) {
   const optionalTables = new Map();
-  for (const tableName of ["memory_items", "memory_chunks", "session_memory", "mastra_messages", "mastra_resources", "mastra_observational_memory", "mastra_thread_state"]) optionalTables.set(tableName, await tableExists(client, tableName));
+  for (const tableName of ["sessions", "memory_items", "memory_chunks", "session_memory", "mastra_messages", "mastra_resources", "mastra_observational_memory", "mastra_thread_state"]) optionalTables.set(tableName, await tableExists(client, tableName));
   for (const item of replay.evidence) {
     if (item.factIds) {
       const facts = await client.query("SELECT COUNT(*)::int AS count FROM memory_facts WHERE user_id=$1 AND id=ANY($2::bigint[])", [item.userId, item.factIds]);
@@ -392,16 +416,17 @@ async function verifyReplay(client, replay) {
     if (Number(suppression.rows[0]?.count || 0) === 0) throw new Error(`restore erasure read-back found no active suppression for request ${item.id}`);
     for (const textValue of item.targetTexts) {
       const checks = [
-        await client.query("SELECT COUNT(*)::int AS count FROM memory_entities WHERE user_id=$1 AND summary LIKE '%' || $2 || '%'", [item.userId, textValue]),
-        await client.query("SELECT COUNT(*)::int AS count FROM profile_blocks WHERE user_id=$1 AND value_json::text LIKE '%' || $2 || '%'", [item.userId, textValue]),
+        await client.query("SELECT COUNT(*)::int AS count FROM memory_entities WHERE user_id=$1 AND strpos(summary, $2) > 0", [item.userId, textValue]),
+        await client.query("SELECT COUNT(*)::int AS count FROM profile_blocks WHERE user_id=$1 AND strpos(value_json::text, $2) > 0", [item.userId, textValue]),
         await client.query("SELECT COUNT(*)::int AS count FROM memory_admission_candidates WHERE user_id=$1 AND canonical_text=$2", [item.userId, textValue]),
       ];
-      if (await tableExists(client, "memory_episodes")) checks.push(await client.query("SELECT COUNT(*)::int AS count FROM memory_episodes WHERE user_id=$1 AND content_json::text LIKE '%' || $2 || '%'", [item.userId, textValue]));
-      if (optionalTables.get("session_memory")) checks.push(await client.query("SELECT COUNT(*)::int AS count FROM session_memory WHERE user_id=$1 AND content LIKE '%' || $2 || '%'", [item.userId, textValue]));
-      if (optionalTables.get("memory_chunks")) checks.push(await client.query("SELECT COUNT(*)::int AS count FROM memory_chunks WHERE user_id=$1 AND chunk_text LIKE '%' || $2 || '%'", [item.userId, textValue]));
-      if (optionalTables.get("mastra_resources")) checks.push(await client.query("SELECT COUNT(*)::int AS count FROM mastra_resources WHERE id=$1 AND \"workingMemory\" LIKE '%' || $2 || '%'", [item.userId, textValue]));
-      if (optionalTables.get("mastra_thread_state")) checks.push(await client.query("SELECT COUNT(*)::int AS count FROM mastra_thread_state WHERE \"threadId\" IN (SELECT id FROM mastra_threads WHERE \"resourceId\"=$1) AND value::text LIKE '%' || $2 || '%'", [item.userId, textValue]));
-      if (optionalTables.get("mastra_observational_memory")) checks.push(await client.query("SELECT COUNT(*)::int AS count FROM mastra_observational_memory WHERE (\"resourceId\"=$1 OR \"threadId\" IN (SELECT id FROM mastra_threads WHERE \"resourceId\"=$1)) AND (\"activeObservations\" LIKE '%' || $2 || '%' OR COALESCE(\"activeObservationsPendingUpdate\",'') LIKE '%' || $2 || '%' OR COALESCE(\"bufferedObservations\",'') LIKE '%' || $2 || '%' OR COALESCE(\"bufferedReflection\",'') LIKE '%' || $2 || '%' OR COALESCE(\"bufferedObservationChunks\"::text,'') LIKE '%' || $2 || '%')", [item.userId, textValue]));
+      if (await tableExists(client, "memory_episodes")) checks.push(await client.query("SELECT COUNT(*)::int AS count FROM memory_episodes WHERE user_id=$1 AND strpos(content_json::text, $2) > 0", [item.userId, textValue]));
+      if (optionalTables.get("session_memory")) checks.push(await client.query("SELECT COUNT(*)::int AS count FROM session_memory WHERE user_id=$1 AND strpos(content, $2) > 0", [item.userId, textValue]));
+      if (optionalTables.get("sessions")) checks.push(await client.query("SELECT COUNT(*)::int AS count FROM sessions WHERE user_id=$1 AND deleted_at IS NULL AND strpos(messages_json::text, $2) > 0", [item.userId, textValue]));
+      if (optionalTables.get("memory_chunks")) checks.push(await client.query("SELECT COUNT(*)::int AS count FROM memory_chunks WHERE user_id=$1 AND strpos(chunk_text, $2) > 0", [item.userId, textValue]));
+      if (optionalTables.get("mastra_resources")) checks.push(await client.query("SELECT COUNT(*)::int AS count FROM mastra_resources WHERE id=$1 AND strpos(COALESCE(\"workingMemory\",''), $2) > 0", [item.userId, textValue]));
+      if (optionalTables.get("mastra_thread_state")) checks.push(await client.query("SELECT COUNT(*)::int AS count FROM mastra_thread_state WHERE \"threadId\" IN (SELECT id FROM mastra_threads WHERE \"resourceId\"=$1) AND strpos(value::text, $2) > 0", [item.userId, textValue]));
+      if (optionalTables.get("mastra_observational_memory")) checks.push(await client.query("SELECT COUNT(*)::int AS count FROM mastra_observational_memory WHERE (\"resourceId\"=$1 OR \"threadId\" IN (SELECT id FROM mastra_threads WHERE \"resourceId\"=$1)) AND (strpos(\"activeObservations\", $2) > 0 OR strpos(COALESCE(\"activeObservationsPendingUpdate\",''), $2) > 0 OR strpos(COALESCE(\"bufferedObservations\",''), $2) > 0 OR strpos(COALESCE(\"bufferedReflection\",''), $2) > 0 OR strpos(COALESCE(\"bufferedObservationChunks\"::text,''), $2) > 0)", [item.userId, textValue]));
       if (checks.some((result) => Number(result.rows[0]?.count || 0) > 0)) throw new Error(`restore erasure read-back found derived memory for request ${item.id}`);
     }
   }

@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 import type { PoolClient } from "pg";
 import { withPostgresClient } from "@/lib/postgres";
 import { transitionAgentRun } from "@/lib/agent/runtime/state-machine";
-import { nextAgentRunStatusForContinuationInput } from "@/lib/agent/runtime/run-continuation";
+import { acceptsContinuationInput, nextAgentRunStatusForContinuationInput } from "@/lib/agent/runtime/run-continuation";
 import { isTerminalAgentRunStatus } from "@/lib/agent/runtime/types";
 import type {
   AgentRunCheckpoint,
@@ -695,6 +695,9 @@ export class PostgresAgentRunStore implements AgentRunStore {
           return { run: current, input: normalizeInput(duplicate.rows[0]), replayed: true };
         }
         if (isTerminalAgentRunStatus(current.status)) throw new Error("Terminal Agent Run cannot accept input");
+        if (!acceptsContinuationInput(current.status)) {
+          throw new Error("Agent Run is not accepting continuation input while execution is in progress");
+        }
         const inserted = await client.query(`
           INSERT INTO agent_run_inputs (run_id, user_id, request_id, input_type, content_json)
           VALUES ($1, $2, $3, 'turn', $4::jsonb)
