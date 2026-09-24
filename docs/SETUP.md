@@ -4,8 +4,7 @@
 
 - Node.js 20+ recommended.
 - npm.
-- At least one chat/evaluation model key, normally `DEEPSEEK_API_KEY`.
-- `ZHIPU_API_KEY` for screenshot OCR/vision.
+- `DEEPSEEK_API_KEY` for chat, evaluation, screenshot recognition, and custom job-page extraction.
 - A 32+ character `JWT_SECRET` for login sessions.
 - PostgreSQL with pgvector for the current LAN runtime and long-term memory path.
 - SQLite is still available as a local fallback/archive path.
@@ -23,7 +22,6 @@ Edit `.env.local`:
 
 ```bash
 DEEPSEEK_API_KEY=sk-...
-ZHIPU_API_KEY=...
 JWT_SECRET=replace-with-a-random-32-char-secret
 ```
 
@@ -32,7 +30,6 @@ Optional integrations:
 ```bash
 SERPAPI_API_KEY=...
 BAIDU_MAP_API_KEY=...
-ZHIPU_VISION_MODEL=glm-5v-turbo
 ```
 
 Run checks and start the app:
@@ -62,11 +59,10 @@ Give colleagues the LAN URL printed by the script. Keep `.env.local` only on the
 
 ## Screenshot OCR
 
-JD/offer/resume screenshots require:
+JD/offer/resume screenshots use the same DeepSeek key as chat:
 
 ```bash
-ZHIPU_API_KEY=...
-ZHIPU_VISION_MODEL=glm-5v-turbo
+DEEPSEEK_API_KEY=sk-...
 ```
 
 The image intake flow classifies image content before routing:
@@ -75,9 +71,12 @@ The image intake flow classifies image content before routing:
 | --- | --- | --- |
 | JD | Evaluate JD | OCR then `evaluate_jd_full`. |
 | Offer | Evaluate offer | OCR then `evaluate_offer`. |
+| Resume | Evaluate resume | Diagnose the screenshot without a JD or automatic save. |
 | Resume | Save/import resume | Ask confirmation before saving. |
 | Mismatch | Example: JD request + offer image | Ask clarification. |
 | Unrelated | Any | Explain image content and ask for job-search intent. |
+
+The runtime uses `deepseek-flash` for both text and image requests. If a screenshot cannot be read, the user can paste its text in the same Agent conversation.
 
 ## Resume PDF And DOCX Extraction With MinerU
 
@@ -88,7 +87,7 @@ text PDF -> local pdf-parse text extraction -> DeepSeek section classification
 scanned/empty/garbled PDF -> MinerU pipeline -> DeepSeek section classification
 DOCX -> mammoth text extraction -> MinerU only if empty/garbled -> DeepSeek section classification
 legacy DOC -> clear conversion-required error unless a local converter is configured
-images -> existing Zhipu vision path
+images -> DeepSeek `deepseek-flash` vision path
 ```
 
 Install MinerU locally under the project copy the user placed at `C:\Users\Admin\Documents\求职\zhiyuan-job-assistant-master\MinerU-master`:
@@ -215,7 +214,7 @@ npx tsc --noEmit
 | --- | --- |
 | Login spins or fails | Confirm `/api/auth/login` returns JSON and `JWT_SECRET` is set. |
 | User approval returns 401 | Re-login as admin and verify token version/session cookie. |
-| Screenshot OCR says format error | Confirm the uploaded file is the original image, not a tiny chat thumbnail; verify `ZHIPU_API_KEY`. |
+| Screenshot OCR says format error | Confirm the uploaded file is the original image, not a tiny chat thumbnail; verify `DEEPSEEK_API_KEY`. |
 | OCR rate limited | Wait and retry, or paste text/link; check provider quota. |
 | PostgreSQL routes fail | Run `npm run check:postgres` and confirm `DB_DRIVER`/`DATABASE_URL`. |
 | Job discovery scan fails on Aliyun/Linux | Run `npm run install:playwright`, then restart the service so the worker can launch Chromium. |

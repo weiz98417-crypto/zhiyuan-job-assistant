@@ -3,7 +3,7 @@ import fs from "fs";
 import path from "path";
 
 const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
-const MODEL = "deepseek-v4-flash";
+const MODEL = "deepseek-flash";
 
 interface CvAnalyzeRequest {
   sections: Record<string, string>;

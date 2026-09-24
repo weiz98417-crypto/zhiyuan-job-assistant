@@ -12,16 +12,15 @@ export class PostgresRunContextSource implements DurableRunContextSource {
 
   async load(principal: { userId: string }, runId: string): Promise<DurableRunContextMaterial> {
     return this.withClient(async (client) => {
-      const [attempts, recoveryAttempts, gates, evidence] = await Promise.all([
-        client.query(`
+      const attempts = await client.query(`
           SELECT attempt.id, attempt.tool_name, attempt.args_hash, attempt.effect_state,
                  attempt.result_json, attempt.updated_at
           FROM agent_tool_attempts attempt
           JOIN agent_runs run ON run.id = attempt.run_id
           WHERE attempt.run_id = $1 AND run.user_id = $2 AND attempt.status = 'succeeded'
           ORDER BY attempt.attempt_sequence ASC
-        `, [runId, principal.userId]),
-        client.query(`
+        `, [runId, principal.userId]);
+      const recoveryAttempts = await client.query(`
           SELECT attempt.tool_name, attempt.status, attempt.effect_state,
                  attempt.error_json, attempt.updated_at
           FROM agent_tool_attempts attempt
@@ -29,23 +28,22 @@ export class PostgresRunContextSource implements DurableRunContextSource {
           WHERE attempt.run_id = $1 AND run.user_id = $2
             AND attempt.status <> 'succeeded'
           ORDER BY attempt.attempt_sequence ASC
-        `, [runId, principal.userId]),
-        client.query(`
+        `, [runId, principal.userId]);
+      const gates = await client.query(`
           SELECT gate.id, gate.tool_name, gate.status, gate.scope_hash, gate.request_json, gate.resolved_at
           FROM agent_run_gates gate
           JOIN agent_runs run ON run.id = gate.run_id
           WHERE gate.run_id = $1 AND run.user_id = $2
           ORDER BY gate.created_at ASC
-        `, [runId, principal.userId]),
-        client.query(`
+        `, [runId, principal.userId]);
+      const evidence = await client.query(`
           SELECT event.event_type, event.payload_json
           FROM agent_run_events event
           JOIN agent_runs run ON run.id = event.run_id
           WHERE event.run_id = $1 AND run.user_id = $2
             AND event.event_type IN ('run.model_output_complete', 'run.model_output_interrupted')
           ORDER BY event.sequence ASC
-        `, [runId, principal.userId]),
-      ]);
+        `, [runId, principal.userId]);
 
       return {
         completedToolFacts: attempts.rows.map((row) => ({

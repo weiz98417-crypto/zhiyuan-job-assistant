@@ -142,6 +142,14 @@ CREATE TABLE IF NOT EXISTS jds (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS jd_resume_matching_preferences (
+  user_id TEXT NOT NULL REFERENCES users(id),
+  source_hash TEXT NOT NULL,
+  match_resume INTEGER NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (user_id, source_hash)
+);
+
 CREATE TABLE IF NOT EXISTS profiles (
   id INTEGER PRIMARY KEY DEFAULT 1,
   data_json TEXT NOT NULL DEFAULT '{}',

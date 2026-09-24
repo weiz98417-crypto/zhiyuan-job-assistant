@@ -10,6 +10,7 @@ interface EvalJDFullParams {
   jd_text?: string;
   jd_url?: string;
   cv_text?: string;
+  match_resume?: boolean;
   target_company?: string;
   images?: string[];
   allow_web_search?: boolean;
@@ -99,7 +100,7 @@ async function extractJDFromImages(images: string[]): Promise<{
 }
 
 async function legacyHandler(params: Record<string, unknown>): Promise<ToolResult> {
-  const { jd_url, cv_text, target_company, images, allow_web_search } = params as EvalJDFullParams;
+  const { jd_url, cv_text, target_company, images, allow_web_search, match_resume } = params as EvalJDFullParams;
   let jdText = (params as EvalJDFullParams).jd_text || "";
   let targetCompany = target_company || "";
   let imagesForStream = Array.isArray(images) ? images : [];
@@ -141,7 +142,7 @@ async function legacyHandler(params: Record<string, unknown>): Promise<ToolResul
 
   // Delegate to streaming evaluate API — handler returns the stream,
   // client-runner reads it and yields events through the generator
-  const memoryContext = await fetchAgentMemoryContext({
+  const memoryContext = match_resume === false ? null : await fetchAgentMemoryContext({
     task: "jd_evaluation",
     agentId: "evaluate",
     query: `${targetCompany || ""}\n${jdText.slice(0, 1200)}`,
@@ -149,7 +150,7 @@ async function legacyHandler(params: Record<string, unknown>): Promise<ToolResul
     semanticTopK: 5,
   });
   const cvTextWithMemory = [
-    cv_text || "",
+    match_resume === false ? "" : cv_text || "",
     memoryContext?.llmSummary ? `Long-term memory context:\n${memoryContext.llmSummary}` : "",
   ].filter(Boolean).join("\n\n");
 
@@ -160,6 +161,7 @@ async function legacyHandler(params: Record<string, unknown>): Promise<ToolResul
       jdText,
       jdUrl: jd_url || "",
       cvText: cvTextWithMemory,
+      matchResume: match_resume,
       targetCompany,
       images: imagesForStream,
       allowWebSearch: allow_web_search === true,
@@ -196,6 +198,7 @@ async function handler(
       jdText: input.jd_text || "",
       jdUrl: input.jd_url || "",
       cvText: input.cv_text || "",
+      matchResume: input.match_resume,
       targetCompany: input.target_company || "",
       images: Array.isArray(input.images) ? input.images : [],
       allowWebSearch: input.allow_web_search === true,
@@ -264,6 +267,7 @@ export const evaluateJDFull: ToolDefinition = {
     jd_text: { type: "string", required: false, description: "JD 完整文本，至少 50 字符" },
     jd_url: { type: "string", required: false, description: "JD 链接 URL，工具会自动抓取内容" },
     cv_text: { type: "string", required: false, description: "用户简历文本。用户要求结合简历时，先用 read_file(path='我的简历') 读取后传入。" },
+    match_resume: { type: "boolean", required: false, description: "是否匹配用户简历。用户明确说不要匹配简历时传 false；此参数由服务端任务契约强制覆盖。" },
     target_company: { type: "string", required: false, description: "用户在对话中补充的目标公司名。即使 JD 正文没有公司名，也要传入，例如'字节跳动'。" },
     images: { type: "array", required: false, description: "JD 截图 base64 数组" },
     allow_web_search: { type: "boolean", required: false, description: "是否允许评估流程联网查薪资/公开信息。默认 false；只有用户明确要求联网查询时才设 true。" },

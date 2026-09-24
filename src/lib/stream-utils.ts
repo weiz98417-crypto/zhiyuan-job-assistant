@@ -3,17 +3,15 @@
 import { llmRetry, LLMError } from './llm-retry';
 
 const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
-const DEFAULT_MODEL = "deepseek-v4-flash";
+const DEFAULT_MODEL = "deepseek-flash";
 
 export interface DeepSeekStreamConfig {
-  model?: string;
   messages: { role: string; content: string }[];
   temperature?: number;
   max_tokens?: number;
 }
 
 export interface DeepSeekJsonConfig {
-  model?: string;
   messages: { role: string; content: string }[];
   temperature?: number;
   max_tokens?: number;
@@ -37,14 +35,14 @@ export async function streamDeepSeekChunks(
   let response: Response;
   try {
     response = await llmRetry(DEEPSEEK_API_URL, apiKey || '', {
-      model: config.model || DEFAULT_MODEL,
+      model: DEFAULT_MODEL,
       messages: config.messages,
       stream: true,
       temperature: config.temperature ?? 0.7,
       max_tokens: config.max_tokens ?? 2000,
       timeout: 30_000,
       retries: 1, // stream retries: only 1 — retry connection, not mid-stream
-      fallbackModel: process.env.DEEPSEEK_FALLBACK_MODEL,
+      fallbackModel: "deepseek-flash",
     });
   } catch (err) {
     if (err instanceof LLMError) {
@@ -126,14 +124,14 @@ export function createDeepSeekStream(config: DeepSeekStreamConfig): ReadableStre
       let response: Response;
       try {
         response = await llmRetry(DEEPSEEK_API_URL, apiKey || '', {
-          model: config.model || DEFAULT_MODEL,
+          model: DEFAULT_MODEL,
           messages: config.messages,
           stream: true,
           temperature: config.temperature ?? 0.7,
           max_tokens: config.max_tokens ?? 2000,
           timeout: 30_000,
           retries: 1,
-          fallbackModel: process.env.DEEPSEEK_FALLBACK_MODEL,
+          fallbackModel: "deepseek-flash",
         });
       } catch (err) {
         if (err instanceof LLMError) {
@@ -230,14 +228,14 @@ export async function callDeepSeekJson(config: DeepSeekJsonConfig): Promise<stri
   const apiKey = process.env.DEEPSEEK_API_KEY;
 
   const response = await llmRetry(DEEPSEEK_API_URL, apiKey || '', {
-    model: config.model || DEFAULT_MODEL,
+    model: DEFAULT_MODEL,
     messages: config.messages,
     temperature: config.temperature ?? 0.3,
     max_tokens: config.max_tokens ?? 4000,
     response_format: { type: "json_object" },
     retries: 2,
     timeout: 30_000,
-    fallbackModel: process.env.DEEPSEEK_FALLBACK_MODEL,
+    fallbackModel: "deepseek-flash",
     signal: config.signal,
   });
 
@@ -266,7 +264,6 @@ export function parseJsonResponse(content: string): Record<string, unknown> {
 /* ── Structured streaming: emits typed sections as SSE ── */
 
 export interface StructuredStreamConfig {
-  model?: string;
   systemPrompt: string;
   userMessage: string;
   temperature?: number;
@@ -282,7 +279,6 @@ export function createStructuredStream(config: StructuredStreamConfig): Readable
     async start(controller) {
       await streamDeepSeekChunks(
         {
-          model: config.model,
           messages: [
             { role: "system", content: config.systemPrompt },
             { role: "user", content: config.userMessage },

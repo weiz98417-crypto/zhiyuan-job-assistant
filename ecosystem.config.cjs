@@ -1,4 +1,6 @@
 const path = require("path");
+require("dotenv").config({ path: path.join(__dirname, ".env.local") });
+require("dotenv").config();
 
 const releaseDirectory = __dirname;
 const releaseParent = path.dirname(releaseDirectory);
@@ -21,9 +23,12 @@ module.exports = {
       max_memory_restart: "1G",
       env: {
         NODE_ENV: "production",
+        DB_DRIVER: process.env.DB_DRIVER || "postgres",
+        DATABASE_URL: process.env.DATABASE_URL,
+        AGENT_RUNTIME_MODE: process.env.AGENT_RUNTIME_MODE || "worker_all",
         AGENT_ARTIFACT_DIR: artifactDirectory,
         DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY,
-        ZHIPU_API_KEY: process.env.ZHIPU_API_KEY,
+        DEEPSEEK_MODEL: "deepseek-flash",
       },
     },
     {
@@ -44,10 +49,12 @@ module.exports = {
       env: {
         NODE_ENV: "production",
         DB_DRIVER: "postgres",
+        DATABASE_URL: process.env.DATABASE_URL,
+        AGENT_RUNTIME_MODE: process.env.AGENT_RUNTIME_MODE || "worker_all",
         AGENT_ARTIFACT_DIR: artifactDirectory,
         AGENT_WORKER_CONCURRENCY: "2",
         DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY,
-        ZHIPU_API_KEY: process.env.ZHIPU_API_KEY,
+        DEEPSEEK_MODEL: "deepseek-flash",
       },
     },
   ],

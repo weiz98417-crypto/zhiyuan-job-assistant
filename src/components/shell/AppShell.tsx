@@ -1,6 +1,7 @@
 "use client";
 
-import { type ReactNode, useState, useEffect } from "react";
+import { type ReactNode, useState, useEffect, useRef } from "react";
+import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   Home,
@@ -22,6 +23,7 @@ import {
   Database,
   ClipboardCheck,
   ScrollText,
+  X,
 } from "lucide-react";
 import NavItem from "./NavItem";
 import { useTheme } from "@/components/providers/ThemeProvider";
@@ -76,6 +78,9 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const [user, setUser] = useState<UserInfo | null>(null);
+  const [adminOpen, setAdminOpen] = useState(false);
+  const adminDialogRef = useRef<HTMLDialogElement>(null);
+  const isAdmin = Boolean(user && (user.role === 'admin' || user.role === 'superadmin'));
   const isWorkspacePage = pathname === "/agent";
 
   useEffect(() => {
@@ -84,6 +89,13 @@ export default function AppShell({ children }: { children: ReactNode }) {
       .then((data) => data && setUser(data))
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    const dialog = adminDialogRef.current;
+    if (!dialog) return;
+    if (adminOpen && !dialog.open) dialog.showModal();
+    if (!adminOpen && dialog.open) dialog.close();
+  }, [adminOpen, isAdmin]);
 
   async function handleLogout() {
     await fetch('/api/auth/logout', { method: 'POST' });
@@ -129,6 +141,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
           ))}
 
           <NavItem key={BOTTOM_ITEM.href} {...BOTTOM_ITEM} />
+          <NavItem href="/changelog" label="版本更新" icon={ScrollText} />
         </nav>
 
         {/* User area + Theme toggle */}
@@ -150,36 +163,18 @@ export default function AppShell({ children }: { children: ReactNode }) {
                 </div>
               </div>
 
-              {/* Admin links */}
-              {(user.role === 'admin' || user.role === 'superadmin') && (
-                <div className="mt-1 space-y-0.5">
-                  <a href="/admin/agent-runs" className="flex items-center gap-2 px-2 py-1.5 rounded-[var(--radius-sm)] text-xs font-medium text-[var(--color-primary)] hover:bg-[var(--color-primary-muted)] transition-colors duration-[var(--duration-fast)] no-underline">
-                    <Bot size={14} />
-                    Agent 运行监控
-                  </a>
-                  <a href="/admin/agent-reviews" className="flex items-center gap-2 px-2 py-1.5 rounded-[var(--radius-sm)] text-xs font-medium text-[var(--color-primary)] hover:bg-[var(--color-primary-muted)] transition-colors duration-[var(--duration-fast)] no-underline">
-                    <ClipboardCheck size={14} />
-                    Agent 复盘治理
-                  </a>
-                  <a href="/admin/users" className="flex items-center gap-2 px-2 py-1.5 rounded-[var(--radius-sm)] text-xs font-medium text-[var(--color-primary)] hover:bg-[var(--color-primary-muted)] transition-colors duration-[var(--duration-fast)] no-underline">
-                    <Shield size={14} />
-                    管理后台
-                  </a>
-                  <a href="/admin/insights" className="flex items-center gap-2 px-2 py-1.5 rounded-[var(--radius-sm)] text-xs font-medium text-[var(--color-primary)] hover:bg-[var(--color-primary-muted)] transition-colors duration-[var(--duration-fast)] no-underline">
-                    <TrendingUp size={14} />
-                    团队洞察
-                  </a>
-                  <a href="/admin/memory" className="flex items-center gap-2 px-2 py-1.5 rounded-[var(--radius-sm)] text-xs font-medium text-[var(--color-primary)] hover:bg-[var(--color-primary-muted)] transition-colors duration-[var(--duration-fast)] no-underline">
-                    <Database size={14} />
-                    记忆治理
-                  </a>
-                  {user.role === 'superadmin' && (
-                    <a href="/admin/security-events" className="flex items-center gap-2 px-2 py-1.5 rounded-[var(--radius-sm)] text-xs font-medium text-[var(--color-primary)] hover:bg-[var(--color-primary-muted)] transition-colors duration-[var(--duration-fast)] no-underline">
-                      <ScrollText size={14} />
-                      安全审计
-                    </a>
-                  )}
-                </div>
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => setAdminOpen(true)}
+                  aria-haspopup="dialog"
+                  aria-expanded={adminOpen}
+                  aria-controls="admin-drawer"
+                  className="flex items-center gap-2 w-full px-2 py-1.5 mt-1 rounded-[var(--radius-sm)] text-xs font-medium text-[var(--color-primary)] hover:bg-[var(--color-primary-muted)] transition-colors duration-[var(--duration-fast)]"
+                >
+                  <Shield size={14} />
+                  管理后台
+                </button>
               )}
 
               {/* Logout */}
@@ -210,6 +205,28 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
       {/* Main content area — the "pages" of the journal */}
       <main className="min-w-0 flex-1 overflow-x-hidden lg:ml-56">
+        <header className="flex items-center justify-between gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 lg:hidden">
+          <span className="font-[family-name:var(--font-display)] font-bold text-[var(--color-text)]">筝筝纸鸢</span>
+          <div className="flex items-center gap-2">
+            <Link href="/changelog" className="flex items-center gap-1 rounded-[var(--radius-sm)] px-2 py-1.5 text-xs text-[var(--color-muted)] hover:bg-[var(--color-primary-muted)] hover:text-[var(--color-text)]">
+              <ScrollText size={16} />
+              更新日志
+            </Link>
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => setAdminOpen(true)}
+                aria-haspopup="dialog"
+                aria-expanded={adminOpen}
+                aria-controls="admin-drawer"
+                className="flex items-center gap-1 rounded-[var(--radius-sm)] px-2 py-1.5 text-xs text-[var(--color-primary)] hover:bg-[var(--color-primary-muted)]"
+              >
+                <Shield size={16} />
+                管理
+              </button>
+            )}
+          </div>
+        </header>
         <motion.div
           key="page-content"
           initial={{ opacity: 0, y: 8 }}
@@ -229,6 +246,49 @@ export default function AppShell({ children }: { children: ReactNode }) {
           <NavItem key={item.href} {...item} mobile />
         ))}
       </nav>
+      {isAdmin && (
+        <dialog
+          id="admin-drawer"
+          ref={adminDialogRef}
+          onClose={() => setAdminOpen(false)}
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setAdminOpen(false);
+          }}
+          aria-labelledby="admin-drawer-title"
+          className="fixed inset-y-0 left-auto right-0 m-0 h-dvh max-h-dvh w-full max-w-sm border-l border-[var(--color-border)] bg-[var(--color-surface)] p-0 text-[var(--color-text)] shadow-[var(--shadow-lg)] backdrop:bg-black/40"
+        >
+          <div className="flex h-full flex-col">
+            <div className="flex items-center justify-between border-b border-[var(--color-border)] px-5 py-4">
+              <h2 id="admin-drawer-title" className="text-base font-semibold">管理后台</h2>
+              <button type="button" onClick={() => setAdminOpen(false)} aria-label="关闭管理后台" className="rounded-[var(--radius-sm)] p-2 text-[var(--color-muted)] hover:bg-[var(--color-primary-muted)] hover:text-[var(--color-text)]">
+                <X size={18} />
+              </button>
+            </div>
+            <nav aria-label="管理后台" className="flex-1 space-y-1 overflow-y-auto p-3">
+              <a href="/admin/agent-runs" className="flex items-center gap-3 rounded-[var(--radius-sm)] px-3 py-3 text-sm text-[var(--color-primary)] hover:bg-[var(--color-primary-muted)]">
+                <Bot size={18} />Agent 运行监控
+              </a>
+              <a href="/admin/agent-reviews" className="flex items-center gap-3 rounded-[var(--radius-sm)] px-3 py-3 text-sm text-[var(--color-primary)] hover:bg-[var(--color-primary-muted)]">
+                <ClipboardCheck size={18} />Agent 复盘治理
+              </a>
+              <a href="/admin/users" className="flex items-center gap-3 rounded-[var(--radius-sm)] px-3 py-3 text-sm text-[var(--color-primary)] hover:bg-[var(--color-primary-muted)]">
+                <Shield size={18} />用户管理
+              </a>
+              <a href="/admin/insights" className="flex items-center gap-3 rounded-[var(--radius-sm)] px-3 py-3 text-sm text-[var(--color-primary)] hover:bg-[var(--color-primary-muted)]">
+                <TrendingUp size={18} />团队洞察
+              </a>
+              <a href="/admin/memory" className="flex items-center gap-3 rounded-[var(--radius-sm)] px-3 py-3 text-sm text-[var(--color-primary)] hover:bg-[var(--color-primary-muted)]">
+                <Database size={18} />记忆治理
+              </a>
+              {user?.role === 'superadmin' && (
+                <a href="/admin/security-events" className="flex items-center gap-3 rounded-[var(--radius-sm)] px-3 py-3 text-sm text-[var(--color-primary)] hover:bg-[var(--color-primary-muted)]">
+                  <ScrollText size={18} />安全审计
+                </a>
+              )}
+            </nav>
+          </div>
+        </dialog>
+      )}
     </div>
     </ToastProvider>
   );

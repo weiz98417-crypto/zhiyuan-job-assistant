@@ -122,7 +122,7 @@ export async function generateInterviewQuestionsForAgent(
   });
   const modeInfo = COACH_MODES[mode];
   const response = await llmRetry("https://api.deepseek.com/chat/completions", apiKey, {
-    model: process.env.DEEPSEEK_INTERVIEW_MODEL?.trim() || "deepseek-v4-flash",
+    model: "deepseek-flash",
     messages: [
       {
         role: "system",
@@ -144,7 +144,7 @@ export async function generateInterviewQuestionsForAgent(
     max_tokens: 1800,
     response_format: { type: "json_object" },
     retries: 2,
-    fallbackModel: process.env.DEEPSEEK_FALLBACK_MODEL,
+    fallbackModel: "deepseek-flash",
     signal: options.signal,
   });
   const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
@@ -178,7 +178,7 @@ export async function scoreInterviewAnswerForAgent(
   });
   const weights = MODE_WEIGHTS[mode];
   const response = await llmRetry("https://api.deepseek.com/chat/completions", apiKey, {
-    model: process.env.DEEPSEEK_INTERVIEW_MODEL?.trim() || "deepseek-v4-flash",
+    model: "deepseek-flash",
     messages: [
       {
         role: "system",
@@ -193,7 +193,7 @@ export async function scoreInterviewAnswerForAgent(
     max_tokens: 1600,
     response_format: { type: "json_object" },
     retries: 2,
-    fallbackModel: process.env.DEEPSEEK_FALLBACK_MODEL,
+    fallbackModel: "deepseek-flash",
     signal: options.signal,
   });
   const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };

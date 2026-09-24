@@ -13,6 +13,7 @@ import {
   type AgentTaskRouteDecision,
 } from "@/lib/agent/task-routing";
 import type { AgentRunSnapshot, DurableRunInput } from "@/lib/agent/runtime/durable-agent-run";
+import { inferJDResumeMatchingDirective } from "@/lib/agent/jd-resume-scope-intent";
 
 export type AgentRunAdmissionKind =
   | "continue_current_run"
@@ -61,6 +62,7 @@ const AGENT_TASK_TYPES = new Set<AgentTaskType>([
   "general_chat",
   "career_positioning_guidance",
   "resume_query",
+  "resume_diagnosis",
   "resume_edit",
   "jd_evaluation",
   "offer_evaluation",
@@ -91,6 +93,7 @@ export function admitAgentRun(input: AgentRunAdmissionInput): AgentRunAdmissionD
   const route = routeAgentTask({
     agentId: normalizedHintAgentId(input.entryHints?.agentId, evidence),
     content,
+    hasImages: Boolean(input.input.images?.length),
     activeTask: guidedSessionForActiveRun(input.activeRun),
   });
   const taskType = route.taskType;
@@ -187,6 +190,9 @@ function createServerOwnedContract(
       clarificationQuestion: route.clarificationQuestion,
       blockedReason: route.blockedReason,
       auditSummary: route.auditSummary,
+      ...(taskType === "jd_evaluation"
+        ? { jdMatchResume: inferJDResumeMatchingDirective(target) }
+        : {}),
     },
   });
 }

@@ -2,7 +2,7 @@ import { llmRetry } from "@/lib/llm-retry";
 import { mcpManager } from "@/lib/agent/mcp/manager";
 
 const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
-const SEARCH_MODEL = "deepseek-v4-flash";
+const SEARCH_MODEL = "deepseek-flash";
 
 export interface ExternalSearchResult {
   text: string;

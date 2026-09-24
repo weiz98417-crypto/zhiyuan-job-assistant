@@ -73,7 +73,7 @@ export function loadAgentMD(agentId: string): AgentSoul {
 /** Fallback: 返回空 soul，调用方自己处理 */
 function getFallback(agentId: string): AgentSoul {
   return {
-    meta: { name: agentId, model: "deepseek-v4-flash" },
+    meta: { name: agentId, model: "deepseek-flash" },
     body: `你是纸鸢的 ${agentId} 助手。根据用户需求提供帮助。`,
   };
 }

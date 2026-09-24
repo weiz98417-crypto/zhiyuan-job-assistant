@@ -58,6 +58,11 @@ const CASES: Array<{
     ],
   },
   {
+    taskType: "resume_diagnosis",
+    prompt: "评估这份简历，不用匹配 JD",
+    events: [{ type: "text", content: "这份简历的经历描述较完整，但成果数字不足；建议补充指标。ATS 标题使用标准名称。" }],
+  },
+  {
     taskType: "resume_edit",
     prompt: "优化我的简历",
     events: [

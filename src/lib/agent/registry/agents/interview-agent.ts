@@ -106,7 +106,7 @@ export const interviewAgent: AgentDefinition = {
   knowledgeSubset: ["interview-styles"],
   priority: 10,
   suggestions: INTERVIEW_SUGGESTIONS,
-  model: "deepseek-v4-pro",
+  model: "deepseek-flash",
 
   async buildSystemPrompt(ctx: AgentPromptContext): Promise<string> {
     // Load soul from agent.md

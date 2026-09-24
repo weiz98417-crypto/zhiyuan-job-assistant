@@ -12,7 +12,8 @@ describe("durable Agent live session read-back regression", () => {
 
     expect(terminalHandler).toContain("const refreshPersistedMessages = async () => {");
     expect(terminalHandler).toContain("attempt < 8");
-    expect(terminalHandler).toContain("currentSessionIdRef.current !== sessionId");
+    expect(source).toContain("currentSessionIdRef.current === sessionId");
+    expect(terminalHandler).toContain("if (!isCurrentConversation()) return;");
     expect(terminalHandler).toContain("setTimeout(resolve, 250)");
     expect(terminalHandler).not.toContain("setTimeout(() =>");
   });

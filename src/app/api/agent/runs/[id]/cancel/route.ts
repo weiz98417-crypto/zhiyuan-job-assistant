@@ -4,6 +4,7 @@ import {
   getDurableAgentRuntime,
   isDurableAgentRuntimeAvailable,
 } from "@/lib/agent/runtime/runtime-factory";
+import { runReceipt } from "@/lib/agent/runtime/run-receipt";
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -23,7 +24,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       id,
       requestId,
     );
-    return NextResponse.json({ success: true, data: { run } }, { status: 202 });
+    return NextResponse.json({ success: true, data: { run: runReceipt(run) } }, { status: 202 });
   } catch (error) {
     return NextResponse.json({ success: false, error: String(error) }, { status: 500 });
   }

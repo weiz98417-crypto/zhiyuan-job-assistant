@@ -15,5 +15,16 @@ describe("waiting_user Agent input regression", () => {
     expect(observer).toContain('setStreaming(notice.status !== "waiting_user")');
     expect(observer).toContain('if (notice.status === "waiting_user") setPhase(null);');
     expect(observer).not.toContain('if (notice.status === "waiting_user") {');
+    expect(observer).toContain('if (status === "waiting_user") {');
+    expect(observer).toContain("void refreshPersistedMessages();");
+  });
+
+  it("does not submit a new message into a paused Run", () => {
+    const source = readFileSync(path.join(process.cwd(), "src/app/agent/page.tsx"), "utf8");
+    const start = source.indexOf("if (\n        activeRunNotice?.conversationId === sessionId");
+    const end = source.indexOf("const pendingInput", start);
+    const continuationGuard = source.slice(start, end);
+
+    expect(continuationGuard).toContain('activeRunNotice.status !== "paused"');
   });
 });

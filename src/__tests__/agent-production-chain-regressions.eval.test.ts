@@ -163,7 +163,7 @@ describe("production Agent short/long-chain regressions", () => {
     expect(result.outcome).toBe("failed");
     expect(saved.at(-1)).toEqual(expect.arrayContaining([
       expect.objectContaining({ role: "user", content: "导出这个报告" }),
-      expect.objectContaining({ role: "assistant", content: expect.stringContaining("不会把它标记为已完成") }),
+      expect.objectContaining({ role: "assistant", content: expect.stringContaining("这次处理还没有完成") }),
     ]));
   });
 

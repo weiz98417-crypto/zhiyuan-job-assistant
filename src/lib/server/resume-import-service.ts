@@ -16,7 +16,7 @@ import {
   type ParsedResumeChunk,
   type ResumeSections,
 } from "@/lib/resume/document";
-import { ZHIPU_API_URL, ZHIPU_VISION_MODEL } from "@/lib/zhipu";
+import { getDeepSeekApiKey, DEEPSEEK_API_URL, DEEPSEEK_VISION_MODEL } from "@/lib/deepseek-provider";
 import type { CVData } from "@/types";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
@@ -236,7 +236,7 @@ async function parseResumeChunk(text: string, signal?: AbortSignal): Promise<Res
   const apiKey = process.env.DEEPSEEK_API_KEY?.trim();
   if (!apiKey) throw new Error("未配置 DEEPSEEK_API_KEY");
   const response = await llmRetry("https://api.deepseek.com/chat/completions", apiKey, {
-    model: process.env.DEEPSEEK_RESUME_PARSE_MODEL?.trim() || "deepseek-v4-flash",
+    model: "deepseek-flash",
     messages: [
       {
         role: "system",
@@ -248,7 +248,7 @@ async function parseResumeChunk(text: string, signal?: AbortSignal): Promise<Res
     max_tokens: 16000,
     response_format: { type: "json_object" },
     retries: 2,
-    fallbackModel: process.env.DEEPSEEK_FALLBACK_MODEL,
+    fallbackModel: "deepseek-flash",
     signal,
     timeout: 120_000,
   });
@@ -264,18 +264,18 @@ async function parseResumeChunk(text: string, signal?: AbortSignal): Promise<Res
 }
 
 async function parseResumeImage(dataUri: string, signal?: AbortSignal): Promise<ResumeSections> {
-  const apiKey = process.env.ZHIPU_API_KEY?.trim();
-  if (!apiKey) throw new Error("未配置 ZHIPU_API_KEY");
+  const apiKey = getDeepSeekApiKey();
+  if (!apiKey) throw new Error("未配置 DEEPSEEK_API_KEY");
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(new Error("智谱识别超时")), 30_000);
+  const timeoutId = setTimeout(() => controller.abort(new Error("DeepSeek 视觉识别超时")), 30_000);
   const abort = () => controller.abort(signal?.reason);
   signal?.addEventListener("abort", abort, { once: true });
   try {
-    const response = await fetch(ZHIPU_API_URL, {
+    const response = await fetch(DEEPSEEK_API_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
-        model: ZHIPU_VISION_MODEL,
+        model: DEEPSEEK_VISION_MODEL,
         messages: [{
           role: "user",
           content: [
@@ -287,7 +287,7 @@ async function parseResumeImage(dataUri: string, signal?: AbortSignal): Promise<
       }),
       signal: controller.signal,
     });
-    if (!response.ok) throw new Error(`智谱识别失败: ${response.status}`);
+    if (!response.ok) throw new Error(`DeepSeek 视觉识别失败: ${response.status}`);
     const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
     const parsed = parseModelJson(payload.choices?.[0]?.message?.content || "{}");
     return normalizeResumeSections({

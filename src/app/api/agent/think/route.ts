@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { ZHIPU_API_URL, ZHIPU_FALLBACK_MODEL } from "@/lib/zhipu";
 
 const MAX_MESSAGES = 30;
 const MAX_MSG_LEN = 50000;
@@ -24,10 +23,8 @@ function isExpectedStreamStop(error: unknown): boolean {
   return name === "AbortError" || code === "ABORT_ERR" || /aborted|cancelled|canceled/i.test(message);
 }
 
-// Model fallback chain: DeepSeek → Zhipu
 const MODEL_CHAIN = [
-  { model: "deepseek-v4-flash", url: "https://api.deepseek.com/chat/completions", keyEnv: "DEEPSEEK_API_KEY" },
-  { model: ZHIPU_FALLBACK_MODEL, url: ZHIPU_API_URL, keyEnv: "ZHIPU_API_KEY" },
+  { model: "deepseek-flash", url: "https://api.deepseek.com/chat/completions", keyEnv: "DEEPSEEK_API_KEY" },
 ];
 
 async function fetchWithFallback(
@@ -71,7 +68,7 @@ export async function POST(request: Request) {
     console.log("[think] msgs:", messages.length, "hasTools:", !!(tools?.length));
     console.log("[think] systemPrompt length:", systemPrompt?.length || 0);
 
-    if (!process.env.DEEPSEEK_API_KEY && !process.env.ZHIPU_API_KEY) {
+    if (!process.env.DEEPSEEK_API_KEY) {
       return NextResponse.json({ success: false, error: "未配置任何 LLM API Key" }, { status: 500 });
     }
 
@@ -92,7 +89,6 @@ export async function POST(request: Request) {
       totalChars = truncated.reduce((sum, m) => sum + (typeof m.content === "string" ? m.content.length : 0), 0);
     }
 
-    // Use fallback chain: DeepSeek → Zhipu
     let response: Response;
     let modelUsed: string;
     try {

@@ -6,13 +6,11 @@
  */
 
 import type { AgentDefinition } from "./registry/types";
-import { ZHIPU_API_URL, ZHIPU_FALLBACK_MODEL } from "@/lib/zhipu";
 
 // ── MODEL_CHAIN（与 server-runner.ts 同步）──
 
 const MODEL_CHAIN = [
-  { model: "deepseek-v4-flash", url: "https://api.deepseek.com/chat/completions", keyEnv: "DEEPSEEK_API_KEY" },
-  { model: ZHIPU_FALLBACK_MODEL, url: ZHIPU_API_URL, keyEnv: "ZHIPU_API_KEY" },
+  { model: "deepseek-flash", url: "https://api.deepseek.com/chat/completions", keyEnv: "DEEPSEEK_API_KEY" },
 ];
 
 export interface IntentResult {

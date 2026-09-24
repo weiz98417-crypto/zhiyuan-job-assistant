@@ -1,4 +1,4 @@
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import { orchestrateGen } from "@/lib/agent/orchestrator";
 import type { SSEEvent } from "@/lib/agent/loop/types";
 import type { ModelRecoveryPolicy } from "@/lib/agent/loop/types";
@@ -28,6 +28,7 @@ import {
 import { buildCareerPositioningFallback } from "@/lib/agent/career-positioning-result";
 import type { VerifiedActionResult } from "@/lib/agent/verified-action";
 import { projectDurableUiEvent } from "@/lib/agent/runtime/run-event-projection";
+import { inferJDResumeMatchingDirective } from "@/lib/agent/jd-resume-scope-intent";
 import { projectToolResultForUser } from "@/lib/agent/surface-projection";
 import {
   buildRunContext,
@@ -127,6 +128,33 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
       images: item.content.images ? [...item.content.images] : undefined,
       timestamp: item.createdAt,
     }));
+    const originalContract = asTaskContract(input.run.contract);
+    const checkpointMatchingScope = typeof input.checkpoint?.context.jdMatchResume === "boolean"
+      ? input.checkpoint.context.jdMatchResume
+      : undefined;
+    const checkpointSourceKey = typeof input.checkpoint?.context.jdSourceKey === "string"
+      ? input.checkpoint.context.jdSourceKey
+      : latestJDSourceKey(runContextMessages(input.checkpoint?.context.messages));
+    const jdScope = originalContract?.taskType === "jd_evaluation"
+      ? resolveJDMatchingScope(durableMessages, checkpointSourceKey, checkpointMatchingScope ?? originalContract.routing?.jdMatchResume)
+      : null;
+    const jdMatchResume = jdScope?.matchResume;
+    const jdSourceChanged = jdScope?.sourceChanged === true;
+    const contextInputs = jdSourceChanged
+      ? durableMessages.slice(jdScope.sourceStartIndex)
+      : durableMessages;
+    const safeContextInputs = jdMatchResume === false
+      ? filterJDNoResumeMessages(contextInputs)
+      : contextInputs;
+    const effectiveContract = originalContract?.taskType === "jd_evaluation"
+      ? {
+          ...originalContract,
+          ...(jdMatchResume === false
+            ? { target: "仅评估当前 JD，不读取或匹配简历" }
+            : jdSourceChanged ? { target: "评估当前用户提供的 JD" } : {}),
+          routing: { ...originalContract.routing, jdMatchResume },
+        }
+      : input.run.contract;
     const durableConversationMessages = pendingInputs
       .filter((item) => item.content.persistInConversation !== false)
       .map((item) => ({
@@ -148,28 +176,40 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
           content: `[RECOVERY action=${String(recoveryDecision.action || "safe_tool_replan")}] ${String(recoveryObservation.userSafeSummary || "上一次执行路径失败，请使用尚未尝试的安全方法继续原任务。")}`,
         }]
       : [];
-    const checkpointMessages = runContextMessages(input.checkpoint?.context.messages);
+    const checkpointMessages = (jdSourceChanged ? [] : runContextMessages(input.checkpoint?.context.messages))
+      .filter((message) => !(message.role === "system" && message.content.startsWith("Durable Run Contract:")));
+    const contextCheckpointMessages = jdMatchResume === false
+      ? filterJDNoResumeMessages(checkpointMessages)
+      : checkpointMessages;
+    const contextConversationMessages = jdSourceChanged
+      ? []
+      : jdMatchResume === false
+      ? filterJDNoResumeMessages(runContextMessages(priorMessages))
+      : runContextMessages(priorMessages);
+    const contextCompletedToolFacts = jdMatchResume === false || jdSourceChanged ? [] : durableMaterial.completedToolFacts;
+    const contextRecoveryObservations = jdMatchResume === false || jdSourceChanged ? [] : durableMaterial.recoveryObservations;
+    const contextEvidence = jdMatchResume === false || jdSourceChanged ? [] : durableMaterial.evidence;
     const rebuiltContext = buildRunContext({
-      contract: input.run.contract,
+      contract: effectiveContract,
       checkpoint: {
-        messages: checkpointMessages,
-        plan: input.checkpoint?.plan || {},
-        factRefs: input.checkpoint?.factRefs || [],
+        messages: contextCheckpointMessages,
+        plan: jdSourceChanged ? {} : input.checkpoint?.plan || {},
+        factRefs: jdSourceChanged ? [] : input.checkpoint?.factRefs || [],
       },
-      conversationMessages: runContextMessages(priorMessages),
-      pendingInputs: [...recoveryMessages, ...durableMessages],
-      completedToolFacts: durableMaterial.completedToolFacts,
-      recoveryObservations: durableMaterial.recoveryObservations,
-      evidence: durableMaterial.evidence,
-      gates: durableMaterial.gates,
-      factRefs: durableMaterial.factRefs,
+      conversationMessages: contextConversationMessages,
+      pendingInputs: [...(jdMatchResume === false || jdSourceChanged ? [] : recoveryMessages), ...safeContextInputs],
+      completedToolFacts: contextCompletedToolFacts,
+      recoveryObservations: contextRecoveryObservations,
+      evidence: contextEvidence,
+      gates: jdSourceChanged ? [] : durableMaterial.gates,
+      factRefs: jdSourceChanged ? [] : durableMaterial.factRefs,
     });
     const messages: ExecutionConversationMessage[] = rebuiltContext.messages;
     const checkpointConversationMessages = executionConversationMessages(
       input.checkpoint?.context.conversationMessages,
     );
     const baseConversationMessages = checkpointConversationMessages.length > 0
-      ? checkpointConversationMessages
+      ? appendPendingConversationMessages(checkpointConversationMessages, durableConversationMessages)
       : [...priorMessages, ...durableConversationMessages];
     const conversationMessages = reconcileExecutionRunGates(baseConversationMessages, durableMaterial.gates);
     const forceCompaction = String(recoveryDecision.action || "") === "compact_context";
@@ -178,9 +218,14 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
       ? Math.min(24_000, configuredContextLimit)
       : configuredContextLimit;
     const executionContext = compactExecutionConversation(messages, contextLimit);
-    const latestInput = durableMessages.at(-1)?.content
+    const latestDurableMessage = durableMessages.at(-1);
+    const latestInput = latestDurableMessage?.content
+      || (latestDurableMessage?.images?.length ? "请分析我刚才发送的图片。" : "")
       || String(input.checkpoint?.context.latestInput || "");
     if (!latestInput) throw new Error("Agent Run has no durable input to execute");
+    const modelLatestInput = jdMatchResume === false
+      ? safeContextInputs.at(-1)?.content || "请仅分析当前 JD；若缺少正文，请让我补充 JD 文字或截图。"
+      : latestInput;
 
     await this.options.runtime.saveCheckpoint({
       runId: input.run.id,
@@ -191,6 +236,8 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
         messages: executionContext.messages,
         conversationMessages,
         latestInput,
+        jdMatchResume,
+        jdSourceKey: jdScope?.sourceKey,
         compacted: executionContext.compacted,
         omittedMessageCount: executionContext.omittedCount,
         ...(Object.keys(recovery).length > 0 ? { recovery } : {}),
@@ -222,7 +269,7 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
     const completedCriteria = new Set<string>();
     const contract = asTaskContract(rebuiltContext.contract);
     const stream = this.orchestrate({
-      content: latestInput,
+      content: modelLatestInput,
       messages: executionContext.messages,
       agentId: input.run.agentId,
       sessionId: input.run.conversationId,
@@ -331,6 +378,8 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
         executionMessages: executionContext.messages,
         conversationMessages,
         latestInput,
+        jdMatchResume,
+        jdSourceKey: jdScope?.sourceKey,
         compacted: executionContext.compacted,
         omittedMessageCount: executionContext.omittedCount,
         plan: rebuiltContext.plan,
@@ -366,6 +415,8 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
         executionMessages: executionContext.messages,
         conversationMessages,
         latestInput,
+        jdMatchResume,
+        jdSourceKey: jdScope?.sourceKey,
         compacted: executionContext.compacted,
         omittedMessageCount: executionContext.omittedCount,
         plan: rebuiltContext.plan,
@@ -388,22 +439,41 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
     }
     const contractOutcome = contract
       ? resolveTaskContractRunOutcome(contract, Array.from(completedCriteria), {
-          requiresClarification: contract.routing?.requiresClarification || waitingUserRequested,
+          requiresClarification: waitingUserRequested || Boolean(
+            contract.taskType !== "resume_diagnosis" && contract.routing?.requiresClarification
+          ),
           hasAssistantResponse: Boolean(assistantText.trim()),
           hasUserVisibleArtifact,
         })
       : null;
-    if (contractOutcome?.status === "failed" && contractOutcome.replaceAssistantMessage && contractOutcome.safeMessage) {
+    const recoveryActionAttempts = asRecord(input.checkpoint?.budgets.actionAttempts);
+    const contractRecoveryExhausted = Number(recoveryActionAttempts.safe_tool_replan || 0) >= 2;
+    const contractNoticeRequired = Boolean(
+      contractOutcome?.safeMessage
+      && !terminalToolFailure
+      && (
+        (contractOutcome.status === "waiting_user" && contractOutcome.replaceAssistantMessage)
+        || (contractOutcome.status === "failed" && contractRecoveryExhausted)
+      ),
+    );
+    const contractRecoveryPending = contractOutcome?.status === "failed"
+      && !terminalToolFailure
+      && !contractNoticeRequired;
+    if ((contractNoticeRequired || terminalToolFailure && contractOutcome?.replaceAssistantMessage) && contractOutcome?.safeMessage) {
+      assistantText = contractOutcome.safeMessage;
+    } else if (contractOutcome?.status === "waiting_user" && !assistantText.trim() && contractOutcome.safeMessage) {
       assistantText = contractOutcome.safeMessage;
     }
-    if (assistantText.trim()) {
+    if (assistantText.trim() && !contractRecoveryPending) {
       projectedMessages.push({
         role: "assistant",
         content: assistantText,
         timestamp: new Date().toISOString(),
       });
     }
-    const completedConversationMessages = [...conversationMessages, ...projectedMessages];
+    const completedConversationMessages = contractRecoveryPending
+      ? conversationMessages
+      : [...conversationMessages, ...projectedMessages];
     const completedRunContext = compactExecutionConversation([
       ...executionContext.messages,
       ...projectedMessages.map(({ role, content, images, toolName, timestamp }) => ({
@@ -418,19 +488,21 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
       id: randomUUID(),
       outcome: terminalToolFailure
         ? "failed"
-        : contractOutcome?.status
+        : contractNoticeRequired
+          ? "waiting_user"
+          : contractOutcome?.status
         || (waitingUserRequested
           ? "waiting_user"
           : assistantText.trim() || projectedMessages.length > 0 ? "succeeded" : "failed"),
-      charCount: assistantText.length,
-      toolResultCount: projectedMessages.filter((message) => message.role === "tool").length,
+      charCount: contractRecoveryPending ? 0 : assistantText.length,
+      toolResultCount: contractRecoveryPending ? 0 : projectedMessages.filter((message) => message.role === "tool").length,
       failure: terminalToolFailure,
       contractEvaluation: contractOutcome
         ? {
             canClaimSuccess: contractOutcome.gate.canClaimSuccess,
             completedCriteria: contractOutcome.gate.completedCriteria,
             unmetCriteria: contractOutcome.gate.unmetCriteria,
-            outcome: contractOutcome.status,
+            outcome: contractNoticeRequired ? "waiting_user" : contractOutcome.status,
           }
         : undefined,
     };
@@ -443,6 +515,8 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
         messages: completedRunContext.messages,
         conversationMessages: completedConversationMessages,
         latestInput,
+        jdMatchResume,
+        jdSourceKey: jdScope?.sourceKey,
         compacted: completedRunContext.compacted,
         omittedMessageCount: completedRunContext.omittedCount,
         modelCompletion: completion,
@@ -460,6 +534,8 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
     executionMessages: ExecutionConversationMessage[];
     conversationMessages: ExecutionConversationMessage[];
     latestInput: string;
+    jdMatchResume?: boolean;
+    jdSourceKey?: string;
     compacted: boolean;
     omittedMessageCount: number;
     plan: Record<string, unknown>;
@@ -474,6 +550,8 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
         messages: input.executionMessages,
         conversationMessages: input.conversationMessages,
         latestInput: input.latestInput,
+        jdMatchResume: input.jdMatchResume,
+        jdSourceKey: input.jdSourceKey,
         compacted: input.compacted,
         omittedMessageCount: input.omittedMessageCount,
         interruptedModelOutput: {
@@ -559,6 +637,86 @@ function asTaskContract(value: unknown): AgentTaskContract | null {
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function resolveJDMatchingScope(
+  messages: Array<{ content: string; images?: string[] }>,
+  previousSourceKey: string | undefined,
+  previousMatchResume: boolean | undefined,
+): { sourceKey?: string; matchResume?: boolean; sourceChanged: boolean; sourceStartIndex: number } {
+  let sourceKey = previousSourceKey;
+  let matchResume = previousMatchResume;
+  let sourceChanged = false;
+  let sourceStartIndex = 0;
+  for (const [index, message] of messages.entries()) {
+    const nextSourceKey = jdSourceKeyForMessage(message);
+    if (nextSourceKey) {
+      if (sourceKey && nextSourceKey !== sourceKey) {
+        matchResume = undefined;
+        sourceChanged = true;
+        sourceStartIndex = index;
+      }
+      sourceKey = nextSourceKey;
+    }
+    const directive = inferJDResumeMatchingDirective(message.content);
+    if (directive !== undefined) matchResume = directive;
+  }
+  return { sourceKey, matchResume, sourceChanged, sourceStartIndex };
+}
+
+function latestJDSourceKey(messages: RunContextMessage[]): string | undefined {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index].role !== "user") continue;
+    const sourceKey = jdSourceKeyForMessage(messages[index]);
+    if (sourceKey) return sourceKey;
+  }
+  return undefined;
+}
+
+function jdSourceKeyForMessage(message: { content: string; images?: string[] }): string | undefined {
+  const images = (message.images || []).filter((image) => image.startsWith("data:image/"));
+  if (images.length > 0) return `image:${hashJDSource(images.join("\n"))}`;
+  const jdId = message.content.match(/\bjdId\s*[=:：]\s*(\d+)/i)?.[1];
+  if (jdId) return `id:${jdId}`;
+  const text = message.content.replace(/\s+/g, " ").trim();
+  const urlMatch = /https?:\/\/[^\s)）]+/i.exec(text);
+  if (urlMatch) {
+    const url = urlMatch[0];
+    const urlIntroducedAsJD = /(?:\bJD\b|岗位|职位|招聘|job|position)(?:信息|发布)?(?:链接|地址|网址|页面|url)?\s*[:：]\s*$/i.test(text.slice(0, urlMatch.index));
+    const jobPostingUrl = /\/(?:jobs?|job_detail|positions?|careers?)(?:[/?#_-]|$)|[?&](?:jobid|jdId|positionId)=/i.test(url);
+    if (text === url || urlIntroducedAsJD || jobPostingUrl) {
+      return `url:${hashJDSource(url.replace(/[.,，。；;!?！?]+$/, "").toLowerCase())}`;
+    }
+  }
+  if (text.length < 50) return undefined;
+  const hasJDStructure = /(?:\bJD\b|岗位职责|任职要求|职位描述|工作内容|招聘要求|工作职责|岗位要求|job description|responsibilit(?:y|ies)|requirements?|qualifications?|about the role)\s*[:：]|(?:岗位职责|任职要求|职位描述|工作内容|招聘要求|工作职责|岗位要求)\s*是(?!否|不)|we are hiring|you will be responsible/i.test(text);
+  if (!hasJDStructure) return undefined;
+  return `text:${hashJDSource(text)}`;
+}
+
+function hashJDSource(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function filterJDNoResumeMessages(messages: RunContextMessage[]): RunContextMessage[] {
+  return messages.flatMap((message) => {
+    if (message.role === "assistant") {
+      const isJDAnalysis = /\bJD\b|岗位|职位|招聘|任职|工作内容|job description|responsibilit|requirement|qualification|hiring|\brole\b/i.test(message.content);
+      const includesPersonalContext = /简历|履历|\bcv\b|\bresume\b|匹配|适配|契合|对照|比较|候选人|求职者|(?:你|您|我|本人|个人).{0,12}(?:经历|背景|能力|经验|项目|学历|工作)|手机号|手机|电话|邮箱|身份证|学校|毕业|项目经历|工作经历|实习|姓名|\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b|\b1[3-9]\d{9}\b/i.test(message.content);
+      return isJDAnalysis && !includesPersonalContext ? [{ ...message, images: undefined }] : [];
+    }
+    if (message.role !== "user") return [];
+    const resumeContent = /(?:我的|本人|个人)?(?:简历|履历|\bcv\b|\bresume\b)\s*(?:内容|如下|全文|文本|信息)?\s*[:：]/i.exec(message.content);
+    if (!resumeContent) return [message];
+    const beforeResume = message.content.slice(0, resumeContent.index);
+    const afterResume = message.content.slice(resumeContent.index + resumeContent[0].length);
+    const laterJD = /(?:\bJD\b|job description|职位描述)\s*[:：]/i.exec(afterResume);
+    const jdOnly = [beforeResume, laterJD ? afterResume.slice(laterJD.index) : ""]
+      .filter((part) => /\bJD\b|job description|岗位职责|任职要求|职位描述|responsibilities|requirements|qualifications/i.test(part))
+      .join("\n")
+      .trim();
+    return jdOnly ? [{ ...message, content: jdOnly, images: undefined }] : [];
+  });
 }
 
 function readStoredModelCompletion(value: unknown): StoredModelCompletion | null {
@@ -667,6 +825,26 @@ function executionConversationMessages(value: unknown): ExecutionConversationMes
   });
 }
 
+function appendPendingConversationMessages(
+  conversationMessages: ExecutionConversationMessage[],
+  pendingMessages: ExecutionConversationMessage[],
+): ExecutionConversationMessage[] {
+  const existing = new Set(conversationMessages.map((message) => JSON.stringify([
+    message.role,
+    message.content,
+    message.images || [],
+    message.timestamp,
+  ])));
+  const appended = [...conversationMessages];
+  for (const message of pendingMessages) {
+    const key = JSON.stringify([message.role, message.content, message.images || [], message.timestamp]);
+    if (existing.has(key)) continue;
+    existing.add(key);
+    appended.push(message);
+  }
+  return appended;
+}
+
 const emptyRunContextSource: DurableRunContextSource = {
   load: async () => ({ completedToolFacts: [], recoveryObservations: [], evidence: [], gates: [], factRefs: [] }),
 };
@@ -675,6 +853,7 @@ function addAssistantCriteria(contract: AgentTaskContract | null, completed: Set
   if (!contract) return;
   if (contract.taskType === "general_chat") completed.add("answer generated");
   if (contract.taskType === "resume_query") completed.add("answer generated");
+  if (contract.taskType === "resume_diagnosis") completed.add("answer generated");
   if (contract.taskType === "career_positioning_guidance") {
     completed.add("next question or guidance response generated");
   }

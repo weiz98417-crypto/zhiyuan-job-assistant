@@ -4,23 +4,27 @@ import {
   InMemoryAgentRunStore,
 } from "@/lib/agent/runtime/durable-agent-run";
 import { DurableOrchestratorExecutionEngine } from "@/lib/agent/runtime/durable-orchestrator-engine";
+import { AgentWorker } from "@/lib/agent/runtime/agent-worker";
 import { createAgentTaskContract, type AgentTaskType } from "@/lib/agent/task-contract";
 
 const ADVISORY_TASKS: AgentTaskType[] = [
   "general_chat",
   "career_positioning_guidance",
-  "resume_query",
   "interview_coaching",
 ];
 
 const VERIFIED_EFFECT_TASKS: AgentTaskType[] = [
   "resume_edit",
-  "jd_evaluation",
-  "offer_evaluation",
   "profile_update",
-  "reference_resume_save",
   "file_export",
   "job_search",
+];
+
+const USER_INPUT_TASKS: AgentTaskType[] = [
+  "resume_query",
+  "jd_evaluation",
+  "offer_evaluation",
+  "reference_resume_save",
 ];
 
 describe("Durable Orchestrator execution engine", () => {
@@ -94,8 +98,8 @@ describe("Durable Orchestrator execution engine", () => {
     expect(savedConversations.length).toBeGreaterThan(0);
     expect(savedConversations.at(-1)).toEqual(expect.arrayContaining([
       expect.objectContaining({ role: "user", content: `test:${taskType}` }),
-      expect.objectContaining({ role: "assistant" }),
     ]));
+    expect((savedConversations.at(-1) as Array<{ role: string }>).some((message) => message.role === "assistant")).toBe(false);
   });
 
   it("turns the self-positioning framework into a real first-stage question", async () => {
@@ -216,6 +220,488 @@ describe("Durable Orchestrator execution engine", () => {
       checkpoint: null,
       signal: new AbortController().signal,
     })).rejects.toThrow("Run Contract unmet");
+  });
+
+  it.each(USER_INPUT_TASKS)("offers one actionable continuation when %s has no source", async (taskType) => {
+    const runtime = new DurableAgentRunService(new InMemoryAgentRunStore());
+    const contract = createAgentTaskContract({ taskType, target: `test:${taskType}` });
+    await runtime.createRun(
+      { userId: `user-missing-${taskType}` },
+      {
+        requestId: `request-missing-${taskType}`,
+        conversationId: 102,
+        taskType,
+        agentId: "general",
+        input: { content: `test:${taskType}` },
+        contract,
+      },
+    );
+    const run = await runtime.claimNextRun({ workerId: `worker-missing-${taskType}` });
+    const savedConversations: Array<Array<{ role: string; content: string }>> = [];
+    const engine = new DurableOrchestratorExecutionEngine({
+      runtime,
+      loadConversation: async () => [],
+      saveConversation: async (_principal, _conversationId, messages) => {
+        savedConversations.push(messages);
+      },
+      orchestrate: async function* () {
+        yield { type: "text", content: "处理已经完成。" };
+        yield { type: "done" };
+      },
+    });
+
+    const result = await engine.execute({
+      run: run!,
+      checkpoint: null,
+      signal: new AbortController().signal,
+    });
+
+    expect(result.outcome).toBe("waiting_user");
+    const finalMessages = savedConversations.at(-1) || [];
+    expect(finalMessages.filter((message) => message.role === "assistant")).toHaveLength(1);
+    expect(finalMessages.at(-1)?.content).not.toMatch(/落库|校验|契约|处理已经完成/);
+  });
+
+  it("records two contract recoveries internally and writes one final user notice", async () => {
+    const runtime = new DurableAgentRunService(new InMemoryAgentRunStore());
+    const contract = createAgentTaskContract({ taskType: "file_export", target: "导出报告" });
+    const created = await runtime.createRun(
+      { userId: "user-contract-notice" },
+      {
+        requestId: "request-contract-notice",
+        conversationId: 104,
+        taskType: "file_export",
+        agentId: "general",
+        input: { content: "导出报告" },
+        contract,
+      },
+    );
+    let modelCalls = 0;
+    const savedConversations: Array<Array<{ role: string; content: string }>> = [];
+    const engine = new DurableOrchestratorExecutionEngine({
+      runtime,
+      loadConversation: async () => [],
+      saveConversation: async (_principal, _conversationId, messages) => {
+        savedConversations.push(messages);
+      },
+      orchestrate: async function* () {
+        modelCalls += 1;
+        yield { type: "text", content: "报告已经导出。" };
+      },
+    });
+    const worker = new AgentWorker({ workerId: "worker-contract-notice", runtime, engine });
+
+    await worker.runOnce();
+    await worker.runOnce();
+    const finalRun = await worker.runOnce();
+    const events = await runtime.listEvents({ userId: "user-contract-notice" }, created.run.id, 0);
+
+    expect(finalRun?.status).toBe("waiting_user");
+    expect(modelCalls).toBe(3);
+    expect(events.filter((event) => event.type === "run.contract_evaluated")).toHaveLength(3);
+    expect(events.filter((event) => event.type === "run.recovery_decided")).toHaveLength(2);
+    const assistantMessages = (savedConversations.at(-1) || []).filter((message) => message.role === "assistant");
+    expect(assistantMessages).toHaveLength(1);
+    expect(assistantMessages[0]?.content).not.toMatch(/报告已经导出|落库|校验|契约|成功条件/);
+  });
+
+  it("continues the same Run after the user supplies missing resume text", async () => {
+    const runtime = new DurableAgentRunService(new InMemoryAgentRunStore());
+    const contract = createAgentTaskContract({ taskType: "resume_query", target: "评估简历" });
+    const created = await runtime.createRun(
+      { userId: "user-resume-continuation" },
+      {
+        requestId: "request-resume-continuation",
+        conversationId: 105,
+        taskType: "resume_query",
+        agentId: "resume",
+        input: { content: "评估简历截图" },
+        contract,
+      },
+    );
+    let modelCalls = 0;
+    let savedConversation: Array<{ role: string; content: string }> = [];
+    const engine = new DurableOrchestratorExecutionEngine({
+      runtime,
+      loadConversation: async () => savedConversation,
+      saveConversation: async (_principal, _conversationId, messages) => {
+        savedConversation = messages;
+      },
+      orchestrate: async function* () {
+        modelCalls += 1;
+        if (modelCalls === 1) {
+          yield { type: "text", content: "无法识别截图。" };
+          return;
+        }
+        yield { type: "tool_result", name: "read_file", success: true, result: "已读取本轮简历文字" };
+        yield { type: "text", content: "这份简历可以增加量化成果。" };
+      },
+    });
+    const worker = new AgentWorker({ workerId: "worker-resume-continuation", runtime, engine });
+
+    expect((await worker.runOnce())?.status).toBe("waiting_user");
+    await runtime.submitInput(
+      { userId: "user-resume-continuation" },
+      created.run.id,
+      "resume-continuation-text",
+      { content: "这是我的简历文字：负责产品规划和上线。" },
+    );
+    expect((await worker.runOnce())?.status).toBe("succeeded");
+
+    const userMessages = savedConversation.filter((message) => message.role === "user");
+    expect(userMessages.map((message) => message.content)).toEqual([
+      "评估简历截图",
+      "这是我的简历文字：负责产品规划和上线。",
+    ]);
+    expect(savedConversation.filter((message) => message.role === "assistant")).toHaveLength(2);
+  });
+
+  it("retains a no-resume instruction across later turns of the same JD Run", async () => {
+    const runtime = new DurableAgentRunService(new InMemoryAgentRunStore());
+    const userId = "user-jd-scope-continuation";
+    const contract = createAgentTaskContract({
+      taskType: "jd_evaluation",
+      target: "评估这个 JD",
+      routing: { jdMatchResume: true },
+    });
+    const created = await runtime.createRun(
+      { userId },
+      {
+        requestId: "request-jd-scope-continuation",
+        conversationId: 206,
+        taskType: "jd_evaluation",
+        agentId: "evaluate",
+        input: { content: "评估这个 JD" },
+        contract,
+      },
+    );
+    const matchingScopes: Array<boolean | undefined> = [];
+    const engine = new DurableOrchestratorExecutionEngine({
+      runtime,
+      loadConversation: async () => [],
+      saveConversation: async () => undefined,
+      orchestrate: async function* (input) {
+        matchingScopes.push(input.taskContract?.routing?.jdMatchResume);
+        yield { type: "text", content: "请继续提供 JD 内容。" };
+        yield { type: "run_directive", directive: "wait_user", reason: "等待 JD 内容" };
+      },
+    });
+    const worker = new AgentWorker({ workerId: "worker-jd-scope-continuation", runtime, engine });
+
+    expect((await worker.runOnce())?.status).toBe("waiting_user");
+    await runtime.submitInput(
+      { userId }, created.run.id, "jd-scope-opt-out",
+      { content: "不要匹配我的简历，这不是我求职" },
+    );
+    expect((await worker.runOnce())?.status).toBe("waiting_user");
+    expect((await runtime.getLatestCheckpoint({ userId }, created.run.id))?.context.jdMatchResume).toBe(false);
+    await runtime.submitInput(
+      { userId }, created.run.id, "jd-scope-follow-up",
+      { content: "继续分析这个 JD 的风险" },
+    );
+    expect((await worker.runOnce())?.status).toBe("waiting_user");
+    expect(matchingScopes).toEqual([true, false, false]);
+  });
+
+  it("keeps the no-resume scope and prior JD analysis for a long follow-up without a new JD", async () => {
+    const runtime = new DurableAgentRunService(new InMemoryAgentRunStore());
+    const userId = "user-jd-long-follow-up";
+    const initialJD = "不要匹配我的简历。岗位职责：负责 AI 产品规划、需求研究与跨团队交付，推动复杂项目上线。任职要求：五年产品经验，熟悉数据分析与用户访谈。";
+    const followUp = `${"请继续分析刚才那份材料的风险点，重点说明任职要求与团队协作中可能存在的问题，并给出面试时可以进一步核实的具体问题。".repeat(4)}参考资料：https://example.com/articles/team-coordination`;
+    expect(followUp.length).toBeGreaterThan(200);
+    const created = await runtime.createRun({ userId }, {
+      requestId: "request-jd-long-follow-up",
+      conversationId: 209,
+      taskType: "jd_evaluation",
+      agentId: "evaluate",
+      input: { content: initialJD },
+      contract: createAgentTaskContract({ taskType: "jd_evaluation", target: initialJD, routing: { jdMatchResume: false } }),
+    });
+    const matchingScopes: Array<boolean | undefined> = [];
+    const modelMessages: Array<Array<{ role: string; content: string }>> = [];
+    const engine = new DurableOrchestratorExecutionEngine({
+      runtime,
+      loadConversation: async () => [
+        { role: "assistant", content: "岗位职责涉及跨团队交付，任职要求强调数据分析。" },
+        { role: "assistant", content: "岗位适配你的简历：你曾负责秘密项目北斗。" },
+        { role: "assistant", content: "岗位信息中包含联系人手机号 13800000000。" },
+      ],
+      saveConversation: async () => undefined,
+      orchestrate: async function* (input) {
+        matchingScopes.push(input.taskContract?.routing?.jdMatchResume);
+        modelMessages.push(input.messages);
+        yield { type: "text", content: "请继续提供 JD 内容。" };
+        yield { type: "run_directive", directive: "wait_user", reason: "等待 JD 内容" };
+      },
+    });
+    const worker = new AgentWorker({ workerId: "worker-jd-long-follow-up", runtime, engine });
+
+    expect((await worker.runOnce())?.status).toBe("waiting_user");
+    const initialSourceKey = (await runtime.getLatestCheckpoint({ userId }, created.run.id))?.context.jdSourceKey;
+    expect(initialSourceKey).toMatch(/^text:/);
+    await runtime.submitInput({ userId }, created.run.id, "jd-long-follow-up", { content: followUp });
+    expect((await worker.runOnce())?.status).toBe("waiting_user");
+
+    const laterMessages = JSON.stringify(modelMessages[1]);
+    expect(matchingScopes).toEqual([false, false]);
+    expect((await runtime.getLatestCheckpoint({ userId }, created.run.id))?.context.jdSourceKey).toBe(initialSourceKey);
+    expect(laterMessages).toContain(initialJD);
+    expect(laterMessages).toContain(followUp);
+    expect(modelMessages[1]).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: "assistant", content: "岗位职责涉及跨团队交付，任职要求强调数据分析。" }),
+    ]));
+    expect(laterMessages).not.toContain("秘密项目北斗");
+    expect(laterMessages).not.toContain("13800000000");
+  });
+
+  it.each(["image", "text", "chinese"] as const)("restores default matching when a waiting Run receives a new %s JD", async (sourceKind) => {
+    const runtime = new DurableAgentRunService(new InMemoryAgentRunStore());
+    const userId = `user-new-jd-${sourceKind}`;
+    const firstContent = sourceKind === "image"
+      ? "不要匹配我的简历，评估这份 JD"
+      : "不要匹配我的简历。岗位职责：负责产品路线图和跨团队交付，任职要求：具备多年产品管理和数据分析经验，能够推动复杂项目落地。";
+    const nextContent = sourceKind === "image"
+      ? "评估这份新的 JD"
+      : sourceKind === "chinese"
+        ? "岗位职责：负责企业客户需求研究、产品路线图规划与跨团队交付。任职要求：具备数据分析能力和丰富的 B 端产品经验。"
+        : "We are hiring a product manager to own customer discovery, product strategy, launch planning, and cross-functional delivery. Requirements include strong analytics and communication skills across software teams.";
+    const created = await runtime.createRun({ userId }, {
+      requestId: `request-new-jd-${sourceKind}`,
+      conversationId: 207,
+      taskType: "jd_evaluation",
+      agentId: "evaluate",
+      input: { content: firstContent, ...(sourceKind === "image" ? { images: ["data:image/png;base64,source-a"] } : {}) },
+      contract: createAgentTaskContract({ taskType: "jd_evaluation", target: firstContent, routing: { jdMatchResume: false } }),
+    });
+    const matchingScopes: Array<boolean | undefined> = [];
+    const modelMessages: string[][] = [];
+    const engine = new DurableOrchestratorExecutionEngine({
+      runtime,
+      loadConversation: async () => [],
+      saveConversation: async () => undefined,
+      orchestrate: async function* (input) {
+        matchingScopes.push(input.taskContract?.routing?.jdMatchResume);
+        modelMessages.push(input.messages.map((message) => message.content));
+        yield { type: "text", content: "请继续提供 JD 内容。" };
+        yield { type: "run_directive", directive: "wait_user", reason: "等待 JD 内容" };
+      },
+    });
+    const worker = new AgentWorker({ workerId: `worker-new-jd-${sourceKind}`, runtime, engine });
+
+    expect((await worker.runOnce())?.status).toBe("waiting_user");
+    await runtime.submitInput({ userId }, created.run.id, `next-jd-${sourceKind}`, {
+      content: nextContent,
+      ...(sourceKind === "image" ? { images: ["data:image/png;base64,source-b"] } : {}),
+    });
+    expect((await worker.runOnce())?.status).toBe("waiting_user");
+
+    expect(matchingScopes).toEqual([false, undefined]);
+    expect(modelMessages[1].join("\n")).toContain(nextContent);
+    expect(modelMessages[1].join("\n")).not.toContain(firstContent);
+    expect((await runtime.getLatestCheckpoint({ userId }, created.run.id))?.context.jdMatchResume).toBeUndefined();
+  });
+
+  it("applies the last explicit matching directive in batched inputs and hides old resume context", async () => {
+    const runtime = new DurableAgentRunService(new InMemoryAgentRunStore());
+    const userId = "user-jd-scope-batch";
+    const contract = createAgentTaskContract({
+      taskType: "jd_evaluation",
+      target: "评估这个 JD",
+      routing: { jdMatchResume: true },
+    });
+    const created = await runtime.createRun(
+      { userId },
+      {
+        requestId: "request-jd-scope-batch",
+        conversationId: 207,
+        taskType: "jd_evaluation",
+        agentId: "evaluate",
+        input: { content: "评估这份 JD：岗位职责是开发 AI 产品，任职要求是五年以上产品经验。" },
+        contract,
+      },
+    );
+    let seenMessages: Array<{ role: string; content: string }> = [];
+    let seenScope: boolean | undefined;
+    const engine = new DurableOrchestratorExecutionEngine({
+      runtime,
+      loadConversation: async () => [
+        { role: "user", content: "不要匹配我的简历。评估这份 JD：岗位职责是开发 AI 产品。" },
+        { role: "user", content: "我的简历内容如下：负责销售项目。" },
+        { role: "assistant", content: "岗位职责包含 AI 产品规划，任职要求侧重交付能力。" },
+        { role: "assistant", content: "你的简历匹配度是 80%。" },
+        { role: "tool", content: "候选人画像含销售经历。" },
+      ],
+      saveConversation: async () => undefined,
+      orchestrate: async function* (input) {
+        seenScope = input.taskContract?.routing?.jdMatchResume;
+        seenMessages = input.messages;
+        yield { type: "text", content: "请继续提供 JD 内容。" };
+        yield { type: "run_directive", directive: "wait_user", reason: "等待 JD 内容" };
+      },
+      contextSource: {
+        load: async () => ({
+          completedToolFacts: [{ toolName: "read_file", summary: "候选人简历里有销售经历" }],
+          recoveryObservations: [{ toolName: "read_file", summary: "已读取简历" }],
+          evidence: [{ type: "model.output_complete", content: "你的简历匹配度是 80%。" }],
+          gates: [],
+          factRefs: [],
+        }),
+      },
+    });
+    const worker = new AgentWorker({ workerId: "worker-jd-scope-batch", runtime, engine });
+    expect((await worker.runOnce())?.status).toBe("waiting_user");
+    await runtime.submitInput(
+      { userId }, created.run.id, "jd-batch-opt-out",
+      { content: "不要匹配我的简历" },
+    );
+    await runtime.submitInput(
+      { userId }, created.run.id, "jd-batch-follow-up",
+      { content: "继续分析这个 JD" },
+    );
+
+    expect((await worker.runOnce())?.status).toBe("waiting_user");
+    expect(seenScope).toBe(false);
+    expect(seenMessages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: "user", content: expect.stringContaining("岗位职责") }),
+      expect.objectContaining({ role: "user", content: "继续分析这个 JD" }),
+      expect.objectContaining({ role: "assistant", content: "岗位职责包含 AI 产品规划，任职要求侧重交付能力。" }),
+    ]));
+    expect(JSON.stringify(seenMessages)).not.toMatch(/销售经历|匹配度是 80%|已读取简历/);
+  });
+
+  it("keeps the JD but removes resume text from a mixed no-match message", async () => {
+    const runtime = new DurableAgentRunService(new InMemoryAgentRunStore());
+    await runtime.createRun({ userId: "user-mixed-jd-resume" }, {
+      requestId: "request-mixed-jd-resume",
+      conversationId: 208,
+      taskType: "jd_evaluation",
+      agentId: "evaluate",
+      input: {
+        content: "不要匹配我的简历。JD：岗位职责：负责 AI 产品规划与交付。任职要求：五年产品经验，熟悉数据分析。我的简历：秘密项目代号北斗，曾负责内部销售平台。",
+      },
+      contract: createAgentTaskContract({ taskType: "jd_evaluation", target: "评估当前 JD", routing: { jdMatchResume: false } }),
+    });
+    let modelInput = "";
+    let modelMessages = "";
+    const engine = new DurableOrchestratorExecutionEngine({
+      runtime,
+      loadConversation: async () => [],
+      saveConversation: async () => undefined,
+      orchestrate: async function* (input) {
+        modelInput = input.content;
+        modelMessages = JSON.stringify(input.messages);
+        yield { type: "text", content: "请继续提供 JD 内容。" };
+        yield { type: "run_directive", directive: "wait_user", reason: "等待 JD 内容" };
+      },
+    });
+    const worker = new AgentWorker({ workerId: "worker-mixed-jd-resume", runtime, engine });
+
+    expect((await worker.runOnce())?.status).toBe("waiting_user");
+    expect(modelInput).toContain("岗位职责");
+    expect(modelMessages).toContain("任职要求");
+    expect(`${modelInput}${modelMessages}`).not.toContain("秘密项目代号北斗");
+  });
+
+  it("resumes screenshot diagnosis after pasted text clears its original clarification", async () => {
+    const runtime = new DurableAgentRunService(new InMemoryAgentRunStore());
+    const contract = createAgentTaskContract({
+      taskType: "resume_diagnosis",
+      target: "评估这份简历",
+      routing: { requiresClarification: true, clarificationQuestion: "请在当前对话粘贴简历文字。" },
+    });
+    const created = await runtime.createRun(
+      { userId: "user-resume-diagnosis-continuation" },
+      {
+        requestId: "request-resume-diagnosis-continuation",
+        conversationId: 205,
+        taskType: "resume_diagnosis",
+        agentId: "resume",
+        input: { content: "评估这份简历", images: ["data:image/png;base64,unreadable"] },
+        contract,
+      },
+    );
+    let turnCount = 0;
+    let savedConversation: Array<{ role: string; content: string }> = [];
+    const engine = new DurableOrchestratorExecutionEngine({
+      runtime,
+      loadConversation: async () => savedConversation,
+      saveConversation: async (_principal, _conversationId, messages) => {
+        savedConversation = messages;
+      },
+      orchestrate: async function* () {
+        turnCount += 1;
+        if (turnCount === 1) {
+          yield { type: "text", content: "请在当前对话粘贴简历文字。" };
+          yield { type: "run_directive", directive: "wait_user", reason: "等待补充文字" };
+          return;
+        }
+        yield { type: "text", content: "这份简历应补充项目成果数字和标准 ATS 标题。" };
+      },
+    });
+    const worker = new AgentWorker({ workerId: "worker-resume-diagnosis-continuation", runtime, engine });
+
+    expect((await worker.runOnce())?.status).toBe("waiting_user");
+    await runtime.submitInput(
+      { userId: "user-resume-diagnosis-continuation" },
+      created.run.id,
+      "resume-diagnosis-paste",
+      { content: "工作经历：负责 AI 产品规划。项目经历：搭建 RAG 知识库。" },
+    );
+    expect((await worker.runOnce())?.status).toBe("succeeded");
+    expect(turnCount).toBe(2);
+    expect(savedConversation.filter((message) => message.role === "assistant").map((message) => message.content)).toEqual([
+      "请在当前对话粘贴简历文字。",
+      "这份简历应补充项目成果数字和标准 ATS 标题。",
+    ]);
+  });
+
+  it("does not repeat a JD write when the report exists but read-back is unverified", async () => {
+    const runtime = new DurableAgentRunService(new InMemoryAgentRunStore());
+    const contract = createAgentTaskContract({ taskType: "jd_evaluation", target: "评估 JD" });
+    const created = await runtime.createRun(
+      { userId: "user-jd-unverified" },
+      {
+        requestId: "request-jd-unverified",
+        conversationId: 106,
+        taskType: "jd_evaluation",
+        agentId: "evaluate",
+        input: { content: "评估这份 JD" },
+        contract,
+      },
+    );
+    let modelCalls = 0;
+    let savedConversation: Array<{ role: string; content: string }> = [];
+    const engine = new DurableOrchestratorExecutionEngine({
+      runtime,
+      loadConversation: async () => savedConversation,
+      saveConversation: async (_principal, _conversationId, messages) => {
+        savedConversation = messages;
+      },
+      orchestrate: async function* () {
+        modelCalls += 1;
+        yield {
+          type: "tool_result",
+          name: "evaluate_jd_full",
+          success: true,
+          result: "分析已生成",
+          data: {
+            jdText: "这是一份包含职责和任职要求的足够长的岗位描述文本。",
+            blocks: Object.fromEntries("abcdefg".split("").map((key) => [key, `${key} 分析结果`])),
+            reportNum: 7,
+          },
+        };
+        yield { type: "text", content: "已保存 JD 评估报告。" };
+      },
+    });
+    const worker = new AgentWorker({ workerId: "worker-jd-unverified", runtime, engine });
+
+    expect((await worker.runOnce())?.status).toBe("waiting_user");
+    const events = await runtime.listEvents({ userId: "user-jd-unverified" }, created.run.id, 0);
+    expect(events.filter((event) => event.type === "run.recovery_decided")).toHaveLength(0);
+    expect(modelCalls).toBe(1);
+    expect(savedConversation.filter((message) => message.role === "assistant")).toEqual([
+      expect.objectContaining({ content: expect.not.stringContaining("已保存") }),
+    ]);
   });
 
   it("consumes durable input and persists only redacted UI event envelopes", async () => {

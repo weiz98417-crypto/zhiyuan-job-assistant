@@ -616,14 +616,27 @@ export async function* agentLoopClient(
   tools?: Array<{ type: string; function: object }>,
   runtimeContext?: AgentLoopRuntimeContext,
 ): AsyncGenerator<SSEEvent> {
+  const latestInput = latestUserTurn(messages);
+  const resumeDiagnosis = runtimeContext?.taskContract?.taskType === "resume_diagnosis"
+    || (latestInput.images.length > 0
+      && routeImageIntake(latestInput.text, runtimeContext?.imageIntake ?? null).route === "resume_diagnosis");
+  const activeSystemPrompt = resumeDiagnosis
+    ? `${systemPrompt}\n当前任务是只读简历诊断：优先分析本轮上传的简历截图或粘贴的文字；不要读取或修改已保存简历。没有 JD 时评估内容、结构、ATS 可读性、成果证据缺口并给具体建议；有 JD 才额外匹配。读不清时请用户在当前对话粘贴文字继续。`
+    : systemPrompt;
   const state: LoopState = {
     iteration: 0,
     consecutiveFailures: 0,
-    contextSize: estimateTokens(messages) + systemPrompt.replace(/[\u4e00-\u9fff]/g, 'aa').length,
+    contextSize: estimateTokens(messages) + activeSystemPrompt.replace(/[\u4e00-\u9fff]/g, 'aa').length,
     phase: "understanding",
   };
 
   let ctx: LoopMessage[] = messages.map((m) => ({ role: m.role, content: m.content, images: m.images }));
+  if (resumeDiagnosis && latestInput.index >= 0 && runtimeContext?.imageIntake?.extractedText?.trim()) {
+    ctx[latestInput.index] = {
+      role: "user",
+      content: `${ctx[latestInput.index].content}\n\n本轮简历截图识别文字：\n${runtimeContext.imageIntake.extractedText.slice(0, 16000)}`,
+    };
+  }
   let firstIteration = true;
   let autoRetryCount = 0;
   let forceTextOnly = false; // Set after degradeToUser: next iteration LLM responds with text only, no tools
@@ -765,7 +778,8 @@ export async function* agentLoopClient(
         decision &&
         !imagePlan &&
         decision.route !== "evaluate_jd" &&
-        decision.route !== "evaluate_offer"
+        decision.route !== "evaluate_offer" &&
+        decision.route !== "resume_diagnosis"
       ) {
         state.phase = "responding";
         yield { type: "phase", phase: "responding" };
@@ -798,7 +812,7 @@ export async function* agentLoopClient(
       } else {
         // Outbound requests are capped silently every turn once a chat is long.
         // Reserve the visible compression state for actual in-loop context rewrites.
-        const thinkResponse = await fetchFromThinkProxy(systemPrompt, ctx, signal, searchProgress, skipResearchProtocol, tools);
+        const thinkResponse = await fetchFromThinkProxy(activeSystemPrompt, ctx, signal, searchProgress, skipResearchProtocol, resumeDiagnosis ? [] : tools);
         if (!thinkResponse.ok) {
           yield { type: "phase", phase: "responding" };
           yield { type: "text", content: `AI 请求失败: ${thinkResponse.status}` };
@@ -1447,7 +1461,7 @@ ${followupInstruction}`,
     if (autoRetryCount > MAX_AUTO_RETRY) {
       yield { type: "phase", phase: "responding" };
       yield { type: "text", content: `搜索暂不可用（已尝试 ${autoRetryCount} 次），以下是我基于已有知识的分析：` };
-      const forceResponse = await fetchFromThinkProxy(systemPrompt, ctx, signal, "", skipResearchProtocol, tools);
+      const forceResponse = await fetchFromThinkProxy(activeSystemPrompt, ctx, signal, "", skipResearchProtocol, resumeDiagnosis ? [] : tools);
       if (forceResponse.ok) {
         const streamGen = collectThinkResponseStreaming(forceResponse, signal);
         let streamResult: IteratorResult<SSEEvent, { text: string; toolCalls: NativeToolCall[] }>;

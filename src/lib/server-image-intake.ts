@@ -1,5 +1,5 @@
 import { buildOCRImageCandidates } from "@/lib/server-image-variants";
-import { ZHIPU_API_URL, ZHIPU_VISION_MODEL } from "@/lib/zhipu";
+import { getDeepSeekApiKey, DEEPSEEK_API_URL, DEEPSEEK_VISION_MODEL } from "@/lib/deepseek-provider";
 import type { ImageDocumentType, ImageIntakeResult } from "@/lib/agent/image-intake";
 import type { ImageCandidate } from "@/lib/server-image-variants";
 
@@ -41,11 +41,13 @@ interface CandidateResult {
 interface ScanOptions {
   userText?: string;
   preferredDocumentType?: ImageDocumentType;
+  signal?: AbortSignal;
 }
 
 const MAX_IMAGES = 5;
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
 const CANDIDATE_TIMEOUT_MS = 45_000;
+const SCAN_TIMEOUT_MS = 120_000;
 
 function clampConfidence(value: unknown, fallback = 0.65): number {
   const n = typeof value === "number" ? value : Number(value);
@@ -179,14 +181,15 @@ async function inspectCandidate(
   candidateLabel: string,
   candidateKind: ImageCandidate["kind"],
   preferredDocumentType?: ImageDocumentType,
+  scanSignal?: AbortSignal,
 ): Promise<CandidateResult> {
-  const apiKey = process.env.ZHIPU_API_KEY;
+  const apiKey = getDeepSeekApiKey();
   if (!apiKey) {
     return {
       documentType: "unknown",
       confidence: 0,
       quality: "unknown",
-      reason: "ZHIPU_API_KEY not configured",
+      reason: "DEEPSEEK_API_KEY not configured",
       extractedText: "",
       candidateLabel,
       candidateKind,
@@ -230,14 +233,14 @@ ${hintBlock}`.trim();
 
   let response: Response;
   try {
-    response = await fetch(ZHIPU_API_URL, {
+    response = await fetch(DEEPSEEK_API_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: ZHIPU_VISION_MODEL,
+      model: DEEPSEEK_VISION_MODEL,
       messages: [
         { role: "system", content: systemPrompt },
         {
@@ -256,7 +259,9 @@ ${hintBlock}`.trim();
       max_tokens: 2200,
       response_format: { type: "json_object" },
     }),
-    signal: AbortSignal.timeout(CANDIDATE_TIMEOUT_MS),
+    signal: scanSignal
+      ? AbortSignal.any([scanSignal, AbortSignal.timeout(CANDIDATE_TIMEOUT_MS)])
+      : AbortSignal.timeout(CANDIDATE_TIMEOUT_MS),
   });
   } catch (err) {
     const message = err instanceof Error ? err.message : "OCR request failed";
@@ -336,6 +341,7 @@ async function inspectImage(
   dataUri: string,
   userText: string,
   preferredDocumentType?: ImageDocumentType,
+  scanSignal?: AbortSignal,
 ): Promise<CandidateResult> {
   let candidates: ImageCandidate[] = [];
   try {
@@ -357,7 +363,8 @@ async function inspectImage(
 
   const results: CandidateResult[] = [];
   for (const candidate of candidates) {
-    const result = await inspectCandidate(candidate.dataUri, userText, candidate.label, candidate.kind, preferredDocumentType);
+    if (scanSignal?.aborted) break;
+    const result = await inspectCandidate(candidate.dataUri, userText, candidate.label, candidate.kind, preferredDocumentType, scanSignal);
     results.push(result);
     const hasTallSlices = candidates.some((item) => item.kind === "tall_slice");
     const successfulTallSlices = results.filter((item) =>
@@ -375,6 +382,17 @@ async function inspectImage(
     ) {
       break;
     }
+  }
+
+  if (results.length === 0) {
+    return {
+      documentType: "unknown",
+      confidence: 0,
+      quality: "unknown",
+      reason: "OCR request timeout: 图片识别总时限已到",
+      extractedText: "",
+      candidateLabel: "原图",
+    };
   }
 
   const bestSingle = results
@@ -457,6 +475,9 @@ export async function inspectDocumentImages(
   options: ScanOptions = {},
 ): Promise<ImageIntakeResult> {
   const userText = options.userText || "";
+  const scanSignal = options.signal
+    ? AbortSignal.any([options.signal, AbortSignal.timeout(SCAN_TIMEOUT_MS)])
+    : AbortSignal.timeout(SCAN_TIMEOUT_MS);
   const validImages = images
     .filter((src) => typeof src === "string" && src.startsWith("data:image/"))
     .slice(0, MAX_IMAGES);
@@ -478,6 +499,10 @@ export async function inspectDocumentImages(
   const errors: string[] = [];
 
   for (let i = 0; i < validImages.length; i++) {
+    if (scanSignal.aborted) {
+      errors.push("OCR request timeout: 图片识别总时限已到，可直接粘贴文字继续");
+      break;
+    }
     const image = validImages[i];
     const normalized = image.startsWith("data:image/") ? image : null;
     if (!normalized) {
@@ -491,7 +516,7 @@ export async function inspectDocumentImages(
       continue;
     }
 
-    const result = await inspectImage(normalized, userText, options.preferredDocumentType);
+    const result = await inspectImage(normalized, userText, options.preferredDocumentType, scanSignal);
     candidateResults.push(result);
     if (result.reason && (result.documentType === "unknown" || isTimeoutReason(result.reason))) {
       const reasonCode = isTimeoutReason(result.reason) ? "ocr_timeout" : result.reason;

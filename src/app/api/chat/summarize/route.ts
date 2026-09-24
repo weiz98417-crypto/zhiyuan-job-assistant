@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
-const MODEL = "deepseek-v4-flash";
+const MODEL = "deepseek-flash";
 
 const SYSTEM_PROMPT = `你是一个求职画像提取引擎。根据用户与AI求职顾问的完整对话历史，提取用户的结构化求职画像。
 

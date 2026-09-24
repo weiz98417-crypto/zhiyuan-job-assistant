@@ -160,6 +160,14 @@ CREATE TABLE IF NOT EXISTS jds (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS jd_resume_matching_preferences (
+  user_id TEXT NOT NULL REFERENCES users(id),
+  source_hash TEXT NOT NULL,
+  match_resume BOOLEAN NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, source_hash)
+);
+
 CREATE SEQUENCE IF NOT EXISTS profiles_id_seq;
 
 CREATE TABLE IF NOT EXISTS profiles (

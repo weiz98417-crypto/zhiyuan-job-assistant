@@ -1,4 +1,5 @@
 import type { AgentTaskType } from "@/lib/agent/task-contract";
+import { inferJDResumeMatchingDirective } from "@/lib/agent/jd-resume-scope-intent";
 import {
   hasProfileWriteIntent,
   hasReferenceResumeSaveIntent,
@@ -63,12 +64,14 @@ export const GUIDED_TASK_TYPES = new Set<AgentTaskType>([
   "jd_evaluation",
   "offer_evaluation",
   "resume_edit",
+  "resume_diagnosis",
 ]);
 
 const TASK_AGENT_ID: Record<AgentTaskType, string> = {
   general_chat: "general",
   career_positioning_guidance: "profile",
   resume_query: "resume",
+  resume_diagnosis: "resume",
   resume_edit: "resume",
   jd_evaluation: "evaluate",
   offer_evaluation: "offer",
@@ -83,6 +86,7 @@ const TASK_LABEL_ZH: Record<AgentTaskType, string> = {
   general_chat: "普通对话",
   career_positioning_guidance: "自我定位",
   resume_query: "简历查询",
+  resume_diagnosis: "简历诊断",
   resume_edit: "简历修改",
   jd_evaluation: "JD 评估",
   offer_evaluation: "Offer 评估",
@@ -283,12 +287,23 @@ export function isConfirmedGuidedTaskSwitch(content: string): boolean {
 export function inferRequestedTaskFromText(content: string): AgentTaskType | null {
   const text = content.trim();
   if (!text) return null;
+  if (inferJDResumeMatchingDirective(text) !== undefined
+    && !/(?:评估|分析|诊断).{0,8}(?:简历|履历|CV|resume)/i.test(text)) {
+    return "jd_evaluation";
+  }
+  const resumeMentionIndex = text.search(/简历|履历|\bcv\b|\bresume\b/i);
+  const jdMentionIndex = text.search(/\bjd\b|职位|岗位|招聘|job description/i);
+  const resumeDiagnosisIntent = resumeMentionIndex >= 0
+    && (jdMentionIndex < 0 || resumeMentionIndex < jdMentionIndex)
+    && /(评估|分析|诊断|评价|测评|检查|审阅|看看|看下|看一下|给.*建议|提.*建议)/i.test(text)
+    && !hasResumeWriteIntent(text);
   if (
     (/(换一批|再来一批|下一批|岗位发现|职位搜索|找岗位|找职位|搜岗位|搜职位|搜索岗位|搜索职位|扫一批\s*JD|扫描\s*JD)/i.test(text)
       || /(找|搜|搜索|推荐|发现|扫描|扫).{0,16}(岗位|职位|工作|JD|jd|招聘|机会)/i.test(text))
     && !/(评估|分析|看看|看下|评价|打分|匹配).{0,16}(JD|jd|职位|岗位|招聘|这个)/i.test(text)
   ) return "job_search";
   if (/(评估|分析|看看|看下).{0,16}(offer|录用|薪资|合同|待遇)|\boffer\b/i.test(text)) return "offer_evaluation";
+  if (resumeDiagnosisIntent) return "resume_diagnosis";
   if (/(评估|分析|看看|看下).{0,16}(JD|jd|职位|岗位|招聘|job description)|\bjd\b/i.test(text)) return "jd_evaluation";
   if (/(模拟|练习|准备|继续).{0,10}(面试)|下一题|追问/.test(text)) return "interview_coaching";
   if (/(导出|下载).{0,16}(报告|PDF|文件|简历|履历|resume|cv)|(报告|PDF|文件|简历|履历|resume|cv).{0,16}(导出|下载)/i.test(text)) return "file_export";
@@ -332,7 +347,7 @@ export function inferTaskFromImageClarificationReply(
   if (activeTask.documentType === "jd") return "jd_evaluation";
   if (activeTask.documentType === "offer") return "offer_evaluation";
   if (activeTask.documentType === "resume") {
-    return wantsResumeSave ? "resume_edit" : "resume_edit";
+    return wantsResumeSave ? "resume_edit" : "resume_diagnosis";
   }
   return null;
 }

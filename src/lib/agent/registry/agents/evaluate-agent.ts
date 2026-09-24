@@ -150,8 +150,8 @@ export const evaluateAgent: AgentDefinition = {
   knowledgeSubset: ["salary-benchmarks", "zhiyuan-levels", "jd-signals"],
   priority: 10,
   suggestions: EVAL_SUGGESTIONS,
-  model: "deepseek-v4-flash",
-  modelPro: "deepseek-v4-pro",
+  model: "deepseek-flash",
+  modelPro: "deepseek-flash",
 
   async buildSystemPrompt(ctx: AgentPromptContext): Promise<string> {
     return buildEvalPrompt(ctx);

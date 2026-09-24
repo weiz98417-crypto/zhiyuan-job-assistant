@@ -17,6 +17,7 @@ export interface AgentRuntimeAssignment {
 
 const READ_ONLY_TASKS = new Set([
   "resume_query",
+  "resume_diagnosis",
   "general_chat",
   "system_diagnostics",
 ]);

@@ -56,7 +56,8 @@ export const PRODUCTION_BROWSER_EVAL_DOMAINS: readonly ProductionBrowserEvalDoma
   domain("F05", "图片识别与截图路由", "05-图片识别与截图路由系统-Evals.md", [
     browserCase("IMAGE-001", "JD 截图进入 JD 评估", "/agent", "jd_evaluation"),
     browserCase("IMAGE-002", "Offer 截图进入 Offer 评估", "/agent", "offer_evaluation"),
-    browserCase("IMAGE-003", "简历截图只产生待批准提案", "/agent", "resume_edit"),
+    browserCase("IMAGE-003", "明确修改请求的简历截图只产生待批准提案", "/agent", "resume_edit"),
+    browserCase("IMAGE-004", "简历截图无 JD 只读诊断，失败后可粘贴文字继续", "/agent", "resume_diagnosis"),
   ]),
   domain("F06", "Agent 路由任务契约与子 Agent 编排", "06-Agent路由任务契约与子Agent编排系统-Evals.md", [
     browserCase("ROUTE-001", "简历只读查询不触发修改", "/agent", "resume_query"),
@@ -190,6 +191,7 @@ export const AGENT_TASK_TYPES_REQUIRING_BROWSER_SHORT_JOURNEYS: readonly AgentTa
   "general_chat",
   "career_positioning_guidance",
   "resume_query",
+  "resume_diagnosis",
   "resume_edit",
   "jd_evaluation",
   "offer_evaluation",

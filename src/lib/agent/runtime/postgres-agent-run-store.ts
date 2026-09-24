@@ -36,13 +36,12 @@ export class PostgresAgentRunStore implements AgentRunStore {
     return this.withClient(async (client) => {
       await client.query("BEGIN");
       try {
-        const existing = await client.query(
-          "SELECT * FROM agent_runs WHERE user_id = $1 AND request_id = $2",
-          [principal.userId, command.requestId],
-        );
-        if (existing.rows[0]) {
+        await lockRunRequestId(client, principal.userId, command.requestId);
+        const existing = await findRunByRequestId(client, principal.userId, command.requestId);
+        if (existing) {
+          if (existing.conversationId !== command.conversationId) throw new Error("Agent Run requestId belongs to another Conversation");
           await client.query("COMMIT");
-          return { run: normalizeRun(existing.rows[0]), replayed: true };
+          return { run: existing, replayed: true };
         }
 
         const id = randomUUID();
@@ -111,11 +110,11 @@ export class PostgresAgentRunStore implements AgentRunStore {
       } catch (error) {
         await client.query("ROLLBACK");
         if (isUniqueViolation(error)) {
-          const existing = await client.query(
-            "SELECT * FROM agent_runs WHERE user_id = $1 AND request_id = $2",
-            [principal.userId, command.requestId],
-          );
-          if (existing.rows[0]) return { run: normalizeRun(existing.rows[0]), replayed: true };
+          const existing = await findRunByRequestId(client, principal.userId, command.requestId);
+          if (existing) {
+            if (existing.conversationId !== command.conversationId) throw new Error("Agent Run requestId belongs to another Conversation");
+            return { run: existing, replayed: true };
+          }
           throw new Error(`Conversation ${command.conversationId} already has a nonterminal Agent Run`);
         }
         throw error;
@@ -677,21 +676,25 @@ export class PostgresAgentRunStore implements AgentRunStore {
     return this.withClient(async (client) => {
       await client.query("BEGIN");
       try {
+        await lockRunRequestId(client, principal.userId, requestId);
         const selected = await client.query(
           "SELECT * FROM agent_runs WHERE id = $1 AND user_id = $2 FOR UPDATE",
           [runId, principal.userId],
         );
         if (!selected.rows[0]) throw new Error("Agent Run not found");
         const current = normalizeRun(selected.rows[0]);
-        if (isTerminalAgentRunStatus(current.status)) throw new Error("Terminal Agent Run cannot accept input");
         const duplicate = await client.query(
           "SELECT * FROM agent_run_inputs WHERE user_id = $1 AND request_id = $2",
           [principal.userId, requestId],
         );
         if (duplicate.rows[0]) {
+          if (String(duplicate.rows[0].run_id) !== runId || duplicate.rows[0].input_type !== "turn") {
+            throw new Error("Agent Run requestId belongs to another command");
+          }
           await client.query("COMMIT");
           return { run: current, input: normalizeInput(duplicate.rows[0]), replayed: true };
         }
+        if (isTerminalAgentRunStatus(current.status)) throw new Error("Terminal Agent Run cannot accept input");
         const inserted = await client.query(`
           INSERT INTO agent_run_inputs (run_id, user_id, request_id, input_type, content_json)
           VALUES ($1, $2, $3, 'turn', $4::jsonb)
@@ -734,6 +737,10 @@ export class PostgresAgentRunStore implements AgentRunStore {
       );
       return result.rows[0] ? normalizeRun(result.rows[0]) : null;
     });
+  }
+
+  async getRunByRequestId(principal: ExecutionPrincipal, requestId: string): Promise<AgentRunSnapshot | null> {
+    return this.withClient((client) => findRunByRequestId(client, principal.userId, requestId));
   }
 
   async listPendingInputs(principal: ExecutionPrincipal, runId: string): Promise<AgentRunInputRecord[]> {
@@ -855,6 +862,31 @@ export class PostgresAgentRunStore implements AgentRunStore {
       return result.rows.map(normalizeRun);
     });
   }
+}
+
+async function lockRunRequestId(client: PoolClient, userId: string, requestId: string): Promise<void> {
+  await client.query("SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))", [userId, requestId]);
+}
+
+async function findRunByRequestId(
+  client: PoolClient,
+  userId: string,
+  requestId: string,
+): Promise<AgentRunSnapshot | null> {
+  const created = await client.query(
+    "SELECT * FROM agent_runs WHERE user_id = $1 AND request_id = $2",
+    [userId, requestId],
+  );
+  if (created.rows[0]) return normalizeRun(created.rows[0]);
+  const continued = await client.query(`
+    SELECT run.*
+    FROM agent_run_inputs input
+    JOIN agent_runs run ON run.id = input.run_id
+    WHERE input.user_id = $1 AND input.request_id = $2
+      AND input.input_type = 'turn' AND run.user_id = $1
+    LIMIT 1
+  `, [userId, requestId]);
+  return continued.rows[0] ? normalizeRun(continued.rows[0]) : null;
 }
 
 async function insertEventAndOutbox(

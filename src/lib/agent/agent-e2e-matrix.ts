@@ -4,6 +4,7 @@ export const AGENT_E2E_TASK_TYPES: readonly AgentTaskType[] = [
   "general_chat",
   "career_positioning_guidance",
   "resume_query",
+  "resume_diagnosis",
   "resume_edit",
   "jd_evaluation",
   "offer_evaluation",

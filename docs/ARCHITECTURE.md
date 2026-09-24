@@ -84,7 +84,7 @@ AgentChat prepares full-size image payloads
   v
 server-image-intake + image-intake-router
   |-- classify content: JD / offer / resume / unrelated / ambiguous
-  |-- OCR or vision extraction through Zhipu GLM vision
+  |-- OCR or vision extraction through DeepSeek deepseek-flash
   |-- compare user text intent with image content
   |
   v

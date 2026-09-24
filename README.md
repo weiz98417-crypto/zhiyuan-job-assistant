@@ -27,7 +27,7 @@ Zhiyuan is a local-first AI job search assistant for the Chinese market. It eval
 ### JD Evaluation
 
 - Supports pasted text, links, and screenshots.
-- Screenshot flow uses Zhipu vision/OCR and image-variant guards to avoid sending tiny chat thumbnails when a full-size image is available.
+- Screenshot flow uses `deepseek-flash` for image recognition and image-variant guards to avoid sending tiny chat thumbnails when a full-size image is available.
 - Full A-G evaluation covers overview, resume match, level strategy, compensation/market, customization plan, interview prep, and legitimacy/risk.
 - Reports are persisted and can be reviewed in the report library or exported as PDF.
 
@@ -67,7 +67,7 @@ Zhiyuan is a local-first AI job search assistant for the Chinese market. It eval
 | --- | --- |
 | Frontend | Next.js 16, React 19, TypeScript, Tailwind CSS |
 | Agent runtime | Custom ReAct-style loop, tool registry, per-agent prompts, streaming responses |
-| AI providers | DeepSeek for chat/evaluation, Zhipu GLM vision for screenshots, DashScope/OpenAI-compatible embeddings |
+| AI providers | `deepseek-flash` for chat, evaluation, and screenshots; DashScope/OpenAI-compatible embeddings |
 | Current LAN database | PostgreSQL with pgvector, selected by `DB_DRIVER=postgres` |
 | Fallback/archive database | SQLite via `better-sqlite3` |
 | Memory | Reference resume vectors, memory chunks/items, feedback promotion, eval harness |
@@ -97,7 +97,6 @@ Required environment variables:
 
 ```bash
 DEEPSEEK_API_KEY=sk-...
-ZHIPU_API_KEY=...
 JWT_SECRET=replace-with-a-random-32-char-secret
 ```
 

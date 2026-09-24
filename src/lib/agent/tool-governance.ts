@@ -682,6 +682,7 @@ export const TASK_CONTRACT_POLICY: Record<AgentTaskType, TaskContractPolicy> = {
   general_chat: "read_only",
   career_positioning_guidance: "guidance",
   resume_query: "read_only",
+  resume_diagnosis: "read_only",
   resume_edit: "high_risk_verified_write",
   jd_evaluation: "high_risk_verified_write",
   offer_evaluation: "high_risk_verified_write",

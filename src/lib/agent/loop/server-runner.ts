@@ -13,7 +13,6 @@ import { executeTool, formatToolResult, getTool } from "@/lib/agent/tools";
 import type { ToolExecutionContext, ToolResult, ErrorCategory } from "@/lib/agent/tools/types";
 import type { AgentDefinition } from "@/lib/agent/registry/types";
 import { enforceToolPolicy, inferCompanyFromMessages, isToolAllowedInMode } from "./tool-policy";
-import { ZHIPU_API_URL, ZHIPU_FALLBACK_MODEL } from "@/lib/zhipu";
 import type { InterviewSessionState } from "@/types";
 import type { InterviewRebindAction } from "@/lib/agent/interview-rebind-policy";
 import { requiresReadBackVerification } from "@/lib/agent/tools/readback-verification";
@@ -96,9 +95,7 @@ function inferDecodeTextFromMessages(messages: DeepSeekMessage[]): string | null
 /* ── LLM API with fallback ── */
 
 const MODEL_CHAIN = [
-  { provider: "deepseek", model: "deepseek-v4-flash", url: "https://api.deepseek.com/chat/completions", keyEnv: "DEEPSEEK_API_KEY" },
-  { provider: "deepseek", model: "deepseek-v4-pro", url: "https://api.deepseek.com/chat/completions", keyEnv: "DEEPSEEK_API_KEY" },
-  { provider: "zhipu", model: ZHIPU_FALLBACK_MODEL, url: ZHIPU_API_URL, keyEnv: "ZHIPU_API_KEY" },
+  { provider: "deepseek", model: "deepseek-flash", url: "https://api.deepseek.com/chat/completions", keyEnv: "DEEPSEEK_API_KEY" },
 ];
 
 interface DeepSeekMessage {
@@ -113,6 +110,38 @@ interface DeepSeekMessage {
   }>;
 }
 
+const RESUME_DIAGNOSIS_DIRECTIVE = `
+当前任务是只读简历诊断。优先分析本轮用户上传的简历截图或粘贴的简历原文，不要读取已保存的另一份简历，也不要调用修改、保存或导入工具。
+没有 JD 时，直接评估简历内容、结构、ATS 可读性、成果证据缺口，并给出对应的具体改进建议。有用户提供的 JD 时，才额外分析岗位匹配。
+评估本身不修改或保存简历。若截图文字无法辨认，不猜测内容；请用户在当前对话粘贴简历文字或重传清晰截图，收到文字后继续诊断。`;
+const RESUME_IMAGE_RETRY_MESSAGE = "这张简历截图暂时无法读清。请在当前对话粘贴简历文字，或重传清晰截图，我会继续评估。";
+
+function isUnreadableResumeImageResponse(text: string): boolean {
+  return /无法(?:识别|辨认|读取|读清|看清)|(?:看|读)不清|未能识别|图片.{0,12}无法.{0,12}(?:读取|识别|评估)/i.test(text);
+}
+
+function modelMessages(messages: DeepSeekMessage[], includeLatestImages: boolean) {
+  const latestUserIndex = includeLatestImages
+    ? messages.findLastIndex((message) => message.role === "user" && !message.content.trim().startsWith("<!--"))
+    : -1;
+  return messages.map(({ images, ...message }, index) => {
+    if (message.role === "tool") {
+      return { role: "user", content: `已完成的工具记录，仅供参考：\n${message.content}` };
+    }
+    const imageUrls = index === latestUserIndex
+      ? (images || []).filter((image) => image.startsWith("data:image/")).slice(0, 5)
+      : [];
+    if (imageUrls.length === 0) return message;
+    return {
+      ...message,
+      content: [
+        { type: "text", text: message.content || "请评估这张简历截图。" },
+        ...imageUrls.map((url) => ({ type: "image_url", image_url: { url } })),
+      ],
+    };
+  });
+}
+
 interface NativeToolCall {
   id: string;
   name: string;
@@ -125,13 +154,16 @@ async function callLLM(
   tools?: Array<{ type: string; function: object }>,
   modelPreference?: string,
   modelRecovery?: ModelRecoveryPolicy,
+  includeLatestImages = false,
+  signal?: AbortSignal,
 ): Promise<{ text: string; toolCalls: NativeToolCall[] }> {
   let lastError = "";
   const preferredProvider = MODEL_CHAIN.find((candidate) => candidate.model === modelPreference)?.provider;
-  const eligibleModels = modelRecovery?.switchProvider && preferredProvider
+  const alternateModels = modelRecovery?.switchProvider && preferredProvider
     ? MODEL_CHAIN.filter((candidate) => candidate.provider !== preferredProvider)
-    : MODEL_CHAIN;
-  const chain = modelPreference && !modelRecovery?.switchProvider
+    : [];
+  const eligibleModels = alternateModels.length > 0 ? alternateModels : MODEL_CHAIN;
+  const chain = modelPreference && alternateModels.length === 0
     ? [...eligibleModels].sort((a) => a.model === modelPreference ? -1 : 1)
     : eligibleModels;
   for (const { model, url, keyEnv } of chain) {
@@ -142,7 +174,7 @@ async function callLLM(
       model,
       messages: [
         ...(systemPrompt ? [{ role: "system", content: systemPrompt }] : []),
-        ...messages.map(({ images: _images, ...message }) => message),
+        ...modelMessages(messages, includeLatestImages),
       ],
       temperature: 0.7,
       max_tokens: 16384,
@@ -157,14 +189,14 @@ async function callLLM(
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
           body: JSON.stringify(body),
-          signal: AbortSignal.timeout(60_000),
+          signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(60_000)]) : AbortSignal.timeout(60_000),
         });
       } catch (err) {
         lastError = `${model} network: ${err instanceof Error ? err.message : String(err)}`;
         break; // Network error → try next model
       }
       if (response.ok) break;
-      lastError = `${model} ${response.status}`;
+      lastError = `${model} ${response.status} ${(await response.text().catch(() => "")).slice(0, 300)}`;
       if (response.status !== 429 && response.status !== 503) break;
       await new Promise((r) => setTimeout(r, 1000));
     }
@@ -246,12 +278,35 @@ export async function* agentLoopServer(opts: {
   frozenToolCall?: { name: string; args: Record<string, unknown> };
 }): AsyncGenerator<SSEEvent> {
   const { systemPrompt, messages, config = DEFAULT_LOOP_CONFIG, tools, agent, signal, interviewState, interviewRebindAction, taskContract, executionContext, modelRecovery } = opts;
+  const resumeDiagnosis = taskContract?.taskType === "resume_diagnosis";
+  const jdWithoutResume = taskContract?.taskType === "jd_evaluation" && taskContract.routing?.jdMatchResume === false;
+  const blockedResumeTools = new Set(["read_file", "get_profile", "get_recent_jd_context"]);
+  const activeSystemPrompt = resumeDiagnosis
+    ? `${systemPrompt}\n${RESUME_DIAGNOSIS_DIRECTIVE}`
+    : jdWithoutResume
+      ? `${systemPrompt}\n本轮 JD 分析按用户要求不匹配简历；不要读取简历、画像或长期个人记忆，也不要引用旧报告里的简历匹配结论。只分析当前 JD 本身。`
+      : systemPrompt;
+  const availableTools = resumeDiagnosis
+    ? []
+    : taskContract?.taskType === "jd_evaluation"
+      ? tools?.filter((tool) => !blockedResumeTools.has(String((tool.function as { name?: unknown }).name || "")))
+      : tools;
+  const latestUserMessage = messages.findLast((message) => message.role === "user" && !message.content.trim().startsWith("<!--"));
+  const currentJDImages = taskContract?.taskType === "jd_evaluation"
+    ? (latestUserMessage?.images || []).filter((image) => image.startsWith("data:image/")).slice(0, 5)
+    : [];
+  const prioritizeCurrentJDImage = currentJDImages.length > 0
+    && !messages.some((message) => message.content.includes("[VERIFIED_TOOL_FACT tool=evaluate_jd_full]"));
   const modelPreference = agent?.model;
-  const toolWhitelist = agent?.toolNames?.length ? agent.toolNames : undefined;
+  const toolWhitelist = agent?.toolNames?.length
+    ? taskContract?.taskType === "jd_evaluation"
+      ? agent.toolNames.filter((name) => !blockedResumeTools.has(name))
+      : agent.toolNames
+    : undefined;
   const state: LoopState = {
     iteration: 0,
     consecutiveFailures: 0,
-    contextSize: estimateTokens(messages) + systemPrompt.replace(/[\u4e00-\u9fff]/g, 'aa').length,
+    contextSize: estimateTokens(messages) + activeSystemPrompt.replace(/[\u4e00-\u9fff]/g, 'aa').length,
     phase: "understanding",
   };
 
@@ -266,6 +321,7 @@ export async function* agentLoopServer(opts: {
   const recentCalls: { name: string; params: string; result: string }[] = [];
   const intermediateSteps: { tool: string; params: string; category: ErrorCategory; summary: string }[] = [];
   let frozenToolCall = opts.frozenToolCall;
+  const latestUserHasImages = Boolean([...ctx].reverse().find((item) => item.role === "user")?.images?.length);
 
   while (state.iteration < config.maxIterations) {
     if (signal?.aborted) {
@@ -295,13 +351,31 @@ export async function* agentLoopServer(opts: {
           arguments: JSON.stringify(frozenToolCall.args),
         }];
         frozenToolCall = undefined;
+      } else if (state.iteration === 1 && prioritizeCurrentJDImage) {
+        thinkText = "";
+        toolCalls = [{
+          id: "current-jd-image",
+          name: "evaluate_jd_full",
+          arguments: JSON.stringify({ images: currentJDImages }),
+        }];
       } else {
-        const resp = await callLLM(ctx, systemPrompt, tools, modelPreference, modelRecovery);
+        const resp = await callLLM(ctx, activeSystemPrompt, availableTools, modelPreference, modelRecovery, resumeDiagnosis, signal);
         thinkText = resp.text;
         toolCalls = resp.toolCalls;
       }
     } catch (err) {
+      if (signal?.aborted) {
+        yield { type: "done" };
+        return;
+      }
       const message = err instanceof Error ? err.message : "未知错误";
+      if (resumeDiagnosis && latestUserHasImages && /\b400\b/.test(message) && /invalid image|image.*(format|decode|invalid|unsupported)|图片.*(格式|无法解析|无效)/i.test(message)) {
+        yield { type: "phase", phase: "responding" };
+        yield { type: "text", content: RESUME_IMAGE_RETRY_MESSAGE };
+        yield { type: "run_directive", directive: "wait_user", reason: "等待用户补充可读的简历文字或截图" };
+        yield { type: "done" };
+        return;
+      }
       if (executionContext?.workerId && Number.isFinite(executionContext.fencingToken)) {
         yield { type: "error", message };
         yield { type: "done" };
@@ -332,8 +406,17 @@ export async function* agentLoopServer(opts: {
       yield { type: "phase", phase: "responding" };
 
       const responseText = thinkText.trim();
+      if (resumeDiagnosis && latestUserHasImages && isUnreadableResumeImageResponse(responseText)) {
+        yield { type: "text", content: RESUME_IMAGE_RETRY_MESSAGE };
+        yield { type: "run_directive", directive: "wait_user", reason: "等待用户补充可读的简历文字或截图" };
+        break;
+      }
       if (responseText) {
         yield { type: "text", content: responseText };
+      } else if (resumeDiagnosis) {
+        yield { type: "error", message: "Resume diagnosis model returned an empty response" };
+        yield { type: "done" };
+        return;
       } else {
         yield { type: "text", content: "操作完成。" };
       }
@@ -346,7 +429,25 @@ export async function* agentLoopServer(opts: {
     for (const tc of toolCalls) {
       let params: Record<string, unknown>;
       try { params = JSON.parse(tc.arguments); } catch { continue; }
+      if (taskContract?.taskType === "jd_evaluation" && blockedResumeTools.has(tc.name)) {
+        yield { type: "tool_error", name: tc.name, error: "JD 评估由专用工具统一处理简历匹配", recoverable: true, category: "policy_denied" };
+        ctx.push({ role: "user", content: "请调用 JD 评估工具继续；简历匹配由该工具按当前 JD 的用户偏好处理。" });
+        continue;
+      }
       injectLatestImagesForImageTool(tc.name, params, ctx);
+      if (tc.name === "evaluate_jd_full") {
+        const matchResume = taskContract?.routing?.jdMatchResume;
+        if (taskContract?.taskType === "jd_evaluation") {
+          if (typeof matchResume === "boolean") params.match_resume = matchResume;
+          else delete params.match_resume;
+        }
+        if (matchResume === false) delete params.cv_text;
+        if (currentJDImages.length > 0 && state.iteration === 1) {
+          params.images = currentJDImages;
+          delete params.jd_text;
+          delete params.jd_url;
+        }
+      }
       if (tc.name === "evaluate_jd_full" && typeof params.target_company !== "string") {
         const inferredCompany = inferCompanyFromMessages(ctx);
         if (inferredCompany) params.target_company = inferredCompany;
@@ -590,7 +691,7 @@ export async function* agentLoopServer(opts: {
       yield { type: "phase", phase: "responding" };
       yield { type: "text", content: `搜索暂不可用（已尝试 ${autoRetryCount} 次），以下是我基于已有知识的分析：` };
       try {
-        const forceResp = await callLLM(ctx, systemPrompt, tools, modelPreference, modelRecovery);
+        const forceResp = await callLLM(ctx, activeSystemPrompt, availableTools, modelPreference, modelRecovery, resumeDiagnosis);
         const clean = forceResp.text.trim();
         if (clean) yield { type: "text", content: clean };
       } catch { /* ignore */ }

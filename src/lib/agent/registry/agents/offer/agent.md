@@ -1,7 +1,7 @@
 ---
 name: "Offer 评估"
-model: "deepseek-v4-flash"
-model_pro: "deepseek-v4-pro"
+model: "deepseek-flash"
+model_pro: "deepseek-flash"
 ---
 
 你是纸鸢的 Offer 评估专家。你的唯一任务：帮用户评估和对比录取 Offer。

@@ -315,11 +315,10 @@ async function listVectorGovernanceData(): Promise<{
   if (getDatabaseDriver() !== "postgres" || !isPostgresConfigured()) return empty;
 
   return withPostgresClient(async (client) => {
-    const [referenceChunkStats, memoryChunkStats, memoryItemStats, referenceHealth, memoryHealth, candidatePatterns] = await Promise.all([
-      client.query("SELECT embedding_status, COUNT(*) AS count FROM reference_resume_chunks GROUP BY embedding_status"),
-      client.query("SELECT embedding_status, COUNT(*) AS count FROM memory_chunks GROUP BY embedding_status"),
-      client.query("SELECT status, COUNT(*) AS count FROM memory_items GROUP BY status"),
-      client.query(`
+    const referenceChunkStats = await client.query("SELECT embedding_status, COUNT(*) AS count FROM reference_resume_chunks GROUP BY embedding_status");
+    const memoryChunkStats = await client.query("SELECT embedding_status, COUNT(*) AS count FROM memory_chunks GROUP BY embedding_status");
+    const memoryItemStats = await client.query("SELECT status, COUNT(*) AS count FROM memory_items GROUP BY status");
+    const referenceHealth = await client.query(`
         SELECT
           c.id, c.reference_resume_id AS source_id, r.name, c.owner_user_id,
           c.role_category, c.visibility, c.embedding_status, c.failure_reason,
@@ -330,8 +329,8 @@ async function listVectorGovernanceData(): Promise<{
            OR (c.embedding_status = 'pending' AND c.updated_at < now() - interval '10 minutes')
         ORDER BY c.updated_at DESC
         LIMIT 80
-      `),
-      client.query(`
+      `);
+    const memoryHealth = await client.query(`
         SELECT
           c.id, c.source_id, c.source_type, c.user_id, c.embedding_status,
           c.failure_reason, c.retry_count, c.embedding_model, c.updated_at
@@ -340,8 +339,8 @@ async function listVectorGovernanceData(): Promise<{
            OR (c.embedding_status = 'pending' AND c.updated_at < now() - interval '10 minutes')
         ORDER BY c.updated_at DESC
         LIMIT 80
-      `),
-      client.query(`
+      `);
+    const candidatePatterns = await client.query(`
         SELECT
           mi.id, mi.user_id, mi.memory_type, mi.canonical_text, mi.status,
           mi.confidence, mi.importance, mi.source_count, mi.created_at, mi.updated_at,
@@ -368,8 +367,7 @@ async function listVectorGovernanceData(): Promise<{
           mi.confidence DESC,
           mi.updated_at DESC
         LIMIT 80
-      `),
-    ]);
+      `);
 
     return {
       available: true,

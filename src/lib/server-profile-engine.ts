@@ -243,7 +243,7 @@ async function callLLM(prompt: string): Promise<LLMProfileResult | null> {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
-        model: "deepseek-v4-flash",
+        model: "deepseek-flash",
         messages: [{ role: "user", content: prompt }],
         temperature: 0.2,
         max_tokens: 3000,

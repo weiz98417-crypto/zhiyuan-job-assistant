@@ -132,26 +132,14 @@ export class AgentRuntimeAdminService {
 
   async getStatus(): Promise<RuntimeAdminStatus> {
     return this.withClient(async (client) => {
-      const [
-        control,
-        runCounts,
-        recentRuns,
-        recentEvents,
-        recentCheckpoints,
-        deadLetters,
-        reconciliations,
-        backgroundJobCounts,
-        backgroundJobs,
-        leaseHealth,
-      ] = await Promise.all([
-        client.query("SELECT * FROM agent_runtime_controls WHERE id = 'global'"),
-        client.query(`
+      const control = await client.query("SELECT * FROM agent_runtime_controls WHERE id = 'global'");
+      const runCounts = await client.query(`
           SELECT status, COUNT(*)::int AS count
           FROM agent_runs
           WHERE legacy = FALSE
           GROUP BY status
-        `),
-        client.query(`
+        `);
+      const recentRuns = await client.query(`
           SELECT id, user_id, session_id, task_type, agent_id, status, runtime_mode,
                  snapshot_version, event_sequence, owner_id, lease_expires_at,
                  heartbeat_at, fencing_token, wake_at, isolation_reason,
@@ -160,50 +148,50 @@ export class AgentRuntimeAdminService {
           WHERE legacy = FALSE
           ORDER BY updated_at DESC
           LIMIT 50
-        `),
-        client.query(`
+        `);
+      const recentEvents = await client.query(`
           SELECT id, run_id, user_id, sequence, event_type, payload_json, created_at
           FROM agent_run_events
           ORDER BY created_at DESC, id DESC
           LIMIT 100
-        `),
-        client.query(`
+        `);
+      const recentCheckpoints = await client.query(`
           SELECT id, run_id, user_id, snapshot_version, fencing_token, boundary,
                  budgets_json, created_at
           FROM agent_run_checkpoints
           ORDER BY created_at DESC, id DESC
           LIMIT 50
-        `),
-        client.query(`
+        `);
+      const deadLetters = await client.query(`
           SELECT id, run_id, user_id, event_sequence, topic, attempt_count,
                  last_error, dead_lettered_at, created_at
           FROM agent_run_outbox
           WHERE status = 'dead_letter'
           ORDER BY dead_lettered_at DESC NULLS LAST, id DESC
           LIMIT 50
-        `),
-        client.query(`
+        `);
+      const reconciliations = await client.query(`
           SELECT id, run_id, user_id, tool_name, status, effect_state,
                  input_json, verifier_json, error_json, updated_at
           FROM agent_tool_attempts
           WHERE status = 'reconciling' OR effect_state = 'unknown'
           ORDER BY updated_at DESC
           LIMIT 50
-        `),
-        client.query(`
+        `);
+      const backgroundJobCounts = await client.query(`
           SELECT status, COUNT(*)::int AS count
           FROM agent_background_jobs
           GROUP BY status
-        `),
-        client.query(`
+        `);
+      const backgroundJobs = await client.query(`
           SELECT id, run_id, tool_attempt_id, user_id, job_type, status,
                  progress_json, error_json, owner_id, lease_expires_at,
                  fencing_token, updated_at
           FROM agent_background_jobs
           ORDER BY updated_at DESC
           LIMIT 50
-        `),
-        client.query(`
+        `);
+      const leaseHealth = await client.query(`
           SELECT
             COUNT(*) FILTER (
               WHERE owner_id IS NOT NULL
@@ -219,8 +207,7 @@ export class AgentRuntimeAdminService {
             )::int AS active_lease_count
           FROM agent_runs
           WHERE legacy = FALSE
-        `),
-      ]);
+        `);
       const runRows = recentRuns.rows.map((row) => mapRun(row));
       const deadLetterRows = deadLetters.rows.map((row) => mapDeadLetter(row));
       const reconciliationRows = reconciliations.rows.map((row) => mapReconciliation(row));

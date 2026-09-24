@@ -31,6 +31,8 @@ import type { AgentTaskType } from "@/lib/agent/task-contract";
 import type { VerifiedActionResult } from "@/lib/agent/verified-action";
 import {
   createDurableAgentRunClient,
+  type DurableRunCreateResponse,
+  DurableRunRequestError,
   DurableRunOwnershipUnknownError,
   getDurableAgentRunClient,
   listActiveDurableAgentRunsClient,
@@ -55,6 +57,11 @@ import {
   resolveAgentSessionUrlSync,
 } from "@/lib/agent/agent-session-url";
 import { triggerProfileUpdate } from "@/lib/profile-update";
+import {
+  clearPendingRunCreate,
+  pendingRunCreateRequestId,
+  rememberPendingRunCreate,
+} from "@/lib/agent/pending-run-create";
 import { scanMessage, deduplicateSignals, maybeRawContext } from "@/lib/agent/signal-extractor";
 import type { ExtractedSignal } from "@/lib/agent/signal-extractor";
 import {
@@ -168,6 +175,7 @@ function buildSavedJDEvaluationPrompt(jdId: string, jd: SavedJDForEvaluation): s
 
 type ActiveRunNotice = {
   id: string;
+  conversationId: number | null;
   taskType: string;
   agentId: string;
   status: string;
@@ -178,6 +186,7 @@ type ActiveRunNotice = {
   toolName?: string;
   verifierSummary?: string;
   updatedAt?: string;
+  eventCursor?: number;
   journeyGraphVersion?: string;
   artifacts?: AgentArtifactRef[];
 };
@@ -383,11 +392,13 @@ function activeNoticeFromRun(run: AgentRunSnapshot): ActiveRunNotice {
     : [];
   return {
     id: run.id,
+    conversationId: run.conversationId,
     taskType: run.taskType,
     agentId: run.agentId,
     status: run.status,
     createdAt: run.createdAt,
     updatedAt: run.updatedAt,
+    eventCursor: Number.isFinite(Number(run.eventCursor)) ? Number(run.eventCursor) : undefined,
     journeyGraphVersion: typeof journey.graphVersion === "string" ? journey.graphVersion : undefined,
     artifacts,
   };
@@ -412,6 +423,53 @@ function runStatusLabel(status: string): string {
     cancelled: "已取消",
   };
   return labels[status] || status || "未知";
+}
+
+async function extractReadOnlyPdfContext(attachments: string[]): Promise<{
+  context: string;
+  pdfCount: number;
+  readableCount: number;
+}> {
+  let context = "";
+  let pdfCount = 0;
+  let readableCount = 0;
+  for (const dataUri of attachments) {
+    if (!dataUri.startsWith("data:application/pdf")) continue;
+    pdfCount += 1;
+    try {
+      const fileResponse = await fetch(dataUri);
+      const formData = new FormData();
+      formData.append("file", await fileResponse.blob(), "resume.pdf");
+      const response = await fetch("/api/agent/document-extract", { method: "POST", body: formData });
+      const payload = await response.json().catch(() => ({}));
+      if (response.ok && payload.success && typeof payload.data?.text === "string" && payload.data.text.trim()) {
+        readableCount += 1;
+        context += "\n\n---\n已读取的 PDF 文本（仅用于本次分析，不会自动保存）：\n" + payload.data.text;
+      } else {
+        context += "\n\n---\n这份 PDF 暂时无法读取文本；请在当前对话粘贴简历文字后继续，我不会修改或保存简历。\n";
+      }
+    } catch {
+      context += "\n\n---\n这份 PDF 暂时无法读取文本；请在当前对话粘贴简历文字后继续，我不会修改或保存简历。\n";
+    }
+  }
+  return { context, pdfCount, readableCount };
+}
+
+function userFacingAgentRunError(error: unknown): string {
+  if (error instanceof DurableRunOwnershipUnknownError) {
+    return `${error.message} 刷新当前对话后，系统会继续查找已提交的任务。`;
+  }
+  if (error instanceof DurableRunRequestError) {
+    if (error.status === 401 || error.status === 403 || error.status === 428) {
+      return "登录状态或安全校验已失效，请刷新页面后重试。";
+    }
+    if (error.status === 503) return "Agent 服务暂时不可用，当前对话仍可继续；请稍后重试。";
+    if (error.code === "REQUEST_TIMEOUT") return "Agent 响应较慢，任务状态正在确认；请稍后刷新当前对话。";
+    if (error.status && error.status >= 500) return "Agent 服务暂时忙，当前对话仍可继续；请稍后重试。";
+    if (error.status === 409) return "这条消息的提交状态已变化，请刷新当前对话后继续。";
+    return error.status === 400 ? error.message : "Agent 请求未完成，请在当前对话继续尝试。";
+  }
+  return "Agent 执行暂时中断，你可以在当前对话继续尝试。";
 }
 
 function runPhaseLabel(phase: string): string {
@@ -567,7 +625,8 @@ function AgentPageInner() {
   const [completionInfo, setCompletionInfo] = useState<CompletionInfo | null>(null);
   const [resultQuality, setResultQuality] = useState<string | null>(null);
   const [sessionLoadError, setSessionLoadError] = useState<string | null>(null);
-  const [activeRunNotice, setActiveRunNotice] = useState<ActiveRunNotice | null>(null);
+  const [storedRunNotice, setActiveRunNotice] = useState<ActiveRunNotice | null>(null);
+  const activeRunNotice = storedRunNotice?.conversationId === currentSessionId ? storedRunNotice : null;
   const [activeRunAction, setActiveRunAction] = useState<"resume" | "pause" | "cancel" | null>(null);
   const [latestRollbackProposal, setLatestRollbackProposal] = useState<ResumeEditProposalDTO | null>(null);
   const [rollbackAction, setRollbackAction] = useState<"rollback" | null>(null);
@@ -581,12 +640,44 @@ function AgentPageInner() {
   const createdHandoffSessionIdRef = useRef<number | null>(null);
   const manualSessionSwitchRef = useRef<number | null>(null);
   const durableRunCursorsRef = useRef<Record<string, number>>({});
+  const pendingRunInputRef = useRef<{
+    runId: string;
+    originalContent: string;
+    originalImages: string[];
+    submittedContent: string;
+    requestId: string;
+  } | null>(null);
   const currentSessionIdRef = useRef<number | null>(null);
+  const sessionGenerationRef = useRef(0);
+  const observerGenerationRef = useRef(0);
+  const turnGenerationRef = useRef(0);
   const itemAssemblerRef = useRef<AgentItemAssembler | null>(null);
   const itemSequenceRef = useRef(0);
   const turnItemPrefixRef = useRef("");
 
   const rafRef = useRef<number>(0);
+
+  const clearSessionActivity = useCallback(() => {
+    sessionGenerationRef.current += 1;
+    turnGenerationRef.current += 1;
+    observerGenerationRef.current += 1;
+    abortRef.current?.abort();
+    abortRef.current = null;
+    pendingRunInputRef.current = null;
+    currentSessionIdRef.current = null;
+    setStreaming(false);
+    setPhase(null);
+    setExecutingTool(undefined);
+    setThinkingContent("");
+    setActiveAgent(null);
+    setActiveRunNotice(null);
+    setActiveRunAction(null);
+    setStreamText("");
+    streamContentRef.current = "";
+    setEvalProgress([]);
+    setCompletionInfo(null);
+    setResultQuality(null);
+  }, []);
 
   const makeSessionTitle = useCallback((text: string) => {
     const cleaned = text.replace(/\s+/g, " ").trim();
@@ -641,11 +732,13 @@ function AgentPageInner() {
 
         if (loaded.length > 0) {
           const latest = loaded[0];
+          currentSessionIdRef.current = latest.id!;
           setCurrentSessionId(latest.id!);
           setMessages(latest.messages);
         } else {
           // Create default session with welcome message
           const id = await createSession([WELCOME]);
+          currentSessionIdRef.current = id;
           setCurrentSessionId(id);
           setMessages([WELCOME]);
           setSessions(await listSessions());
@@ -681,15 +774,16 @@ function AgentPageInner() {
     }
     if (currentSessionId === id) return;
 
-    getSession(id).then((session) => {
-      if (!session) return;
+    let cancelled = false;
+    getSession(id, { preferServer: true }).then((session) => {
+      if (cancelled || !session) return;
+      clearSessionActivity();
+      currentSessionIdRef.current = id;
       setCurrentSessionId(id);
       setMessages(session.messages);
-      setStreamText("");
-      setThinkingContent("");
-      streamContentRef.current = "";
     });
-  }, [mounted, searchParams, currentSessionId]);
+    return () => { cancelled = true; };
+  }, [mounted, searchParams, currentSessionId, clearSessionActivity]);
 
   useEffect(() => {
     if (!mounted || streaming) return;
@@ -715,6 +809,8 @@ function AgentPageInner() {
           : `JD评估 #${jdId}`;
       const id = await createSession([], { title });
       createdHandoffSessionIdRef.current = id;
+      clearSessionActivity();
+      currentSessionIdRef.current = id;
       setCurrentSessionId(id);
       setMessages([]);
       setStreamText("");
@@ -728,19 +824,34 @@ function AgentPageInner() {
     createDedicatedSession().catch((error) => {
       setSessionLoadError(error instanceof Error ? error.message : "Failed to create handoff session");
     });
-  }, [mounted, streaming, searchParams]);
+  }, [mounted, streaming, searchParams, clearSessionActivity]);
 
   useEffect(() => {
     if (!mounted || !currentSessionId) return;
     let cancelled = false;
+    const sessionId = currentSessionId;
+    const generation = sessionGenerationRef.current;
 
-    listActiveDurableAgentRunsClient(currentSessionId)
-      .then((data) => {
-        if (cancelled) return;
-        setActiveRunNotice(data[0] ? activeNoticeFromRun(data[0]) : null);
+    setActiveRunNotice(null);
+    listActiveDurableAgentRunsClient(sessionId)
+      .then(async (data) => {
+        if (cancelled || currentSessionIdRef.current !== sessionId || sessionGenerationRef.current !== generation) return;
+        const run = data.find((item) => item.conversationId === sessionId);
+        if (run?.status === "waiting_user") {
+          const session = await getSession(sessionId, { preferServer: true }).catch(() => undefined);
+          if (cancelled || currentSessionIdRef.current !== sessionId || sessionGenerationRef.current !== generation) return;
+          if (session) {
+            setMessages(session.messages);
+            setSessions((current) => current.map((item) => item.id === sessionId ? session : item));
+            durableRunCursorsRef.current[run.id] = Math.max(durableRunCursorsRef.current[run.id] || 0, run.eventCursor);
+          }
+        }
+        setActiveRunNotice((current) => current?.conversationId === sessionId ? current : run ? activeNoticeFromRun(run) : null);
       })
       .catch(() => {
-        if (!cancelled) setActiveRunNotice(null);
+        if (!cancelled && currentSessionIdRef.current === sessionId && sessionGenerationRef.current === generation) {
+          setActiveRunNotice((current) => current?.conversationId === sessionId ? current : null);
+        }
       });
 
     return () => {
@@ -751,7 +862,31 @@ function AgentPageInner() {
   useEffect(() => {
     const notice = activeRunNotice;
     if (!mounted || !notice || !NON_TERMINAL_DURABLE_RUN_STATUSES.has(notice.status)) return;
+    if (notice.conversationId !== currentSessionId) return;
     const runId = notice.id;
+    const sessionId = currentSessionId;
+    const sessionGeneration = sessionGenerationRef.current;
+    const generation = ++observerGenerationRef.current;
+    const isCurrentConversation = () => sessionGenerationRef.current === sessionGeneration
+      && currentSessionIdRef.current === sessionId;
+    const isCurrentObserver = () => observerGenerationRef.current === generation && isCurrentConversation();
+    const refreshPersistedMessages = async () => {
+      if (sessionId === null) return;
+      const turnGeneration = turnGenerationRef.current;
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        if (!isCurrentConversation()) return;
+        if (turnGenerationRef.current !== turnGeneration) return;
+        const session = await getSession(sessionId, { preferServer: true }).catch(() => undefined);
+        if (!isCurrentConversation()) return;
+        if (turnGenerationRef.current !== turnGeneration) return;
+        if (session?.messages) {
+          setMessages(session.messages);
+          setSessions((current) => current.map((item) => item.id === sessionId ? session : item));
+        }
+        if (attempt === 7) return;
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 250));
+      }
+    };
     if (notice.status === "paused") {
       setStreaming(false);
       setPhase(null);
@@ -762,14 +897,21 @@ function AgentPageInner() {
     itemAssemblerRef.current = new AgentItemAssembler(`run:${runId}`);
 
     const stopObserving = observeDurableAgentRun(runId, {
-      afterCursor: durableRunCursorsRef.current[runId] || 0,
+      afterCursor: Math.max(
+        durableRunCursorsRef.current[runId] || 0,
+        notice.status === "waiting_user" ? notice.eventCursor || 0 : 0,
+      ),
       onEvents(events, cursor) {
+        if (!isCurrentObserver()) return;
         durableRunCursorsRef.current[runId] = cursor;
         for (const runEvent of events) {
           if (runEvent.type === "run.status_changed") {
             const status = String(runEvent.payload.status || "");
             if (status) {
               setActiveRunNotice((current) => current?.id === runId ? { ...current, status } : current);
+            }
+            if (status === "waiting_user") {
+              void refreshPersistedMessages();
             }
             if (!NON_TERMINAL_DURABLE_RUN_STATUSES.has(status)) {
               setStreaming(false);
@@ -778,12 +920,12 @@ function AgentPageInner() {
               if (TERMINAL_DURABLE_RUN_STATUSES.has(status)) {
                 setActiveRunNotice((current) => (current?.id === runId ? null : current));
               }
-              if (currentSessionId) {
-                const sessionId = currentSessionId;
+              if (sessionId) {
                 const refreshPersistedMessages = async () => {
                   for (let attempt = 0; attempt < 8; attempt += 1) {
-                    if (currentSessionIdRef.current !== sessionId) return;
+                    if (!isCurrentConversation()) return;
                     const session = await getSession(sessionId, { preferServer: true }).catch(() => undefined);
+                    if (!isCurrentConversation()) return;
                     if (session?.messages) {
                       setMessages(session.messages);
                       setSessions((current) => current.map((item) => item.id === sessionId ? session : item));
@@ -881,6 +1023,7 @@ function AgentPageInner() {
       },
     });
     return () => {
+      observerGenerationRef.current += 1;
       stopObserving();
     };
   }, [activeRunNotice, currentSessionId, mounted]);
@@ -899,7 +1042,10 @@ function AgentPageInner() {
   }, [currentSessionId, messages]);
 
   const handleGateDecision = useCallback(async (gateId: string, decision: "approved" | "denied") => {
+    const sessionId = currentSessionId;
+    const generation = sessionGenerationRef.current;
     const gate = await respondDurableAgentRunGateClient(gateId, decision, createBrowserRequestId());
+    if (currentSessionIdRef.current !== sessionId || sessionGenerationRef.current !== generation) return;
     if (!gate) {
       await appendAssistantStatusMessage("确认请求未提交成功，请重试。");
       return;
@@ -951,10 +1097,14 @@ function AgentPageInner() {
   const handleResumeActiveRun = useCallback(async () => {
     const runId = activeRunNotice?.id;
     if (!runId || activeRunAction) return;
+    const sessionId = currentSessionId;
+    const generation = sessionGenerationRef.current;
+    const isCurrentAction = () => currentSessionIdRef.current === sessionId && sessionGenerationRef.current === generation;
     setActiveRunAction("resume");
     try {
       if (activeRunNotice?.status === "paused") {
         const resumed = await requestDurableAgentRunResumeClient(runId, createBrowserRequestId());
+        if (!isCurrentAction()) return;
         if (resumed) {
           setActiveRunNotice(activeNoticeFromRun(resumed));
           setStreaming(true);
@@ -962,6 +1112,7 @@ function AgentPageInner() {
         }
       }
       const run = await getDurableAgentRunClient(runId);
+      if (!isCurrentAction()) return;
       if (!run) {
         setActiveRunNotice(null);
         await appendAssistantStatusMessage(`没有找到 Agent run #${shortRunId(runId)}，可能已经结束或被清理。`);
@@ -975,16 +1126,20 @@ function AgentPageInner() {
         await updateSession(currentSessionId, { messages: nextMessages }).catch(() => {});
       }
     } finally {
-      setActiveRunAction(null);
+      if (isCurrentAction()) setActiveRunAction(null);
     }
   }, [activeRunAction, activeRunNotice?.id, activeRunNotice?.status, appendAssistantStatusMessage, currentSessionId, messages]);
 
   const handlePauseActiveRun = useCallback(async () => {
     const runId = activeRunNotice?.id;
     if (!runId || activeRunAction || activeRunNotice?.status === "paused") return;
+    const sessionId = currentSessionId;
+    const generation = sessionGenerationRef.current;
+    const isCurrentAction = () => currentSessionIdRef.current === sessionId && sessionGenerationRef.current === generation;
     setActiveRunAction("pause");
     try {
       const run = await requestDurableAgentRunPauseClient(runId, createBrowserRequestId());
+      if (!isCurrentAction()) return;
       if (run) {
         setActiveRunNotice(activeNoticeFromRun(run));
         setStreaming(false);
@@ -993,10 +1148,12 @@ function AgentPageInner() {
       } else {
         await appendAssistantStatusMessage(`暂停 Agent run #${shortRunId(runId)} 失败，它可能已经结束。`);
       }
+    } catch {
+      if (isCurrentAction()) await appendAssistantStatusMessage("暂停请求暂未成功，当前任务仍可继续；请稍后重试。");
     } finally {
-      setActiveRunAction(null);
+      if (isCurrentAction()) setActiveRunAction(null);
     }
-  }, [activeRunAction, activeRunNotice?.id, activeRunNotice?.status, appendAssistantStatusMessage]);
+  }, [activeRunAction, activeRunNotice?.id, activeRunNotice?.status, appendAssistantStatusMessage, currentSessionId]);
 
   const handleRollbackLatestProposal = useCallback(async () => {
     const proposal = latestRollbackProposal;
@@ -1022,9 +1179,13 @@ function AgentPageInner() {
   const handleCancelActiveRun = useCallback(async () => {
     const runId = activeRunNotice?.id;
     if (!runId || activeRunAction) return;
+    const sessionId = currentSessionId;
+    const generation = sessionGenerationRef.current;
+    const isCurrentAction = () => currentSessionIdRef.current === sessionId && sessionGenerationRef.current === generation;
     setActiveRunAction("cancel");
     try {
       const run = await requestDurableAgentRunCancelClient(runId, createBrowserRequestId());
+      if (!isCurrentAction()) return;
       if (run) {
         setActiveRunNotice(activeNoticeFromRun(run));
         await appendAssistantStatusMessage(`已提交 Agent run #${shortRunId(runId)} 的取消请求，Worker 会在安全位置停止。`);
@@ -1032,14 +1193,42 @@ function AgentPageInner() {
         await appendAssistantStatusMessage(`取消 Agent run #${shortRunId(runId)} 失败，它可能已经结束。`);
       }
     } finally {
-      setActiveRunAction(null);
+      if (isCurrentAction()) setActiveRunAction(null);
     }
-  }, [activeRunAction, activeRunNotice?.id, appendAssistantStatusMessage]);
+  }, [activeRunAction, activeRunNotice?.id, appendAssistantStatusMessage, currentSessionId]);
 
   const sendMessage = useCallback(
     async (content: string, images?: string[], options?: SendMessageOptions) => {
+      const turnGeneration = ++turnGenerationRef.current;
+      const sessionId = currentSessionId;
+      const originalContent = content;
+      const isCurrentTurn = () => turnGenerationRef.current === turnGeneration
+        && currentSessionIdRef.current === sessionId;
       const hideUserMessage = options?.hideUserMessage === true;
       const explicitForcedAgentId = options?.forcedAgentId;
+      const requestImages = [...(images || [])];
+      const pendingStorage = (() => {
+        try {
+          return typeof window === "undefined" ? null : window.localStorage;
+        } catch {
+          return null;
+        }
+      })();
+      const rememberedCreateRequestId = pendingRunCreateRequestId(
+        sessionId,
+        originalContent,
+        requestImages,
+        pendingStorage,
+      );
+      const createRequestId = rememberedCreateRequestId || createBrowserRequestId();
+      const rememberCreateRequest = () => rememberPendingRunCreate(
+        sessionId,
+        originalContent,
+        requestImages,
+        createRequestId,
+        pendingStorage,
+      );
+      const clearCreateRequest = () => clearPendingRunCreate(sessionId, createRequestId, pendingStorage);
       const userMsg: AgentMessage = {
         role: "user",
         content,
@@ -1094,7 +1283,58 @@ function AgentPageInner() {
       itemSequenceRef.current = 0;
       itemAssemblerRef.current = new AgentItemAssembler(turnItemPrefixRef.current);
 
+      const priorPendingInput = pendingRunInputRef.current;
+      const matchingPendingInput = priorPendingInput
+        && priorPendingInput.runId === activeRunNotice?.id
+        && priorPendingInput.originalContent === originalContent
+        && priorPendingInput.originalImages.length === (images?.length || 0)
+        && priorPendingInput.originalImages.every((image, index) => image === images?.[index])
+          ? priorPendingInput
+          : null;
+      const pdfExtraction = matchingPendingInput
+        ? { context: "", pdfCount: 0, readableCount: 0 }
+        : await extractReadOnlyPdfContext(images || []);
+      content = matchingPendingInput?.submittedContent || (content + pdfExtraction.context);
+      if (!isCurrentTurn()) return;
+      if (
+        pdfExtraction.pdfCount > 0
+        && pdfExtraction.readableCount === 0
+        && !(images || []).some((attachment) => attachment.startsWith("data:image/"))
+        && originalContent.trim().length < 100
+      ) {
+        const response: AgentMessage = {
+          role: "assistant",
+          content: "这份 PDF 没有读到可分析的文字。请在当前对话粘贴简历或 JD 正文，我会接着评估；这次没有修改或保存你的简历。",
+          timestamp: new Date().toISOString(),
+        };
+        setMessages(hideUserMessage ? [...messages, response] : [...updated, response]);
+        setStreaming(false);
+        setPhase(null);
+        setExecutingTool(undefined);
+        if (sessionId && !activeRunNotice) {
+          const session = await getSession(sessionId).catch(() => undefined);
+          if (!isCurrentTurn()) return;
+          if (session) {
+            const requestedTask = inferRequestedTaskFromText(originalContent);
+            const guidedSession = isGuidedTaskType(requestedTask)
+              ? startOrContinueGuidedSession({
+                  existing: resolveActiveGuidedSession({ agentState: session.agentState, interviewState: session.interviewState }),
+                  taskType: requestedTask,
+                  phase: "document_text_retry",
+                  expectedInput: "粘贴简历或 JD 正文，或重新上传清晰文件",
+                  summary: "等待补充可读取的文档文字",
+                })
+              : undefined;
+            await updateSession(sessionId, {
+              messages: hideUserMessage ? [...session.messages, response] : [...session.messages, userMsg, response],
+              agentState: guidedSession ? { ...(session.agentState || {}), guidedSession } : undefined,
+            });
+          }
+        }
+        return;
+      }
       const sessionForActiveRun = currentSessionId ? await getSession(currentSessionId).catch(() => undefined) : undefined;
+      if (!isCurrentTurn()) return;
       const activeGuidedForSubmit = resolveActiveGuidedSession({
         agentState: sessionForActiveRun?.agentState,
         interviewState: sessionForActiveRun?.interviewState,
@@ -1107,37 +1347,80 @@ function AgentPageInner() {
         && isConfirmedGuidedTaskSwitch(content),
       );
 
-      if (activeRunNotice && NON_TERMINAL_DURABLE_RUN_STATUSES.has(activeRunNotice.status) && !confirmedTaskSwitchForSubmit) {
-        const submitted = await submitDurableAgentRunInputClient(activeRunNotice.id, {
-          requestId: createBrowserRequestId(),
-          input: { content, images, persistInConversation: !hideUserMessage },
-        });
-        if (submitted) {
+      if (
+        activeRunNotice?.conversationId === sessionId
+        && NON_TERMINAL_DURABLE_RUN_STATUSES.has(activeRunNotice.status)
+        && activeRunNotice.status !== "paused"
+        && !confirmedTaskSwitchForSubmit
+      ) {
+        const pendingInput = matchingPendingInput?.runId === activeRunNotice.id
+          ? matchingPendingInput
+          : {
+              runId: activeRunNotice.id,
+              originalContent,
+              originalImages: [...(images || [])],
+              submittedContent: content,
+              requestId: createBrowserRequestId(),
+            };
+        pendingRunInputRef.current = pendingInput;
+        try {
+          const submitted = await submitDurableAgentRunInputClient(activeRunNotice.id, {
+            requestId: pendingInput.requestId,
+            input: {
+              content: pendingInput.submittedContent,
+              images: images?.filter((source) => source.startsWith("data:image/")),
+              persistInConversation: !hideUserMessage,
+            },
+          });
+          if (!isCurrentTurn()) return;
+          if (!submitted) throw new Error("消息未确认写入当前任务");
+          pendingRunInputRef.current = null;
           setActiveRunNotice(activeNoticeFromRun(submitted.run));
-        } else {
+        } catch (error) {
+          if (!isCurrentTurn()) return;
+          if (error instanceof DurableRunRequestError && !error.retryable) pendingRunInputRef.current = null;
           setStreaming(false);
           setPhase(null);
+          setExecutingTool(undefined);
           setMessages((current) => {
-            const next = [...current];
-            const lastIndex = next.length - 1;
-            if (next[lastIndex]?.role === "assistant" && !next[lastIndex]?.content) {
-              next[lastIndex] = {
-                ...next[lastIndex],
-                content: "补充信息未能写入当前 Run，请稍后重试。",
-              };
-            }
-            return next;
+            const next = current.filter((message) => message.timestamp !== userMsg.timestamp);
+            return [...next, {
+              role: "assistant",
+              content: `这条消息暂时未确认送达，请重新发送；当前对话可以继续。 ${userFacingAgentRunError(error)}`,
+              timestamp: new Date().toISOString(),
+            }];
           });
+          throw error;
         }
         return;
       }
 
-      if (activeRunNotice && confirmedTaskSwitchForSubmit) {
-        const paused = await requestDurableAgentRunPauseClient(activeRunNotice.id, createBrowserRequestId());
-        if (paused) setActiveRunNotice(activeNoticeFromRun(paused));
+      if (activeRunNotice?.conversationId === sessionId && confirmedTaskSwitchForSubmit) {
+        try {
+          const paused = await requestDurableAgentRunPauseClient(activeRunNotice.id, createBrowserRequestId());
+          if (!isCurrentTurn()) return;
+          if (!paused) throw new Error("当前任务暂停状态未确认");
+          setActiveRunNotice(activeNoticeFromRun(paused));
+        } catch (error) {
+          if (!isCurrentTurn()) return;
+          setStreaming(false);
+          setPhase(null);
+          setExecutingTool(undefined);
+          setMessages((current) => [
+            ...current.filter((message) => message.timestamp !== userMsg.timestamp),
+            { role: "assistant", content: "切换任务暂未成功，请重新发送这条消息；当前对话可以继续。", timestamp: new Date().toISOString() },
+          ]);
+          throw error;
+        }
       }
 
       const imageDataUris = (images || []).filter((src) => typeof src === "string" && src.startsWith("data:image/"));
+      const runAttachments = imageDataUris.length > 0 ? imageDataUris : undefined;
+      const requestedImageTask = inferRequestedTaskFromText(content);
+      const directImageTask = imageDataUris.length > 0 && imageDataUris.length === images?.length
+        && (requestedImageTask === "jd_evaluation" || requestedImageTask === "resume_diagnosis")
+          ? requestedImageTask
+          : null;
       const imageIntakeToolTimestamp = imageDataUris.length ? new Date().toISOString() : "";
       let imageIntakeToolMessage: AgentMessage | null = null;
 
@@ -1162,7 +1445,7 @@ function AgentPageInner() {
         });
       };
 
-      if (imageDataUris.length > 0) {
+      const beginImageIntake = () => {
         setPhase("extracting_ocr");
         setExecutingTool("recognize_document_image");
         upsertImageIntakeToolMessage({
@@ -1180,34 +1463,10 @@ function AgentPageInner() {
           },
           timestamp: imageIntakeToolTimestamp,
         });
-      }
+      };
+      if (imageDataUris.length > 0 && !directImageTask) beginImageIntake();
 
-      // ── File preprocessing: extract text from PDFs, keep images as context ──
-      let fileContext = "";
-      if (images?.length) {
-        for (const b64 of images) {
-          const isPdf = b64.startsWith("data:application/pdf");
-          if (isPdf) {
-            try {
-              const res = await fetch(b64);
-              const blob = await res.blob();
-              const fd = new FormData();
-              fd.append("file", blob, "resume.pdf");
-              const importRes = await fetch("/api/cv/import", { method: "POST", body: fd });
-              const importData = await importRes.json();
-              if (importData.success) {
-                const sections = importData.data.sections as Record<string, string>;
-                fileContext += "\n\n---\n已解析的简历内容：\n" + Object.entries(sections)
-                  .filter(([, v]) => v).map(([k, v]) => `【${k}】\n${v}`).join("\n\n");
-              }
-            } catch { /* preprocess failed, agent handles it */ }
-          }
-        }
-      }
-
-      if (fileContext) {
-        content = content + fileContext;
-      }
+      if (!isCurrentTurn()) return;
 
       const controller = new AbortController();
       abortRef.current = controller;
@@ -1222,12 +1481,14 @@ function AgentPageInner() {
 
       try {
         // ── Client-side orchestration: classify + agentLoopClient ──
-        const sessionMessages = updated.map((m) => ({
+        let earlyCreatedRun: DurableRunCreateResponse | null = null;
+        const sessionMessages = updated.map((m, index) => ({
           role: m.role,
-          content: m.content,
+          content: index === updated.length - 1 ? content : m.content,
         }));
 
         const currentSessionForRun = currentSessionId ? await getSession(currentSessionId) : undefined;
+        if (!isCurrentTurn()) return;
         const memoryDigest = currentSessionForRun?.memoryDigest;
         const agentState = markOfferStateStaleFromText(currentSessionForRun?.agentState, content) || currentSessionForRun?.agentState;
         const journeyArtifacts = collectArtifactRefsFromSafePayloads([
@@ -1237,6 +1498,48 @@ function AgentPageInner() {
           agentState,
           interviewState: currentSessionForRun?.interviewState,
         });
+        if (directImageTask && currentSessionId &&
+          (!activeGuidedSession || activeGuidedSession.taskType === directImageTask)) {
+          try {
+            rememberCreateRequest();
+            earlyCreatedRun = await createDurableAgentRunClient({
+              requestId: createRequestId,
+              conversationId: currentSessionId,
+              input: { content, images: runAttachments, persistInConversation: !hideUserMessage },
+              entryHints: { agentId: explicitForcedAgentId || taskAgentId(directImageTask), source: "agent_chat" },
+            });
+            if (!isCurrentTurn()) return;
+            if (earlyCreatedRun?.admission?.kind === "defer_switch") {
+              setStreaming(false);
+              setPhase(null);
+              setMessages((current) => {
+                const next = [...current];
+                const lastIndex = next.length - 1;
+                if (next[lastIndex]?.role === "assistant" && !next[lastIndex]?.content) {
+                  next[lastIndex] = {
+                    ...next[lastIndex],
+                    content: earlyCreatedRun?.admission?.safeMessage || "当前任务尚未到达安全切换点，请先完成、取消或暂停它。",
+                  };
+                }
+                return next;
+              });
+              return;
+            }
+            if (earlyCreatedRun?.assignment.owner === "worker" && earlyCreatedRun.run) {
+              clearCreateRequest();
+              workerOwnedRun = true;
+              durableRunId = earlyCreatedRun.run.id;
+              setActiveRunNotice({ ...activeNoticeFromRun(earlyCreatedRun.run), phase: "understanding" });
+              abortRef.current = null;
+              return;
+            }
+            clearCreateRequest();
+          } catch (error) {
+            if (error instanceof DurableRunOwnershipUnknownError) throw error;
+            clearCreateRequest();
+            earlyCreatedRun = null;
+          }
+        }
         const pendingCareerPositioningArtifact =
           activeGuidedSession?.taskType === "career_positioning_guidance" &&
           activeGuidedSession.phase === "awaiting_positioning_confirmation"
@@ -1254,6 +1557,7 @@ function AgentPageInner() {
           let nextGuidedSession: GuidedSessionState | undefined = activeGuidedSession || undefined;
           try {
             const saved = await persistCareerPositioningArtifact(pendingCareerPositioningArtifact, currentSessionId);
+            if (!isCurrentTurn()) return;
             nextGuidedSession = finishGuidedSession(
               activeGuidedSession,
               "completed",
@@ -1266,6 +1570,7 @@ function AgentPageInner() {
             ].join("\n");
             triggerProfileUpdate({ force: true }).catch(() => {});
           } catch (err) {
+            if (!isCurrentTurn()) return;
             finalAssistantContent = `这次定位结果没有写入画像：${err instanceof Error ? err.message : "未知错误"}。我没有把任务标记为完成，你可以再回复“确认”重试，或告诉我要调整哪里。`;
           }
 
@@ -1291,19 +1596,22 @@ function AgentPageInner() {
           const fullMessages = [...currentSessionForRun.messages];
           if (!hideUserMessage) fullMessages.push({ ...userMsg, agent_id: "profile" });
           fullMessages.push(finalAssistant);
+          const nextMemoryDigest = await generateMemoryDigestWithStatus(
+            fullMessages,
+            currentSessionForRun.memoryDigest,
+          );
+          if (!isCurrentTurn()) return;
           await updateSession(currentSessionId, {
             messages: fullMessages,
-            memoryDigest: await generateMemoryDigestWithStatus(
-              fullMessages,
-              currentSessionForRun.memoryDigest,
-            ),
+            memoryDigest: nextMemoryDigest,
             interviewState: currentSessionForRun.interviewState,
             agentState: {
               ...(agentState || {}),
               guidedSession: nextGuidedSession,
             },
           });
-          setSessions(await listSessions());
+          const refreshedSessions = await listSessions();
+          if (isCurrentTurn()) setSessions(refreshedSessions);
           return;
         }
         const requestedTaskForSwitch = inferRequestedTaskFromText(content);
@@ -1314,6 +1622,7 @@ function AgentPageInner() {
           const decision = classifyInterviewMaterialReference(content);
           if (decision.intent !== "continue_current_session") {
             const materialRecords = await loadInterviewMaterialRecords();
+            if (!isCurrentTurn()) return;
             const match = matchInterviewMaterialReference(decision, materialRecords);
             rebindResolution = resolveInterviewRebindAction(decision, match);
           }
@@ -1324,6 +1633,7 @@ function AgentPageInner() {
           : undefined;
         let imageIntake: ImageIntakeResult | null = null;
         if (imageDataUris.length > 0) {
+          if (directImageTask) beginImageIntake();
           const intakeController = new AbortController();
           const intakeTimeout = window.setTimeout(() => intakeController.abort(), IMAGE_INTAKE_TIMEOUT_MS);
           let intakeFailure = "";
@@ -1349,6 +1659,7 @@ function AgentPageInner() {
           } finally {
             window.clearTimeout(intakeTimeout);
           }
+          if (!isCurrentTurn()) return;
           if (!imageIntake) {
             imageIntake = {
               documentType: "unknown",
@@ -1446,6 +1757,7 @@ function AgentPageInner() {
                   currentSessionForRun.title === "新对话" ||
                   currentSessionForRun.title === "新的对话");
               const nextMemoryDigest = await generateMemoryDigestWithStatus(fullMessages, memoryDigest);
+              if (!isCurrentTurn()) return;
               await updateSession(currentSessionId, {
                 messages: fullMessages,
                 title: needsTitle ? makeSessionTitle(content) : undefined,
@@ -1465,7 +1777,8 @@ function AgentPageInner() {
                   }),
                 },
               });
-              setSessions(await listSessions());
+              const refreshedSessions = await listSessions();
+              if (isCurrentTurn()) setSessions(refreshedSessions);
             }
 
             triggerProfileUpdate({ force: true }).catch(() => {});
@@ -1493,6 +1806,7 @@ function AgentPageInner() {
         let routeDecision = routeAgentTask({
           agentId: forcedAgentId || "general",
           content,
+          hasImages: imageDataUris.length > 0,
           imageIntake,
           preferredDocumentType,
           activeTask: activeGuidedSessionForRun,
@@ -1505,6 +1819,7 @@ function AgentPageInner() {
         if (taskType) {
           try {
             const baseSnapshot = await loadTaskBaseSnapshot(taskType);
+            if (!isCurrentTurn()) return;
             const runAgentId = routeForcedAgentId || taskAgentId(taskType);
             const contract = createAgentTaskContract({
               taskType,
@@ -1549,15 +1864,17 @@ function AgentPageInner() {
             if (taskType === "interview_coaching" && interviewState?.planSnapshot) {
               completedContractCriteria.add("JD/resume context bound");
             }
-            const created = await createDurableAgentRunClient({
-              requestId: createBrowserRequestId(),
+            if (!earlyCreatedRun) rememberCreateRequest();
+            const created = earlyCreatedRun || await createDurableAgentRunClient({
+              requestId: createRequestId,
               conversationId: currentSessionId,
-              input: { content, images, persistInConversation: !hideUserMessage },
+              input: { content, images: runAttachments, persistInConversation: !hideUserMessage },
               entryHints: {
                 ...(routeForcedAgentId ? { agentId: routeForcedAgentId } : {}),
                 source: "agent_chat",
               },
             });
+            if (!isCurrentTurn()) return;
             if (created?.admission?.kind === "defer_switch") {
               setStreaming(false);
               setPhase(null);
@@ -1576,6 +1893,7 @@ function AgentPageInner() {
             }
             const createdRun = created?.run || null;
             if (created?.assignment.owner === "worker" && createdRun) {
+              clearCreateRequest();
               workerOwnedRun = true;
               durableRunId = createdRun.id;
               setActiveRunNotice({
@@ -1587,6 +1905,7 @@ function AgentPageInner() {
               abortRef.current = null;
               return;
             }
+            clearCreateRequest();
           } catch (error) {
             if (error instanceof DurableRunOwnershipUnknownError) throw error;
             durableRunId = null;
@@ -1602,6 +1921,7 @@ function AgentPageInner() {
           preferredDocumentType,
           forcedAgentId: routeForcedAgentId,
         });
+        if (!isCurrentTurn()) return;
 
         const interviewContext = interviewState?.planSnapshot
           ? `\n\n## Active Interview Session
@@ -1638,6 +1958,7 @@ Rules:
           routeDecision = routeAgentTask({
             agentId: agent.id,
             content,
+            hasImages: imageDataUris.length > 0,
             imageIntake,
             preferredDocumentType,
             activeTask: activeGuidedSessionForRun,
@@ -1709,8 +2030,8 @@ Rules:
 
         const msgList = updated.map((m, index) => ({
           role: m.role,
-          content: m.content,
-          images: m.images,
+          content: index === updated.length - 1 ? content : m.content,
+          images: index === updated.length - 1 ? runAttachments : m.images,
         }));
 
         let firstEvent = true;
@@ -1725,6 +2046,7 @@ Rules:
             taskContract: activeTaskContract,
           },
         )) {
+          if (!isCurrentTurn()) return;
           if (firstEvent) { setStartTime(Date.now()); firstEvent = false; }
           switch (event.type) {
             case "phase": {
@@ -1989,7 +2311,7 @@ Rules:
         if (activeTaskContract?.taskType === "career_positioning_guidance" && (assistantText.trim() || careerPositioningFallback)) {
           addContractCriteria(["next question or guidance response generated"]);
         }
-        if (activeTaskContract?.taskType === "resume_query" && assistantText.trim()) {
+        if ((activeTaskContract?.taskType === "resume_query" || activeTaskContract?.taskType === "resume_diagnosis") && assistantText.trim()) {
           addContractCriteria(["answer generated"]);
         }
         if (activeTaskContract?.taskType === "interview_coaching" && assistantText.trim()) {
@@ -2088,6 +2410,7 @@ Rules:
           // Save to current session
           if (currentSessionId) {
             const currentSession = await getSession(currentSessionId);
+            if (!isCurrentTurn()) return;
             if (currentSession) {
               const currentAgentState = currentSession.agentState || currentSessionForRun?.agentState || {};
               const fullMessages = [...currentSession.messages];
@@ -2145,6 +2468,7 @@ Rules:
                 fullMessages,
                 currentSession.memoryDigest || currentSessionForRun?.memoryDigest,
               );
+              if (!isCurrentTurn()) return;
 
               // Set title from FIRST user message (not current message)
               const needsTitle =
@@ -2195,6 +2519,7 @@ Rules:
               const completedGuidedBusinessTask =
                 (taskType === "jd_evaluation" && toolResultInfo?.name === "evaluate_jd_full" && toolResultInfo.success === true && !contractGateFailed) ||
                 (taskType === "offer_evaluation" && toolResultInfo?.name === "evaluate_offer" && toolResultInfo.success === true && !contractGateFailed) ||
+                (taskType === "resume_diagnosis" && finalRunStatus === "succeeded" && !shouldKeepImageClarification && assistantText.trim().length > 0) ||
                 (taskType === "resume_edit" && (resumeEditAppliedSucceeded || resumeEditRolledBackSucceeded));
               if (
                 completedReferenceResumeSave ||
@@ -2249,12 +2574,16 @@ Rules:
                     ? "career_direction_discovery"
                     : taskType === "interview_coaching"
                       ? "one_question_loop"
+                      : taskType === "resume_diagnosis"
+                        ? "resume_diagnosis"
                       : taskType === "resume_edit"
                         ? contractRunOutcome?.status === "waiting_user" ? "awaiting_resume_draft_confirmation" : "resume_optimization"
                         : "role_category_confirmation",
-                  expectedInput: taskType === "resume_edit" && contractRunOutcome?.status === "waiting_user"
-                    ? "选择一个优化方案并确认创建修改提案，或说明需要继续调整的地方"
-                    : undefined,
+                  expectedInput: taskType === "resume_diagnosis"
+                    ? "粘贴简历文字或重新上传清晰截图继续评估"
+                    : taskType === "resume_edit" && contractRunOutcome?.status === "waiting_user"
+                      ? "选择一个优化方案并确认创建修改提案，或说明需要继续调整的地方"
+                      : undefined,
                   summary: taskType === "resume_edit" && contractRunOutcome?.status === "waiting_user"
                     ? "等待确认简历优化草稿"
                     : taskLabelZh(taskType),
@@ -2276,6 +2605,7 @@ Rules:
                   guidedSession: nextGuidedSession,
                 },
               });
+              if (!isCurrentTurn()) return;
               triggerSessionAnomalyReview({
                 sessionId: currentSessionId,
                 messages: fullMessages,
@@ -2285,7 +2615,8 @@ Rules:
                   : [],
               });
               // Refresh sessions list
-              setSessions(await listSessions());
+              const refreshedSessions = await listSessions();
+              if (isCurrentTurn()) setSessions(refreshedSessions);
             }
           }
 
@@ -2326,9 +2657,15 @@ Rules:
           });
         }
       } catch (err: unknown) {
+        if (!isCurrentTurn()) return;
         if (err instanceof DOMException && err.name === "AbortError") return;
-        const errorMsg = err instanceof Error ? err.message : "未知错误";
-        console.error("Stream error:", errorMsg);
+        if (!(err instanceof DurableRunOwnershipUnknownError)) clearCreateRequest();
+        const errorMsg = userFacingAgentRunError(err);
+        console.error("[agent] turn failed", {
+          sessionId: currentSessionId,
+          runId: durableRunId,
+          error: err instanceof Error ? err.message : String(err),
+        });
         if (durableRunId) {
           setActiveRunNotice((prev) => (prev?.id === durableRunId ? { ...prev, status: "failed" } : prev));
           window.setTimeout(() => {
@@ -2341,14 +2678,15 @@ Rules:
           const copy = [...prev];
           const last = copy[copy.length - 1];
           if (last && last.role === "assistant" && last.content.trim() === "") {
-            copy[copy.length - 1] = { ...last, content: `⚠️ 连接中断：${errorMsg}` };
+            copy[copy.length - 1] = { ...last, content: `⚠️ ${errorMsg}` };
           } else if (!last || last.role !== "assistant") {
-            copy.push({ role: "assistant", content: `⚠️ 连接中断：${errorMsg}`, timestamp: new Date().toISOString() });
+            copy.push({ role: "assistant", content: `⚠️ ${errorMsg}`, timestamp: new Date().toISOString() });
           }
           return copy;
         });
+        throw err;
       } finally {
-        if (!workerOwnedRun) {
+        if (isCurrentTurn() && !workerOwnedRun) {
           setStreaming(false);
           setPhase(null);
         }
@@ -2378,7 +2716,35 @@ Rules:
     };
   }, [mounted, streaming, currentSessionId, messages.length, sendMessage]);
 
-  const handleStopStreaming = useCallback(() => {
+  const handleStopStreaming = useCallback(async () => {
+    const activeRun = activeRunNotice;
+    if (activeRun && NON_TERMINAL_DURABLE_RUN_STATUSES.has(activeRun.status)) {
+      if (activeRunAction) return;
+      const sessionId = currentSessionId;
+      const generation = sessionGenerationRef.current;
+      const isCurrentAction = () => currentSessionIdRef.current === sessionId && sessionGenerationRef.current === generation;
+      setActiveRunAction("cancel");
+      try {
+        const cancelled = await requestDurableAgentRunCancelClient(activeRun.id, createBrowserRequestId());
+        if (!isCurrentAction()) return;
+        if (!cancelled) throw new Error("取消请求未确认");
+        setActiveRunNotice(activeNoticeFromRun(cancelled));
+        setStreaming(false);
+        setPhase(null);
+        setExecutingTool(undefined);
+      } catch {
+        if (!isCurrentAction()) return;
+        setMessages((current) => [...current, {
+          role: "assistant",
+          content: "停止请求暂未成功，任务可能仍在运行。你可以使用上方“取消”重试。",
+          timestamp: new Date().toISOString(),
+        }]);
+      } finally {
+        if (isCurrentAction()) setActiveRunAction(null);
+      }
+      return;
+    }
+    turnGenerationRef.current += 1;
     abortRef.current?.abort();
     abortRef.current = null;
     setStreaming(false);
@@ -2386,35 +2752,21 @@ Rules:
     setExecutingTool(undefined);
     setThinkingContent("");
     setActiveAgent(null);
-  }, []);
+  }, [activeRunAction, activeRunNotice, currentSessionId]);
 
   const handleNewSession = useCallback(async () => {
-    // Save current session before switching
-    if (currentSessionId) {
-      const currentSession = await getSession(currentSessionId);
-      if (currentSession) {
-        await updateSession(currentSessionId, { messages });
-      }
-    }
     // Trigger profile update before switching
     triggerProfileUpdate({ force: true }).catch(() => {});
 
-    // Abort any streaming
-    abortRef.current?.abort();
-    setStreaming(false);
-    setPhase(null);
-    setActiveAgent(null);
-
     const id = await createSession([WELCOME]);
+    clearSessionActivity();
     manualSessionSwitchRef.current = id;
     replaceUrlForSelectedSession(id);
+    currentSessionIdRef.current = id;
     setCurrentSessionId(id);
     setMessages([WELCOME]);
-    setStreamText("");
-    setThinkingContent("");
-    streamContentRef.current = "";
     setSessions(await listSessions());
-  }, [currentSessionId, messages, replaceUrlForSelectedSession]);
+  }, [clearSessionActivity, replaceUrlForSelectedSession]);
 
   useEffect(() => {
     if (!mounted || streaming || !currentSessionId) return;
@@ -2546,34 +2898,19 @@ Rules:
 
   const handleSelectSession = useCallback(async (id: number) => {
     if (id === currentSessionId) return;
-    // Save current session
-    if (currentSessionId) {
-      const currentSession = await getSession(currentSessionId);
-      if (currentSession) {
-        await updateSession(currentSessionId, { messages });
-      }
-    }
     // Trigger profile update before switching
     triggerProfileUpdate({ force: true }).catch(() => {});
 
-    // Abort streaming
-    abortRef.current?.abort();
-    setStreaming(false);
-    setPhase(null);
-    setActiveAgent(null);
-
-    // Load selected session
-    const session = await getSession(id);
+    const session = await getSession(id, { preferServer: true });
     if (session) {
+      clearSessionActivity();
       manualSessionSwitchRef.current = id;
       replaceUrlForSelectedSession(id);
+      currentSessionIdRef.current = id;
       setCurrentSessionId(id);
       setMessages(session.messages);
-      setStreamText("");
-      setThinkingContent("");
-      streamContentRef.current = "";
     }
-  }, [currentSessionId, messages, replaceUrlForSelectedSession]);
+  }, [clearSessionActivity, currentSessionId, replaceUrlForSelectedSession]);
 
   const handleDeleteSession = useCallback(async (id: number) => {
     const session = await getSession(id);
@@ -2589,20 +2926,24 @@ Rules:
       const remaining = await listSessions();
       if (remaining.length > 0) {
         const nextId = remaining[0].id!;
+        clearSessionActivity();
         manualSessionSwitchRef.current = nextId;
         replaceUrlForSelectedSession(nextId);
+        currentSessionIdRef.current = nextId;
         setCurrentSessionId(nextId);
         setMessages(remaining[0].messages);
       } else {
         const newId = await createSession([WELCOME]);
+        clearSessionActivity();
         manualSessionSwitchRef.current = newId;
         replaceUrlForSelectedSession(newId);
+        currentSessionIdRef.current = newId;
         setCurrentSessionId(newId);
         setMessages([WELCOME]);
       }
     }
     setSessions(await listSessions());
-  }, [currentSessionId, replaceUrlForSelectedSession]);
+  }, [clearSessionActivity, currentSessionId, replaceUrlForSelectedSession]);
 
   const handleUndoDelete = useCallback(async (id: number) => {
     await undoDeleteSession(id);
@@ -2650,7 +2991,7 @@ Rules:
   );
 
   return (
-    <div className="flex h-[calc(100vh-(var(--space-section)*2))] min-h-[560px] max-h-[calc(100vh-(var(--space-section)*2))] w-full min-w-0 max-w-full flex-1 gap-0 overflow-hidden">
+    <div className="flex h-[calc(100dvh-(var(--space-section)*2)-3.5rem)] min-h-0 max-h-[calc(100dvh-(var(--space-section)*2)-3.5rem)] w-full min-w-0 max-w-full flex-1 gap-0 overflow-hidden lg:h-[calc(100vh-(var(--space-section)*2))] lg:min-h-[560px] lg:max-h-[calc(100vh-(var(--space-section)*2))]">
       {/* Desktop SessionList Sidebar (>=1280px) */}
       <div className="hidden h-full w-[220px] flex-shrink-0 overflow-hidden border-r border-[var(--color-divider)] bg-[var(--color-bg)]/50 pr-3 lg:flex">
         <SessionList
@@ -2668,30 +3009,41 @@ Rules:
       {/* Mobile SessionList Drawer */}
       <AnimatePresence>
         {sessionSidebarOpen && (
-          <motion.aside
-            initial={{ x: -280, opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            exit={{ x: -280, opacity: 0 }}
-            transition={{ duration: 0.25, ease: [0.19, 1, 0.22, 1] }}
-            className="lg:hidden fixed left-0 top-0 bottom-0 z-40 bg-[var(--color-surface)] border-r border-[var(--color-divider)] w-[280px] overflow-hidden"
-          >
-            <SessionList
-              sessions={sessions}
-              currentSessionId={currentSessionId}
-              onSelect={(id) => {
-                handleSelectSession(id);
-                setSessionSidebarOpen(false);
-              }}
-              onNew={() => {
-                handleNewSession();
-                setSessionSidebarOpen(false);
-              }}
-              onDelete={handleDeleteSession}
-              onUndoDelete={handleUndoDelete}
-              onPin={handlePinSession}
-              showUndoToast={undoToast}
+          <>
+            <motion.button
+              type="button"
+              aria-label="关闭会话列表"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setSessionSidebarOpen(false)}
+              className="lg:hidden fixed inset-0 z-30 bg-black/30"
             />
-          </motion.aside>
+            <motion.aside
+              initial={{ x: -280, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: -280, opacity: 0 }}
+              transition={{ duration: 0.25, ease: [0.19, 1, 0.22, 1] }}
+              className="lg:hidden fixed left-0 top-0 bottom-0 z-40 bg-[var(--color-surface)] border-r border-[var(--color-divider)] w-[280px] overflow-hidden"
+            >
+              <SessionList
+                sessions={sessions}
+                currentSessionId={currentSessionId}
+                onSelect={(id) => {
+                  handleSelectSession(id);
+                  setSessionSidebarOpen(false);
+                }}
+                onNew={() => {
+                  handleNewSession();
+                  setSessionSidebarOpen(false);
+                }}
+                onDelete={handleDeleteSession}
+                onUndoDelete={handleUndoDelete}
+                onPin={handlePinSession}
+                showUndoToast={undoToast}
+              />
+            </motion.aside>
+          </>
         )}
       </AnimatePresence>
 
@@ -2748,7 +3100,7 @@ Rules:
               variant="ghost"
               size="sm"
               onClick={handleNewSession}
-              disabled={streaming}
+              disabled={streaming && !activeRunNotice}
             >
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none" className="mr-1">
                 <path d="M7 1v12M1 7h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
