@@ -15,7 +15,6 @@ const REQUIRED_TABLES = [
   "agent_run_gates",
   "agent_tool_attempts",
   "agent_run_outbox",
-  "agent_conversation_items",
   "agent_feature_flags",
   "agent_eval_layer_results",
   "jd_resume_matching_preferences",

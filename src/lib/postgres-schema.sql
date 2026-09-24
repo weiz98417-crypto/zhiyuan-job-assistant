@@ -439,39 +439,11 @@ CREATE TABLE IF NOT EXISTS agent_run_events (
   UNIQUE(run_id, sequence)
 );
 
-CREATE TABLE IF NOT EXISTS agent_conversation_items (
-  item_id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  conversation_id BIGINT,
-  run_id TEXT REFERENCES agent_runs(id) ON DELETE CASCADE,
-  event_cursor BIGINT,
-  item_type TEXT NOT NULL,
-  schema_version INTEGER NOT NULL DEFAULT 1,
-  display_state TEXT NOT NULL,
-  dedupe_key TEXT NOT NULL,
-  payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-  artifact_id TEXT,
-  artifact_version TEXT,
-  artifact_hash TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT agent_conversation_items_type_check CHECK (
-    item_type IN ('user_turn', 'assistant_text', 'run_progress', 'safe_tool_status', 'artifact_card', 'run_gate', 'task_switch_notice', 'run_terminal', 'user_safe_error')
-  ),
-  CONSTRAINT agent_conversation_items_state_check CHECK (
-    display_state IN ('visible', 'running', 'pending', 'resolved', 'failed', 'interrupted', 'hidden')
-  ),
-  CONSTRAINT agent_conversation_items_artifact_check CHECK (
-    item_type <> 'artifact_card' OR (artifact_id IS NOT NULL AND artifact_version IS NOT NULL)
-  )
-);
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_conversation_items_dedupe
-  ON agent_conversation_items(user_id, COALESCE(conversation_id, 0), dedupe_key);
-CREATE INDEX IF NOT EXISTS idx_agent_conversation_items_timeline
-  ON agent_conversation_items(user_id, conversation_id, created_at, item_id);
-CREATE INDEX IF NOT EXISTS idx_agent_conversation_items_run_cursor
-  ON agent_conversation_items(run_id, event_cursor);
+
+
+
+
 
 CREATE TABLE IF NOT EXISTS agent_feature_flags (
   name TEXT PRIMARY KEY,

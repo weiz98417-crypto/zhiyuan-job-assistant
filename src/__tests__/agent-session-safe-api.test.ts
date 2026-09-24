@@ -68,19 +68,21 @@ describe("session user API safe projection", () => {
     expect(serialized).not.toContain("secret");
   });
 
-  it("sanitizes messages before create and update persistence", async () => {
+  it("refuses browser transcript writes on create and update (0.11.0-C, ADR-0030)", async () => {
     const listRoute = await import("@/app/api/sessions/route");
-    await listRoute.POST(new Request("http://localhost/api/sessions", {
+    const postRes = await listRoute.POST(new Request("http://localhost/api/sessions", {
       method: "POST",
       body: JSON.stringify({ messages: JSON.parse(legacyRow.messages_json) }),
     }));
-    expect(JSON.stringify(boundaries.create.mock.calls[0]?.[0])).not.toContain("raw result");
+    expect(postRes.status).toBe(422);
+    expect(boundaries.create.mock.calls).toHaveLength(0);
 
     const detailRoute = await import("@/app/api/sessions/[id]/route");
-    await detailRoute.PATCH(new Request("http://localhost/api/sessions/7", {
+    const patchRes = await detailRoute.PATCH(new Request("http://localhost/api/sessions/7", {
       method: "PATCH",
       body: JSON.stringify({ messages: JSON.parse(legacyRow.messages_json) }),
     }), { params: Promise.resolve({ id: "7" }) });
-    expect(JSON.stringify(boundaries.update.mock.calls[0]?.[2])).not.toContain("raw result");
+    expect(patchRes.status).toBe(422);
+    expect(boundaries.update.mock.calls).toHaveLength(0);
   });
 });

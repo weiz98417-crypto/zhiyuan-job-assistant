@@ -17,6 +17,7 @@ import type { ClientAgentDefinition } from "@/lib/agent/orchestrator/client";
 import { inferPreferredDocumentTypeFromText, type ImageDocumentType, type ImageIntakeResult } from "@/lib/agent/image-intake";
 import { buildImageIntakeStatusText, buildImageIntakeToolSummary, routeImageIntake } from "@/lib/agent/image-intake-router";
 import { collectArtifactRefsFromSafePayloads, type AgentArtifactRef } from "@/lib/agent/task-journey";
+import { mergeServerTranscript, type MergeableMessage } from "@/lib/agent/transcript-merge";
 import {
   createResumeBaseSnapshot,
   inferCompletedCriteriaFromToolResult,
@@ -542,34 +543,6 @@ const WELCOME: AgentMessage = {
   timestamp: new Date().toISOString(),
 };
 
-async function persistMessages(messages: AgentMessage[]): Promise<void> {
-  const lastUser = [...messages].reverse().find((m) => m.role === "user");
-  const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
-  if (!lastUser) return;
-
-  try {
-    await logInteraction({
-      timestamp: new Date(lastUser.timestamp),
-      trigger: "user_query",
-      contextSnapshot: {
-        profileVersion: "",
-        pipelineSummary: "",
-        recentActivityCount: 0,
-      },
-      reasoning: {
-        thought: lastAssistant?.content || "",
-        toolsConsidered: [],
-        toolsUsed: [],
-      },
-      output: {
-        type: "answer",
-        summary: lastUser.content,
-      },
-    } as AgentInteraction);
-  } catch {
-    /* best-effort persistence */
-  }
-}
 
 /* ── Inner page ── */
 
@@ -749,7 +722,7 @@ function AgentPageInner() {
       clearSessionActivity();
       currentSessionIdRef.current = id;
       setCurrentSessionId(id);
-      setMessages(session.messages);
+      setMessages(mergeServerTranscript(messages as MergeableMessage[], session.messages as MergeableMessage[]) as typeof messages);
       // 0.11.0-B: the header agent belongs to the conversation, not the app.
       setActiveAgent(null);
     });
@@ -812,7 +785,7 @@ function AgentPageInner() {
           const session = await getSession(sessionId, { preferServer: true }).catch(() => undefined);
           if (cancelled || currentSessionIdRef.current !== sessionId || sessionGenerationRef.current !== generation) return;
           if (session) {
-            setMessages(session.messages);
+            setMessages(mergeServerTranscript(messages as MergeableMessage[], session.messages as MergeableMessage[]) as typeof messages);
             setSessions((current) => current.map((item) => item.id === sessionId ? session : item));
             durableRunCursorsRef.current[run.id] = Math.max(durableRunCursorsRef.current[run.id] || 0, run.eventCursor);
           }
@@ -851,7 +824,7 @@ function AgentPageInner() {
         if (!isCurrentConversation()) return;
         if (turnGenerationRef.current !== turnGeneration) return;
         if (session?.messages) {
-          setMessages(session.messages);
+          setMessages(mergeServerTranscript(messages as MergeableMessage[], session.messages as MergeableMessage[]) as typeof messages);
           setSessions((current) => current.map((item) => item.id === sessionId ? session : item));
         }
         if (attempt === 7) return;
@@ -898,7 +871,7 @@ function AgentPageInner() {
                     const session = await getSession(sessionId, { preferServer: true }).catch(() => undefined);
                     if (!isCurrentConversation()) return;
                     if (session?.messages) {
-                      setMessages(session.messages);
+                      setMessages(mergeServerTranscript(messages as MergeableMessage[], session.messages as MergeableMessage[]) as typeof messages);
                       setSessions((current) => current.map((item) => item.id === sessionId ? session : item));
                     }
                     if (attempt === 7) return;
@@ -1039,18 +1012,16 @@ function AgentPageInner() {
     };
   }, [activeRunNotice, currentSessionId, mounted]);
 
+  // 0.11.0-C (ADR-0030): status notices are UI-transient. The worker owns the
+  // transcript; these messages render from run state and never hit the server.
   const appendAssistantStatusMessage = useCallback(async (content: string) => {
-    const message: AgentMessage = {
+    setMessages((current) => [...current, {
       role: "assistant",
       content,
       timestamp: new Date().toISOString(),
-    };
-    const nextMessages = [...messages, message];
-    setMessages(nextMessages);
-    if (currentSessionId) {
-      await updateSession(currentSessionId, { messages: nextMessages }).catch(() => {});
-    }
-  }, [currentSessionId, messages]);
+      itemId: `status:${Date.now()}`,
+    }]);
+  }, []);
 
   const handleGateDecision = useCallback(async (gateId: string, decision: "approved" | "denied") => {
     const sessionId = currentSessionId;
@@ -1133,9 +1104,6 @@ function AgentPageInner() {
       const content = buildRunRecoveryMessage(run);
       const nextMessages = upsertRunRecoveryStatusMessage(messages, runId, content, new Date().toISOString());
       setMessages(nextMessages);
-      if (currentSessionId) {
-        await updateSession(currentSessionId, { messages: nextMessages }).catch(() => {});
-      }
     } finally {
       if (isCurrentAction()) setActiveRunAction(null);
     }
@@ -2154,7 +2122,7 @@ function AgentPageInner() {
       replaceUrlForSelectedSession(id);
       currentSessionIdRef.current = id;
       setCurrentSessionId(id);
-      setMessages(session.messages);
+      setMessages(mergeServerTranscript(messages as MergeableMessage[], session.messages as MergeableMessage[]) as typeof messages);
     }
   }, [clearSessionActivity, currentSessionId, replaceUrlForSelectedSession]);
 
@@ -2202,7 +2170,7 @@ function AgentPageInner() {
         manualSessionSwitchRef.current = id;
         replaceUrlForSelectedSession(id);
         setCurrentSessionId(id);
-        setMessages(session.messages);
+        setMessages(mergeServerTranscript(messages as MergeableMessage[], session.messages as MergeableMessage[]) as typeof messages);
       }
     }
   }, [currentSessionId, replaceUrlForSelectedSession]);

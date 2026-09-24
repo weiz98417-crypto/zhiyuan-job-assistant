@@ -85,7 +85,6 @@ export async function createSession(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       title: session.title,
-      messages: session.messages,
       interviewState: session.interviewState,
       agentState: session.agentState,
     }),

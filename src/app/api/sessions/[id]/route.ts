@@ -34,7 +34,16 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     }
 
     const { id } = await params;
-    const body = projectSessionMutationForPersistence(await request.json());
+    const raw = await request.json();
+    // 0.11.0-C (ADR-0030): the worker is the sole transcript writer. The
+    // browser may update session metadata but never the messages array.
+    if (raw && typeof raw === "object" && "messages" in raw) {
+      return NextResponse.json(
+        { success: false, error: "messages 由 Agent Worker 独占写入；客户端请通过 durable Run 提交内容。" },
+        { status: 422 },
+      );
+    }
+    const body = projectSessionMutationForPersistence(raw);
     const ok = await getDataRepositories().sessions.update(Number(id), user.userId, body);
     if (!ok) return NextResponse.json({ success: false, error: "No fields to update" }, { status: 400 });
     return NextResponse.json({ success: true });

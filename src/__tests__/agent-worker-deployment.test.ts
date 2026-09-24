@@ -30,7 +30,8 @@ describe("Agent Worker production deployment", () => {
     expect(preflight).toContain("to_regclass");
     expect(preflight).toContain("build/agent-worker.mjs");
     expect(preflight).toContain("fs.constants.W_OK");
-    expect(preflight).toContain("agent_conversation_items");
+    // 0.11.0-C: the never-powered items materialization was deleted (ADR-0030).
+    expect(preflight).not.toContain("agent_conversation_items");
     expect(preflight).toContain("agent_feature_flags");
     expect(preflight).toContain("agent_eval_layer_results");
     expect(release).toContain("current.next");
