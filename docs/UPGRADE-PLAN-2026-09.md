@@ -9,6 +9,17 @@
 - 生产问题清单（13 条冻结 PE2E）：`docs/agent-production-e2e-issues-2026-08-30.md`
 - 代码事实探查（三份）：legacy 路径可达性 / child run 现状 / 记忆子系统现状（2026-09-24，本仓库 dev 分支 @ 44049e1）
 
+## 0.11.0 连贯性升级（2026-09-25 定稿）
+
+四份 openspec 变更单承载，一趟发布列车，无 flag 无观察期（git 整体回退即回滚）：
+
+- openspec/changes/a-routing-authority — Run Admission 单一权威：POST 零 LLM 亚秒建 Run；envelope 移 worker 首步；澄清 Run；删浏览器三套路由
+- openspec/changes/b-event-dialect — AG-UI 词汇共享类型单一事实源；subagent/step/messages.snapshot；交接/委派/步骤轨道可见；SSE 250ms
+- openspec/changes/c-transcript-single-writer — worker 独占 transcript；PATCH 硬拒 messages；按条 reconcile；删 items 物化表
+- openspec/changes/d-dual-canvas-ui — 双面画布（旅程栏/对话面/分析面）；assistant-ui + shadcn + 纸鸢令牌（去黄化 claude 基准，霞鹜文楷+朱砂）；Lucide；⌘K；PE2E 全解冻 + 连贯性验收
+
+ADR 计划：0029（admission 确定性）、0030（transcript 单写者与 items 删除）、0031（assistant-ui 与事件方言）。设计样张 v2 定稿：双面画布（%TEMP%/zhiyuan-0.11.0-design-proposal.html）。
+
 ## 实施状态（2026-09-24）
 
 - M1 ✅ 提交 d32e18c；M2 ✅ d3686c0；M3 ✅ bffc53b；M4 ✅ 4fc546d；M5 ✅ 7286cb8；M6a ✅（本提交，交接/委派安全卡视图）
