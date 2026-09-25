@@ -4,13 +4,14 @@ import { Suspense, useEffect, useRef, useState, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
-import { Menu, User, Bot, RotateCcw, XCircle, Pause, Play } from "lucide-react";
+import { Menu, User, Bot } from "lucide-react";
 import { HandwritingTitle, WarmButton } from "@/components/design";
 import AgentChat from "@/components/agent/AgentChat";
 import type { EvalBlockProgress, CompletionInfo } from "@/components/agent/AgentChat";
 import SessionList from "@/components/agent/SessionList";
 import CommandPalette from "@/components/shell/CommandPalette";
 import AgentPhaseTrack from "@/components/agent/assistant-ui/AgentPhaseTrack";
+import { AgentRunToolbar, RollbackProposalBanner } from "@/components/agent/AgentRunToolbar";
 import { DEFAULT_SUGGESTIONS } from "@/components/agent/SuggestionChips";
 import type { SuggestionChip } from "@/components/agent/SuggestionChips";
 import { logInteraction } from "@/lib/agent/memory";
@@ -389,26 +390,6 @@ function activeNoticeFromRun(run: AgentRunSnapshot): ActiveRunNotice {
   };
 }
 
-function runStatusLabel(status: string): string {
-  const labels: Record<string, string> = {
-    queued: "排队中",
-    planned: "已计划",
-    running: "运行中",
-    waiting_user: "等待用户",
-    paused: "已暂停",
-    recovering: "恢复中",
-    cancel_requested: "取消中",
-    verifying: "自检中",
-    repairing: "自愈中",
-    recovered: "已恢复",
-    needs_engineering: "需工程处理",
-    succeeded: "成功",
-    failed: "失败",
-    rolled_back: "已回滚",
-    cancelled: "已取消",
-  };
-  return labels[status] || status || "未知";
-}
 
 async function extractReadOnlyPdfContext(attachments: string[]): Promise<{
   context: string;
@@ -458,17 +439,6 @@ function userFacingAgentRunError(error: unknown): string {
   return "Agent 执行暂时中断，你可以在当前对话继续尝试。";
 }
 
-function runPhaseLabel(phase: string): string {
-  const labels: Record<string, string> = {
-    understanding: "理解意图",
-    executing: "执行工具",
-    verifying: "自检验证",
-    repairing: "自愈修复",
-    responding: "生成回复",
-    "image-intake": "图片识别",
-  };
-  return labels[phase] || phase || "未知阶段";
-}
 
 function triggerSessionAnomalyReview(input: {
   sessionId: number | null;
@@ -697,11 +667,12 @@ function AgentPageInner() {
           setCurrentSessionId(latest.id!);
           setMessages(latest.messages);
         } else {
-          // Create default session with welcome message
-          const id = await createSession([WELCOME]);
+          // 0.11.0-C: the worker is the sole transcript writer — sessions
+          // persist empty; the welcome note is render-level only.
+          const id = await createSession([]);
           currentSessionIdRef.current = id;
           setCurrentSessionId(id);
-          setMessages([WELCOME]);
+          setMessages([]);
           setSessions(await listSessions());
         }
       })
@@ -1926,9 +1897,9 @@ function AgentPageInner() {
           const copy = [...prev];
           const last = copy[copy.length - 1];
           if (last && last.role === "assistant" && last.content.trim() === "") {
-            copy[copy.length - 1] = { ...last, content: `⚠️ ${errorMsg}` };
+            copy[copy.length - 1] = { ...last, content: `注意：${errorMsg}` };
           } else if (!last || last.role !== "assistant") {
-            copy.push({ role: "assistant", content: `⚠️ ${errorMsg}`, timestamp: new Date().toISOString() });
+            copy.push({ role: "assistant", content: `注意：${errorMsg}`, timestamp: new Date().toISOString() });
           }
           return copy;
         });
@@ -2006,13 +1977,13 @@ function AgentPageInner() {
     // Trigger profile update before switching
     triggerProfileUpdate({ force: true }).catch(() => {});
 
-    const id = await createSession([WELCOME]);
+    const id = await createSession([]);
     clearSessionActivity();
     manualSessionSwitchRef.current = id;
     replaceUrlForSelectedSession(id);
     currentSessionIdRef.current = id;
     setCurrentSessionId(id);
-    setMessages([WELCOME]);
+    setMessages([]);
     setSessions(await listSessions());
   }, [clearSessionActivity, replaceUrlForSelectedSession]);
 
@@ -2181,13 +2152,13 @@ function AgentPageInner() {
         setCurrentSessionId(nextId);
         setMessages(remaining[0].messages);
       } else {
-        const newId = await createSession([WELCOME]);
+        const newId = await createSession([]);
         clearSessionActivity();
         manualSessionSwitchRef.current = newId;
         replaceUrlForSelectedSession(newId);
         currentSessionIdRef.current = newId;
         setCurrentSessionId(newId);
-        setMessages([WELCOME]);
+        setMessages([]);
       }
     }
     setSessions(await listSessions());
@@ -2237,6 +2208,8 @@ function AgentPageInner() {
   const showActiveRunToolbar = Boolean(
     activeRunNotice && NON_TERMINAL_DURABLE_RUN_STATUSES.has(activeRunNotice.status),
   );
+  // 0.11.0-C 单写者:空会话的欢迎语只存在于渲染层,刷新后依然出现。
+  const displayMessages = messages.length === 0 ? [WELCOME] : messages;
 
   return (
     <div className="flex h-[calc(100dvh-(var(--space-section)*2)-3.5rem)] min-h-0 max-h-[calc(100dvh-(var(--space-section)*2)-3.5rem)] w-full min-w-0 max-w-full flex-1 gap-0 overflow-hidden lg:h-[calc(100vh-(var(--space-section)*2))] lg:min-h-[560px] lg:max-h-[calc(100vh-(var(--space-section)*2))]">
@@ -2375,83 +2348,33 @@ function AgentPageInner() {
           <AgentPhaseTrack phase={phase} streaming={streaming} criteria={programProgress} />
         </div>
 
-        {activeRunNotice && (
-          showActiveRunToolbar ? <div data-testid="agent-run-toolbar" className="mt-2 flex h-8 w-fit max-w-full flex-shrink-0 items-center gap-1 overflow-hidden text-xs text-[var(--color-muted)]">
-            <div className="flex min-w-0 items-center gap-2 rounded-full bg-[var(--color-bg)] px-3">
-              <span className="font-medium text-[var(--color-text)]">
-                {activeRunNotice.status === "waiting_user"
-                  ? "等待你的回复"
-                  : activeRunNotice.status === "paused"
-                    ? "任务已暂停"
-                    : "纸鸢正在处理"}
-              </span>
-              <span>{runStatusLabel(activeRunNotice.status)}</span>
-              {activeRunNotice.phase && <span>{runPhaseLabel(activeRunNotice.phase)}</span>}
-              {activeRunNotice.artifacts && activeRunNotice.artifacts.length > 0 && <span>材料 {activeRunNotice.artifacts.length}</span>}
-            </div>
-            <div className="flex items-center gap-1">
-              {activeRunNotice.status === "paused" ? (
-                <button
-                  type="button"
-                  onClick={handleResumeActiveRun}
-                  disabled={activeRunAction !== null}
-                  title="恢复运行"
-                  className="inline-flex h-7 items-center gap-1 rounded-full px-2 text-[var(--color-text)] transition-colors hover:bg-[var(--color-bg)] disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <Play size={13} />
-                  {activeRunAction === "resume" ? "恢复中" : "恢复"}
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={handlePauseActiveRun}
-                  disabled={activeRunAction !== null}
-                  title="暂停运行"
-                  className="inline-flex h-7 items-center gap-1 rounded-full px-2 text-[var(--color-text)] transition-colors hover:bg-[var(--color-bg)] disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <Pause size={13} />
-                  {activeRunAction === "pause" ? "暂停中" : "暂停"}
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={handleCancelActiveRun}
-                disabled={activeRunAction !== null}
-                title="取消运行"
-                className="inline-flex h-7 items-center gap-1 rounded-full px-2 text-red-700 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-red-300 dark:hover:bg-red-950/30"
-              >
-                <XCircle size={13} />
-                {activeRunAction === "cancel" ? "取消中" : "取消"}
-              </button>
-            </div>
-          </div> : null
+        {activeRunNotice && showActiveRunToolbar && (
+          <AgentRunToolbar
+            status={activeRunNotice.status}
+            phase={activeRunNotice.phase}
+            artifacts={activeRunNotice.artifacts}
+            action={activeRunAction}
+            onResume={handleResumeActiveRun}
+            onPause={handlePauseActiveRun}
+            onCancel={handleCancelActiveRun}
+          />
         )}
 
         {latestRollbackProposal && (
-          <div className="mt-2 flex flex-shrink-0 flex-wrap items-center gap-2 rounded-[var(--radius-sm)] border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
-            <div className="min-w-0 flex-1">
-              <span className="font-medium">最近简历修改可撤销</span>
-              <span className="ml-2">section: {latestRollbackProposal.sectionId}</span>
-              {latestRollbackProposal.updatedAt && <span className="ml-2">updated: {latestRollbackProposal.updatedAt}</span>}
-            </div>
-            <button
-              type="button"
-              onClick={handleRollbackLatestProposal}
-              disabled={streaming || rollbackAction !== null}
-              title="撤销最近一次已应用的简历修改"
-              className="inline-flex h-7 items-center gap-1 rounded-[var(--radius-sm)] border border-amber-300 bg-white px-2 text-amber-900 transition-colors hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-100 dark:hover:bg-amber-900/40"
-            >
-              <RotateCcw size={13} />
-              {rollbackAction === "rollback" ? "撤销中" : "撤销"}
-            </button>
-          </div>
+          <RollbackProposalBanner
+            sectionId={latestRollbackProposal.sectionId}
+            updatedAt={latestRollbackProposal.updatedAt}
+            rollingBack={rollbackAction === "rollback"}
+            disabled={streaming || rollbackAction !== null}
+            onRollback={handleRollbackLatestProposal}
+          />
         )}
 
         {/* 0.11.0-D dual canvas: chat face + analyst face */}
         <div className="flex min-h-0 flex-1 gap-3">
         <AgentChat
           currentSessionId={currentSessionId}
-          messages={messages}
+          messages={displayMessages}
           streaming={streaming}
           phase={phase}
           thinkingContent={thinkingContent}

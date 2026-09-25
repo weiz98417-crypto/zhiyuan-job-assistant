@@ -381,11 +381,13 @@ describe("agent runtime regression evals", () => {
 
   it("recovery: agent page keeps a rollback affordance for the latest applied resume edit", () => {
     const page = fs.readFileSync(path.join(process.cwd(), "src", "app", "agent", "page.tsx"), "utf-8");
+    const toolbar = fs.readFileSync(path.join(process.cwd(), "src", "components", "agent", "AgentRunToolbar.tsx"), "utf-8");
 
+    // 0.11.0-D 任务 5.3:横幅 UI 迁至 AgentRunToolbar 组件,回调仍由页面持有。
     expect(page).toContain("latestRollbackProposal");
     expect(page).toContain("handleRollbackLatestProposal");
     expect(page).toContain("status=applied&limit=1");
-    expect(page).toContain("撤销最近一次已应用的简历修改");
+    expect(toolbar).toContain("撤销最近一次已应用的简历修改");
   });
 
   it("recovery: pending resume proposal survives refresh and routes approval by proposal id", () => {

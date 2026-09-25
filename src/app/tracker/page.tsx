@@ -31,6 +31,7 @@ import {
   StatusTag,
 } from "@/components/design";
 import { StaggerList, StaggerItem } from "@/components/design/PageTransition";
+import LandingCelebration from "@/components/tracker/LandingCelebration";
 import { exportApplicationsMD, downloadAsFile } from "@/lib/exporters";
 import type { Application, ApplicationStatus, InterviewRound } from "@/types";
 import { STATUS_LABELS, STATUS_ORDER } from "@/types";
@@ -100,6 +101,7 @@ export default function TrackerPage() {
   const [showInterviewModal, setShowInterviewModal] = useState<Application | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [updatingId, setUpdatingId] = useState<number | null>(null);
+  const [landingCelebration, setLandingCelebration] = useState<{ company: string; role: string } | null>(null);
   const [interviewForm, setInterviewForm] = useState<InterviewRound>({
     round: 1,
     date: new Date().toISOString().slice(0, 10),
@@ -176,6 +178,10 @@ export default function TrackerPage() {
     try {
       const updated = await patchApplicationStatus({ id: app.id, status, source: "tracker_page" });
       setApplications((prev) => prev.map((item) => item.id === updated.id ? updated : item));
+      // 上岸时刻(任务 5.1):投递旅程走到「已获 Offer」时呈现庆祝态。
+      if (status === "offer" && app.status !== "offer") {
+        setLandingCelebration({ company: updated.company || app.company, role: updated.role || app.role });
+      }
       if (detailApp && detailApp.id === app.id) {
         setDetailApp(updated);
       }
@@ -262,6 +268,10 @@ export default function TrackerPage() {
             source: "tracker_page",
           });
           setApplications((prev) => prev.map((item) => item.id === updated.id ? updated : item));
+          // 上岸时刻(任务 5.1):下一步动作路径同样触发庆祝态。
+          if (action.status === "offer" && app.status !== "offer") {
+            setLandingCelebration({ company: updated.company || app.company, role: updated.role || app.role });
+          }
           if (detailApp && detailApp.id === app.id) setDetailApp(updated);
         } catch (error) {
           console.error("[tracker] next action failed:", error);
@@ -985,6 +995,14 @@ export default function TrackerPage() {
           </>
         )}
       </AnimatePresence>
+
+      {landingCelebration && (
+        <LandingCelebration
+          company={landingCelebration.company}
+          role={landingCelebration.role}
+          onClose={() => setLandingCelebration(null)}
+        />
+      )}
     </div>
   );
 }

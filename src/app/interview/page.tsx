@@ -401,7 +401,7 @@ export default function InterviewPage() {
                     return (
                       <div key={cat} className="flex items-center gap-2">
                         <span className={`text-sm w-20 shrink-0 ${isWeak ? "text-amber-600 font-medium" : "text-[var(--color-text-soft)]"}`}>
-                          {label} {isWeak && "⚠️"}
+                          {label}{isWeak ? "（待加强）" : ""}
                         </span>
                         <div className="flex-1 h-4 bg-[var(--color-divider)] rounded-full overflow-hidden">
                           <div

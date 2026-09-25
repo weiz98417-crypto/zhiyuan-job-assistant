@@ -301,7 +301,7 @@ export function ToolResultCard({
             download
             className="inline-flex items-center gap-1.5 mt-2 text-xs px-3 py-1.5 rounded-[var(--radius-sm)] bg-[var(--color-primary)] text-white hover:opacity-90 transition-opacity no-underline"
           >
-            📥 {downloadLabel || "下载文件"}
+            <Download size={12} /> {downloadLabel || "下载文件"}
           </a>
         )}
       </div>

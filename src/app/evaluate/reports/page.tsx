@@ -14,7 +14,8 @@ import {
   Download,
   CheckCircle,
 } from "lucide-react";
-import { WarmButton, PaperCard, ScoreBadge } from "@/components/design";
+import { ScoreBadge } from "@/components/design";
+import { Button, Card, CardContent } from "@/components/ui";
 import { StaggerList, StaggerItem } from "@/components/design/PageTransition";
 import ReportBlocks from "@/components/ReportBlocks";
 import db from "@/lib/db";
@@ -359,9 +360,9 @@ export default function ReportsPage() {
               : "去评估一个职位，生成第一份报告"}
           </p>
           {!search && !hasFilters && (
-            <WarmButton variant="soft" size="sm" onClick={() => router.push("/evaluate")}>
+            <Button variant="secondary" size="sm" onClick={() => router.push("/evaluate")}>
               去评估
-            </WarmButton>
+            </Button>
           )}
         </motion.div>
       )}
@@ -371,7 +372,8 @@ export default function ReportsPage() {
         {filtered.map((report) => (
           <StaggerItem key={report.id}>
             <div onClick={() => setSelectedReport(report)} className="cursor-pointer">
-              <PaperCard hover="lift">
+              <Card className="transition-transform hover:-translate-y-0.5">
+                <CardContent>
                 <div className="flex items-start justify-between mb-2">
                   <div className="flex-1 min-w-0">
                     <h3 className="font-semibold text-[var(--color-text)] truncate">
@@ -412,7 +414,8 @@ export default function ReportsPage() {
                     )}
                   </div>
                 </div>
-              </PaperCard>
+                </CardContent>
+              </Card>
             </div>
           </StaggerItem>
         ))}
@@ -483,25 +486,25 @@ export default function ReportsPage() {
                     <Download size={12} />
                     下载 PDF
                   </a>
-                  <WarmButton
+                  <Button
                     variant="ghost"
                     size="sm"
                     onClick={() => setDeleteConfirm(selectedReport)}
                   >
                     <Trash2 size={12} className="mr-1" />
                     删除报告
-                  </WarmButton>
-                  <WarmButton
-                    variant="soft"
+                  </Button>
+                  <Button
+                    variant="secondary"
                     size="sm"
                     onClick={() => handleAddToTracker(selectedReport)}
                     disabled={trackerStatus === "saving"}
                   >
                     <CheckCircle size={12} className="mr-1" />
                     {trackerStatus === "saving" ? "加入中..." : "加入追踪"}
-                  </WarmButton>
-                  <WarmButton
-                    variant="soft"
+                  </Button>
+                  <Button
+                    variant="secondary"
                     size="sm"
                     onClick={() => {
                       setSelectedReport(null);
@@ -510,7 +513,7 @@ export default function ReportsPage() {
                   >
                     <ExternalLink size={12} className="mr-1" />
                     查看 JD 库
-                  </WarmButton>
+                  </Button>
                 </div>
                 {trackerStatus === "error" && (
                   <p className="mt-2 text-xs text-red-500">
@@ -545,12 +548,12 @@ export default function ReportsPage() {
                 确定删除该评估报告？关联的 JD 记录不受影响，但会解除关联。
               </p>
               <div className="flex items-center gap-2 justify-end">
-                <WarmButton variant="ghost" size="sm" onClick={() => setDeleteConfirm(null)}>
+                <Button variant="ghost" size="sm" onClick={() => setDeleteConfirm(null)}>
                   取消
-                </WarmButton>
-                <WarmButton variant="primary" size="sm" onClick={handleDelete}>
+                </Button>
+                <Button variant="destructive" size="sm" onClick={handleDelete}>
                   确认删除
-                </WarmButton>
+                </Button>
               </div>
             </motion.div>
           </motion.div>

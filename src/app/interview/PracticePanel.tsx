@@ -217,7 +217,7 @@ export default function PracticePanel({
           (err) => {
             setMessages((prev) => [
               ...prev,
-              { role: "assistant", content: `❌ ${err}` },
+              { role: "assistant", content: `出错了：${err}` },
             ]);
           },
         );
@@ -225,7 +225,7 @@ export default function PracticePanel({
         const msg = err instanceof Error ? err.message : "流式请求失败";
         setMessages((prev) => [
           ...prev,
-          { role: "assistant", content: `❌ ${msg}` },
+          { role: "assistant", content: `出错了：${msg}` },
         ]);
       } finally {
         setLoading(false);
@@ -331,7 +331,7 @@ export default function PracticePanel({
                 >
                   {isUser ? (
                     <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
-                  ) : msg.content.startsWith("❌") ? (
+                  ) : msg.content.startsWith("出错了：") ? (
                     <span className="text-sm text-red-500">{msg.content}</span>
                   ) : (
                     <div className="text-sm whitespace-pre-wrap leading-relaxed">

@@ -192,7 +192,7 @@ export default function ReferenceViewer({
               <Calendar size={12} />
               {new Date(resume.created_at).toLocaleDateString("zh-CN")}
             </span>
-            <span>{resume.source === "upload" ? "📄 上传" : "📋 粘贴"}</span>
+            <span>{resume.source === "upload" ? "上传" : "粘贴"}</span>
             {resume.roleCategory && (
               <span className="px-1.5 py-0.5 rounded-full bg-[var(--color-primary-muted)] text-[var(--color-text-soft)]">
                 {resume.roleCategory}

@@ -29,11 +29,11 @@ export function AnalystCanvas({
   return (
     <aside
       data-testid="analyst-canvas"
-      className="flex shrink-0 flex-col border-l"
+      /* 样张 v2 任务 2.3:窄屏以覆盖层呈现;lg+ 保持行内双面画布(默认 40% 宽) */
+      className="fixed inset-0 z-40 flex flex-col lg:static lg:z-auto lg:w-[min(420px,40vw)] lg:shrink-0 lg:border-l"
       style={{
-        width: maximized ? "100%" : "min(420px, 40vw)",
+        ...(maximized ? { width: "100%" } : {}),
         background: "var(--color-analyst-bg)",
-        borderColor: "var(--color-analyst-border)",
         color: "var(--color-analyst-text)",
       }}
     >

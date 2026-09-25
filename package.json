@@ -53,7 +53,8 @@
     "check-onboarding": "node scripts/check-onboarding.mjs",
     "security:promote-superadmin": "node scripts/promote-sole-admin.mjs",
     "security:preflight": "node scripts/check-auth-security-preflight.mjs",
-    "security:retry-alerts": "node scripts/retry-security-alerts.mjs"
+    "security:retry-alerts": "node scripts/retry-security-alerts.mjs",
+    "verify:canvas": "node scripts/verify-dual-canvas.mjs"
   },
   "dependencies": {
     "@ant-design/icons": "^6.3.2",

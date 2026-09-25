@@ -33,12 +33,12 @@
   --color-border: oklch(91% 0.007 95);
   --color-divider: oklch(94% 0.005 95);
 
-  /* Analyst face — 深炭 #191712 / #22201a / #35322a */
-  --analyst-bg: #191712;
-  --analyst-elev: #22201a;
-  --analyst-line: #35322a;
-  --analyst-text: #f2efe7;
-  --analyst-muted: #9b968a;
+  /* Analyst face — 深炭 #191712 / #22201a / #35322a(AnalystCanvas 消费 --color-analyst-*) */
+  --color-analyst-bg: #191712;
+  --color-analyst-surface: #22201a;
+  --color-analyst-border: #35322a;
+  --color-analyst-text: #f2efe7;
+  --color-analyst-muted: #9b968a;
 
   /* 样张语义别名(单一定义源;领域卡内的 var(--zhusha) 等引用统一走这里) */
   --zhusha: var(--color-primary);

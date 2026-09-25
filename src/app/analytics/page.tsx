@@ -363,7 +363,7 @@ export default function AnalyticsPage() {
           </div>
           <p className="text-sm text-[var(--color-text-soft)] mt-4 text-center">
             {appliedChange > 0
-              ? `本周你的匹配度比上周提升了${appliedChange}%，策略调整在起效 🔥`
+              ? `本周你的匹配度比上周提升了${appliedChange}%，策略调整在起效`
               : thisWeekApplied > 0
                 ? "本周开局不错，保持节奏！"
                 : "这周可以开始新的投递了，好机会在等你。"}

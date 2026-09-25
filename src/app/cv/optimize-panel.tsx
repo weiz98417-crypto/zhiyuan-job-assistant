@@ -242,7 +242,7 @@ export default function OptimizePanel({
         <div className="mt-3 pt-4 border-t border-[var(--color-divider)] space-y-4">
           <div className="p-3 rounded-[var(--radius-sm)] bg-amber-50/50 dark:bg-amber-950/10 border border-amber-200 dark:border-amber-800">
             <p className="text-sm font-medium text-amber-800 dark:text-amber-300 mb-3">
-              📋 为了让优化效果更好，我想了解更多：
+              为了让优化效果更好，我想了解更多：
             </p>
             <div className="space-y-3">
               {questions.map((q) => (
