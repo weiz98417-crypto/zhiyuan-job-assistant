@@ -1,31 +1,54 @@
 @import "tailwindcss";
+@import "lxgw-wenkai-webfont/style.css";
 
 /* ── Design System: 筝筝纸鸢 Frontend ── */
-/* Creative North Star: "一页翻开的手帳" */
-/* Color Strategy: Committed — Warm Amber Glow 30-50% surface */
+/* Creative North Star: "一页翻开的手帳 · 双面画布" */
+/* Color Strategy: 纸鸢令牌 v2（0.11.0-D 样张定稿）— 暖白瓷画布 / 朱砂情感轴 / 深炭分析面 */
+/* 基准: 去黄化 claude 系 DESIGN.md(awesome-design-md),色值与样张 v2 一致 */
 
 /* ── Light Mode (Default) ── */
-/* Scene: 周六早晨，阳光从窗户斜照进来，一本精装布面Moleskine */
+/* Scene: 暖白瓷纸上的手帳,朱砂只作情感与决策色 */
 :root {
-  /* Primary — Warm Amber Glow: the committed voice */
-  --color-primary: oklch(75% 0.12 75);
-  --color-primary-hover: oklch(72% 0.13 75);
-  --color-primary-soft: oklch(88% 0.06 75);
-  --color-primary-muted: oklch(93% 0.03 75);
+  /* Primary — 朱砂 zhusha #c0502f: the committed voice */
+  --color-primary: oklch(53% 0.135 40);
+  --color-primary-hover: oklch(46% 0.125 40);
+  --color-primary-soft: oklch(92% 0.03 50);
+  --color-primary-muted: oklch(95% 0.018 50);
 
-  /* Surface — Cream Paper baseline, never pure white */
-  --color-bg: oklch(97% 0.005 85);
-  --color-surface: oklch(99% 0.003 85);
+  /* Semantic amber — 仅警示用(风险/待办),不作主色 */
+  --color-warn: oklch(68% 0.12 75);
+
+  /* Surface — 暖白瓷 baseline, never pure white */
+  --color-bg: oklch(97.5% 0.004 90);
+  --color-surface: oklch(99% 0.003 95);
+  --color-surface-soft: oklch(95% 0.006 95);
   --color-surface-raised: oklch(100% 0 0);
 
-  /* Text — Warm Ink, never pure black */
-  --color-text: oklch(25% 0.01 260);
-  --color-text-soft: oklch(40% 0.008 260);
-  --color-muted: oklch(65% 0.005 85);
+  /* Text — 墨色阶 ink/body/muted #1f1e1b / #3d3c38 / #76736b */
+  --color-text: oklch(23% 0.005 90);
+  --color-text-soft: oklch(36% 0.006 95);
+  --color-muted: oklch(58% 0.008 95);
 
-  /* Borders & Dividers */
-  --color-border: oklch(88% 0.008 85);
-  --color-divider: oklch(92% 0.005 85);
+  /* Borders & Dividers — hairline #e8e5de */
+  --color-border: oklch(91% 0.007 95);
+  --color-divider: oklch(94% 0.005 95);
+
+  /* Analyst face — 深炭 #191712 / #22201a / #35322a */
+  --analyst-bg: #191712;
+  --analyst-elev: #22201a;
+  --analyst-line: #35322a;
+  --analyst-text: #f2efe7;
+  --analyst-muted: #9b968a;
+
+  /* 样张语义别名(单一定义源;领域卡内的 var(--zhusha) 等引用统一走这里) */
+  --zhusha: var(--color-primary);
+  --zhusha-deep: var(--color-primary-hover);
+  --zhusha-soft: var(--color-primary-soft);
+  --ink: var(--color-text);
+  --body: var(--color-text-soft);
+  --muted: var(--color-muted);
+  --hairline: var(--color-border);
+  --surface-soft: var(--color-surface-soft);
 
   /* Elevation — warm paper shadows, not dark box-shadows */
   --shadow-sm: 0 1px 2px oklch(50% 0.01 85 / 0.04);
@@ -39,8 +62,8 @@
   --radius-xl: 20px;
   --radius-2xl: 24px;
 
-  /* Typography */
-  --font-display: "LXGW WenKai", "Zen Maru Gothic", "KaiTi", "STKaiti", serif;
+  /* Typography — 霞鹜文楷(标题层) + Noto Sans SC(正文层, tabular-nums) */
+  --font-display: "LXGW WenKai", "Noto Sans SC", "KaiTi", "STKaiti", serif;
   --font-body: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
 
   /* Spacing rhythm */
@@ -57,23 +80,26 @@
 }
 
 /* ── Dark Mode ── */
-/* Scene: 晚间台灯下翻开手帳 — 深灰纸张 + 温暖墨水，不冷 */
+/* Scene: 深炭画布上的手帳 — 朱砂提亮一档,墨色阶反转 */
 .dark {
-  --color-primary: oklch(72% 0.13 75);
-  --color-primary-hover: oklch(70% 0.14 75);
-  --color-primary-soft: oklch(30% 0.06 75);
-  --color-primary-muted: oklch(25% 0.03 75);
+  --color-primary: oklch(68% 0.115 40);
+  --color-primary-hover: oklch(73% 0.12 40);
+  --color-primary-soft: oklch(32% 0.06 40);
+  --color-primary-muted: oklch(26% 0.03 40);
 
-  --color-bg: oklch(18% 0.005 85);
-  --color-surface: oklch(22% 0.005 85);
-  --color-surface-raised: oklch(26% 0.005 85);
+  --color-warn: oklch(75% 0.12 75);
 
-  --color-text: oklch(88% 0.005 85);
-  --color-text-soft: oklch(75% 0.005 85);
-  --color-muted: oklch(55% 0.005 85);
+  --color-bg: oklch(17% 0.006 90);
+  --color-surface: oklch(21% 0.007 95);
+  --color-surface-soft: oklch(25% 0.008 95);
+  --color-surface-raised: oklch(26% 0.008 95);
 
-  --color-border: oklch(32% 0.005 85);
-  --color-divider: oklch(26% 0.005 85);
+  --color-text: oklch(93% 0.005 95);
+  --color-text-soft: oklch(80% 0.006 95);
+  --color-muted: oklch(62% 0.008 95);
+
+  --color-border: oklch(32% 0.008 95);
+  --color-divider: oklch(26% 0.006 95);
 
   --shadow-sm: 0 1px 2px oklch(0% 0 0 / 0.12);
   --shadow-md: 0 2px 8px oklch(0% 0 0 / 0.18);
@@ -105,6 +131,7 @@ body {
   font-family: var(--font-body);
   font-weight: 400;
   line-height: 1.6;
+  font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -167,6 +194,19 @@ body {
 .scrollbar-thin::-webkit-scrollbar-thumb { background: var(--color-divider); border-radius: 2px; }
 .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: var(--color-muted); }
 .scrollbar-thin { scrollbar-width: thin; scrollbar-color: var(--color-divider) transparent; }
+
+/* ── 样张 v2 基础件:白瓷卡 / 区块标签 ── */
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+}
+.sec-label {
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  color: var(--color-muted);
+  font-weight: 700;
+}
 
 /* ── Risk Badge Styles (for JD evaluation risk signals) ── */
 .risk-badge {

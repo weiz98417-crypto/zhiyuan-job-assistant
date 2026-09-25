@@ -29,21 +29,22 @@ description: 一个有温度的 AI 求职引擎界面——让求职从焦虑变
 **The Committed Rule.** 一个主色承担界面 30-50% 的色彩面积。它不是点缀——它是这个产品的身份。辅色淡雅柔和，服务于层级区分而非视觉竞争。
 
 ### Primary
-- **[Warm Amber Glow]** ([to be resolved during implementation]): 主品牌色。大面积用于背景区块、关键操作按钮、状态标签。温暖但不甜腻，有分量但不沉重。参考方向：oklch(75% 0.12 75) 附近的暖琥珀/杏色。
+- **[纸鸢朱砂 Zhusha]**（已定稿，0.11.0-D 样张 v2）: 主品牌色，#c0502f ≈ oklch(53% 0.135 40)。用于关键操作按钮（批准/发送）、主责徽章、审批卡描边、活跃旅程图标。求职语境里红色读作"喜"，黄色读作"黄了"——这是 0.11.0 去黄化的原因。Hover 用深一档 #a0411f；淡出层 zhusha-soft #f5e3da。
 
 ### Neutral
-- **[Cream Paper]** ([to be resolved during implementation]): 页面底色。温暖的纸张白——不是 #fff，是早晨阳光下的纸。参考方向：oklch(97% 0.005 85)。
-- **[Warm Ink]** ([to be resolved during implementation]): 正文色。深但不黑，像蓝黑墨水的温度。参考方向：oklch(25% 0.01 260)。
-- **[Soft Shadow Ash]** ([to be resolved during implementation]): 次级文字和分隔线。参考方向：oklch(65% 0.005 85)。
+- **[暖白瓷 Porcelain Canvas]**（已定稿）: 页面底色 #f8f7f4；卡面 #fdfcf9；软面 #f2f0eb；hairline #e8e5de。
+- **[墨色阶 Ink]**（已定稿）: ink #1f1e1b / body #3d3c38 / muted #76736b。
+- **[深炭分析面 Analyst Dark]**（已定稿）: 分析面底 #191712、卡面 #22201a、边界 #35322a、字 #f2efe7 / #9b968a。工作台 = 分析面全屏态。
 
 ### Named Rules
-**The One Voice Rule.** 主品牌色 Warm Amber Glow 是界面唯一的"声音"。其他颜色只是"气息"——不用第二个高饱和色争夺注意力。
-**The Paper Baseline Rule.** 所有背景色必须从 Cream Paper 开始调暗或调亮。永远不出现纯白 (#fff) 或纯黑 (#000)。
+**The One Voice Rule.** 主品牌色朱砂是界面唯一的"声音"。其他颜色只是"气息"——不用第二个高饱和色争夺注意力。语义 amber（--color-warn）仅用于风险警示，不作装饰。
+**The Paper Baseline Rule.** 所有背景色必须从暖白瓷开始调暗或调亮。永远不出现纯白 (#fff) 或纯黑 (#000)。
+**The De-AI Rules（去 AI 味四禁）.** 禁 emoji 作 UI 图标（Lucide 1.75px 线宽统一）、禁紫色渐变、禁玻璃卡墙、禁 Inter 字体。
 
 ## 3. Typography
 
-**Display Font:** [圆体/手写感字体，to be chosen at implementation]
-**Body Font:** [干净人文无衬线，to be chosen at implementation]
+**Display Font:** 霞鹜文楷（LXGW WenKai，lxgw-wenkai-webfont）——标题、大数字、品牌字。
+**Body Font:** Noto Sans SC（系统回退 PingFang/雅黑），数字 tabular-nums。
 
 **Character:** 标题像手写批注——圆润、有个性、有温度。正文清晰安静，不抢戏。两者之间的落差感就是"有人在手帐上写了标题"的感觉，而非"页面排版"。
 

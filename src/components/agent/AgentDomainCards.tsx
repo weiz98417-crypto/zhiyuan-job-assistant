@@ -9,10 +9,11 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { BookOpen, Check, CheckCircle, ExternalLink, X, ChevronDown, ChevronUp, FileText, Loader2, MapPin, Maximize2, RefreshCw, Sparkles, Target, Briefcase, Trash2, User } from "lucide-react";
+import { ArrowLeftRight, BookOpen, Check, CheckCircle, Download, ExternalLink, Image as ImageIcon, X, ChevronDown, ChevronUp, FileText, Loader2, MapPin, Maximize2, RefreshCw, ShieldCheck, Sparkles, Target, Briefcase, Trash2, User } from "lucide-react";
 import { WarmButton, ScoreBadge } from "@/components/design";
 import MarkdownRenderer from "@/components/MarkdownRenderer";
 import { getToolDisplay } from "@/lib/agent/tool-display-names";
+import { getAgentDisplayName } from "@/lib/agent/client-metadata";
 import { fetchDiscoveryJobDetail, getAgentEvaluationUrl, saveDiscoveryJobJD } from "@/lib/job-discovery";
 import type { AgentMessage, CoachMode, InterviewQuestion, InterviewSessionState } from "@/types";
 import { createJD } from "@/lib/jd-storage";
@@ -269,7 +270,7 @@ export function ToolResultCard({
         ) : (
           <X size={14} className="text-red-500 flex-shrink-0" />
         )}
-        <span className="text-xs font-medium text-[var(--color-text)]">{display.emoji} {display.label}</span>
+        <span className="text-xs font-medium text-[var(--color-text)]">{display.label}</span>
         <span className={`text-xs ml-auto ${success ? "text-emerald-500" : "text-red-500"}`}>
           {success ? "完成" : "失败"}
         </span>
@@ -339,21 +340,29 @@ export function RunGateCard({
 
   return (
     <div className={COMPACT_AGENT_CARD_CLASS}>
-      <div className="rounded-[var(--radius-md)] border border-amber-200 bg-amber-50/60 px-4 py-3">
-        <div className="text-sm font-semibold text-[var(--color-text)]">{title}</div>
-        <p className="mt-1 text-xs leading-5 text-[var(--color-muted)]">此操作会修改已保存的数据，需要你明确确认后才会继续。</p>
-        <div className="mt-3 flex items-center gap-2">
+      {/* 样张 v2 审批卡形态:白瓷卡 + 朱砂描边,风险说明一行,主按钮「批准并应用」 */}
+      <div className="rounded-[14px] border-[1.5px] border-[var(--zhusha)] bg-[var(--color-surface)] px-4 py-4">
+        <div className="mb-2 flex items-center gap-2">
+          <ShieldCheck size={16} className="text-[var(--zhusha)]" />
+          <span className="text-sm font-medium text-[var(--ink)]">需要你的批准 · {title}</span>
+        </div>
+        <p className="mb-3 text-xs leading-5 text-[var(--muted)]">
+          此操作会修改已保存的数据，批准后才会继续
+          {textValue(request.toolName) ? ` · 工具 ${textValue(request.toolName)}` : ""}
+          {" · 可回滚"}
+        </p>
+        <div className="flex items-center gap-2.5">
           {status === "pending" ? (
             <>
-              <button type="button" disabled={!onDecision || submitting !== null} onClick={() => void decide("approved")} className="inline-flex items-center gap-1.5 rounded-[var(--radius-sm)] bg-[var(--color-primary)] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50">
-                {submitting === "approved" ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}批准并继续
+              <button type="button" disabled={!onDecision || submitting !== null} onClick={() => void decide("approved")} className="inline-flex items-center gap-1.5 rounded-[10px] bg-[var(--zhusha)] px-[18px] py-2 text-xs font-medium text-white transition-colors hover:bg-[var(--zhusha-deep)] disabled:opacity-50">
+                {submitting === "approved" ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}批准并应用
               </button>
-              <button type="button" disabled={!onDecision || submitting !== null} onClick={() => void decide("denied")} className="inline-flex items-center gap-1.5 rounded-[var(--radius-sm)] border border-[var(--color-divider)] bg-[var(--color-surface)] px-3 py-1.5 text-xs font-medium text-[var(--color-text)] disabled:opacity-50">
+              <button type="button" disabled={!onDecision || submitting !== null} onClick={() => void decide("denied")} className="inline-flex items-center gap-1.5 rounded-[10px] border border-[var(--hairline)] bg-[var(--color-surface)] px-[18px] py-2 text-xs font-medium text-[var(--body)] transition-colors hover:bg-[var(--surface-soft)] disabled:opacity-50">
                 {submitting === "denied" ? <Loader2 size={13} className="animate-spin" /> : <X size={13} />}拒绝
               </button>
             </>
           ) : (
-            <span className="text-xs text-[var(--color-muted)]">{status === "approved" ? "已批准，正在继续" : "已拒绝"}</span>
+            <span className="text-xs text-[var(--muted)]">{status === "approved" ? "已批准，正在继续" : "已拒绝"}</span>
           )}
         </div>
       </div>
@@ -948,10 +957,10 @@ export function AgentResponseRenderer({ content }: { content: string }) {
 export function AgentHandoffBanner({ payload }: { payload: Record<string, unknown> }) {
   return (
     <div className="flex items-center gap-2 px-3 py-2 my-1 rounded-xl text-xs border border-dashed"
-      style={{ background: "var(--surface-soft, #f2f0eb)", borderColor: "var(--hairline, #e8e5de)", color: "var(--muted, #76736b)" }}>
-      <span>⇄</span>
+      style={{ background: "var(--surface-soft)", borderColor: "var(--hairline)", color: "var(--muted)" }}>
+      <ArrowLeftRight size={14} className="shrink-0" />
       <span>
-        主责交接 → <b style={{ color: "var(--ink, #1f1e1b)" }}>{String(payload.agentName || payload.agentId || "")}</b>
+        主责交接 → <b style={{ color: "var(--ink)" }}>{String(payload.agentName || payload.agentId || "")}</b>
         {payload.reason ? <span className="ml-1">· {String(payload.reason)}</span> : null}
       </span>
     </div>
@@ -961,30 +970,31 @@ export function AgentHandoffBanner({ payload }: { payload: Record<string, unknow
 export function AgentDelegationCard({ payload }: { payload: Record<string, unknown> }) {
   const state = String(payload.state || (payload.findings ? "completed" : "running"));
   const running = state === "running";
+  const agentName = getAgentDisplayName(String(payload.agentId || "general"));
   return (
     <div className="card px-4 py-3 my-1 text-sm">
       <div className="flex items-center gap-2 mb-1">
         {running ? (
-          <span className="w-2 h-2 rounded-full animate-pulse" style={{ background: "var(--zhusha, #c0502f)" }} />
+          <span className="w-2 h-2 rounded-full animate-pulse" style={{ background: "var(--zhusha)" }} />
         ) : (
-          <span className="rounded-md px-2 py-0.5 text-xs" style={{ background: "var(--surface-soft, #f2f0eb)", color: "var(--muted, #76736b)" }}>
+          <span className="rounded-md px-2 py-0.5 text-xs" style={{ background: "var(--surface-soft)", color: "var(--muted)" }}>
             {state === "failed" ? "委派失败" : "委派完成"}
           </span>
         )}
-        <span style={{ color: "var(--ink, #1f1e1b)" }}>
+        <span style={{ color: "var(--ink)" }}>
           {running ? "正在让 " : ""}
-          <b>{String(payload.agentId || "")}</b>
-          {running ? " 研究：" : " 已回传："}
-          {String(payload.goal || "")}
+          <b>{agentName}</b>
+          {running ? ` ${String(payload.goal || "")}` : " 已回传"}
+          {!running && payload.goal ? <span> · {String(payload.goal)}</span> : null}
         </span>
-        <span className="ml-auto rounded-full px-2 py-0.5 text-xs" style={{ background: "var(--surface-soft, #f2f0eb)", color: "var(--muted, #76736b)" }}>
-          只读委派 · 不写数据
+        <span className="ml-auto rounded-full px-2 py-0.5 text-xs" style={{ background: "var(--surface-soft)", color: "var(--muted)" }}>
+          只读委派
         </span>
       </div>
       {!running && payload.findings ? (
-        <div className="text-xs mt-1" style={{ color: "var(--body, #3d3c38)" }}>{String(payload.findings)}</div>
+        <div className="text-xs mt-1" style={{ color: "var(--body)" }}>{String(payload.findings)}</div>
       ) : running ? (
-        <div className="text-xs mt-1" style={{ color: "var(--muted, #76736b)" }}>结论将回到本对话 · 不写入任何数据</div>
+        <div className="text-xs mt-1" style={{ color: "var(--muted)" }}>结论将回到本对话 · 不写入任何数据</div>
       ) : null}
     </div>
   );
@@ -1019,8 +1029,9 @@ export function EvalCompletionNotice({ info }: { info: CompletionInfo }) {
           <a
             href={`/api/reports/${info.reportNum}/pdf`}
             download
-            className="inline-flex items-center rounded-[var(--radius-sm)] bg-[var(--color-primary)] px-3 py-1.5 text-xs font-medium text-white hover:opacity-90"
+            className="inline-flex items-center gap-1 rounded-[var(--radius-sm)] bg-[var(--color-primary)] px-3 py-1.5 text-xs font-medium text-white hover:opacity-90"
           >
+            <Download size={12} />
             下载 PDF
           </a>
         </div>

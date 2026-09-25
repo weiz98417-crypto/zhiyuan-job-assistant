@@ -8,7 +8,7 @@
  * 组件本身来自 AgentDomainCards(原样迁出),本文件只做登记与分发。
  */
 
-import { Check, CheckCircle, FileText, User, X } from "lucide-react";
+import { Ban, Check, CheckCircle, FileText, Image as ImageIcon, User, X } from "lucide-react";
 import { motion } from "framer-motion";
 import { createContext, useContext, type ReactNode } from "react";
 import type { ToolCallMessagePartProps } from "@assistant-ui/react";
@@ -105,8 +105,8 @@ export function AgentToolCardOverride({ toolName, result }: ToolCallMessagePartP
   if (payload?.type === "handoff_denied" || payload?.type === "delegation_denied") {
     return (
       <div className={COMPACT_AGENT_CARD_CLASS}>
-        <div className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs" style={{ background: "var(--surface-soft, #f2f0eb)", color: "var(--muted, #76736b)" }}>
-          <span>⛔</span>
+        <div className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs" style={{ background: "var(--surface-soft)", color: "var(--muted)" }}>
+          <Ban size={13} className="shrink-0" />
           <span>{String(payload?.reason || "协作请求被治理策略拒绝")}</span>
         </div>
       </div>
@@ -234,7 +234,7 @@ function ImageIntakeCard({ payload, success }: { payload?: Record<string, unknow
       >
         <div className="flex items-center gap-2 border-b border-[var(--color-divider)] bg-[var(--color-bg)] px-3 py-2">
           <CheckCircle size={14} className={status === "failed" ? "text-red-500" : "text-[var(--color-primary)]"} />
-          <span className="text-xs font-medium text-[var(--color-text)]">🖼️ 识别图片</span>
+          <span className="text-xs font-medium text-[var(--color-text)] flex items-center gap-1"><ImageIcon size={13} /> 识别图片</span>
           <span className={`ml-auto text-xs ${status === "failed" ? "text-red-500" : "text-emerald-500"}`}>
             {status === "failed" ? "失败" : status === "running" ? "识别中" : "完成"}
           </span>

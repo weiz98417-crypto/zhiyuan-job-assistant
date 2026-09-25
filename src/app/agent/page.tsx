@@ -9,6 +9,8 @@ import { HandwritingTitle, WarmButton } from "@/components/design";
 import AgentChat from "@/components/agent/AgentChat";
 import type { EvalBlockProgress, CompletionInfo } from "@/components/agent/AgentChat";
 import SessionList from "@/components/agent/SessionList";
+import CommandPalette from "@/components/shell/CommandPalette";
+import AgentPhaseTrack from "@/components/agent/assistant-ui/AgentPhaseTrack";
 import { DEFAULT_SUGGESTIONS } from "@/components/agent/SuggestionChips";
 import type { SuggestionChip } from "@/components/agent/SuggestionChips";
 import { logInteraction } from "@/lib/agent/memory";
@@ -562,6 +564,8 @@ function AgentPageInner() {
   const [sessionSidebarOpen, setSessionSidebarOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [activeAgent, setActiveAgent] = useState<ClientAgentDefinition | null>(null);
+  const [agentSwitchedAt, setAgentSwitchedAt] = useState<number | null>(null);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const [evalProgress, setEvalProgress] = useState<EvalBlockProgress[]>([]);
   const [programProgress, setProgramProgress] = useState<{ done: number; total: number } | null>(null);
   const [analystCanvas, setAnalystCanvas] = useState<{ open: boolean; maximized: boolean; payload: AnalystCanvasPayload | null }>({ open: false, maximized: false, payload: null });
@@ -614,6 +618,7 @@ function AgentPageInner() {
     setExecutingTool(undefined);
     setThinkingContent("");
     setActiveAgent(null);
+    setAgentSwitchedAt(null);
     setActiveRunNotice(null);
     setActiveRunAction(null);
     setStreamText("");
@@ -666,6 +671,18 @@ function AgentPageInner() {
     rafRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafRef.current);
   }, [streaming]);
+
+  // ⌘K / Ctrl+K 唤起命令面板(0.11.0-D 任务 2.2)
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setPaletteOpen((open) => !open);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
 
   useEffect(() => {
     // Best-effort migration from legacy localStorage
@@ -1010,6 +1027,7 @@ function AgentPageInner() {
             const nextAgentId = String(event.agentId || "");
             if (nextAgentId) {
               setActiveAgent({ id: nextAgentId, name: String(event.agentName || nextAgentId), description: "", toolNames: [], priority: 0, suggestions: [] });
+              setAgentSwitchedAt(Date.now());
             }
           } else if (eventType === "step.started" || eventType === "step.finished") {
             const criteriaTotal = Number(event.criteriaTotal || 0);
@@ -2223,7 +2241,7 @@ function AgentPageInner() {
   return (
     <div className="flex h-[calc(100dvh-(var(--space-section)*2)-3.5rem)] min-h-0 max-h-[calc(100dvh-(var(--space-section)*2)-3.5rem)] w-full min-w-0 max-w-full flex-1 gap-0 overflow-hidden lg:h-[calc(100vh-(var(--space-section)*2))] lg:min-h-[560px] lg:max-h-[calc(100vh-(var(--space-section)*2))]">
       {/* Desktop SessionList Sidebar (>=1280px) */}
-      <div className="hidden h-full w-[220px] flex-shrink-0 overflow-hidden border-r border-[var(--color-divider)] bg-[var(--color-bg)]/50 pr-3 lg:flex">
+      <div className="hidden h-full w-[220px] flex-shrink-0 overflow-hidden border-r border-[var(--color-divider)] bg-[var(--color-surface-soft)]/60 pr-3 lg:flex">
         <SessionList
           sessions={sessions}
           currentSessionId={currentSessionId}
@@ -2233,6 +2251,7 @@ function AgentPageInner() {
           onUndoDelete={handleUndoDelete}
           onPin={handlePinSession}
           showUndoToast={undoToast}
+          onOpenCommandPalette={() => setPaletteOpen(true)}
         />
       </div>
 
@@ -2271,6 +2290,10 @@ function AgentPageInner() {
                 onUndoDelete={handleUndoDelete}
                 onPin={handlePinSession}
                 showUndoToast={undoToast}
+                onOpenCommandPalette={() => {
+                  setSessionSidebarOpen(false);
+                  setPaletteOpen(true);
+                }}
               />
             </motion.aside>
           </>
@@ -2296,12 +2319,19 @@ function AgentPageInner() {
               <div className="flex items-center gap-2">
                 <HandwritingTitle as="h1">纸鸢 Agent</HandwritingTitle>
                 {activeAgent && activeAgent.id !== "general" && (
-                  <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800">
+                  <span
+                    className="inline-flex items-center gap-1 rounded-full bg-[var(--color-primary-soft)] px-2.5 py-0.5 text-xs font-medium text-[var(--color-primary-hover)] dark:text-[var(--color-primary)]"
+                    title={agentSwitchedAt ? "本轮由事件方言 agent_switch 决定主责" : "当前主责"}
+                  >
                     <Bot size={12} />
                     {activeAgent.name}
+                    {agentSwitchedAt && Date.now() - agentSwitchedAt < 5 * 60 * 1000 ? " · 刚刚交接" : ""}
                     <button
-                      onClick={() => setActiveAgent(null)}
-                      className="ml-1 hover:text-blue-800 dark:hover:text-blue-200"
+                      onClick={() => {
+                        setActiveAgent(null);
+                        setAgentSwitchedAt(null);
+                      }}
+                      className="ml-1 opacity-60 hover:opacity-100"
                       title="退出当前模式"
                     >
                       ×
@@ -2338,6 +2368,11 @@ function AgentPageInner() {
               新建对话
             </WarmButton>
           </div>
+        </div>
+
+        {/* 样张 v2 对话脸:阶段轨道(✓理解/●执行/校验/回应 + 判据 n/m),仅 Run 活跃时渲染 */}
+        <div className="mt-2">
+          <AgentPhaseTrack phase={phase} streaming={streaming} criteria={programProgress} />
         </div>
 
         {activeRunNotice && (
@@ -2442,6 +2477,15 @@ function AgentPageInner() {
           />
         ) : null}
         </div>
+
+        {/* ⌘K 命令面板(0.11.0-D 任务 2.2) */}
+        <CommandPalette
+          open={paletteOpen}
+          onClose={() => setPaletteOpen(false)}
+          onNewChat={handleNewSession}
+          onSelectSession={handleSelectSession}
+          sessions={sessions.map((session) => ({ id: session.id!, title: session.title }))}
+        />
       </div>
 
     </div>

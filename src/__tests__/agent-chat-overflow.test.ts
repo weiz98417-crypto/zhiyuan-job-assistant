@@ -20,7 +20,9 @@ describe("agent chat overflow containment", () => {
 
     expect(chat).toContain("overflow-y-auto overflow-x-hidden");
     expect(chat).toContain("flex w-full min-w-0");
-    expect(chat).toContain("max-w-[90%] min-w-0 overflow-hidden");
+    // 样张 v2:用户气泡 75% 窄列;助手素面但保留溢出裁剪由内部卡片承担
+    expect(chat).toContain("max-w-[75%] min-w-0 overflow-hidden");
+    expect(chat).toContain("max-w-[92%] min-w-0");
 
     expect(layout).toContain("h-full overflow-x-hidden");
     expect(appShell).toContain("flex min-h-full min-w-0 overflow-x-hidden");

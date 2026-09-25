@@ -23,7 +23,7 @@ function AgentImagePart({ image }: { image: string }) {
     <OpenableImage
       src={image}
       alt="上传图片"
-      className="max-h-64 max-w-full rounded-[var(--radius-md)] border border-white/25 object-contain bg-white/10"
+      className="max-h-64 max-w-full rounded-[var(--radius-md)] border border-[var(--color-border)] object-contain bg-white"
       name="上传图片"
     />
   );
@@ -37,7 +37,7 @@ function UserTextPart({ text }: { text: string }) {
 function AgentUserMessage() {
   return (
     <div className="flex w-full min-w-0 justify-end">
-      <div className="max-w-[90%] min-w-0 overflow-hidden rounded-[var(--radius-lg)] bg-[var(--color-primary)] px-4 py-3 text-base leading-relaxed text-[var(--color-surface-raised)] cursor-default">
+      <div className="max-w-[75%] min-w-0 overflow-hidden rounded-2xl rounded-br-md bg-[var(--color-surface-soft)] px-4 py-2.5 text-sm leading-relaxed text-[var(--color-text)] cursor-default">
         <MessagePrimitive.Parts
           components={{
             Text: UserTextPart,
@@ -52,7 +52,8 @@ function AgentUserMessage() {
 function AgentAssistantMessage() {
   return (
     <div className="flex w-full min-w-0 justify-start">
-      <div className="max-w-[90%] min-w-0 overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 text-base leading-relaxed text-[var(--color-text)] cursor-default">
+      {/* 样张 v2 对话脸:助手文字素面呈现,只有领域卡/审批卡带卡面 */}
+      <div className="max-w-[92%] min-w-0 text-sm leading-relaxed text-[var(--color-text)] cursor-default">
         <MessagePrimitive.Parts
           components={{
             Text: AgentTextPart,

@@ -214,8 +214,8 @@ describe("AgentChat 新壳外部行为", () => {
       }),
     ];
     render(ShellHarness({ messages, onGateDecision }));
-    await waitFor(() => expect(screen.getByText("保存优秀参考简历")).toBeTruthy());
-    fireEvent.click(screen.getByRole("button", { name: /批准并继续/ }));
+    await waitFor(() => expect(screen.getByText(/保存优秀参考简历/)).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: /批准并应用/ }));
     await waitFor(() => expect(onGateDecision).toHaveBeenCalledWith("gate-1", "approved"));
 
     await waitFor(() => expect(screen.getByRole("button", { name: "拒绝" })).toBeTruthy());
@@ -235,14 +235,14 @@ describe("AgentChat 新壳外部行为", () => {
     ];
     render(ShellHarness({ messages }));
     await waitFor(() => expect(screen.getByText("已拒绝")).toBeTruthy());
-    expect(screen.queryByRole("button", { name: /批准并继续/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /批准并应用/ })).toBeNull();
   });
 
   it("Enter submits through the composer; Shift+Enter does not (任务 3.3)", async () => {
     const onSend = vi.fn(async () => {});
     render(ShellHarness({ messages: [assistantMsg("你好")], onSend }));
     const input = await waitFor(() => {
-      const el = screen.getByPlaceholderText(/告诉纸鸢你需要什么/) as HTMLTextAreaElement;
+      const el = screen.getByPlaceholderText(/继续对话/) as HTMLTextAreaElement;
       return el;
     });
     fireEvent.change(input, { target: { value: "评估这个岗位" } });
