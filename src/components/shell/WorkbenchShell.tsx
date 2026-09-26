@@ -51,6 +51,7 @@ import {
 import NavItem from "./NavItem";
 import CommandPalette from "./CommandPalette";
 import { useTheme } from "@/components/providers/ThemeProvider";
+import { createPortal } from "react-dom";
 import { motion } from "framer-motion";
 import { ToastProvider } from "@/lib/use-toast";
 interface PaletteSession { id: number; title: string; }
@@ -99,21 +100,18 @@ const MOBILE_ITEMS = [TOP_ITEM, ...PHASE_GROUPS.flatMap((g) => g.items)].slice(0
 
 const COLLAPSE_KEY = "workbench.rail.collapsed";
 
-/* ── rail slot:页面把求职旅程栏注册进外壳 ── */
-
-interface WorkbenchRailEntry {
-  node: ReactNode;
-  label: string;
-}
+/* ── rail slot:页面把求职旅程栏 portal 进外壳的槽位容器 ── */
 
 const WorkbenchRailContext = createContext<{
-  rail: WorkbenchRailEntry | null;
-  setRail: (entry: WorkbenchRailEntry | null) => void;
+  railLabel: string;
+  desktopSlot: HTMLDivElement | null;
+  mobileSlot: HTMLDivElement | null;
   mobileRailOpen: boolean;
   setMobileRailOpen: (open: boolean) => void;
 }>({
-  rail: null,
-  setRail: () => {},
+  railLabel: "求职旅程",
+  desktopSlot: null,
+  mobileSlot: null,
   mobileRailOpen: false,
   setMobileRailOpen: () => {},
 });
@@ -124,13 +122,15 @@ export function useWorkbenchRailControls() {
   return useMemo(() => ({ closeMobileRail: () => setMobileRailOpen(false) }), [setMobileRailOpen]);
 }
 
-/** 把旅程栏节点注册进外壳(桌面栏位 + 移动 Sheet 同源渲染)。 */
-export function useWorkbenchRail(node: ReactNode, label = "求职旅程") {
-  const { setRail } = useContext(WorkbenchRailContext);
-  useEffect(() => {
-    setRail(node ? { node, label } : null);
-    return () => setRail(null);
-  }, [node, label, setRail]);
+/**
+ * 旅程栏 portal:单实例渲染进外壳槽位(桌面栏位 + 移动 Sheet 同源),
+ * 不经 props 复制节点,避免「新节点 → 外壳重渲染 → 新节点」的渲染环。
+ */
+export function WorkbenchRailPortal({ children }: { children: ReactNode }) {
+  const { desktopSlot, mobileSlot, mobileRailOpen } = useContext(WorkbenchRailContext);
+  const target = mobileRailOpen && mobileSlot ? mobileSlot : desktopSlot;
+  if (!target) return null;
+  return createPortal(children, target);
 }
 
 /* ── shell ── */
@@ -166,9 +166,11 @@ export default function WorkbenchShell({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  // 旅程栏 slot(仅工作台页消费)
-  const [rail, setRail] = useState<WorkbenchRailEntry | null>(null);
+  // 旅程栏槽位(仅工作台页;页面经 WorkbenchRailPortal 注入内容)
+  const [desktopSlot, setDesktopSlot] = useState<HTMLDivElement | null>(null);
+  const [mobileSlot, setMobileSlot] = useState<HTMLDivElement | null>(null);
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
+  const railLabel = "求职旅程";
 
   // ⌘K 命令面板(全局);会话数据在打开时获取
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -221,7 +223,7 @@ export default function WorkbenchShell({ children }: { children: ReactNode }) {
     router.push('/login');
   }
 
-  const railVisible = isWorkspacePage && rail !== null;
+  const railVisible = isWorkspacePage && desktopSlot !== null;
 
   const paletteElement = (
     <CommandPalette
@@ -234,7 +236,7 @@ export default function WorkbenchShell({ children }: { children: ReactNode }) {
   );
 
   return (
-    <WorkbenchRailContext.Provider value={{ rail, setRail, mobileRailOpen, setMobileRailOpen }}>
+    <WorkbenchRailContext.Provider value={{ railLabel, desktopSlot, mobileSlot, mobileRailOpen, setMobileRailOpen }}>
       <ToastProvider>
         <div className="flex min-h-full min-w-0 overflow-x-hidden">
           {/* ── 桌面侧导航 ── */}
@@ -308,7 +310,8 @@ export default function WorkbenchShell({ children }: { children: ReactNode }) {
               <button
                 type="button"
                 onClick={openPalette}
-                title="命令面板"
+                aria-label="⌘K 唤起命令面板"
+                title="⌘K 唤起命令面板"
                 className={`flex items-center gap-3 w-full rounded-[var(--radius-md)] text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-primary-muted)] transition-colors ${isWorkspacePage && navCollapsed ? "py-2 justify-center" : "px-3 py-2.5"}`}
               >
                 <Command size={18} />
@@ -396,13 +399,13 @@ export default function WorkbenchShell({ children }: { children: ReactNode }) {
 
           {/* ── 主内容区:工作台页 = 旅程栏 + 内容 的行内双栏 ── */}
           <main className={`min-w-0 flex-1 overflow-x-hidden flex ${navMarginClass(isWorkspacePage, navCollapsed)}`}>
-            {railVisible && (
+            {isWorkspacePage && (
               <aside
                 data-testid="workbench-journey-rail"
-                aria-label={rail.label}
+                aria-label={railLabel}
                 className="hidden lg:flex flex-col min-h-0 w-[220px] flex-shrink-0 border-r border-[var(--color-divider)] bg-[var(--color-surface-soft)]/60 overflow-hidden"
               >
-                {rail.node}
+                <div ref={setDesktopSlot} className="flex min-h-0 flex-1 flex-col overflow-hidden" />
               </aside>
             )}
             <header className="flex items-center justify-between gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 lg:hidden">
@@ -541,12 +544,11 @@ export default function WorkbenchShell({ children }: { children: ReactNode }) {
                     版本更新
                   </Link>
                 </nav>
-                {rail && (
-                  <div className="border-t border-[var(--color-divider)] flex flex-col min-h-0" style={{ maxHeight: "45%" }}>
-                    <div className="sec-label px-3 pt-3 pb-1">{rail.label}</div>
-                    <div className="flex-1 overflow-y-auto">{rail.node}</div>
-                  </div>
-                )}
+                <div
+                  ref={setMobileSlot}
+                  className="border-t border-[var(--color-divider)] flex flex-col min-h-0 overflow-hidden"
+                  style={{ maxHeight: "45%" }}
+                />
                 <div className="border-t border-[var(--color-divider)] px-3 py-2 flex items-center gap-2">
                   <button type="button" onClick={openPalette} className="flex items-center gap-2 rounded-[var(--radius-sm)] px-2 py-1.5 text-xs text-[var(--color-muted)] hover:bg-[var(--color-primary-muted)] hover:text-[var(--color-text)]">
                     <Command size={14} />命令面板

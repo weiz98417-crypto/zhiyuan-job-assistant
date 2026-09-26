@@ -20,10 +20,10 @@ function buildStageCounts(
 ): StageCount[] {
   return [
     { label: "已评估", count: evaluated, color: "var(--color-primary)" },
-    { label: "已投递", count: applied, color: "#6366f1" },
-    { label: "已回复", count: responded, color: "#f59e0b" },
-    { label: "面试中", count: interview, color: "#8b5cf6" },
-    { label: "已Offer", count: offer, color: "#10b981" },
+    { label: "已投递", count: applied, color: "var(--color-primary)" },
+    { label: "已回复", count: responded, color: "var(--color-primary-hover)" },
+    { label: "面试中", count: interview, color: "var(--color-warn)" },
+    { label: "已Offer", count: offer, color: "var(--color-primary)" },
   ];
 }
 

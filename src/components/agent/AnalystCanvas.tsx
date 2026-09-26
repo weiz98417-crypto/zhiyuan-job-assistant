@@ -89,7 +89,7 @@ export function AnalystCanvas({
               </div>
               {typeof payload.score === "number" ? (
                 <div className="text-right">
-                  <div className="display text-3xl" style={{ color: "#e08a63" }}>
+                  <div className="display text-3xl" style={{ color: "var(--color-primary)", filter: "brightness(1.35)" }}>
                     {payload.score.toFixed(1)}
                     <span className="text-sm">/5</span>
                   </div>

@@ -40,6 +40,10 @@
   --color-analyst-text: #f2efe7;
   --color-analyst-muted: #9b968a;
 
+  /* 底图(0.12.0 任务 5.2):位图经 --app-bg-image 接入;默认纸纹噪点,
+     替换/关闭只改令牌,不动组件。 */
+  --app-bg-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23n)' opacity='0.05'/%3E%3C/svg%3E");
+
   /* 样张语义别名(单一定义源;领域卡内的 var(--zhusha) 等引用统一走这里) */
   --zhusha: var(--color-primary);
   --zhusha-deep: var(--color-primary-hover);

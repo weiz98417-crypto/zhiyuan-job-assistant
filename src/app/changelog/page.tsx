@@ -67,7 +67,7 @@ export default function ChangelogPage() {
 
       <section aria-labelledby="upcoming-version" className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-[var(--shadow-sm)] sm:p-7">
         <div className="flex flex-wrap items-center gap-3">
-          <h2 id="upcoming-version" className="text-xl font-semibold text-[var(--color-text)]">V0.11.0</h2>
+          <h2 id="upcoming-version" className="text-xl font-semibold text-[var(--color-text)]">V0.12.0</h2>
           <span className="rounded-full bg-[var(--color-primary-muted)] px-3 py-1 text-xs font-medium text-[var(--color-text-soft)]">待发布</span>
         </div>
         <p className="mt-2 text-sm text-[var(--color-text-soft)]">以下改进正在本地验证，线上尚未更新。</p>

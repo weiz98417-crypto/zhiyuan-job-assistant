@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 import type { TeamInsights } from "@/lib/team-insights";
 
 const severityColor: Record<string, string> = {
-  critical: "#dc2626",
-  warning: "#d97706",
+  critical: "var(--color-primary-hover)",
+  warning: "var(--color-warn)",
   info: "var(--color-muted)",
 };
 

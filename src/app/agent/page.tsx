@@ -11,6 +11,8 @@ import AgentPhaseTrack from "@/components/agent/assistant-ui/AgentPhaseTrack";
 import { AgentRunToolbar, RollbackProposalBanner } from "@/components/agent/AgentRunToolbar";
 import { AnalystCanvas } from "@/components/agent/AnalystCanvas";
 import { Group as ResizeGroup, Panel as ResizePanel, Separator as ResizeSeparator } from "react-resizable-panels";
+import SessionList from "@/components/agent/SessionList";
+import { WorkbenchRailPortal, useWorkbenchRailControls } from "@/components/shell/WorkbenchShell";
 import { useAgentConversation } from "@/components/agent/use-agent-conversation";
 
 export type { CompletionInfo, EvalBlockProgress } from "@/components/agent/AgentDomainCards";
@@ -109,8 +111,29 @@ function AgentPageInner() {
     showActiveRunToolbar,
     displayMessages,
   } = useAgentConversation();
+  const { closeMobileRail } = useWorkbenchRailControls();
+  const journeyRailNode = (
+    <SessionList
+      sessions={sessions}
+      currentSessionId={currentSessionId}
+      onSelect={(id) => {
+        handleSelectSession(id);
+        closeMobileRail();
+      }}
+      onNew={() => {
+        handleNewSession();
+        closeMobileRail();
+      }}
+      onDelete={handleDeleteSession}
+      onUndoDelete={handleUndoDelete}
+      onPin={handlePinSession}
+      showUndoToast={undoToast}
+    />
+  );
 
   return (
+    <>
+    <WorkbenchRailPortal>{journeyRailNode}</WorkbenchRailPortal>
     <div className="flex h-[calc(100dvh-(var(--space-section)*2)-3.5rem)] min-h-0 max-h-[calc(100dvh-(var(--space-section)*2)-3.5rem)] w-full min-w-0 max-w-full flex-1 gap-0 overflow-hidden lg:h-[calc(100vh-(var(--space-section)*2))] lg:min-h-[560px] lg:max-h-[calc(100vh-(var(--space-section)*2))]">
       {/* Chat Area(旅程栏已由 WorkbenchShell rail slot 承接) */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" style={{ cursor: "default" }}>
@@ -256,6 +279,7 @@ function AgentPageInner() {
       </div>
 
     </div>
+    </>
   );
 }
 

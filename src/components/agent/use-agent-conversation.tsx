@@ -6,8 +6,6 @@ import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { Bot } from "lucide-react";
 import type { EvalBlockProgress, CompletionInfo } from "@/components/agent/AgentChat";
-import SessionList from "@/components/agent/SessionList";
-import { useWorkbenchRail, useWorkbenchRailControls } from "@/components/shell/WorkbenchShell";
 import type { SuggestionChip } from "@/components/agent/SuggestionChips";
 import { logInteraction } from "@/lib/agent/memory";
 import { migrateExploreToAgent } from "@/lib/agent/migrate";
@@ -2187,27 +2185,6 @@ export function useAgentConversation() {
   // 0.11.0-C 单写者:空会话的欢迎语只存在于渲染层,刷新后依然出现。
   const displayMessages = messages.length === 0 ? [WELCOME] : messages;
 
-  // 求职旅程栏注册进 WorkbenchShell 的 rail slot(桌面栏位 + 移动 Sheet 共用)。
-  const { closeMobileRail } = useWorkbenchRailControls();
-  const journeyRailNode = (
-    <SessionList
-      sessions={sessions}
-      currentSessionId={currentSessionId}
-      onSelect={(id) => {
-        handleSelectSession(id);
-        closeMobileRail();
-      }}
-      onNew={() => {
-        handleNewSession();
-        closeMobileRail();
-      }}
-      onDelete={handleDeleteSession}
-      onUndoDelete={handleUndoDelete}
-      onPin={handlePinSession}
-      showUndoToast={undoToast}
-    />
-  );
-  useWorkbenchRail(journeyRailNode);
 
   return {
     searchParams,

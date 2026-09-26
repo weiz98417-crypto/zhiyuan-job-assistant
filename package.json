@@ -1,6 +1,6 @@
 {
   "name": "zhiyuan-job-assistant",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "private": true,
   "description": "AI-powered job search assistant for the Chinese market",
   "scripts": {
@@ -54,7 +54,8 @@
     "security:promote-superadmin": "node scripts/promote-sole-admin.mjs",
     "security:preflight": "node scripts/check-auth-security-preflight.mjs",
     "security:retry-alerts": "node scripts/retry-security-alerts.mjs",
-    "verify:canvas": "node scripts/verify-dual-canvas.mjs"
+    "verify:canvas": "node scripts/verify-dual-canvas.mjs",
+    "verify:tokens": "node scripts/check-design-tokens.mjs"
   },
   "dependencies": {
     "@ant-design/icons": "^6.3.2",
