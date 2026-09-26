@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-const page = readFileSync(path.join(process.cwd(), "src/app/agent/page.tsx"), "utf8");
+const page = readFileSync(path.join(process.cwd(), "src/components/agent/use-agent-conversation.tsx"), "utf8");
 
 describe("Agent session activity isolation", () => {
   it("only exposes a run notice in its owning conversation", () => {

@@ -107,7 +107,7 @@ describe("production administration regressions", () => {
 
   it("provides mobile user cards and keeps fixed navigation from covering content", () => {
     const usersPage = source("src/app/admin/users/page.tsx");
-    const appShell = source("src/components/shell/AppShell.tsx");
+    const appShell = source("src/components/shell/WorkbenchShell.tsx");
     const navItem = source("src/components/shell/NavItem.tsx");
     const runtimePage = source("src/app/admin/agent-runs/page.tsx");
     const backfillScript = source("scripts/backfill-memory.mjs");

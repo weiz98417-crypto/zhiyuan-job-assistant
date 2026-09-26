@@ -7,7 +7,7 @@ import path from "node:path";
 // Report: .gstack/qa-reports/qa-report-121-43-198-13-2026-08-28.md
 describe("waiting_user Agent input regression", () => {
   it("enables user input while keeping the durable observer alive", () => {
-    const source = readFileSync(path.join(process.cwd(), "src/app/agent/page.tsx"), "utf8");
+    const source = readFileSync(path.join(process.cwd(), "src/components/agent/use-agent-conversation.tsx"), "utf8");
     const start = source.indexOf("const notice = activeRunNotice;");
     const end = source.indexOf("return observeDurableAgentRun(runId", start);
     const observer = source.slice(start, end);
@@ -20,7 +20,7 @@ describe("waiting_user Agent input regression", () => {
   });
 
   it("does not submit a new message into a paused Run", () => {
-    const source = readFileSync(path.join(process.cwd(), "src/app/agent/page.tsx"), "utf8").replace(/\r\n/g, "\n");
+    const source = readFileSync(path.join(process.cwd(), "src/components/agent/use-agent-conversation.tsx"), "utf8").replace(/\r\n/g, "\n");
     const start = source.indexOf("if (\n        activeRunNotice?.conversationId === sessionId");
     const end = source.indexOf("const pendingInput", start);
     const continuationGuard = source.slice(start, end);

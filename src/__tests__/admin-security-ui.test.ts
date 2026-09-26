@@ -9,7 +9,7 @@ const source = (relativePath: string) => fs.readFileSync(
 
 describe('authentication security administration UI', () => {
   it('shows all administration links to admins and reserves the audit view for superadmins', () => {
-    const shell = source('src/components/shell/AppShell.tsx');
+    const shell = source('src/components/shell/WorkbenchShell.tsx');
 
     expect(shell).toContain("'admin' | 'member' | 'superadmin'");
     expect(shell).toContain("user.role === 'admin' || user.role === 'superadmin'");

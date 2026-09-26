@@ -21,7 +21,8 @@ interface CommandPaletteProps {
   onClose: () => void;
   onNewChat: () => void;
   onSelectSession: (id: number) => void;
-  sessions: CommandPaletteSession[];
+  /** 未传时面板不展示会话分组(全局唤起场景由外壳负责数据)。 */
+  sessions?: CommandPaletteSession[];
 }
 
 const WORKBENCHES: Array<{ label: string; href: string }> = [
@@ -60,7 +61,7 @@ export default function CommandPalette({ open, onClose, onNewChat, onSelectSessi
         hint: "工作台",
         run: () => router.push(page.href),
       })),
-      ...sessions.slice(0, 12).map((session) => ({
+      ...(sessions ?? []).slice(0, 12).map((session) => ({
         key: `session:${session.id}`,
         label: session.title || "新对话",
         hint: "切换旅程",

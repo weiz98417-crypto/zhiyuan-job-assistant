@@ -230,7 +230,7 @@ describe("job discovery agent evals - regression", () => {
     const message = "找一下杭州的AI产品经理岗位";
     const intent = classifyIntentHardRule(message);
     const decision = routeAgentTask({ agentId: "evaluate", content: message });
-    const page = source("src/app/agent/page.tsx");
+    const page = source("src/components/agent/use-agent-conversation.tsx");
 
     expect(intent?.agentId).toBe("general");
     expect(decision.taskType).toBe("job_search");
@@ -323,7 +323,7 @@ describe("job discovery agent evals - regression", () => {
   });
 
   it("R9 JD card evaluation handoff loads saved JD and forces the evaluate agent", () => {
-    const page = source("src/app/agent/page.tsx");
+    const page = source("src/components/agent/use-agent-conversation.tsx");
 
     expect(page).toContain("buildSavedJDEvaluationPrompt");
     expect(page).toContain("/api/data/jds?id=");

@@ -274,7 +274,7 @@ describe("Offer Agent routing and tool contracts", () => {
 
   it("Offer workspace source keeps report, stale badge, and Agent handoff boundaries", () => {
     const source = readFileSync(path.join(process.cwd(), "src/app/compare/page.tsx"), "utf-8");
-    const agentPage = readFileSync(path.join(process.cwd(), "src/app/agent/page.tsx"), "utf-8");
+    const agentPage = readFileSync(path.join(process.cwd(), "src/components/agent/use-agent-conversation.tsx"), "utf-8");
 
     expect(source).toContain("/api/offers");
     expect(source).toContain("/api/offer-reports");

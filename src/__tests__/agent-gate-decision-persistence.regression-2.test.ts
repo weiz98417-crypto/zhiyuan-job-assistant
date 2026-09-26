@@ -32,7 +32,7 @@ describe("Agent Gate decision persistence regression", () => {
   });
 
   it("writes the reconciled Gate card back to the current Session", () => {
-    const pageSource = readFileSync(join(process.cwd(), "src/app/agent/page.tsx"), "utf8");
+    const pageSource = readFileSync(join(process.cwd(), "src/components/agent/use-agent-conversation.tsx"), "utf8");
 
     expect(pageSource).toContain("reconcileRunGateMessages(messages");
     expect(pageSource).toContain("await updateSession(currentSessionId, { messages: nextMessages })");

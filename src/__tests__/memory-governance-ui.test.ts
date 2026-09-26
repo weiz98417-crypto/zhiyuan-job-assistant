@@ -56,7 +56,7 @@ describe("memory governance admin boundaries", () => {
 
   it("renders admin governance queues and safe actions", () => {
     const page = source("src/app/admin/memory/page.tsx");
-    const shell = source("src/components/shell/AppShell.tsx");
+    const shell = source("src/components/shell/WorkbenchShell.tsx");
     const route = source("src/app/api/admin/memory/route.ts");
     const governance = source("src/lib/memory/governance.ts");
 

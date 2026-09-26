@@ -10,7 +10,7 @@ describe("agent chat overflow containment", () => {
   it("keeps long markdown output from creating page-level horizontal scroll", () => {
     const markdown = source("src/components/MarkdownRenderer.tsx");
     const chat = source("src/components/agent/assistant-ui/AgentThreadMessages.tsx");
-    const appShell = source("src/components/shell/AppShell.tsx");
+    const appShell = source("src/components/shell/WorkbenchShell.tsx");
     const layout = source("src/app/layout.tsx");
     const agentPage = source("src/app/agent/page.tsx");
 

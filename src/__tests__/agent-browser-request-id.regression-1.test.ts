@@ -21,7 +21,7 @@ describe("Agent browser request ids", () => {
   });
 
   it("keeps browser pages off direct randomUUID calls", () => {
-    const page = readFileSync(path.join(process.cwd(), "src/app/agent/page.tsx"), "utf8");
+    const page = readFileSync(path.join(process.cwd(), "src/components/agent/use-agent-conversation.tsx"), "utf8");
     const adminPage = readFileSync(path.join(process.cwd(), "src/app/admin/agent-runs/page.tsx"), "utf8");
 
     expect(page).toContain("createBrowserRequestId()");

@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 describe("durable Agent live session read-back regression", () => {
   it("retries session read-back after terminal status events", () => {
-    const source = readFileSync(path.join(process.cwd(), "src/app/agent/page.tsx"), "utf8");
+    const source = readFileSync(path.join(process.cwd(), "src/components/agent/use-agent-conversation.tsx"), "utf8");
     const terminalHandler = source.slice(
       source.indexOf('if (!NON_TERMINAL_DURABLE_RUN_STATUSES.has(status))'),
       source.indexOf('continue;', source.indexOf('if (!NON_TERMINAL_DURABLE_RUN_STATUSES.has(status))')),
