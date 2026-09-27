@@ -212,6 +212,10 @@ export default function CVPage() {
   const cvFileInputRef = useRef<HTMLInputElement>(null);
 
   const handleImportCV = async (file: File) => {
+    if (isDirty) {
+      setCvImportError("当前简历有未保存的更改，请先保存后再导入。");
+      return;
+    }
     setCvImportLoading(true);
     setCvImportError(null);
     try {
@@ -520,38 +524,51 @@ export default function CVPage() {
     });
   };
 
-  const handleCreateVersion = async () => {
+  const handleCreateVersion = () => {
     const name = newVersionName.trim() || "新版本";
-    try {
-      const result = await createVersion(name);
-      setCVData(result);
-      setShowNewVersionInput(false);
-      setNewVersionName("");
-      setShowVersionMenu(false);
-    } catch (error) {
-      setCvImportError(error instanceof Error ? error.message : "版本创建失败");
-    }
+    confirmAction(() => {
+      void (async () => {
+        try {
+          const result = await createVersion(name);
+          setCVData(result);
+          setShowNewVersionInput(false);
+          setNewVersionName("");
+          setShowVersionMenu(false);
+        } catch (error) {
+          setCvImportError(error instanceof Error ? error.message : "版本创建失败");
+        }
+      })();
+    });
   };
 
-  const handleDeleteVersion = async (versionId: string) => {
-    try {
-      const result = await deleteVersion(versionId);
-      setCVData(result);
-      if (Object.keys(result.versions).length <= 1) setShowVersionMenu(false);
-    } catch (error) {
-      setCvImportError(error instanceof Error ? error.message : "版本删除失败");
-    }
+  const handleDeleteVersion = (versionId: string) => {
+    confirmAction(() => {
+      void (async () => {
+        try {
+          const result = await deleteVersion(versionId);
+          setCVData(result);
+          if (Object.keys(result.versions).length <= 1) setShowVersionMenu(false);
+        } catch (error) {
+          setCvImportError(error instanceof Error ? error.message : "版本删除失败");
+        }
+      })();
+    });
   };
 
-  const handleRenameVersion = async (versionId: string) => {
+  const handleRenameVersion = (versionId: string) => {
     if (!editVersionName.trim()) return;
-    try {
-      const result = await renameVersion(versionId, editVersionName.trim());
-      if (result) setCVData(result);
-      setEditingVersionId(null);
-    } catch (error) {
-      setCvImportError(error instanceof Error ? error.message : "版本重命名失败");
-    }
+    const newName = editVersionName.trim();
+    confirmAction(() => {
+      void (async () => {
+        try {
+          const result = await renameVersion(versionId, newName);
+          if (result) setCVData(result);
+          setEditingVersionId(null);
+        } catch (error) {
+          setCvImportError(error instanceof Error ? error.message : "版本重命名失败");
+        }
+      })();
+    });
   };
 
   const updateSection = (id: string, content: string) => {
@@ -771,10 +788,13 @@ export default function CVPage() {
           <button
             type="button"
             onClick={() => {
-              void switchVersion(pendingImport.versionId).then((result) => {
-                if (result) setCVData(result);
-                setPendingImport(null);
-              }).catch((error) => setCvImportError(error instanceof Error ? error.message : "确认导入版本失败"));
+              const versionId = pendingImport.versionId;
+              confirmAction(() => {
+                void switchVersion(versionId).then((result) => {
+                  if (result) setCVData(result);
+                  setPendingImport(null);
+                }).catch((error) => setCvImportError(error instanceof Error ? error.message : "确认导入版本失败"));
+              });
             }}
             className="ml-auto rounded-[var(--radius-sm)] bg-amber-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-800"
           >
@@ -1005,10 +1025,12 @@ export default function CVPage() {
               versionLabels={Object.fromEntries(versionIds.map((vid) => [vid, cvData.versions[vid]?.label || vid]))}
               onSwitchVersion={(oldId, newId) => setDiffMode({ oldId, newId })}
               onSetCurrent={(versionId) => {
-                void switchVersion(versionId).then((result) => {
-                  if (result) setCVData(result);
-                  setDiffMode(null);
-                }).catch((error) => setCvImportError(error instanceof Error ? error.message : "版本切换失败"));
+                confirmAction(() => {
+                  void switchVersion(versionId).then((result) => {
+                    if (result) setCVData(result);
+                    setDiffMode(null);
+                  }).catch((error) => setCvImportError(error instanceof Error ? error.message : "版本切换失败"));
+                });
               }}
               onBack={() => setDiffMode(null)}
             />
