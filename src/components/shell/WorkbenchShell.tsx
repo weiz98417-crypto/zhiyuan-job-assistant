@@ -141,6 +141,13 @@ export default function WorkbenchShell({ children }: { children: ReactNode }) {
   const pathname = usePathname() || "/";
   const normalizedPathname = pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
   const isWorkspacePage = normalizedPathname === "/agent";
+  const backdrop = normalizedPathname === "/agent"
+    ? "/backgrounds/agent-journey.webp"
+    : normalizedPathname.startsWith("/discover") || normalizedPathname.startsWith("/tracker")
+      ? "/backgrounds/job-discovery.webp"
+      : normalizedPathname.startsWith("/evaluate") || normalizedPathname.startsWith("/compare") || normalizedPathname.startsWith("/analytics")
+        ? "/backgrounds/analyst.webp"
+        : "/backgrounds/workbench.webp";
 
   const [user, setUser] = useState<UserInfo | null>(null);
   const [adminOpen, setAdminOpen] = useState(false);
@@ -238,7 +245,15 @@ export default function WorkbenchShell({ children }: { children: ReactNode }) {
   return (
     <WorkbenchRailContext.Provider value={{ railLabel, desktopSlot, mobileSlot, mobileRailOpen, setMobileRailOpen }}>
       <ToastProvider>
-        <div className="flex min-h-full min-w-0 overflow-x-hidden">
+        <div
+          className="flex min-h-full min-w-0 overflow-x-hidden"
+          style={{
+            backgroundImage: `url('${backdrop}')`,
+            backgroundSize: "cover",
+            backgroundPosition: "center",
+            backgroundAttachment: "fixed",
+          }}
+        >
           {/* ── 桌面侧导航 ── */}
           <aside
             className={`hidden lg:flex flex-col fixed left-0 top-0 bottom-0 bg-[var(--color-surface)] border-r border-[var(--color-border)] py-6 z-40 transition-[width] duration-[var(--duration-normal)] ${

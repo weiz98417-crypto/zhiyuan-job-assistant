@@ -10,6 +10,9 @@ export default function AuthHero({ subtitle }: AuthHeroProps) {
   return (
     <div style={{
       background: 'var(--color-surface)',
+      backgroundImage: "linear-gradient(rgba(255, 252, 246, 0.2), rgba(255, 252, 246, 0.2)), url('/backgrounds/login-hero.webp')",
+      backgroundSize: 'cover',
+      backgroundPosition: 'center',
       position: 'relative',
       display: 'flex',
       flexDirection: 'column',

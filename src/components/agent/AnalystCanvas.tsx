@@ -34,6 +34,9 @@ export function AnalystCanvas({
       style={{
         ...(maximized ? { width: "100%" } : {}),
         background: "var(--color-analyst-bg)",
+        backgroundImage: "linear-gradient(rgba(25, 23, 18, 0.78), rgba(25, 23, 18, 0.78)), url('/backgrounds/analyst.webp')",
+        backgroundSize: "cover",
+        backgroundPosition: "center",
         color: "var(--color-analyst-text)",
       }}
     >
