@@ -176,7 +176,7 @@ export default function HomePage() {
   return (
     <div className="space-y-8">
       {/* Header */}
-      <div>
+      <div className="page-heading">
         <p className="text-[var(--color-muted)] text-sm mb-2">{getGreeting()}</p>
         <HandwritingTitle as="h1">
           {isEmpty ? "欢迎打开你的求职手帳" : "今日手帳"}

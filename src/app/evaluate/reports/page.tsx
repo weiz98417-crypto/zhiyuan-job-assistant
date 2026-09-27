@@ -245,7 +245,7 @@ export default function ReportsPage() {
   return (
     <div className="">
       {/* Header */}
-      <div className="mb-6">
+      <div className="page-heading mb-6">
         <h2 className="font-[family-name:var(--font-display)] text-2xl font-bold text-[var(--color-text)]">
           评估报告
         </h2>

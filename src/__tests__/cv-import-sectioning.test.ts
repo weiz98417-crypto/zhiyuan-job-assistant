@@ -10,6 +10,23 @@ describe("CV import sectioning", () => {
     vi.doUnmock("@/lib/data-repositories");
   });
 
+  it("keeps nested model project fields out of work experience", async () => {
+    const { parseModelResumeSections } = await import("@/lib/server/resume-import-service");
+    const sections = parseModelResumeSections({
+      experience: [{
+        company: "某科技公司",
+        role: "AI 产品经理",
+        projects: [{ project_name: "智能招聘助手", result: "帮助 100 家企业提效" }],
+      }],
+      projects: "已有独立项目",
+    });
+
+    expect(sections.experience).toContain("某科技公司");
+    expect(sections.experience).not.toContain("智能招聘助手");
+    expect(sections.projects).toContain("智能招聘助手");
+    expect(sections.projects).toContain("已有独立项目");
+  });
+
   it("moves embedded project blocks out of experience when the model returns mixed sections", async () => {
     vi.stubEnv("DEEPSEEK_API_KEY", "test-key");
     vi.stubEnv("DEEPSEEK_RESUME_PARSE_MODEL", "deepseek-chat");

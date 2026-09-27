@@ -249,7 +249,7 @@ export default function ProfilePage() {
     return (
       <div className="max-w-2xl mx-auto py-16 px-4 text-center space-y-6">
         <Compass size={48} className="mx-auto text-[var(--color-primary)]" />
-        <div className="space-y-3">
+        <div className="page-heading mx-auto space-y-3">
           <h1 className="text-2xl font-display text-[var(--color-text)]">求职画像</h1>
           <p className="text-[var(--color-muted)] leading-relaxed">
             AI 会通过几轮对话帮你梳理求职方向。<br />完成后这里将展示你的专属求职画像。
@@ -311,7 +311,7 @@ export default function ProfilePage() {
     <div className="max-w-4xl mx-auto py-8 px-4 space-y-6">
       {/* ── Header ── */}
       <div className="flex items-start justify-between flex-wrap gap-3">
-        <div>
+        <div className="page-heading">
           <h1 className="text-2xl font-display text-[var(--color-text)]">求职画像</h1>
           <p className="text-sm text-[var(--color-muted)] mt-1">
             上次更新：{formatTime(profile.lastUpdated)}

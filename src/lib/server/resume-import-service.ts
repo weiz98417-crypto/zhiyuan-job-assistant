@@ -254,13 +254,7 @@ async function parseResumeChunk(text: string, signal?: AbortSignal): Promise<Res
   });
   const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
   const parsed = parseModelJson(payload.choices?.[0]?.message?.content || "{}");
-  return normalizeResumeSections({
-    summary: [formatField(parsed.personal), formatField(parsed.summary)].filter(Boolean).join("\n\n"),
-    experience: formatField(parsed.experience),
-    projects: formatField(parsed.projects),
-    skills: formatField(parsed.skills),
-    education: formatField(parsed.education),
-  });
+  return parseModelResumeSections(parsed);
 }
 
 async function parseResumeImage(dataUri: string, signal?: AbortSignal): Promise<ResumeSections> {
@@ -290,17 +284,51 @@ async function parseResumeImage(dataUri: string, signal?: AbortSignal): Promise<
     if (!response.ok) throw new Error(`DeepSeek 视觉识别失败: ${response.status}`);
     const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
     const parsed = parseModelJson(payload.choices?.[0]?.message?.content || "{}");
-    return normalizeResumeSections({
-      summary: formatField(parsed.summary) || formatField(parsed.personal_info),
-      experience: formatField(parsed.experience) || formatField(parsed.work_experience),
-      projects: formatField(parsed.projects) || formatField(parsed.project_experience),
-      skills: formatField(parsed.skills),
-      education: formatField(parsed.education),
-    });
+    return parseModelResumeSections(parsed);
   } finally {
     clearTimeout(timeoutId);
     signal?.removeEventListener("abort", abort);
   }
+}
+
+export function parseModelResumeSections(parsed: Record<string, unknown>): ResumeSections {
+  const work = splitModelExperience(parsed.experience ?? parsed.work_experience);
+  return normalizeResumeSections({
+    summary: [formatField(parsed.personal ?? parsed.personal_info), formatField(parsed.summary)].filter(Boolean).join("\n\n"),
+    experience: work.experience,
+    projects: [formatField(parsed.projects ?? parsed.project_experience), work.projects].filter(Boolean).join("\n\n"),
+    skills: formatField(parsed.skills),
+    education: formatField(parsed.education),
+  });
+}
+
+function splitModelExperience(value: unknown): { experience: string; projects: string } {
+  if (Array.isArray(value)) {
+    const items = value.map(splitModelExperience);
+    return {
+      experience: items.map((item) => item.experience).filter(Boolean).join("\n\n"),
+      projects: items.map((item) => item.projects).filter(Boolean).join("\n\n"),
+    };
+  }
+  if (!value || typeof value !== "object") return { experience: formatField(value), projects: "" };
+  const fields = Object.entries(value as Record<string, unknown>);
+  if (fields.some(([key]) => /^(?:project_name|projectName|项目名称)$/.test(key))) {
+    return { experience: "", projects: formatField(value) };
+  }
+  const experience: string[] = [];
+  const projects: string[] = [];
+  for (const [key, field] of fields) {
+    if (/^(?:projects?|project_experience|projectExperience|项目经历|项目经验)$/.test(key)) {
+      projects.push(formatField(field));
+    } else if (/^(?:experience|work_experience|workExperience|工作经历)$/.test(key)) {
+      const nested = splitModelExperience(field);
+      experience.push(nested.experience);
+      projects.push(nested.projects);
+    } else {
+      experience.push(formatField(field));
+    }
+  }
+  return { experience: experience.filter(Boolean).join("\n"), projects: projects.filter(Boolean).join("\n\n") };
 }
 
 function formatField(value: unknown): string {

@@ -159,7 +159,7 @@ export default function MemoryPage() {
   return (
     <main className="mx-auto w-full max-w-4xl space-y-6">
       <header>
-        <h1 className="text-2xl font-semibold text-[var(--color-text)]">我的记忆</h1>
+        <h1 className="page-heading text-2xl font-semibold text-[var(--color-text)]">我的记忆</h1>
         <p className="mt-2 text-sm text-[var(--color-muted)]">查看来源和状态，分别确认、纠正或清除记忆。未确认的闲聊候选不会影响推荐。</p>
       </header>
       {message && <div role="status" className="rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface)] p-3 text-sm">{message}</div>}

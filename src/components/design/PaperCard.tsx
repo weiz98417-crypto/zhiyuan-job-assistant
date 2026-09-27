@@ -26,7 +26,7 @@ export default function PaperCard({
 
   const hoverClass =
     hover === "lift"
-      ? "cursor-pointer transition-all duration-[var(--duration-normal)] ease-[var(--ease-out-expo)] hover:-translate-y-0.5 hover:bg-[var(--color-primary-soft)]"
+      ? "cursor-pointer transition-all duration-[var(--duration-normal)] ease-[var(--ease-out-expo)] hover:-translate-y-0.5 hover:bg-[var(--card-surface-hover)] hover:shadow-[var(--shadow-lg)]"
       : "";
 
   return (
@@ -36,7 +36,7 @@ export default function PaperCard({
       transition={{ duration: 0.4, ease: [0.19, 1, 0.22, 1] }}
     >
       <Component
-        className={`bg-[var(--color-surface)] border border-[var(--color-border)] ${paddings[padding]} ${hoverClass} ${className}`}
+        className={`surface-card ${paddings[padding]} ${hoverClass} ${className}`}
         style={{ borderRadius: "var(--radius-lg)" }}
       >
         {children}

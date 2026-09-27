@@ -141,6 +141,8 @@ export default function WorkbenchShell({ children }: { children: ReactNode }) {
   const pathname = usePathname() || "/";
   const normalizedPathname = pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
   const isWorkspacePage = normalizedPathname === "/agent";
+  const isAnalystPage = ["/evaluate", "/compare", "/analytics"].some((prefix) => normalizedPathname.startsWith(prefix));
+  const backdropOverlay = isAnalystPage ? "--workbench-analyst-overlay" : "--workbench-backdrop-overlay";
   const backdrop = normalizedPathname === "/agent"
     ? "/backgrounds/agent-journey.webp"
     : normalizedPathname.startsWith("/discover") || normalizedPathname.startsWith("/tracker")
@@ -248,7 +250,7 @@ export default function WorkbenchShell({ children }: { children: ReactNode }) {
         <div
           className="flex min-h-full min-w-0 overflow-x-hidden"
           style={{
-            backgroundImage: `url('${backdrop}')`,
+            backgroundImage: `linear-gradient(var(${backdropOverlay}), var(${backdropOverlay})), url('${backdrop}')`,
             backgroundSize: "cover",
             backgroundPosition: "center",
             backgroundAttachment: "fixed",
@@ -418,7 +420,7 @@ export default function WorkbenchShell({ children }: { children: ReactNode }) {
               <aside
                 data-testid="workbench-journey-rail"
                 aria-label={railLabel}
-                className="hidden lg:flex flex-col min-h-0 w-[220px] flex-shrink-0 border-r border-[var(--color-divider)] bg-[var(--color-surface-soft)]/60 overflow-hidden"
+                className="hidden lg:flex flex-col min-h-0 w-[220px] flex-shrink-0 border-r border-[var(--color-divider)] bg-[var(--color-surface-soft)]/90 overflow-hidden"
               >
                 <div ref={setDesktopSlot} className="flex min-h-0 flex-1 flex-col overflow-hidden" />
               </aside>

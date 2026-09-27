@@ -19,7 +19,15 @@ const releaseChanges = [
   },
   {
     title: "对话记录不再闪烁或错乱",
-    description: "刷新页面或切换会话时,对话以已保存的记录为准合并显示,正在生成的内容不会被覆盖、重复或回退。",
+    description: "点击历史会话后立即展示该会话内容，后台刷新只更新当前选中的对话；快速切换也不会把其他对话的消息混进来。",
+  },
+  {
+    title: "简历工作与项目经历分栏",
+    description: "新导入简历会区分工作职责和项目段落；已保存的简历可先预览分栏并撤销，核对无误后再保存。",
+  },
+  {
+    title: "工作台卡片与文字更清晰",
+    description: "各页面改用暖色半透明卡片、细边框与柔和阴影；JD 管理的标题、说明和正文增加底衬与对比度。",
   },
   {
     title: "输入与滚动体验升级",
@@ -54,7 +62,7 @@ const releaseChanges = [
 export default function ChangelogPage() {
   return (
     <div className="mx-auto w-full max-w-3xl space-y-8 pb-8">
-      <header className="space-y-3">
+      <header className="page-heading space-y-3">
         <div className="flex items-center gap-2 text-sm text-[var(--color-primary)]">
           <ScrollText size={18} />
           产品动态
@@ -65,7 +73,7 @@ export default function ChangelogPage() {
         </p>
       </header>
 
-      <section aria-labelledby="current-version" className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-[var(--shadow-sm)] sm:p-7">
+      <section aria-labelledby="current-version" className="surface-panel rounded-[var(--radius-lg)] p-5 sm:p-7">
         <div className="flex flex-wrap items-center gap-3">
           <h2 id="current-version" className="text-xl font-semibold text-[var(--color-text)]">V0.12.0</h2>
           <span className="rounded-full bg-[var(--color-primary-muted)] px-3 py-1 text-xs font-medium text-[var(--color-text-soft)]">当前线上版本</span>
@@ -81,7 +89,7 @@ export default function ChangelogPage() {
         </div>
       </section>
 
-      <section aria-labelledby="previous-version" className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 sm:p-7">
+      <section aria-labelledby="previous-version" className="surface-panel rounded-[var(--radius-lg)] p-5 sm:p-7">
         <div className="flex flex-wrap items-center gap-3">
           <h2 id="previous-version" className="text-xl font-semibold text-[var(--color-text)]">V0.10.6</h2>
           <span className="rounded-full border border-[var(--color-border)] px-3 py-1 text-xs text-[var(--color-text-soft)]">上一版本</span>

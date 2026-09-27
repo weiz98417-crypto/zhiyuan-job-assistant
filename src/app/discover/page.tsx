@@ -380,7 +380,7 @@ export default function DiscoverPage() {
     <div className="space-y-6">
       {/* ── Header ─────────────────────────────────────────────── */}
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
+        <div className="page-heading">
           <p className="text-[var(--color-muted)] text-sm mb-1">
             {loading ? "加载中..."
               : visibleJobs.length > 0 ? `${visibleJobs.length} 个新机会`

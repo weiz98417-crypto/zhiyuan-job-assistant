@@ -83,7 +83,9 @@ export default function EvaluateHistoryPage() {
 
   return (
     <div className="space-y-6">
-      <HandwritingTitle as="h1">评估历史</HandwritingTitle>
+      <div className="page-heading">
+        <HandwritingTitle as="h1">评估历史</HandwritingTitle>
+      </div>
 
       <div className="flex items-center gap-2 px-4 py-2 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-[var(--radius-md)]">
         <Search size={16} className="text-[var(--color-muted)]" />

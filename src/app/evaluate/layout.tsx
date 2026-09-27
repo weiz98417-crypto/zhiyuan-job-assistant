@@ -17,7 +17,7 @@ export default function EvaluateLayout({ children }: { children: ReactNode }) {
   return (
     <div>
       {/* Sub-navigation tabs */}
-      <nav className="flex items-center gap-1 mb-6 -mt-2">
+      <nav className="page-tabs flex items-center gap-1 mb-6 -mt-2">
         {TABS.map((tab) => {
           const isActive = pathname === tab.href || (tab.href !== "/evaluate" && pathname.startsWith(tab.href));
           const Icon = tab.icon;

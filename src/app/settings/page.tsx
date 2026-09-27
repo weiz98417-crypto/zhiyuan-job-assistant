@@ -236,7 +236,9 @@ export default function SettingsPage() {
 
   return (
     <div className="max-w-2xl mx-auto space-y-8">
-      <HandwritingTitle as="h1">个人设置</HandwritingTitle>
+      <div className="page-heading">
+        <HandwritingTitle as="h1">个人设置</HandwritingTitle>
+      </div>
 
       {/* Zhiyuan Profile Card — from explore summary */}
       {(profile.archetype || profile.narrative) && (

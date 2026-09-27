@@ -257,7 +257,7 @@ export default function InterviewPage() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
+        <div className="page-heading">
           <p className="text-[var(--color-muted)] text-sm mb-1">面试准备</p>
           <div className="flex items-center gap-3">
             <HandwritingTitle as="h1">面试看板</HandwritingTitle>

@@ -20,14 +20,21 @@
 
   /* Surface — 暖白瓷 baseline, never pure white */
   --color-bg: oklch(97.5% 0.004 90);
-  --color-surface: oklch(99% 0.003 95);
+  --color-surface: oklch(99% 0.003 95 / 0.88);
   --color-surface-soft: oklch(95% 0.006 95);
   --color-surface-raised: oklch(100% 0 0);
 
-  /* Text — 墨色阶 ink/body/muted #1f1e1b / #3d3c38 / #76736b */
+  --card-surface: color-mix(in srgb, var(--color-surface) 78%, transparent);
+  --card-surface-hover: color-mix(in srgb, var(--color-primary-soft) 30%, var(--card-surface) 70%);
+  --card-surface-strong: color-mix(in srgb, var(--color-surface-raised) 90%, transparent);
+  --card-surface-inset: color-mix(in srgb, var(--color-bg) 70%, transparent);
+  --card-border: color-mix(in srgb, var(--color-border) 78%, var(--color-primary) 22%);
+  --card-highlight: color-mix(in srgb, var(--color-surface-raised) 68%, transparent);
+
+  /* Text — 墨色阶 ink/body/muted */
   --color-text: oklch(23% 0.005 90);
   --color-text-soft: oklch(36% 0.006 95);
-  --color-muted: oklch(58% 0.008 95);
+  --color-muted: oklch(45% 0.008 95);
 
   /* Borders & Dividers — hairline #e8e5de */
   --color-border: oklch(91% 0.007 95);
@@ -43,6 +50,8 @@
   /* 底图(0.12.0 任务 5.2):位图经 --app-bg-image 接入;默认纸纹噪点,
      替换/关闭只改令牌,不动组件。 */
   --app-bg-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23n)' opacity='0.05'/%3E%3C/svg%3E");
+  --workbench-backdrop-overlay: rgba(255, 252, 246, 0.36);
+  --workbench-analyst-overlay: rgba(255, 252, 246, 0.8);
 
   /* 样张语义别名(单一定义源;领域卡内的 var(--zhusha) 等引用统一走这里) */
   --zhusha: var(--color-primary);
@@ -58,6 +67,7 @@
   --shadow-sm: 0 1px 2px oklch(50% 0.01 85 / 0.04);
   --shadow-md: 0 2px 8px oklch(50% 0.01 85 / 0.06);
   --shadow-lg: 0 4px 16px oklch(50% 0.01 85 / 0.08);
+  --shadow-card: 0 10px 30px oklch(35% 0.02 80 / 0.08), inset 0 1px 0 var(--card-highlight);
 
   /* Border Radius — organic, ascending with hierarchy */
   --radius-sm: 8px;
@@ -94,20 +104,30 @@
   --color-warn: oklch(75% 0.12 75);
 
   --color-bg: oklch(17% 0.006 90);
-  --color-surface: oklch(21% 0.007 95);
+  --color-surface: oklch(21% 0.007 95 / 0.9);
   --color-surface-soft: oklch(25% 0.008 95);
   --color-surface-raised: oklch(26% 0.008 95);
 
+  --card-surface: color-mix(in srgb, var(--color-surface) 82%, transparent);
+  --card-surface-hover: color-mix(in srgb, var(--color-primary-soft) 30%, var(--card-surface) 70%);
+  --card-surface-strong: color-mix(in srgb, var(--color-surface-raised) 92%, transparent);
+  --card-surface-inset: color-mix(in srgb, var(--color-bg) 82%, transparent);
+  --card-border: color-mix(in srgb, var(--color-border) 80%, var(--color-primary) 20%);
+  --card-highlight: color-mix(in srgb, white 14%, transparent);
+
   --color-text: oklch(93% 0.005 95);
   --color-text-soft: oklch(80% 0.006 95);
-  --color-muted: oklch(62% 0.008 95);
+  --color-muted: oklch(70% 0.008 95);
 
   --color-border: oklch(32% 0.008 95);
   --color-divider: oklch(26% 0.006 95);
+  --workbench-backdrop-overlay: rgba(17, 18, 15, 0.7);
+  --workbench-analyst-overlay: rgba(17, 18, 15, 0.73);
 
   --shadow-sm: 0 1px 2px oklch(0% 0 0 / 0.12);
   --shadow-md: 0 2px 8px oklch(0% 0 0 / 0.18);
   --shadow-lg: 0 4px 16px oklch(0% 0 0 / 0.24);
+  --shadow-card: 0 12px 32px oklch(0% 0 0 / 0.28), inset 0 1px 0 var(--card-highlight);
 }
 
 /* ── Tailwind Theme ── */
@@ -201,9 +221,54 @@ body {
 
 /* ── 样张 v2 基础件:白瓷卡 / 区块标签 ── */
 .card {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background: var(--card-surface);
+  border: 1px solid var(--card-border);
   border-radius: 14px;
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(10px);
+}
+
+.surface-card {
+  background: var(--card-surface);
+  border: 1px solid var(--card-border);
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(10px);
+}
+
+.surface-panel {
+  background: var(--card-surface-strong);
+  border: 1px solid var(--card-border);
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(12px);
+}
+
+.surface-inset {
+  background: var(--card-surface-inset);
+  border: 1px solid color-mix(in srgb, var(--card-border) 72%, transparent);
+}
+
+.page-heading {
+  width: fit-content;
+  max-width: 100%;
+  padding: 0.5rem 0.85rem 0.65rem;
+  border: 1px solid color-mix(in srgb, var(--card-border) 80%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--card-surface-strong) 80%, transparent);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(10px);
+}
+
+.page-heading p {
+  text-shadow: 0 1px 2px color-mix(in srgb, var(--color-surface-raised) 65%, transparent);
+}
+
+.page-tabs {
+  padding: 0.25rem;
+  border: 1px solid color-mix(in srgb, var(--card-border) 72%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--card-surface) 72%, transparent);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(8px);
 }
 .sec-label {
   font-size: 11px;

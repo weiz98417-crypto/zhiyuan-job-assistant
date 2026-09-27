@@ -65,7 +65,7 @@ export default function EvaluatePage() {
 
   return (
     <div className="space-y-8">
-      <div>
+      <div className="page-heading">
         <p className="text-[var(--color-muted)] text-sm mb-2">管理评估产物</p>
         <HandwritingTitle as="h1">JD 管理</HandwritingTitle>
         <p className="text-[var(--color-text-soft)] text-sm mt-2">

@@ -418,7 +418,7 @@ export default function TrackerPage() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-4">
-        <div>
+        <div className="page-heading">
           <p className="text-[var(--color-muted)] text-sm mb-1">
             {applications.length} 条投递记录
           </p>

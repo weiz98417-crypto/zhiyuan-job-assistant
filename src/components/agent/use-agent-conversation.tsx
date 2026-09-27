@@ -566,6 +566,7 @@ export function useAgentConversation() {
     requestId: string;
   } | null>(null);
   const currentSessionIdRef = useRef<number | null>(null);
+  const sessionSelectionRequestRef = useRef(0);
   const sessionGenerationRef = useRef(0);
   const observerGenerationRef = useRef(0);
   const turnGenerationRef = useRef(0);
@@ -701,7 +702,8 @@ export function useAgentConversation() {
       clearSessionActivity();
       currentSessionIdRef.current = id;
       setCurrentSessionId(id);
-      setMessages(mergeServerTranscript(messages as MergeableMessage[], session.messages as MergeableMessage[]) as typeof messages);
+      setMessages(session.messages);
+      setSessions((current) => current.map((item) => item.id === id ? session : item));
       // 0.11.0-B: the header agent belongs to the conversation, not the app.
       setActiveAgent(null);
     });
@@ -2105,20 +2107,28 @@ export function useAgentConversation() {
   }, [mounted, streaming, currentSessionId, searchParams, sendMessage, clearConsumedHandoffParams]);
 
   const handleSelectSession = useCallback(async (id: number) => {
-    if (id === currentSessionId) return;
+    if (id === currentSessionIdRef.current) return;
+    const cachedSession = sessions.find((item) => item.id === id);
+    if (!cachedSession) return;
     // Trigger profile update before switching
     triggerProfileUpdate({ force: true }).catch(() => {});
 
-    const session = await getSession(id, { preferServer: true });
-    if (session) {
-      clearSessionActivity();
-      manualSessionSwitchRef.current = id;
-      replaceUrlForSelectedSession(id);
-      currentSessionIdRef.current = id;
-      setCurrentSessionId(id);
-      setMessages(mergeServerTranscript(messages as MergeableMessage[], session.messages as MergeableMessage[]) as typeof messages);
-    }
-  }, [clearSessionActivity, currentSessionId, replaceUrlForSelectedSession]);
+    const requestId = ++sessionSelectionRequestRef.current;
+    clearSessionActivity();
+    manualSessionSwitchRef.current = id;
+    replaceUrlForSelectedSession(id);
+    currentSessionIdRef.current = id;
+    setCurrentSessionId(id);
+    setMessages(cachedSession.messages);
+    const sessionGeneration = sessionGenerationRef.current;
+    const turnGeneration = turnGenerationRef.current;
+
+    const session = await getSession(id, { preferServer: true }).catch(() => undefined);
+    if (!session || requestId !== sessionSelectionRequestRef.current || currentSessionIdRef.current !== id
+      || sessionGenerationRef.current !== sessionGeneration || turnGenerationRef.current !== turnGeneration) return;
+    setMessages(session.messages);
+    setSessions((current) => current.map((item) => item.id === id ? session : item));
+  }, [clearSessionActivity, replaceUrlForSelectedSession, sessions]);
 
   const handleDeleteSession = useCallback(async (id: number) => {
     const session = await getSession(id);
@@ -2163,8 +2173,9 @@ export function useAgentConversation() {
       if (session) {
         manualSessionSwitchRef.current = id;
         replaceUrlForSelectedSession(id);
+        currentSessionIdRef.current = id;
         setCurrentSessionId(id);
-        setMessages(mergeServerTranscript(messages as MergeableMessage[], session.messages as MergeableMessage[]) as typeof messages);
+        setMessages(session.messages);
       }
     }
   }, [currentSessionId, replaceUrlForSelectedSession]);

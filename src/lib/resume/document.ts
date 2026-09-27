@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "crypto";
 import type { CVData, CVSection } from "@/types";
+import { cleanText, mergeSectionText, normalizeComparable, splitEmbeddedProjects } from "@/lib/resume/sectioning";
 
 export const RESUME_SECTION_ORDER = ["summary", "experience", "projects", "education", "skills"] as const;
 export type ResumeSectionId = (typeof RESUME_SECTION_ORDER)[number];
@@ -132,23 +133,9 @@ export function normalizeResumeSections(input: Partial<Record<ResumeSectionId, s
   const embeddedProjects = splitEmbeddedProjects(sections.experience);
   if (embeddedProjects.projects) {
     sections.experience = embeddedProjects.experience;
-    sections.projects = [sections.projects, embeddedProjects.projects].filter(Boolean).join("\n\n");
+    sections.projects = mergeSectionText(sections.projects, embeddedProjects.projects);
   }
   return sections;
-}
-
-function splitEmbeddedProjects(experience: string): { experience: string; projects: string } {
-  const lines = cleanText(experience).split("\n");
-  const projectStart = lines.findIndex((line) => {
-    const normalized = line.trim().replace(/^[-•\d.、\s]+/, "");
-    return /^(项目经历|项目经验|项目实践|代表项目|主要项目|项目案例|Projects?)\s*[:：]?\s*$/i.test(normalized)
-      || /^(项目经历|项目经验|项目实践|代表项目|主要项目|项目名称|项目背景|项目描述|项目职责|核心工作|项目成果|项目业绩|项目内容|项目亮点)\s*[:：]/i.test(normalized);
-  });
-  if (projectStart < 0) return { experience: cleanText(experience), projects: "" };
-  return {
-    experience: cleanText(lines.slice(0, projectStart).join("\n")),
-    projects: cleanText(lines.slice(projectStart).join("\n")),
-  };
 }
 
 export function resumeSectionsToText(sections: ResumeSections): string {
@@ -361,29 +348,6 @@ function cloneCvData(cvData: CVData): CVData {
   return JSON.parse(JSON.stringify({ activeVersion: cvData?.activeVersion || "", versions })) as CVData;
 }
 
-function mergeSectionText(existingValue: string, additionValue: string): string {
-  const existing = cleanText(existingValue);
-  const addition = cleanText(additionValue);
-  if (!addition) return existing;
-  if (!existing) return addition;
-  const comparableExisting = normalizeComparable(existing);
-  const comparableAddition = normalizeComparable(addition);
-  if (comparableExisting.includes(comparableAddition)) return existing;
-  if (comparableAddition.includes(comparableExisting)) return addition;
-
-  const existingLines = existing.split("\n");
-  const additionLines = addition.split("\n");
-  let overlap = 0;
-  const maxOverlap = Math.min(existingLines.length, additionLines.length, 12);
-  for (let size = maxOverlap; size > 0; size -= 1) {
-    const tail = normalizeComparable(existingLines.slice(-size).join("\n"));
-    const head = normalizeComparable(additionLines.slice(0, size).join("\n"));
-    if (tail && tail === head) { overlap = size; break; }
-  }
-  const separator = overlap > 0 ? "\n" : "\n\n";
-  return cleanText(`${existing}${separator}${additionLines.slice(overlap).join("\n")}`);
-}
-
 function splitEvidenceUnits(value: string): string[] {
   return value
     .split(/\n+|(?<=[。！？!?；;])\s*/)
@@ -399,12 +363,4 @@ function isUnitCovered(unit: string, structuredComparable: string): boolean {
   if (!tokens.length) return false;
   const covered = tokens.filter((token) => structuredComparable.includes(token));
   return covered.length / tokens.length >= 0.8;
-}
-
-function normalizeComparable(value: string): string {
-  return value.toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, "");
-}
-
-function cleanText(value: string): string {
-  return String(value || "").replace(/\r\n/g, "\n").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
 }

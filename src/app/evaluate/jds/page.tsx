@@ -147,7 +147,7 @@ export default function JDLibraryPage() {
 
   if (loadError) {
     return (
-      <div className="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] p-6 text-sm text-[var(--color-text-soft)]">
+      <div className="surface-panel rounded-[var(--radius-md)] p-6 text-sm text-[var(--color-text-soft)]">
         服务器数据加载失败，请稍后重试。
       </div>
     );
@@ -156,12 +156,12 @@ export default function JDLibraryPage() {
   return (
     <div className="">
       {/* Header */}
-      <div className="mb-6 flex items-center justify-between flex-wrap gap-3">
+      <div className="page-heading mb-6 flex items-center justify-between flex-wrap gap-3">
         <div>
           <h2 className="font-[family-name:var(--font-display)] text-2xl font-bold text-[var(--color-text)]">
             JD 库
           </h2>
-          <p className="text-sm text-[var(--color-muted)] mt-1">
+          <p className="text-sm text-[var(--color-text-soft)] mt-1">
             管理所有录入的职位描述
           </p>
         </div>
@@ -181,7 +181,7 @@ export default function JDLibraryPage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="搜索公司、职位、关键词..."
-            className="w-full pl-9 pr-3 py-2 bg-[var(--color-bg)] border border-[var(--color-border)] rounded-[var(--radius-sm)] text-sm text-[var(--color-text)] placeholder:text-[var(--color-muted)] focus:outline-none focus:border-[var(--color-primary)]"
+            className="surface-inset w-full pl-9 pr-3 py-2 rounded-[var(--radius-sm)] text-sm text-[var(--color-text)] placeholder:text-[var(--color-muted)] focus:outline-none focus:border-[var(--color-primary)]"
           />
         </div>
       </div>
@@ -302,7 +302,7 @@ export default function JDLibraryPage() {
                     )}
                   </div>
                 </div>
-                <p className="text-xs text-[var(--color-muted)] leading-relaxed line-clamp-3 mb-2">
+                <p className="text-xs text-[var(--color-text-soft)] leading-relaxed line-clamp-3 mb-2">
                   {truncateBody(jd.body)}
                 </p>
                 <div className="flex items-center justify-between text-[10px] text-[var(--color-muted)]">
@@ -326,7 +326,7 @@ export default function JDLibraryPage() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/20 z-40"
+            className="fixed inset-0 bg-black/30 backdrop-blur-[2px] z-40"
             onClick={() => setSelectedJD(null)}
           >
             <motion.div
@@ -335,7 +335,7 @@ export default function JDLibraryPage() {
               exit={{ x: "100%" }}
               transition={{ type: "spring", damping: 25, stiffness: 200 }}
               onClick={(e) => e.stopPropagation()}
-              className="fixed right-0 top-0 bottom-0 w-full max-w-lg bg-[var(--color-surface)] border-l border-[var(--color-border)] overflow-y-auto z-50"
+              className="surface-panel fixed right-0 top-0 bottom-0 w-full max-w-lg border-l border-[var(--color-border)] overflow-y-auto z-50"
             >
               <div className="p-6">
                 {/* Header */}
@@ -425,7 +425,7 @@ export default function JDLibraryPage() {
                   )}
                   <div>
                     <label className="text-[10px] font-medium text-[var(--color-muted)] uppercase">JD 正文</label>
-                    <p className="text-sm text-[var(--color-text)] whitespace-pre-wrap leading-relaxed mt-1 max-h-64 overflow-y-auto bg-[var(--color-bg)] rounded-[var(--radius-sm)] p-3">
+                    <p className="surface-inset text-sm text-[var(--color-text)] whitespace-pre-wrap leading-relaxed mt-1 max-h-64 overflow-y-auto rounded-[var(--radius-sm)] p-3">
                       {selectedJD.body || "—"}
                     </p>
                   </div>
@@ -463,7 +463,7 @@ export default function JDLibraryPage() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/20 z-40"
+            className="fixed inset-0 bg-black/30 backdrop-blur-[2px] z-40"
             onClick={() => setEditingJD(null)}
           >
             <motion.div
@@ -472,7 +472,7 @@ export default function JDLibraryPage() {
               exit={{ x: "100%" }}
               transition={{ type: "spring", damping: 25, stiffness: 200 }}
               onClick={(e) => e.stopPropagation()}
-              className="fixed right-0 top-0 bottom-0 w-full max-w-lg bg-[var(--color-surface)] border-l border-[var(--color-border)] overflow-y-auto z-50"
+              className="surface-panel fixed right-0 top-0 bottom-0 w-full max-w-lg border-l border-[var(--color-border)] overflow-y-auto z-50"
             >
               <div className="p-6">
                 <h3 className="font-[family-name:var(--font-display)] text-lg font-bold text-[var(--color-text)] mb-4">
@@ -487,7 +487,7 @@ export default function JDLibraryPage() {
                       type="text"
                       value={editingJD.company}
                       onChange={(e) => setEditingJD({ ...editingJD, company: e.target.value })}
-                      className="w-full bg-[var(--color-bg)] border border-[var(--color-border)] rounded-[var(--radius-sm)] px-3 py-2 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
+                      className="surface-inset w-full rounded-[var(--radius-sm)] px-3 py-2 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
                     />
                   </div>
                   <div>
@@ -498,7 +498,7 @@ export default function JDLibraryPage() {
                       type="text"
                       value={editingJD.role}
                       onChange={(e) => setEditingJD({ ...editingJD, role: e.target.value })}
-                      className="w-full bg-[var(--color-bg)] border border-[var(--color-border)] rounded-[var(--radius-sm)] px-3 py-2 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
+                      className="surface-inset w-full rounded-[var(--radius-sm)] px-3 py-2 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
                     />
                   </div>
                   <div>
@@ -509,7 +509,7 @@ export default function JDLibraryPage() {
                       value={editingJD.body}
                       onChange={(e) => setEditingJD({ ...editingJD, body: e.target.value })}
                       rows={12}
-                      className="w-full bg-[var(--color-bg)] border border-[var(--color-border)] rounded-[var(--radius-sm)] px-3 py-2 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)] resize-none"
+                      className="surface-inset w-full rounded-[var(--radius-sm)] px-3 py-2 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)] resize-none"
                     />
                   </div>
                 </div>
@@ -534,7 +534,7 @@ export default function JDLibraryPage() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/20 z-50 flex items-center justify-center"
+            className="fixed inset-0 bg-black/30 backdrop-blur-[2px] z-50 flex items-center justify-center"
             onClick={() => setDeleteConfirm(null)}
           >
             <motion.div
@@ -542,7 +542,7 @@ export default function JDLibraryPage() {
               animate={{ scale: 1 }}
               exit={{ scale: 0.95 }}
               onClick={(e) => e.stopPropagation()}
-              className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-[var(--radius-md)] p-6 max-w-sm mx-4"
+              className="surface-panel rounded-[var(--radius-md)] p-6 max-w-sm mx-4"
             >
               <h4 className="font-semibold text-[var(--color-text)] mb-2">确认删除</h4>
               <p className="text-sm text-[var(--color-text-soft)] mb-4">

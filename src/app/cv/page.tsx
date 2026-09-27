@@ -45,6 +45,11 @@ import {
   computeSectionsHash,
   createDefaultCVData,
 } from "@/lib/cv-storage";
+import {
+  canUndoSectioningPreview,
+  sectioningPreviewHash,
+  separateCvExperienceProjects,
+} from "@/lib/resume/sectioning";
 import OptimizePanel from "./optimize-panel";
 import VersionDiff from "./version-diff";
 import ReferenceViewer from "./reference-viewer";
@@ -148,6 +153,10 @@ export default function CVPage() {
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
   const [saveFeedback, setSaveFeedback] = useState(false);
+  const [sectioningBackup, setSectioningBackup] = useState<{
+    sections: CVSection[];
+    previewHash: string;
+  } | null>(null);
 
   const [applications, setApplications] = useState<Application[]>([]);
   const [reports, setReports] = useState<EvaluationReport[]>([]);
@@ -415,6 +424,7 @@ export default function CVPage() {
     if (active) {
       setSections(active.sections.map((s) => ({ ...s })));
       setSavedHash(computeSectionsHash(active.sections));
+      setSectioningBackup(null);
     }
   }, [cvData]);
 
@@ -452,6 +462,10 @@ export default function CVPage() {
   }, []);
 
   const isDirty = computeSectionsHash(sections) !== savedHash;
+  const projectSeparation = separateCvExperienceProjects(sections);
+  const sectioningPreviewChanged = sectioningBackup
+    ? !canUndoSectioningPreview(sections, sectioningBackup.previewHash)
+    : false;
 
   const doSave = useCallback(() => {
     const currentVersion = cvData.versions[cvData.activeVersion];
@@ -473,6 +487,7 @@ export default function CVPage() {
         setCVData(persisted);
         const persistedSections = persisted.versions[persisted.activeVersion]?.sections || sections;
         setSavedHash(computeSectionsHash(persistedSections));
+        setSectioningBackup(null);
         setSaveFeedback(true);
         optimizedRef.current = false;
         setTimeout(() => setSaveFeedback(false), 1500);
@@ -766,6 +781,38 @@ export default function CVPage() {
             确认设为当前版本
           </button>
           <button type="button" onClick={() => setPendingImport(null)} className="text-amber-700 hover:text-amber-900">稍后处理</button>
+        </div>
+      )}
+
+      {projectSeparation.movedText && !sectioningBackup && (
+        <div className="flex flex-wrap items-center gap-3 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-raised)]/85 px-4 py-3 text-sm text-[var(--color-text)]">
+          <span className="flex-1">工作经历中检测到项目段落。先预览分栏，核对后再保存；当前简历不会自动改写。</span>
+          <WarmButton variant="ghost" size="sm" onClick={() => {
+            const previewedSections = projectSeparation.sections.map((section) => ({ ...section }));
+            setSectioningBackup({
+              sections: sections.map((section) => ({ ...section })),
+              previewHash: sectioningPreviewHash(previewedSections),
+            });
+            setSections(previewedSections);
+          }}>
+            预览分栏
+          </WarmButton>
+        </div>
+      )}
+      {sectioningBackup && !sectioningPreviewChanged && (
+        <div className="flex flex-wrap items-center gap-3 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-raised)]/85 px-4 py-3 text-sm text-[var(--color-text)]">
+          <span className="flex-1">已将项目段落移至项目经验。请核对两个栏目，确认无误后点击保存。</span>
+          <WarmButton variant="ghost" size="sm" onClick={() => {
+            setSections(sectioningBackup.sections.map((section) => ({ ...section })));
+            setSectioningBackup(null);
+          }}>
+            撤销预览
+          </WarmButton>
+        </div>
+      )}
+      {sectioningBackup && sectioningPreviewChanged && (
+        <div className="rounded-[var(--radius-md)] border border-amber-300/70 bg-amber-50/80 px-4 py-3 text-sm text-amber-900">
+          预览分栏后检测到你修改了内容，已保留这些编辑；为避免覆盖修改，撤销预览已停用。请继续核对后保存。
         </div>
       )}
 
