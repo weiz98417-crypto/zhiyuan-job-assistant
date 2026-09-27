@@ -72,7 +72,11 @@ export default function LoginPage() {
       <AuthHero subtitle="翻开这一页，写你的下一个篇章" />
 
       <div style={{
-        background: 'var(--color-bg)',
+        backgroundColor: 'rgba(255, 252, 246, 0.72)',
+        backgroundImage: "linear-gradient(rgba(255, 252, 246, 0.72), rgba(255, 252, 246, 0.72)), url('/backgrounds/login-hero.webp')",
+        backgroundSize: 'cover',
+        backgroundPosition: 'center right',
+        backgroundBlendMode: 'screen',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
