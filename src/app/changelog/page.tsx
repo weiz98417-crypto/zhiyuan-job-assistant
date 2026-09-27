@@ -91,11 +91,11 @@ export default function ChangelogPage() {
 
       <section aria-labelledby="previous-version" className="surface-panel rounded-[var(--radius-lg)] p-5 sm:p-7">
         <div className="flex flex-wrap items-center gap-3">
-          <h2 id="previous-version" className="text-xl font-semibold text-[var(--color-text)]">V0.10.6</h2>
+          <h2 id="previous-version" className="text-xl font-semibold text-[var(--color-text)]">V0.10.7</h2>
           <span className="rounded-full border border-[var(--color-border)] px-3 py-1 text-xs text-[var(--color-text-soft)]">上一版本</span>
         </div>
         <p className="mt-3 text-sm leading-7 text-[var(--color-text-soft)]">
-          0.12.0 已替代该版本成为当前生产版本。
+          0.12.0 已替代 0.10.7 成为当前生产版本。
         </p>
       </section>
 
