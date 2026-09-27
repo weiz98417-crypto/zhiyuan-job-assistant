@@ -60,9 +60,14 @@ export function validateAuthSecurityConfig(environment) {
     errors.push('REDIS_URL must be a password-authenticated Redis URL');
   } else checks.push('dedicated redis configuration');
 
-  const alertUrl = validUrl(read('SECURITY_ALERT_WEBHOOK_URL'), ['https:']);
-  if (!alertUrl) errors.push('SECURITY_ALERT_WEBHOOK_URL must use https');
-  else checks.push('security alert webhook');
+  const alertUrlValue = read('SECURITY_ALERT_WEBHOOK_URL');
+  const alertUrl = validUrl(alertUrlValue, ['https:']);
+  const alertWebhookRequired = read('SECURITY_ALERT_WEBHOOK_REQUIRED').toLowerCase() !== 'false';
+  if (!alertUrl && !alertWebhookRequired && !alertUrlValue) {
+    checks.push('security alert webhook deferred explicitly');
+  } else if (!alertUrl) {
+    errors.push('SECURITY_ALERT_WEBHOOK_URL must use https');
+  } else checks.push('security alert webhook');
 
   if (errors.length) {
     throw new Error(`Authentication security preflight configuration failed:\n${errors.join('\n')}`);

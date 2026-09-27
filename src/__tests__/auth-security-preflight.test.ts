@@ -44,4 +44,19 @@ describe('authentication security deployment preflight', () => {
       AUTH_RATE_LIMIT_SECRET: '',
     })).toThrow(/DB_DRIVER must be postgres[\s\S]*CSRF_SECRET[\s\S]*AUTH_RATE_LIMIT_SECRET/);
   });
+
+  it('allows an explicitly deferred alert webhook without weakening other gates', () => {
+    const environment = { ...validEnvironment };
+    delete environment.SECURITY_ALERT_WEBHOOK_URL;
+    environment.SECURITY_ALERT_WEBHOOK_REQUIRED = 'false';
+
+    expect(validateAuthSecurityConfig(environment)).toContain('security alert webhook deferred explicitly');
+  });
+
+  it('keeps the alert webhook required by default', () => {
+    const environment = { ...validEnvironment };
+    delete environment.SECURITY_ALERT_WEBHOOK_URL;
+
+    expect(() => validateAuthSecurityConfig(environment)).toThrow(/SECURITY_ALERT_WEBHOOK_URL must use https/);
+  });
 });
