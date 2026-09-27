@@ -8,7 +8,7 @@ export const metadata: Metadata = {
   description: "查看筝筝纸鸢的版本更新与即将上线的改进。",
 };
 
-const upcomingChanges = [
+const releaseChanges = [
   {
     title: "全新界面:纸鸢配色与双面板",
     description: "界面换上纸鸢朱砂新配色,去掉旧黄色主题;报告和证据材料移入独立的\"分析台\"面板,聊天界面保持清爽;左侧旅程栏一眼看清每段求职任务的进度。",
@@ -65,14 +65,14 @@ export default function ChangelogPage() {
         </p>
       </header>
 
-      <section aria-labelledby="upcoming-version" className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-[var(--shadow-sm)] sm:p-7">
+      <section aria-labelledby="current-version" className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-[var(--shadow-sm)] sm:p-7">
         <div className="flex flex-wrap items-center gap-3">
-          <h2 id="upcoming-version" className="text-xl font-semibold text-[var(--color-text)]">V0.12.0</h2>
-          <span className="rounded-full bg-[var(--color-primary-muted)] px-3 py-1 text-xs font-medium text-[var(--color-text-soft)]">待发布</span>
+          <h2 id="current-version" className="text-xl font-semibold text-[var(--color-text)]">V0.12.0</h2>
+          <span className="rounded-full bg-[var(--color-primary-muted)] px-3 py-1 text-xs font-medium text-[var(--color-text-soft)]">当前线上版本</span>
         </div>
-        <p className="mt-2 text-sm text-[var(--color-text-soft)]">以下改进正在本地验证，线上尚未更新。</p>
+        <p className="mt-2 text-sm text-[var(--color-text-soft)]">本次版本已完成生产发布。</p>
         <div className="mt-5 divide-y divide-[var(--color-divider)]">
-          {upcomingChanges.map((change) => (
+          {releaseChanges.map((change) => (
             <div key={change.title} className="py-4 first:pt-0 last:pb-0">
               <h3 className="font-medium text-[var(--color-text)]">{change.title}</h3>
               <p className="mt-1 text-sm leading-7 text-[var(--color-text-soft)]">{change.description}</p>
@@ -81,13 +81,13 @@ export default function ChangelogPage() {
         </div>
       </section>
 
-      <section aria-labelledby="current-version" className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 sm:p-7">
+      <section aria-labelledby="previous-version" className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 sm:p-7">
         <div className="flex flex-wrap items-center gap-3">
-          <h2 id="current-version" className="text-xl font-semibold text-[var(--color-text)]">V0.10.6</h2>
-          <span className="rounded-full border border-[var(--color-border)] px-3 py-1 text-xs text-[var(--color-text-soft)]">当前线上版本</span>
+          <h2 id="previous-version" className="text-xl font-semibold text-[var(--color-text)]">V0.10.6</h2>
+          <span className="rounded-full border border-[var(--color-border)] px-3 py-1 text-xs text-[var(--color-text-soft)]">上一版本</span>
         </div>
         <p className="mt-3 text-sm leading-7 text-[var(--color-text-soft)]">
-          已确认的线上版本。此前版本的逐项更新记录正在核对，确认后会补充在这里。
+          0.12.0 已替代该版本成为当前生产版本。
         </p>
       </section>
 
