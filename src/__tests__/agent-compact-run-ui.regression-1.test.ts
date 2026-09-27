@@ -4,10 +4,8 @@ import path from "node:path";
 
 describe("compact Agent run controls regression", () => {
   it("uses a compact toolbar instead of a full-width card", () => {
-    const source = readFileSync(path.join(process.cwd(), "src/app/agent/page.tsx"), "utf8");
-    const start = source.indexOf("{activeRunNotice && (");
-    const end = source.indexOf("{latestRollbackProposal && (", start);
-    const toolbar = source.slice(start, end);
+    // 0.11.0-D 任务 5.3:工具条迁至 AgentRunToolbar 组件。
+    const toolbar = readFileSync(path.join(process.cwd(), "src/components/agent/AgentRunToolbar.tsx"), "utf8");
 
     expect(toolbar).toContain('data-testid="agent-run-toolbar"');
     expect(toolbar).toContain("h-8");

@@ -159,6 +159,8 @@ export interface ToolOutcome {
   suppressLlmContext?: boolean;
   /** Per-tool instruction appended to the model context after the result. */
   followup?: string;
+  /** 0.11.0-B: the tool delegates to a subagent; the loop emits subagent.* events around it. */
+  subagentOf?: (params: Record<string, unknown>) => { delegationId: string; agentId: string; goal: string } | null;
 }
 
 // Re-export AgentToolParam for convenience (maps to ToolParameter)

@@ -8,7 +8,7 @@ function source(file: string): string {
 
 describe("live resume-edit user path", () => {
   it("creates the durable run and never falls back to a client-side orchestration loop", () => {
-    const page = source("src/app/agent/page.tsx");
+    const page = source("src/components/agent/use-agent-conversation.tsx");
     const sendMessage = page.slice(page.indexOf("const sendMessage = useCallback"));
 
     expect(sendMessage.indexOf("createDurableAgentRunClient({")).toBeGreaterThan(-1);
@@ -20,12 +20,12 @@ describe("live resume-edit user path", () => {
       dependencies?: Record<string, string>;
     };
     const activity = source("src/components/agent/AgentActivityTrack.tsx");
-    const page = source("src/app/agent/page.tsx");
+    const agentPage = source("src/app/agent/page.tsx");
 
     expect(packageJson.dependencies?.["thinking-orbs"]).toBeTruthy();
     expect(activity).toContain('from "thinking-orbs"');
     expect(activity).toContain("startTime?: number");
     expect(activity).toContain("data-testid=\"agent-run-elapsed\"");
-    expect(page).toContain("startTime={startTime}");
+    expect(agentPage).toContain("startTime={startTime}");
   });
 });

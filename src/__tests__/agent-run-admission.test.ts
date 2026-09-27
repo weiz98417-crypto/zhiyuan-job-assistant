@@ -49,7 +49,7 @@ describe("Agent Run Admission", () => {
       conversationId: 12,
       input: { content: "工作经历：负责 AI 产品规划与上线；项目经历：搭建 RAG 知识库。" },
       entryHints: { agentId: "resume", source: "agent_chat" },
-      activeRun: { id: "resume-diagnosis-run", taskType: "resume_diagnosis", status: "waiting_user" },
+      activeRun: { id: "resume-diagnosis-run", taskType: "resume_diagnosis", status: "waiting_user", contract: null },
     });
 
     expect(decision.kind).toBe("continue_current_run");

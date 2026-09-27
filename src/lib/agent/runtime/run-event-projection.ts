@@ -44,9 +44,55 @@ export function projectDurableUiEvent(
       type,
       agentId: safeIdentifier(event.agentId),
       modelTier: safeIdentifier(event.modelTier),
+      ...(typeof event.audit === "string" ? { audit: event.audit.slice(0, 240) } : {}),
+      ...(typeof event.clarify === "boolean" ? { clarify: event.clarify } : {}),
     };
   }
-  if (type === "agent_switch") return { type, agentId: safeIdentifier(event.agentId) };
+  if (type === "agent_switch") {
+    return {
+      type,
+      agentId: safeIdentifier(event.agentId),
+      ...(typeof event.agentName === "string" ? { agentName: event.agentName.slice(0, 120) } : {}),
+    };
+  }
+  if (type === "step.started" || type === "step.finished") {
+    return {
+      type,
+      step: safeIdentifier(event.step),
+      criteriaDone: safeCount(event.criteriaDone),
+      criteriaTotal: safeCount(event.criteriaTotal),
+    };
+  }
+  if (type === "subagent.started") {
+    return {
+      type,
+      delegationId: safeIdentifier(event.delegationId),
+      agentId: safeIdentifier(event.agentId),
+      goal: safeText(event.goal, 500),
+    };
+  }
+  if (type === "subagent.finished") {
+    return {
+      type,
+      delegationId: safeIdentifier(event.delegationId),
+      agentId: safeIdentifier(event.agentId),
+      findings: safeText(event.findings, 1200),
+      keyPoints: Array.isArray(event.keyPoints)
+        ? event.keyPoints.filter((item): item is string => typeof item === "string").slice(0, 20).map((item) => item.slice(0, 240))
+        : [],
+    };
+  }
+  if (type === "subagent.error") {
+    return {
+      type,
+      delegationId: safeIdentifier(event.delegationId),
+      agentId: safeIdentifier(event.agentId),
+      reason: safeText(event.reason, 500),
+    };
+  }
+  if (type === "messages.snapshot") {
+    return { type, items: Array.isArray(event.items) ? event.items : [] };
+  }
   if (type === "text") {
     const content = typeof event.content === "string" ? event.content : "";
     return { type, charCount: content.length };
@@ -84,6 +130,15 @@ export function projectDurableUiEvent(
 
 function safeIdentifier(value: unknown): string {
   return typeof value === "string" ? value.replace(/[^a-zA-Z0-9_.:-]/g, "").slice(0, 80) : "";
+}
+
+function safeText(value: unknown, max: number): string {
+  return typeof value === "string" ? value.slice(0, max) : "";
+}
+
+function safeCount(value: unknown): number {
+  const count = Number(value);
+  return Number.isFinite(count) && count >= 0 ? Math.floor(count) : 0;
 }
 
 function record(value: unknown): Record<string, unknown> {

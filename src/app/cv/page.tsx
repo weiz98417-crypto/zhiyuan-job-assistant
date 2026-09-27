@@ -23,6 +23,10 @@ import {
   Users,
   Lock,
   Gauge,
+  Target,
+  Building2,
+  ClipboardList,
+  BarChart3,
 } from "lucide-react";
 import {
   HandwritingTitle,
@@ -1205,7 +1209,8 @@ export default function CVPage() {
           <PaperCard padding="md">
             <h3 className="font-[family-name:var(--font-display)] font-bold text-[var(--color-text)] mb-3 flex items-center gap-2">
               <Search size={16} className="text-[var(--color-primary)]" />
-              🎯 当前优化目标
+              <Target size={16} className="text-[var(--color-primary)]" />
+              当前优化目标
             </h3>
 
             {selectedReport ? (
@@ -1213,15 +1218,15 @@ export default function CVPage() {
                 {/* JD info display */}
                 <div className="p-3 rounded-[var(--radius-sm)] bg-[var(--color-primary-muted)] space-y-2">
                   <div className="flex items-center gap-2">
-                    <span className="text-lg">🏢</span>
+                    <Building2 size={15} className="text-[var(--color-muted)]" />
                     <span className="font-medium text-[var(--color-text)]">{selectedReport.company}</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-lg">📋</span>
+                    <ClipboardList size={15} className="text-[var(--color-muted)]" />
                     <span className="text-sm text-[var(--color-text-soft)]">{selectedReport.role}</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-lg">📊</span>
+                    <BarChart3 size={15} className="text-[var(--color-muted)]" />
                     <span className="text-sm text-[var(--color-text-soft)]">
                       匹配度: <span className="font-bold text-[var(--color-primary)]">{matchPercent}%</span>
                     </span>
@@ -1541,7 +1546,7 @@ export default function CVPage() {
                       </div>
                     </div>
                     <span className="text-xs text-[var(--color-muted)] shrink-0">
-                      {ref.source === "upload" ? "📄" : "📋"}
+                      {ref.source === "upload" ? "上传" : "粘贴"}
                     </span>
                     <span className="text-[10px] text-[var(--color-muted)] shrink-0">
                       {new Date(ref.created_at).toLocaleDateString("zh-CN")}

@@ -11,8 +11,10 @@ import {
 import {
   routeAgentTask,
   type AgentTaskRouteDecision,
+  mapAgentTaskToMemoryTask,
 } from "@/lib/agent/task-routing";
 import type { ArtifactKind } from "@/lib/agent/task-journey";
+import { getTaskContractPolicy, listToolNamesForTask } from "@/lib/agent/tool-governance";
 import type { AgentRunSnapshot, DurableRunInput } from "@/lib/agent/runtime/durable-agent-run";
 import type { IntentEnvelopeResolution } from "@/lib/agent/intent-envelope";
 import { inferJDResumeMatchingDirective } from "@/lib/agent/jd-resume-scope-intent";
@@ -45,7 +47,7 @@ export interface AgentRunAdmissionInput {
   conversationId: number | null;
   input: DurableRunInput;
   entryHints?: AgentRunEntryHints;
-  activeRun?: Pick<AgentRunSnapshot, "id" | "taskType" | "status"> | null;
+  activeRun?: Pick<AgentRunSnapshot, "id" | "taskType" | "status" | "contract"> | null;
   /** M2: resolved IntentEnvelope (structured LLM routing) for this turn. */
   envelope?: IntentEnvelopeResolution;
 }
@@ -159,6 +161,22 @@ export function admitAgentRun(input: AgentRunAdmissionInput): AgentRunAdmissionD
     : [];
 
   if (input.activeRun) {
+    // 0.11.0-A: a waiting clarification run always absorbs the next turn —
+    // the worker's envelope decides whether the turn continues the clarify
+    // (second question) or redirects to the real task (in-run handoff).
+    if (isClarifyRun(input.activeRun)) {
+      return {
+        kind: "continue_current_run",
+        taskType,
+        agentId,
+        contract,
+        route,
+        primaryGoal,
+        constraints: ["clarify_continuation"],
+        evidence: [...evidence, "admission.clarify_run_continuation"],
+        currentRunId: input.activeRun.id,
+      };
+    }
     if (input.activeRun.taskType === taskType) {
       return {
         kind: "continue_current_run",
@@ -211,13 +229,12 @@ export function admitAgentRun(input: AgentRunAdmissionInput): AgentRunAdmissionD
   };
 }
 
-function createServerOwnedContract(
+export function createServerOwnedContract(
   taskType: AgentTaskType,
   target: string,
   route: AgentTaskRouteDecision,
   journeyArtifacts?: AgentRunEntryHints["journeyArtifacts"],
-): AgentTaskContract {
-  const requiresClarification = route.requiresClarification;
+): AgentTaskContract {  const requiresClarification = route.requiresClarification;
   const validArtifacts: Array<{ artifactId: string; kind: ArtifactKind; version: string; hash: string }> = (journeyArtifacts || [])
     .filter((artifact) => artifact.artifactId && artifact.kind && artifact.version && artifact.hash && !artifact.stale)
     .filter((artifact) => ARTIFACT_KINDS.has(artifact.kind))
@@ -248,6 +265,24 @@ function createServerOwnedContract(
       ? { graphVersion: "task-journey/v1", artifacts: validArtifacts }
       : undefined,
   });
+}
+
+
+/** 0.11.0-A: build a server-owned contract for a task without a full route
+ * decision (worker-side envelope redirect). Tools come from the task policy. */
+export function buildContractForTask(
+  taskType: AgentTaskType,
+  target: string,
+  journeyArtifacts?: AgentRunEntryHints["journeyArtifacts"],
+): AgentTaskContract {
+  return createServerOwnedContract(taskType, target, {
+    taskType,
+    contractPolicy: getTaskContractPolicy(taskType),
+    allowedTools: listToolNamesForTask(taskType),
+    memoryTask: mapAgentTaskToMemoryTask(taskType),
+    requiresClarification: false,
+    auditSummary: "envelope_redirect",
+  }, journeyArtifacts);
 }
 
 function admissionEvidence(entryHints: AgentRunEntryHints | undefined): string[] {
@@ -281,6 +316,15 @@ function guidedSessionForActiveRun(
     lastUpdatedAt: now,
     source: "agent_state",
   };
+}
+
+/** 0.11.0-A: a waiting-user run whose contract carries the clarify criterion. */
+function isClarifyRun(activeRun: AgentRunAdmissionInput["activeRun"]): boolean {
+  if (!activeRun || activeRun.status !== "waiting_user") return false;
+  const contract = activeRun.contract as { taskType?: string; successCriteria?: string[] } | undefined;
+  return contract?.taskType === "general_chat"
+    && Array.isArray(contract?.successCriteria)
+    && contract.successCriteria.includes("clarification question asked");
 }
 
 function isAgentTaskType(value: string): value is AgentTaskType {

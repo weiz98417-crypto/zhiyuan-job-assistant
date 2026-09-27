@@ -95,16 +95,13 @@ export async function POST(request: Request) {
       images: images.length > 0 ? images : undefined,
       ...(body.input?.persistInConversation === false ? { persistInConversation: false } : {}),
     };
-    // M2: structured intent routing — one envelope call decides the task.
-    const envelope = await resolveIntentEnvelope({
-      content,
-      agentId: stringField(body.entryHints?.agentId) || stringField(body.agentId) || undefined,
-    });
+    // 0.11.0-A: Run Admission is deterministic — zero model calls on the POST
+    // path (sub-second receipt). The intent envelope runs as the first worker
+    // step; clarify becomes a waiting-user run instead of a bare 202.
     const admission = admitAgentRun({
       conversationId: conversationId ?? null,
       input,
       activeRun,
-      envelope,
       entryHints: {
         agentId: stringField(body.entryHints?.agentId) || stringField(body.agentId) || undefined,
         taskType: stringField(body.taskType) || undefined,
@@ -119,17 +116,8 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
-    if (admission.kind === "clarify") {
-      const assignment = resolveAgentRuntimeAssignment(user.userId, admission.taskType || "general_chat");
-      return NextResponse.json(
-        {
-          success: true,
-          enabled: true,
-          data: { run: null, replayed: false, assignment, admission: admissionReceipt(admission) },
-        },
-        { status: 202 },
-      );
-    }
+    // 0.11.0-A: clarification is a waiting-user run now — the clarify contract
+    // (question criteria) is created like any other run; no bare 202.
     const assignment = resolveAgentRuntimeAssignment(user.userId, admission.taskType!);
     if (assignment.owner !== "worker") {
       return NextResponse.json({

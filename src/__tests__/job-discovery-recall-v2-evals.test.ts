@@ -52,7 +52,7 @@ describe("job discovery recall v2 evals - regression", () => {
 
   it("R2 zero-result scans expose a strategy card in Agent Chat", () => {
     const worker = source("scripts/scan-worker.mjs");
-    const chat = source("src/components/agent/AgentChat.tsx");
+    const chat = source("src/components/agent/AgentDomainCards.tsx");
 
     expect(worker).toContain("zero_result_strategy");
     expect(chat).toContain("function JobDiscoveryZeroResultStrategyCard");

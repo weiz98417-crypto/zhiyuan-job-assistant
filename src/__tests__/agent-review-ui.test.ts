@@ -5,7 +5,7 @@ import path from "path";
 describe("admin agent review UI", () => {
   it("exposes Chinese admin navigation and eval candidate actions", () => {
     const root = process.cwd();
-    const shell = fs.readFileSync(path.join(root, "src", "components", "shell", "AppShell.tsx"), "utf-8");
+    const shell = fs.readFileSync(path.join(root, "src", "components", "shell", "WorkbenchShell.tsx"), "utf-8");
     const page = fs.readFileSync(path.join(root, "src", "app", "admin", "agent-reviews", "page.tsx"), "utf-8");
 
     expect(shell).toContain("/admin/agent-reviews");

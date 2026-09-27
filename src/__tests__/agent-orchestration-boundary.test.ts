@@ -29,7 +29,7 @@ describe("Agent orchestration browser boundary", () => {
 
   it("keeps the client page away from the server orchestrator graph", () => {
     const pageSource = readFileSync(
-      path.join(process.cwd(), "src/app/agent/page.tsx"),
+      path.join(process.cwd(), "src/components/agent/use-agent-conversation.tsx"),
       "utf8",
     );
     const chatSource = readFileSync(

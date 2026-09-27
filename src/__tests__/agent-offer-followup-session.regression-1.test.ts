@@ -13,10 +13,11 @@ describe("Offer result-card follow-up session continuity regression", () => {
 
   it("passes the current Conversation id from the Agent page into result cards", () => {
     const agentChat = readFileSync(path.join(process.cwd(), "src/components/agent/AgentChat.tsx"), "utf-8");
+    const cards = readFileSync(path.join(process.cwd(), "src/components/agent/AgentDomainCards.tsx"), "utf-8");
     const agentPage = readFileSync(path.join(process.cwd(), "src/app/agent/page.tsx"), "utf-8");
 
     expect(agentChat).toContain("currentSessionId: number | null");
-    expect(agentChat).toContain('buildOfferAgentHandoffUrl(reportId, "ask_hr", currentSessionId)');
+    expect(cards).toContain('buildOfferAgentHandoffUrl(reportId, "ask_hr", currentSessionId)');
     expect(agentPage).toContain("currentSessionId={currentSessionId}");
   });
 });

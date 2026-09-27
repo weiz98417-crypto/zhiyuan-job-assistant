@@ -4,7 +4,7 @@ import path from "node:path";
 
 describe("terminal Agent run toolbar regression", () => {
   it("removes terminal Run notices instead of showing processing controls forever", () => {
-    const source = readFileSync(path.join(process.cwd(), "src/app/agent/page.tsx"), "utf8");
+    const source = readFileSync(path.join(process.cwd(), "src/components/agent/use-agent-conversation.tsx"), "utf8");
 
     expect(source).toContain('const TERMINAL_DURABLE_RUN_STATUSES = new Set(["succeeded", "failed", "cancelled"]);');
     expect(source).toContain("setActiveRunNotice((current) => (current?.id === runId ? null : current));");

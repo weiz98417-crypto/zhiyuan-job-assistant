@@ -9,7 +9,7 @@ dotenv.config();
 const WORKER_ARTIFACT = "build/agent-worker.mjs";
 const REQUIRED_TABLES = [
   "agent_runs", "agent_run_events", "agent_run_checkpoints", "agent_run_inputs", "agent_run_gates",
-  "agent_tool_attempts", "agent_run_outbox", "agent_conversation_items", "agent_feature_flags",
+  "agent_tool_attempts", "agent_run_outbox", "agent_feature_flags",
   "agent_eval_layer_results", "jd_resume_matching_preferences", "session_memory", "memory_items",
   "memory_evidence", "memory_chunks", "memory_episodes", "memory_facts", "memory_fact_decisions",
   "memory_fact_chunks", "profile_blocks", "memory_profile_block_facts", "memory_partitions",

@@ -14,6 +14,7 @@ import {
   Shield,
   Eye,
 } from "lucide-react";
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip as ReTooltip, Legend } from "recharts";
 import {
   HandwritingTitle,
   WarmButton,
@@ -174,58 +175,26 @@ export default function AnalyticsPage() {
     ? Math.round(((thisWeekApplied - lastWeekApplied) / lastWeekApplied) * 100)
     : thisWeekApplied > 0 ? 100 : 0;
 
-  /* ── Bar chart (CSS) ── */
+  /* ── 8周趋势(recharts adapter,任务 5.1;纸鸢令牌配色) ── */
   function TrendChart() {
     if (weeklyData.length === 0) return null;
-    const maxVal = Math.max(...weeklyData.map((w) => w.applied + w.interviews + w.offers), 1);
     return (
       <PaperCard padding="md">
         <h3 className="font-[family-name:var(--font-display)] font-bold text-[var(--color-text)] mb-4">
           8周趋势
         </h3>
-        <div className="flex items-end gap-2 h-40">
-          {weeklyData.map((w) => (
-            <div key={w.label} className="flex-1 flex flex-col items-center gap-1">
-              <div className="w-full flex flex-col-reverse">
-                {w.offers > 0 && (
-                  <div
-                    className="w-full rounded-t-[2px] bg-[var(--color-primary)]"
-                    style={{ height: `${Math.max((w.offers / maxVal) * 120, 4)}px` }}
-                    title={`Offer: ${w.offers}`}
-                  />
-                )}
-                {w.interviews > 0 && (
-                  <div
-                    className="w-full bg-[var(--color-primary-soft)]"
-                    style={{ height: `${Math.max((w.interviews / maxVal) * 120, 4)}px` }}
-                    title={`面试: ${w.interviews}`}
-                  />
-                )}
-                {w.applied > 0 && (
-                  <div
-                    className="w-full rounded-t-[2px] bg-[var(--color-primary-muted)]"
-                    style={{ height: `${Math.max((w.applied / maxVal) * 120, 4)}px` }}
-                    title={`投递: ${w.applied}`}
-                  />
-                )}
-              </div>
-              <span className="text-xs text-[var(--color-muted)]">{w.label}</span>
-            </div>
-          ))}
-        </div>
-        <div className="flex justify-center gap-6 mt-4 text-xs">
-          <div className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded-[2px] bg-[var(--color-primary-muted)]" />
-            <span className="text-[var(--color-text-soft)]">投递</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded-[2px] bg-[var(--color-primary-soft)]" />
-            <span className="text-[var(--color-text-soft)]">面试</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded-[2px] bg-[var(--color-primary)]" />
-            <span className="text-[var(--color-text-soft)]">Offer</span>
-          </div>
+        <div className="h-40">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={weeklyData} barCategoryGap="20%">
+              <XAxis dataKey="label" tick={{ fontSize: 11, fill: "var(--color-muted)" }} axisLine={{ stroke: "var(--color-border)" }} tickLine={false} />
+              <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "var(--color-muted)" }} axisLine={false} tickLine={false} width={28} />
+              <ReTooltip cursor={{ fill: "var(--color-surface-soft)" }} contentStyle={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", borderRadius: 12, fontSize: 12 }} />
+              <Legend wrapperStyle={{ fontSize: 12 }} />
+              <Bar dataKey="applied" name="投递" stackId="a" fill="var(--color-primary-muted)" radius={[0, 0, 0, 0]} />
+              <Bar dataKey="interviews" name="面试" stackId="a" fill="var(--color-primary-soft)" />
+              <Bar dataKey="offers" name="Offer" stackId="a" fill="var(--color-primary)" radius={[3, 3, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
         </div>
       </PaperCard>
     );
@@ -363,7 +332,7 @@ export default function AnalyticsPage() {
           </div>
           <p className="text-sm text-[var(--color-text-soft)] mt-4 text-center">
             {appliedChange > 0
-              ? `本周你的匹配度比上周提升了${appliedChange}%，策略调整在起效 🔥`
+              ? `本周你的匹配度比上周提升了${appliedChange}%，策略调整在起效`
               : thisWeekApplied > 0
                 ? "本周开局不错，保持节奏！"
                 : "这周可以开始新的投递了，好机会在等你。"}

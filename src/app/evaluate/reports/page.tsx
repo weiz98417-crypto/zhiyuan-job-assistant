@@ -14,7 +14,10 @@ import {
   Download,
   CheckCircle,
 } from "lucide-react";
-import { WarmButton, PaperCard, ScoreBadge } from "@/components/design";
+import { ScoreBadge } from "@/components/design";
+import { Button, Card, CardContent } from "@/components/ui";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { AlertDialog, AlertDialogContent, AlertDialogTitle, AlertDialogDescription, AlertDialogAction, AlertDialogCancel } from "@/components/ui/overlay";
 import { StaggerList, StaggerItem } from "@/components/design/PageTransition";
 import ReportBlocks from "@/components/ReportBlocks";
 import db from "@/lib/db";
@@ -359,9 +362,9 @@ export default function ReportsPage() {
               : "去评估一个职位，生成第一份报告"}
           </p>
           {!search && !hasFilters && (
-            <WarmButton variant="soft" size="sm" onClick={() => router.push("/evaluate")}>
+            <Button variant="secondary" size="sm" onClick={() => router.push("/evaluate")}>
               去评估
-            </WarmButton>
+            </Button>
           )}
         </motion.div>
       )}
@@ -371,7 +374,8 @@ export default function ReportsPage() {
         {filtered.map((report) => (
           <StaggerItem key={report.id}>
             <div onClick={() => setSelectedReport(report)} className="cursor-pointer">
-              <PaperCard hover="lift">
+              <Card className="transition-transform hover:-translate-y-0.5">
+                <CardContent>
                 <div className="flex items-start justify-between mb-2">
                   <div className="flex-1 min-w-0">
                     <h3 className="font-semibold text-[var(--color-text)] truncate">
@@ -412,31 +416,18 @@ export default function ReportsPage() {
                     )}
                   </div>
                 </div>
-              </PaperCard>
+                </CardContent>
+              </Card>
             </div>
           </StaggerItem>
         ))}
       </StaggerList>
 
-      {/* Detail Sheet */}
-      <AnimatePresence>
-        {selectedReport && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/20 z-40"
-            onClick={() => setSelectedReport(null)}
-          >
-            <motion.div
-              initial={{ x: "100%" }}
-              animate={{ x: 0 }}
-              exit={{ x: "100%" }}
-              transition={{ type: "spring", damping: 25, stiffness: 200 }}
-              onClick={(e) => e.stopPropagation()}
-              className="fixed right-0 top-0 bottom-0 w-full max-w-lg xl:max-w-2xl bg-[var(--color-surface)] border-l border-[var(--color-border)] overflow-y-auto z-50"
-            >
-              <div className="p-6">
+      {/* Detail Sheet(浮层 kit,任务 3.2) */}
+      {selectedReport && (
+      <Sheet open onOpenChange={(open) => { if (!open) setSelectedReport(null); }}>
+        <SheetContent side="right" className="w-full max-w-lg xl:max-w-2xl overflow-y-auto">
+          <div className="p-6">
                 {/* Header */}
                 <div className="flex items-center justify-between mb-4">
                   <div>
@@ -483,25 +474,25 @@ export default function ReportsPage() {
                     <Download size={12} />
                     下载 PDF
                   </a>
-                  <WarmButton
+                  <Button
                     variant="ghost"
                     size="sm"
                     onClick={() => setDeleteConfirm(selectedReport)}
                   >
                     <Trash2 size={12} className="mr-1" />
                     删除报告
-                  </WarmButton>
-                  <WarmButton
-                    variant="soft"
+                  </Button>
+                  <Button
+                    variant="secondary"
                     size="sm"
                     onClick={() => handleAddToTracker(selectedReport)}
                     disabled={trackerStatus === "saving"}
                   >
                     <CheckCircle size={12} className="mr-1" />
                     {trackerStatus === "saving" ? "加入中..." : "加入追踪"}
-                  </WarmButton>
-                  <WarmButton
-                    variant="soft"
+                  </Button>
+                  <Button
+                    variant="secondary"
                     size="sm"
                     onClick={() => {
                       setSelectedReport(null);
@@ -510,52 +501,35 @@ export default function ReportsPage() {
                   >
                     <ExternalLink size={12} className="mr-1" />
                     查看 JD 库
-                  </WarmButton>
+                  </Button>
                 </div>
                 {trackerStatus === "error" && (
                   <p className="mt-2 text-xs text-red-500">
                     加入追踪失败，请稍后重试。
                   </p>
                 )}
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          </div>
+        </SheetContent>
+      </Sheet>
+      )}
 
-      {/* Delete Confirmation */}
-      <AnimatePresence>
-        {deleteConfirm && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/20 z-50 flex items-center justify-center"
-            onClick={() => setDeleteConfirm(null)}
-          >
-            <motion.div
-              initial={{ scale: 0.95 }}
-              animate={{ scale: 1 }}
-              exit={{ scale: 0.95 }}
-              onClick={(e) => e.stopPropagation()}
-              className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-[var(--radius-md)] p-6 max-w-sm mx-4"
-            >
-              <h4 className="font-semibold text-[var(--color-text)] mb-2">确认删除</h4>
-              <p className="text-sm text-[var(--color-text-soft)] mb-4">
-                确定删除该评估报告？关联的 JD 记录不受影响，但会解除关联。
-              </p>
-              <div className="flex items-center gap-2 justify-end">
-                <WarmButton variant="ghost" size="sm" onClick={() => setDeleteConfirm(null)}>
-                  取消
-                </WarmButton>
-                <WarmButton variant="primary" size="sm" onClick={handleDelete}>
-                  确认删除
-                </WarmButton>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Delete Confirmation(浮层 kit) */}
+      {deleteConfirm && (
+      <AlertDialog open onOpenChange={(open) => { if (!open) setDeleteConfirm(null); }}>
+        <AlertDialogContent>
+          <AlertDialogTitle>确认删除</AlertDialogTitle>
+          <AlertDialogDescription>
+            确定删除该评估报告？关联的 JD 记录不受影响，但会解除关联。
+          </AlertDialogDescription>
+          <div className="flex items-center gap-2 justify-end">
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction className="bg-red-600 hover:bg-red-700" onClick={handleDelete}>
+              确认删除
+            </AlertDialogAction>
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
+      )}
     </div>
   );
 }

@@ -9,7 +9,7 @@ function source(file: string): string {
 describe("Discovery UI", () => {
   it("uses concise job discovery product language", () => {
     const page = source("src/app/discover/page.tsx");
-    const shell = source("src/components/shell/AppShell.tsx");
+    const shell = source("src/components/shell/WorkbenchShell.tsx");
     const toolDisplay = source("src/lib/agent/tool-display-names.ts");
     const toolGovernance = source("src/lib/agent/tool-governance.ts");
 

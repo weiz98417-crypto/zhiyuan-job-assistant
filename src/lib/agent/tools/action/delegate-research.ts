@@ -144,6 +144,14 @@ export const delegateResearch: ToolDefinition = {
     target_agent_id: { type: "string", required: true, description: "受委派 agent：general / resume / evaluate" },
     context: { type: "string", required: false, description: "给子任务的背景信息（可选）" },
   },
+  outcome: {
+    subagentOf: (params) => {
+      const target = typeof params.target_agent_id === "string" ? params.target_agent_id : "general";
+      const goal = typeof params.goal === "string" ? params.goal : "";
+      if (!goal) return null;
+      return { delegationId: "dlg-pending", agentId: target, goal };
+    },
+  },
   handler,
   formatResult: (result) => result.llmSummary || (result.success ? "委派研究完成" : `委派失败：${result.error}`),
   toolCtxCap: 900,

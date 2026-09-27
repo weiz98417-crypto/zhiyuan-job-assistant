@@ -85,7 +85,6 @@ export async function createSession(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       title: session.title,
-      messages: session.messages,
       interviewState: session.interviewState,
       agentState: session.agentState,
     }),
@@ -146,13 +145,14 @@ export async function getSession(
 
 export async function updateSession(id: number, updates: Partial<ChatSession>): Promise<void> {
   const safeMessages = updates.messages ? projectAgentMessages(updates.messages) : undefined;
+  // Transcript content is a local optimistic projection only. The durable
+  // worker is the sole server-side transcript writer (ADR-0036).
   await db.chatSessions.update(id, { ...updates, ...(safeMessages ? { messages: safeMessages } : {}), updatedAt: new Date().toISOString() });
   const res = await fetch(`/api/sessions/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       title: updates.title,
-      messages: safeMessages,
       pinned: updates.pinned,
       memoryDigest: updates.memoryDigest,
       interviewState: updates.interviewState,

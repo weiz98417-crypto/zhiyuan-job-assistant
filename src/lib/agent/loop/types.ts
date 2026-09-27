@@ -43,6 +43,13 @@ export type SSEEvent =
   | { type: "tool_calls"; tool_calls: Array<{ id: string; name: string; arguments: string }> }
   | { type: "intent"; agentId: string; reason: string; modelTier?: string }
   | { type: "agent_switch"; agentId: string; agentName: string }
+  // 0.11.0-B event dialect (AG-UI aligned)
+  | { type: "step.started"; step: string; criteriaDone: number; criteriaTotal: number }
+  | { type: "step.finished"; step: string; criteriaDone: number; criteriaTotal: number }
+  | { type: "subagent.started"; delegationId: string; agentId: string; goal: string }
+  | { type: "subagent.finished"; delegationId: string; agentId: string; findings?: string; keyPoints?: unknown[] }
+  | { type: "subagent.error"; delegationId: string; agentId: string; reason?: string }
+  | { type: "messages.snapshot"; items: Array<Record<string, unknown>> }
   | { type: "done"; company?: string; role?: string; archetype?: string; overallScore?: number; blocks?: Record<string, unknown>; jdText?: string }
   // Stream evaluation events (from /api/evaluate/stream)
   | { type: "block_start"; block: string; label: string }

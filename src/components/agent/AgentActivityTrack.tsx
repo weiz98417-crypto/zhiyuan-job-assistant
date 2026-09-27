@@ -1,12 +1,43 @@
 "use client";
 
 import { useEffect, useId, useState } from "react";
-import { Progress, Timeline } from "antd";
+import { Progress, Timeline, ConfigProvider, theme as antdTheme } from "antd";
 import { motion, useReducedMotion } from "framer-motion";
 import { CheckCircle2, ChevronRight, CircleDashed, PauseCircle, ShieldCheck } from "lucide-react";
 import { ThinkingOrb, type OrbState } from "thinking-orbs";
 import { sanitizeSafeReasoningSummary } from "@/lib/agent/surface-projection";
 import type { AgentArtifactRef } from "@/lib/agent/task-journey";
+import { useTheme } from "@/components/providers/ThemeProvider";
+
+/**
+ * antd 活动轨道组件吃纸鸢令牌(0.11.0-D 主题对齐)。
+ * 色值与 globals.css 的纸鸢令牌镜像;明暗两套由 useTheme 切换,
+ * 避免暗色模式下 antd 默认亮面反白。
+ */
+const PAPER_SEED = {
+  colorPrimary: "#c0502f",
+  colorInfo: "#c0502f",
+  borderRadius: 8,
+  fontFamily: '"Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif',
+};
+
+const LIGHT_SEED = {
+  ...PAPER_SEED,
+  colorBorder: "#e8e5de",
+  colorBorderSecondary: "#e8e5de",
+  colorBgContainer: "#fdfcf9",
+  colorText: "#1f1e1b",
+  colorTextDescription: "#76736b",
+};
+
+const DARK_SEED = {
+  ...PAPER_SEED,
+  colorBorder: "#3a362e",
+  colorBorderSecondary: "#3a362e",
+  colorBgContainer: "#262420",
+  colorText: "#f2efe7",
+  colorTextDescription: "#9b968a",
+};
 
 interface AgentActivityTrackProps {
   streaming: boolean;
@@ -42,6 +73,11 @@ export default function AgentActivityTrack({
   resultQuality,
 }: AgentActivityTrackProps) {
   const reducedMotion = useReducedMotion();
+  const { theme } = useTheme();
+  const paperTheme = {
+    token: theme === "dark" ? DARK_SEED : LIGHT_SEED,
+    algorithm: theme === "dark" ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
+  } as const;
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const detailsId = useId();
@@ -87,13 +123,14 @@ export default function AgentActivityTrack({
   }, [startTime]);
 
   return (
-    <motion.section
-      initial={reducedMotion ? false : { opacity: 0, y: 6 }}
-      animate={reducedMotion ? undefined : { opacity: 1, y: 0 }}
-      className="w-fit max-w-[min(560px,78%)] text-[var(--color-text-soft)]"
-      aria-live="polite"
-      aria-label="Agent 活动进度"
-    >
+    <ConfigProvider theme={paperTheme}>
+      <motion.section
+        initial={reducedMotion ? false : { opacity: 0, y: 6 }}
+        animate={reducedMotion ? undefined : { opacity: 1, y: 0 }}
+        className="w-fit max-w-[min(560px,78%)] text-[var(--color-text-soft)]"
+        aria-live="polite"
+        aria-label="Agent 活动进度"
+      >
       <div className="flex min-h-7 max-w-full items-center gap-2 px-1 py-1">
         <ThinkingOrb
           state={orbState}
@@ -123,14 +160,15 @@ export default function AgentActivityTrack({
         )}
       </div>
       {progress !== undefined && (
-        <Progress percent={progress} size="small" showInfo={false} strokeColor="#8c6a4a" trailColor="rgba(140,106,74,.16)" className="ml-7 max-w-52" />
+        <Progress percent={progress} size="small" showInfo={false} strokeColor="#c0502f" trailColor="rgba(192,80,47,.16)" className="ml-7 max-w-52" />
       )}
       {detailsOpen && hasDetails && (
         <div id={detailsId} className="ml-7 mt-1 max-w-lg pt-1">
           <Timeline className="mb-0" items={timelineItems} />
         </div>
       )}
-    </motion.section>
+      </motion.section>
+    </ConfigProvider>
   );
 }
 

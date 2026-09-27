@@ -2,7 +2,7 @@
 
 import { usePathname } from 'next/navigation';
 import type { ReactNode } from 'react';
-import AppShell from './AppShell';
+import WorkbenchShell from './WorkbenchShell';
 import { installCsrfFetch } from '@/lib/security/csrf-fetch';
 
 const AUTH_PAGES = new Set([
@@ -19,10 +19,10 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     ? pathname.replace(/\/+$/, '')
     : pathname;
 
-  // Auth pages render without AppShell (full-screen split layout)
+  // Auth pages render without the shell (full-screen split layout)
   if (AUTH_PAGES.has(normalizedPathname)) {
     return <>{children}</>;
   }
 
-  return <AppShell>{children}</AppShell>;
+  return <WorkbenchShell>{children}</WorkbenchShell>;
 }

@@ -12,15 +12,16 @@ describe("production Agent E2E eval backlog", () => {
     }
   });
 
-  it("freezes systemic execution findings until their milestone design lands", () => {
+  it("releases systemic execution findings once their milestone design lands (0.11.0-D2 unfreeze)", () => {
+    // M2 修好了 intent_routing;A/B/C 落地 admission/方言/单写者,D2 完成换芯后,
+    // task_execution / gate_resume / conversation_progression 的设计冻结全部解除。
     const systemic = productionAgentEvalBacklog.filter((item) =>
       ["task_execution", "gate_resume", "conversation_progression"].includes(item.cluster),
     );
 
     expect(systemic.length).toBeGreaterThanOrEqual(6);
-    expect(systemic.every((item) => item.disposition === "frozen_for_design")).toBe(true);
-    // M2 released the intent_routing cluster: ROUTE cases are release
-    // guardrails now and must never regress to frozen.
+    expect(systemic.every((item) => item.disposition === "guardrail")).toBe(true);
+    // 路由用例永不回退到 frozen。
     const routing = productionAgentEvalBacklog.filter((item) => item.cluster === "intent_routing");
     expect(routing.length).toBeGreaterThanOrEqual(4);
     expect(routing.every((item) => item.disposition === "guardrail")).toBe(true);

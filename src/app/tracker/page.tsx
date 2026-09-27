@@ -31,6 +31,9 @@ import {
   StatusTag,
 } from "@/components/design";
 import { StaggerList, StaggerItem } from "@/components/design/PageTransition";
+import LandingCelebration from "@/components/tracker/LandingCelebration";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { Dialog, DialogContent } from "@/components/ui/overlay";
 import { exportApplicationsMD, downloadAsFile } from "@/lib/exporters";
 import type { Application, ApplicationStatus, InterviewRound } from "@/types";
 import { STATUS_LABELS, STATUS_ORDER } from "@/types";
@@ -100,6 +103,7 @@ export default function TrackerPage() {
   const [showInterviewModal, setShowInterviewModal] = useState<Application | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [updatingId, setUpdatingId] = useState<number | null>(null);
+  const [landingCelebration, setLandingCelebration] = useState<{ company: string; role: string } | null>(null);
   const [interviewForm, setInterviewForm] = useState<InterviewRound>({
     round: 1,
     date: new Date().toISOString().slice(0, 10),
@@ -176,6 +180,10 @@ export default function TrackerPage() {
     try {
       const updated = await patchApplicationStatus({ id: app.id, status, source: "tracker_page" });
       setApplications((prev) => prev.map((item) => item.id === updated.id ? updated : item));
+      // 上岸时刻(任务 5.1):投递旅程走到「已获 Offer」时呈现庆祝态。
+      if (status === "offer" && app.status !== "offer") {
+        setLandingCelebration({ company: updated.company || app.company, role: updated.role || app.role });
+      }
       if (detailApp && detailApp.id === app.id) {
         setDetailApp(updated);
       }
@@ -262,6 +270,10 @@ export default function TrackerPage() {
             source: "tracker_page",
           });
           setApplications((prev) => prev.map((item) => item.id === updated.id ? updated : item));
+          // 上岸时刻(任务 5.1):下一步动作路径同样触发庆祝态。
+          if (action.status === "offer" && app.status !== "offer") {
+            setLandingCelebration({ company: updated.company || app.company, role: updated.role || app.role });
+          }
           if (detailApp && detailApp.id === app.id) setDetailApp(updated);
         } catch (error) {
           console.error("[tracker] next action failed:", error);
@@ -723,27 +735,11 @@ export default function TrackerPage() {
         </div>
       )}
 
-      {/* ── Detail Panel (Slide-over) ── */}
-      <AnimatePresence>
-        {detailApp && (
-          <>
-            {/* Backdrop */}
-            <motion.div
-              className="fixed inset-0 bg-black/20 z-40"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setDetailApp(null)}
-            />
-            {/* Panel */}
-            <motion.div
-              className="fixed right-0 top-0 bottom-0 w-full max-w-md bg-[var(--color-surface)] border-l border-[var(--color-border)] z-50 overflow-y-auto"
-              initial={{ x: "100%" }}
-              animate={{ x: 0 }}
-              exit={{ x: "100%" }}
-              transition={{ type: "spring", damping: 30, stiffness: 300 }}
-            >
-              <div className="p-6 space-y-6">
+      {/* ── Detail Panel (Slide-over,浮层 kit) ── */}
+      {detailApp && (
+      <Sheet open onOpenChange={(open) => { if (!open) setDetailApp(null); }}>
+        <SheetContent side="right" className="w-full max-w-md overflow-y-auto">
+          <div className="p-6 space-y-6">
                 {/* Close */}
                 <div className="flex items-center justify-between">
                   <HandwritingTitle as="h2">投递详情</HandwritingTitle>
@@ -881,35 +877,15 @@ export default function TrackerPage() {
                   )}
                 </div>
               </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+        </SheetContent>
+      </Sheet>
+      )}
 
-      {/* ── Interview Modal ── */}
-      <AnimatePresence>
-        {showInterviewModal && (
-          <>
-            <motion.div
-              className="fixed inset-0 bg-black/20 z-40"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowInterviewModal(null)}
-            />
-            <motion.div
-              className="fixed inset-0 z-50 flex items-center justify-center p-4"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-            >
-              <motion.div
-                className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-[var(--radius-xl)] p-6 w-full max-w-sm shadow-[var(--shadow-lg)]"
-                initial={{ scale: 0.95, y: 16 }}
-                animate={{ scale: 1, y: 0 }}
-                exit={{ scale: 0.95, y: 16 }}
-              >
-                <HandwritingTitle as="h2" className="mb-4">面试轮次</HandwritingTitle>
+      {/* ── Interview Modal(浮层 kit) ── */}
+      {showInterviewModal && (
+      <Dialog open onOpenChange={(open) => { if (!open) setShowInterviewModal(null); }}>
+        <DialogContent className="w-full max-w-sm">
+          <HandwritingTitle as="h2" className="mb-4">面试轮次</HandwritingTitle>
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm text-[var(--color-text-soft)] mb-1">
@@ -980,11 +956,17 @@ export default function TrackerPage() {
                     </WarmButton>
                   </div>
                 </div>
-              </motion.div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+        </DialogContent>
+      </Dialog>
+      )}
+
+      {landingCelebration && (
+        <LandingCelebration
+          company={landingCelebration.company}
+          role={landingCelebration.role}
+          onClose={() => setLandingCelebration(null)}
+        />
+      )}
     </div>
   );
 }

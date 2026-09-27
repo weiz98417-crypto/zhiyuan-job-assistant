@@ -7,6 +7,7 @@ import { DurableOrchestratorExecutionEngine } from "@/lib/agent/runtime/durable-
 
 const localGetMock = vi.hoisted(() => vi.fn());
 const localPutMock = vi.hoisted(() => vi.fn());
+const localUpdateMock = vi.hoisted(() => vi.fn());
 const fetchMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/db", () => ({
@@ -14,6 +15,7 @@ vi.mock("@/lib/db", () => ({
     chatSessions: {
       get: localGetMock,
       put: localPutMock,
+      update: localUpdateMock,
     },
   },
 }));
@@ -55,6 +57,25 @@ describe("Agent server-authoritative session read-back regressions", () => {
       expect.objectContaining({ content: "Worker 已完成并持久化" }),
     ]);
     expect(localPutMock).toHaveBeenCalled();
+  });
+
+  it("keeps browser transcript updates out of the server PATCH payload", async () => {
+    localUpdateMock.mockResolvedValue(undefined);
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ success: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { updateSession } = await import("@/lib/agent/sessions");
+    await updateSession(74, {
+      messages: [{ role: "assistant", content: "本地乐观内容", timestamp: "2026-09-26T00:00:00.000Z" }],
+      memoryDigest: "保留摘要",
+    });
+
+    const [, request] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(String(request.body));
+    expect(body).not.toHaveProperty("messages");
+    expect(body.memoryDigest).toBe("保留摘要");
+    expect(localUpdateMock).toHaveBeenCalledWith(74, expect.objectContaining({ messages: expect.any(Array) }));
   });
 
   it("does not persist hidden bootstrap instructions into the user transcript", async () => {
