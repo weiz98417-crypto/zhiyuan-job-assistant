@@ -85,6 +85,13 @@ describe('middleware CSRF enforcement', () => {
     expect(response.headers.get('x-middleware-next')).toBe('1');
   });
 
+  it('allows public webp background assets without authentication', async () => {
+    const response = await middleware(new NextRequest('https://app.example/backgrounds/login-hero.webp'));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-middleware-next')).toBe('1');
+  });
+
   it('rejects a cross-origin logout attempt', async () => {
     const response = await middleware(new NextRequest('https://app.example/api/auth/logout', {
       method: 'POST',
