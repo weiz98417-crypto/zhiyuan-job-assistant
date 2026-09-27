@@ -5,14 +5,14 @@ This runbook applies to the Zhiyuan production deployment. Never place real pass
 ## Required topology
 
 ```text
-Internet -> 443/Nginx -> 127.0.0.1:3000/Next.js
+Internet -> 443/Nginx -> 127.0.0.1:3100/Next.js
                          |-> 127.0.0.1:55432/dedicated PostgreSQL/pgvector
                          |-> 127.0.0.1:6380/dedicated auth Redis
                          |-> HTTPS security alert webhook
 ```
 
 - Nginx is the only public HTTP entry point.
-- Next.js binds to `127.0.0.1`; port 3000 is not open in the cloud security group or host firewall.
+- Next.js binds to `127.0.0.1`; port 3100 is not open in the cloud security group or host firewall.
 - PostgreSQL/pgvector runs in the project-owned `zhiyuan-job-assistant-postgres` container with its own user, database, volume, and password. Do not place the Zhiyuan database in another project's PostgreSQL container.
 - The authentication Redis instance is not shared with queues, caches, or model workers. Its host port is loopback-only and AOF is enabled.
 - Nginx overwrites `X-Real-IP`, `X-Forwarded-For`, and `X-Forwarded-Proto`. It never passes client-supplied forwarding headers unchanged.
@@ -57,9 +57,9 @@ The promotion command refuses zero or multiple active privileged accounts and re
 
 1. Replace the example hostname and certificate paths in `deploy/auth-security/nginx.conf.example`.
 2. Validate with `nginx -t`, reload Nginx, and confirm HTTPS before enabling long-lived HSTS.
-3. Start Next.js with a loopback bind, for example `next start -H 127.0.0.1 -p 3000`.
+3. Start Next.js with a loopback bind, for example `next start -H 127.0.0.1 -p 3100`.
 4. Allow inbound TCP 22, 80, and 443 only. Restrict port 22 to operator source addresses when possible.
-5. Deny public access to 3000, 5432, and 6380 in both the Alibaba Cloud security group and the host firewall.
+5. Deny public access to 3100, 5432, and 6380 in both the Alibaba Cloud security group and the host firewall.
 
 HSTS can lock clients onto HTTPS. Do not enable the one-year header until the certificate, redirects, subdomains, and renewal job have been verified.
 
