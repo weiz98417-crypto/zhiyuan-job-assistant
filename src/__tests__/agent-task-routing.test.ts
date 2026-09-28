@@ -169,6 +169,28 @@ describe("agent task routing", () => {
     expect(decision.allowedTools).toContain("create_resume_edit_proposal");
   });
 
+  it.each([
+    "基于这个 JD 生成简历提案，只出草稿、不写入",
+    "不要覆盖当前简历，只生成修改提案",
+  ])("routes non-writing resume proposals to the draft workflow: %s", (content) => {
+    const decision = routeAgentTask({ agentId: "general", content });
+
+    expect(decision.taskType).toBe("resume_edit");
+    expect(decision.auditSummary).toBe("intent:resume_edit:proposal_only");
+    expect(decision.allowedTools).toContain("create_resume_edit_proposal");
+  });
+
+  it("keeps an explicit resume proposal ahead of a conflicting envelope task", () => {
+    const decision = routeAgentTask({
+      agentId: "general",
+      content: "基于这个 JD 为个人概述生成一份简历修改提案，只出草稿，不写入当前简历",
+      envelopeTask: "jd_evaluation",
+    });
+
+    expect(decision.taskType).toBe("resume_edit");
+    expect(decision.auditSummary).toContain("envelope_override:jd_evaluation");
+  });
+
   it("routes matching JD image requests into JD evaluation", () => {
     const imageIntake: ImageIntakeResult = {
       documentType: "jd",

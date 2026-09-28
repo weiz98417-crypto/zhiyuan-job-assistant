@@ -91,7 +91,7 @@ function hasJobDiscoveryCriteria(text: string): boolean {
 }
 
 function isResumeProposalIntent(content: string): boolean {
-  return /(简历|履历|resume|cv).{0,18}(优化|修改|改写|润色|重写).{0,18}(提案|草稿|建议)|(优化|修改|改写|润色|重写).{0,18}(提案|草稿|建议).{0,18}(简历|履历|resume|cv)/i.test(content);
+  return /(?:简历|履历|resume|cv).{0,30}(?:优化|修改|改写|润色|重写|生成).{0,30}(?:提案|草稿|建议)|(?:优化|修改|改写|润色|重写|生成).{0,30}(?:简历|履历|resume|cv).{0,30}(?:提案|草稿|建议)/i.test(content);
 }
 
 function isResumeDiagnosisIntent(content: string): boolean {
@@ -262,6 +262,14 @@ export function routeAgentTask(input: {
   }
 
   const documentType = imageIntake?.documentType || preferredDocumentType;
+
+  if (input.envelopeTask && input.envelopeTask !== "resume_edit" && isResumeProposalIntent(content)) {
+    return buildRouteDecision({
+      taskType: "resume_edit",
+      imageDecision,
+      auditSummary: `intent:resume_edit:proposal_only:envelope_override:${input.envelopeTask}`,
+    });
+  }
 
   // M2: a resolved IntentEnvelope overrides the whole regex intent chain —
   // primary task comes from the structured LLM call (or its audited fallback),

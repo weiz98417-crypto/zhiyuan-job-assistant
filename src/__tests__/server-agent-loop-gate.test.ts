@@ -7,6 +7,7 @@ const { executeGovernedRuntimeTool } = vi.hoisted(() => ({
 vi.mock("@/lib/agent/runtime/governed-tool-runtime", () => ({ executeGovernedRuntimeTool }));
 
 import { agentLoopServer } from "@/lib/agent/loop/server-runner";
+import { createAgentTaskContract } from "@/lib/agent/task-contract";
 
 afterEach(() => {
   executeGovernedRuntimeTool.mockReset();
@@ -162,5 +163,157 @@ describe("durable server Agent Loop gates", () => {
       expect.objectContaining({ type: "text", content: "我已改用安全路径，下面直接给你建议。" }),
     ]));
     expect(events.some((event) => event.type === "run_directive" && event.directive === "wait_user")).toBe(false);
+  });
+
+  it("forces an unconfirmed scan_portals confirmation card when job discovery has no model tool call", async () => {
+    vi.stubEnv("DEEPSEEK_API_KEY", "test-key");
+    vi.stubEnv("ZHIPU_API_KEY", "");
+    executeGovernedRuntimeTool.mockResolvedValue({
+      runDirective: "continue",
+      observation: {
+        category: "tool_success",
+        stage: "execution",
+        retryability: "none",
+        effectState: "not_dispatched",
+        fingerprint: "scan:confirmation",
+        userSafeSummary: "已生成岗位发现确认卡",
+        diagnosticRef: "attempt-scan-confirmation",
+        recoveryCapabilities: [],
+      },
+      attempt: {
+        id: "attempt-scan-confirmation",
+        status: "succeeded",
+        effectState: "not_dispatched",
+        result: {
+          success: true,
+          data: {
+            needsConfirmation: true,
+            criteria: { titlePositive: ["AI 产品经理"], location: "杭州", maxResults: 3 },
+          },
+          errorCategory: "ok",
+          llmSummary: "岗位发现需要用户先确认条件。",
+          uiPayload: {
+            type: "job_discovery_confirmation",
+            criteria: { titlePositive: ["AI 产品经理"], location: "杭州", maxResults: 3 },
+            primaryAction: { id: "start_job_discovery", label: "开始岗位发现" },
+          },
+        },
+      },
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      'data: {"choices":[{"delta":{"content":"我会先确认岗位发现条件。"}}]}\n\ndata: [DONE]\n\n',
+      { status: 200, headers: { "Content-Type": "text/event-stream" } },
+    )));
+    const events = [];
+
+    for await (const event of agentLoopServer({
+      agent: { id: "general", toolNames: ["scan_portals"] } as never,
+      systemPrompt: "岗位发现助手",
+      messages: [{ role: "user", content: "帮我找 3 个杭州 AI 产品经理岗位" }],
+      tools: [{ type: "function", function: { name: "scan_portals" } }],
+      taskContract: createAgentTaskContract({
+        taskType: "job_search",
+        target: "帮我找 3 个杭州 AI 产品经理岗位",
+      }),
+      executionContext: {
+        principal: { userId: "job-search-user" },
+        runId: "job-search-run",
+        workerId: "job-search-worker",
+        fencingToken: 1,
+        allowlist: ["scan_portals"],
+      },
+    })) events.push(event);
+
+    expect(executeGovernedRuntimeTool).toHaveBeenCalledWith(expect.objectContaining({
+      toolName: "scan_portals",
+      args: expect.objectContaining({
+        confirmed: false,
+        location: "杭州",
+        maxResults: 3,
+        titleKeywords: ["AI 产品经理"],
+      }),
+    }));
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "tool_call", name: "scan_portals", params: expect.objectContaining({ confirmed: false }) }),
+      expect.objectContaining({ type: "tool_result", name: "scan_portals", success: true, uiPayload: expect.objectContaining({ type: "job_discovery_confirmation" }) }),
+      expect.objectContaining({ type: "text", content: "已生成岗位发现确认卡，请确认条件后开始扫描。" }),
+    ]));
+    expect(events.some((event) => event.type === "run_directive" && event.directive === "wait_user")).toBe(false);
+  });
+
+  it("keeps get_recent_jd_context available to JD evaluation runs", async () => {
+    vi.stubEnv("DEEPSEEK_API_KEY", "test-key");
+    vi.stubEnv("ZHIPU_API_KEY", "");
+    executeGovernedRuntimeTool.mockResolvedValue({
+      runDirective: "continue",
+      observation: {
+        category: "tool_success",
+        stage: "execution",
+        retryability: "none",
+        effectState: "not_dispatched",
+        fingerprint: "jd:recent-context",
+        userSafeSummary: "已读取保存的 JD",
+        diagnosticRef: "attempt-jd-context",
+        recoveryCapabilities: [],
+      },
+      attempt: {
+        id: "attempt-jd-context",
+        status: "succeeded",
+        effectState: "not_dispatched",
+        result: {
+          success: true,
+          data: { id: 15, company: "示例公司", role: "AI 产品经理", body: "负责 AI 产品规划和交付。" },
+          errorCategory: "ok",
+          llmSummary: "已读取保存的 JD 正文。",
+          uiPayload: { type: "recent_jd_context", reportId: 15 },
+        },
+      },
+    });
+    const responses = [
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-jd-context","function":{"name":"get_recent_jd_context","arguments":"{\\"jdId\\":15}"}}]}}]}\n\ndata: [DONE]\n\n',
+      'data: {"choices":[{"delta":{"content":"我已读取这份 JD，可以继续评估。"}}]}\n\ndata: [DONE]\n\n',
+    ];
+    const requestBodies: Record<string, unknown>[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url, init) => {
+      requestBodies.push(JSON.parse(String(init?.body || "{}")) as Record<string, unknown>);
+      return new Response(responses.shift() || "data: [DONE]\n\n", {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      });
+    }));
+    const events = [];
+
+    for await (const event of agentLoopServer({
+      agent: { id: "evaluate", toolNames: ["get_recent_jd_context", "evaluate_jd_full"] } as never,
+      systemPrompt: "JD 评估助手",
+      messages: [{ role: "user", content: "请评估已保存的 JD 编号 15" }],
+      tools: [
+        { type: "function", function: { name: "get_recent_jd_context" } },
+        { type: "function", function: { name: "evaluate_jd_full" } },
+      ],
+      taskContract: createAgentTaskContract({
+        taskType: "jd_evaluation",
+        target: "请评估已保存的 JD 编号 15",
+        successCriteria: [],
+      }),
+      executionContext: {
+        principal: { userId: "jd-user" },
+        runId: "jd-run",
+        workerId: "jd-worker",
+        fencingToken: 1,
+        allowlist: ["get_recent_jd_context", "evaluate_jd_full"],
+      },
+    })) events.push(event);
+
+    const firstRequestTools = (requestBodies[0]?.tools || []) as Array<{ function: { name: string } }>;
+    expect(firstRequestTools.map((tool) => tool.function.name)).toContain("get_recent_jd_context");
+    expect(executeGovernedRuntimeTool).toHaveBeenCalledWith(expect.objectContaining({
+      toolName: "get_recent_jd_context",
+      args: { jdId: 15 },
+    }));
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "tool_call", name: "get_recent_jd_context", params: { jdId: 15 } }),
+    ]));
+    expect(requestBodies.length).toBeGreaterThanOrEqual(1);
   });
 });

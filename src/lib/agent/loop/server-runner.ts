@@ -105,6 +105,34 @@ function latestUserText(messages: DeepSeekMessage[]): string {
   return "";
 }
 
+function inferJobDiscoveryParams(text: string): Record<string, unknown> {
+  const location = text.match(/北京|上海|深圳|广州|杭州|成都|南京|苏州|武汉|远程/i)?.[0];
+  const countMatch = text.match(/(\d{1,3})\s*(?:个|条|份|家|职位|岗位)/i);
+  const titleMatch = text.match(/(?:AI|AIGC|Agent|大模型|数据|增长|商业|用户|平台|B端|C端)?\s*(?:产品|运营|开发|测试|算法|销售|市场|设计)?\s*(?:经理|负责人|工程师)/i);
+  return {
+    ...(titleMatch?.[0]?.trim() ? { titleKeywords: [titleMatch[0].trim()] } : { query: text }),
+    ...(location ? { location } : {}),
+    ...(countMatch ? { maxResults: Number(countMatch[1]) } : {}),
+    confirmed: false,
+  };
+}
+
+export function buildRequiredJobDiscoveryToolCall(input: {
+  contract?: AgentTaskContract | null;
+  userText: string;
+  successfulTools: Set<string>;
+  allowedTools?: string[];
+}): NativeToolCall | null {
+  if (input.contract?.taskType !== "job_search") return null;
+  if (input.successfulTools.has("scan_portals")) return null;
+  if (input.allowedTools?.length && !input.allowedTools.includes("scan_portals")) return null;
+  return {
+    id: `forced-job-discovery-confirmation-${Date.now()}`,
+    name: "scan_portals",
+    arguments: JSON.stringify(inferJobDiscoveryParams(input.userText)),
+  };
+}
+
 function resolveLoopChain(modelPreference?: string, modelRecovery?: ModelRecoveryPolicy) {
   const chain = getDefaultModelChain();
   const preferredProvider = chain.find((candidate) => candidate.model === modelPreference)?.provider;
@@ -268,7 +296,7 @@ export async function* agentLoopServer(opts: {
   let toolWhitelist = agent?.toolNames?.length ? agent.toolNames : undefined;
   const resumeDiagnosis = taskContract?.taskType === "resume_diagnosis";
   const jdWithoutResume = taskContract?.taskType === "jd_evaluation" && taskContract.routing?.jdMatchResume === false;
-  const blockedResumeTools = new Set(["read_file", "get_profile", "get_recent_jd_context"]);
+  const blockedResumeTools = new Set(["read_file", "get_profile"]);
   const activeSystemPrompt = resumeDiagnosis
     ? `${systemPrompt}\n${RESUME_DIAGNOSIS_DIRECTIVE}`
     : jdWithoutResume
@@ -401,6 +429,23 @@ export async function* agentLoopServer(opts: {
       }
       ctx.push({ role: "assistant", content: thinkText });
       break;
+    }
+
+    if (toolCalls.length === 0) {
+      const requiredJobDiscoveryCall = buildRequiredJobDiscoveryToolCall({
+        contract: taskContract,
+        userText: latestUserText(ctx),
+        successfulTools,
+        allowedTools: toolWhitelist,
+      });
+      if (requiredJobDiscoveryCall) {
+        toolCalls = [requiredJobDiscoveryCall];
+        ctx.push({
+          role: "user",
+          content: "<!-- system:job-discovery-confirmation-required -->当前是岗位发现任务。模型没有发起确认卡，请先调用 scan_portals(confirmed=false) 展示条件确认卡；不要创建扫描任务，也不要声称已经开始扫描。",
+        });
+        state.contextSize = estimateTokens(ctx);
+      }
     }
 
     if (toolCalls.length === 0) {
