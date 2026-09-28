@@ -2,6 +2,8 @@
 
 本目录把 `docs/feature-system` 中 01-28 号功能的 evals 资产按功能拆开记录。27 号“岗位发现 Agent 化”文档本身已经包含完整实施任务和 eval 规范，本目录同时保留一份索引用副本，方便从 evals 目录统一查找。
 
+本轮生产排障中发现的跨功能问题统一登记在 [2026-09 生产问题 Eval Ledger](../../production-incident-eval-ledger-2026-09.md)，机器可读 manifest 位于 `src/__tests__/fixtures/production-incident-eval-manifest.ts`。功能文档负责能力边界，事故 ledger 负责版本、网络、真实 UI、运行时和记忆问题的回放状态，二者不能互相替代。
+
 每份文档都必须区分：
 - 已落地或部分落地的 eval 资产：已经存在的 Vitest、脚本、fixture 或文档覆盖测试。
 - 待补 eval 缺口：产品预期存在，但还缺自动化证据。

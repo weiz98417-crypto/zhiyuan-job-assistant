@@ -105,6 +105,7 @@
 | PE2E-GATE-001 | P0 | 恢复 | profile Turn consumed 后仍 `waiting_user` | 111 | 冻结，待设计 |
 | PE2E-GATE-002 | P0 | 恢复 | Gate `approved` 后 resume Run 仍 `waiting_user` | 120 | 冻结，待设计 |
 | PE2E-FLOW-001 | P0 | 对话推进 | 面试回答后重复生成“第 1 题”，没有反馈 | 118 | 冻结，待设计 |
+| PE2E-QUESTION-001 | P1 | 对话推进 | 主问题数量、单题/整场追问预算和提前收口条件没有完整回放 | 117、118 | 冻结，待设计 |
 | PE2E-UI-001 | P1 | UI 投影 | Gate denied 后刷新仍显示 pending 操作按钮 | 112 | 本地已修，待统一部署 |
 | PE2E-PERF-001 | P1 | 性能/状态 | Gate/真实 proposal 可能需要 2-4 分钟，前台长期显示模糊等待态 | 111、112、118、120 | 冻结，待设计 |
 
@@ -134,3 +135,7 @@
 - 已有生产链路回归：`src/__tests__/agent-production-chain-regressions.eval.test.ts`
 
 所有主干异常用例当前都标记为 `frozen_for_design`，避免在方案形成前用局部补丁把错误行为固化。
+
+## 跨功能事故 Eval Ledger
+
+本文件记录 2026-08-30 的原始生产会话证据；发布、网络、真实页面、运行时扩展问题及其当前覆盖状态统一见 [2026-09 生产问题 Eval Ledger](production-incident-eval-ledger-2026-09.md)。机器可读清单是 `src/__tests__/fixtures/production-incident-eval-manifest.ts`，完整性门禁是 `src/__tests__/production-incident-eval-manifest.eval.test.ts`。

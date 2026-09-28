@@ -13,6 +13,8 @@
 
 src/__tests__/production-browser-eval-catalog.test.ts 只验证目录不缩水；它不等于生产浏览器测试已经通过。生产执行后的截图、控制台检查、网络结果和只读数据库证据必须写入 .gstack/qa-reports。
 
+本轮线上排障的细粒度问题不再只停留在功能域标题中：登录透明面板、白色卡片和对比度、历史会话真实切换、普通对话无回复、简历分栏/版本布局、JD 正文拉取、评分越界、Origin/HTTPS/443、版本 parity 以及完整求职流程均登记在 [生产问题 Eval Ledger](../../production-incident-eval-ledger-2026-09.md)，并由 `production-incident-eval-manifest.eval.test.ts` 检查每条问题的证据和状态。
+
 ## 为什么 11 类不够
 
 11 类只是服务端为明确 Agent 目标选择的顶层 Task Program：普通对话、职业定位、简历查询/修改、JD、Offer、面试、画像、优秀简历、导出、岗位搜索。真实产品还包括认证与隔离、会话管理、图片 intake、首页、导航、简历版本、Judge、投递追踪、对比、Analytics、设置、后台、Run evidence、数据层、MCP、发布治理和安全边界。

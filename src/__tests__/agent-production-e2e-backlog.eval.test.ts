@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { productionAgentEvalBacklog } from "@/__tests__/fixtures/agent-production-e2e-backlog";
+import { productionIncidentEvalManifest } from "@/__tests__/fixtures/production-incident-eval-manifest";
 
 describe("production Agent E2E eval backlog", () => {
   it("keeps every production finding uniquely addressable and reproducible", () => {
@@ -32,5 +33,12 @@ describe("production Agent E2E eval backlog", () => {
       expect.objectContaining({ id: "PE2E-SESSION-001", disposition: "guardrail" }),
       expect.objectContaining({ id: "PE2E-UI-001", disposition: "fixed_locally" }),
     ]));
+  });
+
+  it("keeps every frozen production backlog case represented in the incident manifest", () => {
+    const manifestIds = new Set(productionIncidentEvalManifest.map((item) => item.id));
+    for (const item of productionAgentEvalBacklog) {
+      expect(manifestIds.has(item.id), item.id).toBe(true);
+    }
   });
 });

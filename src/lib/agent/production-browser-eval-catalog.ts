@@ -37,6 +37,8 @@ export const PRODUCTION_BROWSER_EVAL_DOMAINS: readonly ProductionBrowserEvalDoma
     browserCase("AUTH-001", "注册后的 pending 用户不能进入业务页", "/register"),
     browserCase("AUTH-002", "管理员批准后登录、刷新和退出", "/login"),
     browserCase("AUTH-003", "两个用户的简历、会话、报告完全隔离", "/agent"),
+    browserCase("AUTH-004", "生产 Origin、端口和 HTTPS 登录门禁", "/login"),
+    browserCase("AUTH-005", "登录背景面板透明度、层次和文字对比度", "/login"),
   ]),
   domain("F02", "首页求职工作台", "02-首页求职工作台-Evals.md", [
     browserCase("HOME-001", "首次进入的空态和行动入口", "/"),
@@ -47,11 +49,15 @@ export const PRODUCTION_BROWSER_EVAL_DOMAINS: readonly ProductionBrowserEvalDoma
     browserCase("NAV-001", "桌面导航、后退前进和当前态", "/"),
     browserCase("NAV-002", "移动端菜单、长标题和内容溢出", "/agent"),
     browserCase("NAV-003", "跨页面返回 Agent 保留会话", "/agent"),
+    browserCase("NAV-004", "背景、卡片对比度和响应式遮挡检查", "/agent"),
   ]),
   domain("F04", "Agent Chat 会话状态与前端呈现", "04-Agent Chat会话状态与前端呈现系统-Evals.md", [
     browserCase("CHAT-001", "新建、置顶、切换、删除和恢复会话", "/agent"),
     browserCase("CHAT-002", "长中文材料、Markdown、三轮普通对话与刷新", "/agent", "general_chat"),
     browserCase("CHAT-003", "活动 Run、过程轨道与 SSE 补齐", "/agent"),
+    browserCase("CHAT-004", "点击历史会话后 transcript、URL 和刷新读回一致", "/agent"),
+    browserCase("CHAT-005", "简单对话出现唯一非空回复并持久化", "/agent", "general_chat"),
+    browserCase("CHAT-006", "空流/断流显示可重试错误且不泄露工具文本", "/agent"),
   ]),
   domain("F05", "图片识别与截图路由", "05-图片识别与截图路由系统-Evals.md", [
     browserCase("IMAGE-001", "JD 截图进入 JD 评估", "/agent", "jd_evaluation"),
@@ -63,6 +69,7 @@ export const PRODUCTION_BROWSER_EVAL_DOMAINS: readonly ProductionBrowserEvalDoma
     browserCase("ROUTE-001", "简历只读查询不触发修改", "/agent", "resume_query"),
     browserCase("ROUTE-002", "职业定位的否定写入约束不覆盖主目标", "/agent", "career_positioning_guidance"),
     browserCase("ROUTE-003", "模糊续跑和明确任务安全切换", "/agent"),
+    browserCase("ROUTE-004", "主责交接与只读委派展示归因链和输出契约", "/agent"),
   ]),
   domain("F07", "Agent 工具治理与读回校验", "07-Agent工具治理与读回校验-Evals.md", [
     browserCase("GOV-001", "只读任务不能绕过策略写入", "/agent"),
@@ -73,11 +80,16 @@ export const PRODUCTION_BROWSER_EVAL_DOMAINS: readonly ProductionBrowserEvalDoma
     browserCase("SCORE-001", "简历评分的维度、依据和空态", "/cv"),
     browserCase("SCORE-002", "ATS 和技能差距不自动改写简历", "/cv"),
     browserCase("SCORE-003", "版本切换后的评分输入正确", "/cv"),
+    browserCase("SCORE-004", "历史 70 分在五分制页面显示待复核", "/evaluate/reports"),
+    browserCase("SCORE-005", "派生指标不会显示 276 或超范围百分比", "/analytics"),
+    browserCase("SCORE-006", "报告页深色背景上的标题和正文保持可读", "/evaluate/reports"),
   ]),
   domain("F09", "岗位发现扫描系统", "09-岗位发现扫描系统-Evals.md", [
     browserCase("SCAN-001", "条件澄清、确认后才创建扫描", "/discover"),
     browserCase("SCAN-002", "职位卡、原 JD、去重和详情", "/discover"),
     browserCase("SCAN-003", "扫描失败、取消和历史读回", "/discover"),
+    browserCase("SCAN-004", "保存 JD 的完整正文可展开、滚动到底并读回", "/evaluate/jds"),
+    browserCase("SCAN-005", "JD 标题、描述和标签在卡片与抽屉中可读", "/evaluate/jds"),
   ]),
   domain("F10", "投递追踪系统", "10-投递追踪系统-Evals.md", [
     browserCase("TRACK-001", "从职位或报告创建投递", "/tracker"),
@@ -88,6 +100,9 @@ export const PRODUCTION_BROWSER_EVAL_DOMAINS: readonly ProductionBrowserEvalDoma
     browserCase("CV-001", "文本、DOCX、PDF 导入与解析失败", "/cv"),
     browserCase("CV-002", "版本创建、切换、刷新和 Agent 读回", "/cv"),
     browserCase("CV-003", "优化、量化、JD 定制只创建草稿", "/cv"),
+    browserCase("CV-004", "导入流程分阶段显示并分离工作与项目经历", "/cv"),
+    browserCase("CV-005", "历史版本全部可见、切换和刷新不丢失", "/cv"),
+    browserCase("CV-006", "长简历预览无遮挡、重叠和异常空白", "/cv"),
   ]),
   domain("F12", "简历修改提案与回滚", "12-简历修改提案与回滚系统-Evals.md", [
     browserCase("PROPOSAL-001", "Agent 指定区块草稿和提案详情", "/agent", "resume_edit"),
@@ -113,6 +128,7 @@ export const PRODUCTION_BROWSER_EVAL_DOMAINS: readonly ProductionBrowserEvalDoma
     browserCase("INTERVIEW-001", "简历和 JD 绑定后生成第一题", "/interview", "interview_coaching"),
     browserCase("INTERVIEW-002", "回答后的反馈、题号推进与刷新", "/agent", "interview_coaching"),
     browserCase("INTERVIEW-003", "回答中的 JD 关键词不劫持面试任务", "/agent", "interview_coaching"),
+    browserCase("INTERVIEW-004", "主问题与追问有明确上限并安全收口", "/agent", "interview_coaching"),
   ]),
   domain("F17", "Offer 评估与对比", "17-Offer评估与对比系统-Evals.md", [
     browserCase("OFFER-001", "文本、链接、图片 Offer 的结构化评估", "/agent", "offer_evaluation"),
@@ -148,6 +164,8 @@ export const PRODUCTION_BROWSER_EVAL_DOMAINS: readonly ProductionBrowserEvalDoma
     browserCase("DATA-001", "页面写入对应只读数据库证据", "/agent"),
     browserCase("DATA-002", "刷新和双浏览器上下文一致", "/agent"),
     browserCase("DATA-003", "向量检索遵守 private/team ACL", "/cv"),
+    browserCase("DATA-004", "JD 正文和版本/hash 与页面 read-back 一致", "/evaluate/jds"),
+    browserCase("DATA-005", "发布前 schema、记忆表和 pgvector/HNSW preflight", "/admin/agent-runs"),
   ]),
   domain("F24", "MCP 外部连接器", "24-MCP外部连接器系统-Evals.md", [
     browserCase("MCP-001", "允许调用展示安全中文摘要", "/agent"),
@@ -158,6 +176,7 @@ export const PRODUCTION_BROWSER_EVAL_DOMAINS: readonly ProductionBrowserEvalDoma
     browserCase("CHANGE-001", "发布版本、特性开关和证据可观察", "/admin/agent-runs"),
     browserCase("CHANGE-002", "线上失败进入回放候选", "/admin/agent-reviews"),
     browserCase("CHANGE-003", "发布后 web、worker、队列健康检查", "/login"),
+    browserCase("CHANGE-004", "页面版本、静态资源 hash 与 current release 一致", "/changelog"),
   ]),
   domain("F26", "用户注入防范与内容安全", "26-用户注入防范与内容安全系统-Evals.md", [
     browserCase("SECURITY-001", "材料内提示注入不能改变权限", "/agent"),
@@ -168,11 +187,15 @@ export const PRODUCTION_BROWSER_EVAL_DOMAINS: readonly ProductionBrowserEvalDoma
     browserCase("JOB-AGENT-001", "对话条件收集、确认卡和扫描", "/agent", "job_search"),
     browserCase("JOB-AGENT-002", "扫描结果以可展开 JD 卡片流式出现", "/agent", "job_search"),
     browserCase("JOB-AGENT-003", "职位卡接力到 JD 评估和投递", "/agent"),
+    browserCase("JOB-AGENT-004", "已保存 JD 上下文进入简历草稿且不当作文件路径", "/agent", "resume_edit"),
   ]),
   domain("F28", "Durable Agent Run 与自恢复运行时", "28-Durable-Agent-Run与自恢复运行时-Evals.md", [
     browserCase("RUN-001", "waiting_user 补充后同 Run 续跑", "/agent"),
     browserCase("RUN-002", "Gate 批准、拒绝和刷新终态一致", "/agent"),
     browserCase("RUN-003", "暂停、恢复、取消和 worker 恢复", "/agent"),
+    browserCase("RUN-004", "Gate approved 只执行冻结请求一次并完成读回", "/agent"),
+    browserCase("RUN-005", "永久失败显示单条安全收口且保留用户输入", "/agent"),
+    browserCase("RUN-006", "长运行显示阶段、耗时、超时和可恢复动作", "/agent"),
   ]),
 ];
 
