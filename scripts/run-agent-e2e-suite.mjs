@@ -12,7 +12,7 @@ const files = fs.readdirSync(testDir)
 if (files.length === 0) throw new Error("No Agent E2E tests found");
 console.log(`Running Agent E2E suite: ${files.length} test files`);
 const command = process.execPath;
-const result = spawnSync(command, [path.join(root, "node_modules", "vitest", "vitest.mjs"), "run", ...files], {
+const result = spawnSync(command, [path.join(root, "node_modules", "vitest", "vitest.mjs"), "run", "--no-file-parallelism", ...files], {
   cwd: root,
   stdio: "inherit",
   env: process.env,

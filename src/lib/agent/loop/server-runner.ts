@@ -100,7 +100,7 @@ function latestUserText(messages: DeepSeekMessage[]): string {
     const msg = messages[i];
     if (msg.role !== "user") continue;
     const text = msg.content?.trim();
-    if (text) return text;
+    if (text && !text.startsWith("<!--")) return text;
   }
   return "";
 }
@@ -247,7 +247,10 @@ export function normalizeReadFileParams(input: {
     return { ...input.params, path: String(input.params.file).trim() };
   }
   const resumeTask = input.taskType === "resume_edit" || input.taskType === "resume_query";
-  if (!resumeTask || !/简历|履历|resume|cv/i.test(input.userText)) return input.params;
+  if (!resumeTask) return input.params;
+  const mentionsCurrentResume = /我的简历|当前简历|这份简历|履历|\bresume\b|\bcv\b/i.test(input.userText);
+  const mentionsReferenceResume = /参考简历|优秀简历|标杆简历|样例简历|reference\s+resume/i.test(input.userText);
+  if (mentionsReferenceResume && !mentionsCurrentResume) return input.params;
   return { ...input.params, path: "我的简历" };
 }
 

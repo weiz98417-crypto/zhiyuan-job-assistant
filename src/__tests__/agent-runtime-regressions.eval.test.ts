@@ -34,9 +34,14 @@ describe("agent runtime regression evals", () => {
   it("repairs an empty current-resume read path after resume routing", () => {
     expect(normalizeReadFileParams({
       taskType: "resume_edit",
-      userText: "根据当前简历生成一份不落库的定制化草稿",
+      userText: "按这份 JD 生成一份不落库的定制化草稿",
       params: {},
     })).toMatchObject({ path: "我的简历" });
+    expect(normalizeReadFileParams({
+      taskType: "resume_query",
+      userText: "读取参考简历里的项目经验",
+      params: {},
+    })).toEqual({});
     expect(normalizeReadFileParams({
       taskType: "resume_edit",
       userText: "根据当前简历生成草稿",

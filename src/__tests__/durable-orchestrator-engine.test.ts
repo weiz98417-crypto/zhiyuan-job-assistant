@@ -1003,6 +1003,116 @@ describe("Durable Orchestrator execution engine", () => {
     });
   });
 
+  it("does not let an earlier wait-user directive hide a later permanent tool failure", async () => {
+    const runtime = new DurableAgentRunService(new InMemoryAgentRunStore());
+    const contract = createAgentTaskContract({ taskType: "resume_edit", target: "优化简历" });
+    await runtime.createRun(
+      { userId: "user-wait-then-permanent-failure" },
+      {
+        requestId: "request-wait-then-permanent-failure",
+        conversationId: 53,
+        taskType: "resume_edit",
+        agentId: "resume",
+        input: { content: "优化简历" },
+        contract,
+      },
+    );
+    const run = await runtime.claimNextRun({ workerId: "worker-wait-then-permanent-failure" });
+    const engine = new DurableOrchestratorExecutionEngine({
+      runtime,
+      loadConversation: async () => [],
+      saveConversation: async () => undefined,
+      orchestrate: async function* () {
+        yield { type: "run_directive", directive: "wait_user", reason: "等待补充信息" };
+        yield {
+          type: "tool_error",
+          name: "optimize_resume_section",
+          error: "简历优化服务认证失败，请检查服务配置",
+          recoverable: false,
+          category: "permanent",
+        };
+        yield { type: "done" };
+      },
+    });
+
+    await expect(engine.execute({
+      run: run!,
+      checkpoint: null,
+      signal: new AbortController().signal,
+    })).resolves.toMatchObject({
+      outcome: "failed",
+      failure: {
+        category: "tool_permanent",
+        retryability: "never",
+      },
+    });
+  });
+
+  it("keeps a later user-input failure when it belongs to another tool", async () => {
+    const runtime = new DurableAgentRunService(new InMemoryAgentRunStore());
+    const contract = createAgentTaskContract({ taskType: "job_search", target: "发现岗位" });
+    await runtime.createRun(
+      { userId: "user-wait-then-unrelated-input" },
+      {
+        requestId: "request-wait-then-unrelated-input",
+        conversationId: 54,
+        taskType: "job_search",
+        agentId: "general",
+        input: { content: "发现岗位" },
+        contract,
+      },
+    );
+    const run = await runtime.claimNextRun({ workerId: "worker-wait-then-unrelated-input" });
+    const engine = new DurableOrchestratorExecutionEngine({
+      runtime,
+      loadConversation: async () => [],
+      saveConversation: async () => undefined,
+      orchestrate: async function* () {
+        yield { type: "run_directive", directive: "wait_user", reason: "等待岗位发现批准" };
+        yield {
+          type: "tool_result",
+          name: "scan_portals",
+          success: false,
+          result: "等待岗位发现批准",
+          data: { gateId: "gate-1" },
+          uiPayload: { type: "run_gate", gateId: "gate-1", status: "pending" },
+        };
+        yield {
+          type: "tool_error",
+          name: "scan_portals",
+          error: "等待岗位发现批准",
+          recoverable: false,
+          category: "need_user_input",
+        };
+        yield {
+          type: "tool_result",
+          name: "read_file",
+          success: false,
+          result: "缺少岗位来源",
+        };
+        yield {
+          type: "tool_error",
+          name: "read_file",
+          error: "缺少岗位来源",
+          recoverable: false,
+          category: "need_user_input",
+        };
+        yield { type: "done" };
+      },
+    });
+
+    await expect(engine.execute({
+      run: run!,
+      checkpoint: null,
+      signal: new AbortController().signal,
+    })).resolves.toMatchObject({
+      outcome: "failed",
+      failure: {
+        category: "tool_permanent",
+      },
+    });
+  });
+
   it("passes the durable Run Contract into orchestration-time tool governance", async () => {
     const runtime = new DurableAgentRunService(new InMemoryAgentRunStore());
     const contract = createAgentTaskContract({ taskType: "resume_query", target: "读取我的简历" });

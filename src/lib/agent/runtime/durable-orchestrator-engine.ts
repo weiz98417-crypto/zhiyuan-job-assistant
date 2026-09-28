@@ -270,6 +270,7 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
     let pendingRecoverableFailure = "";
     let terminalToolFailure: StoredToolFailure | undefined;
     let waitingUserRequested = false;
+    let waitingUserToolName: string | undefined;
     let hasUserVisibleArtifact = false;
     let latestSuccessfulToolResult: {
       name: string;
@@ -393,6 +394,9 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
         }
         if (event.type === "text") assistantText += String(event.content || "");
         if (event.type === "tool_result") {
+          if (waitingUserRequested && event.success !== true && !waitingUserToolName) {
+            waitingUserToolName = String(event.name || "");
+          }
           const safeView = projectToolResultForUser({
             toolName: String(event.name || ""),
             success: event.success === true,
@@ -495,7 +499,14 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
       : null;
     if (careerPositioningFallback) assistantText = careerPositioningFallback;
 
-    if (waitingUserRequested) terminalToolFailure = undefined;
+    if (
+      waitingUserRequested
+      && terminalToolFailure?.category === "need_user_input"
+      && waitingUserToolName
+      && terminalToolFailure.toolName === waitingUserToolName
+    ) {
+      terminalToolFailure = undefined;
+    }
     if (terminalToolFailure) pendingRecoverableFailure = "";
     if (pendingRecoverableFailure) {
       const interruptedCheckpoint = await this.saveInterruptedOutput({

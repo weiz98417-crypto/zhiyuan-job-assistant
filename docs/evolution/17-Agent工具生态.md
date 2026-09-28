@@ -339,7 +339,7 @@ populateAgentTools(agents)
 | **evaluate** (JD 评估) | 11 | `evaluate_jd_full`, `get_recent_jd_context`, `read_file`, `get_profile`, `fetch_jd_content`, `analyze_jd_risks`, `decode_black_market_terms`, `get_report_detail`, `update_report_metadata`, `export_file`, `download_report_pdf` |
 | **interview** (面试教练) | 4+上下文工具 | `generate_interview_questions`, `score_interview_answer`, `start_interview_session`, `prepare_interview_full`，并在上下文读取场景使用 `read_file`, `get_recent_jd_context`, `search_applications`, `get_report_detail` |
 | **profile** (求职画像) | 7 | `get_profile`, `get_recommendations`, `get_profile_insights`, `self_positioning`, `check_pipeline_health`, `get_recent_activity`, `mine_profile` |
-| **resume** (简历优化) | 14 | `read_file`, `import_resume`, `generate_cv`, `evaluate_jd`, `export_file`, `get_reference_detail`, `optimize_resume_section`, `create_resume_edit_proposal`, `apply_resume_edit_proposal`, `discard_resume_edit_proposal`, `rollback_resume_edit_proposal`, `save_resume_section`, `save_reference_resume`, `check_ats_compatibility` |
+| **resume** (简历优化) | 15 | `read_file`, `get_recent_jd_context`, `import_resume`, `generate_cv`, `evaluate_jd`, `export_file`, `get_reference_detail`, `optimize_resume_section`, `create_resume_edit_proposal`, `apply_resume_edit_proposal`, `discard_resume_edit_proposal`, `rollback_resume_edit_proposal`, `save_resume_section`, `save_reference_resume`, `check_ats_compatibility` |
 | **offer** (Offer 顾问) | 8 | `evaluate_offer`, `read_offer_report`, `generate_offer_negotiation_strategy`, `generate_offer_hr_question_list`, `compare_offers_deep`, `web_search`, `export_file`, `download_report_pdf` |
 
 ### 4.3 白名单强制执行

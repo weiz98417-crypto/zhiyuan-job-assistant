@@ -59,7 +59,7 @@ Agent Loop (src/lib/agent/loop/)
 |----------|------|-----------|---------|
 | `general` | 通用助手 | 全部 48 工具 | 兜底（空白名单=全部） |
 | `evaluate` | JD 评估 | evaluate_jd_full, get_recent_jd_context, read_file, get_profile, fetch_jd_content, analyze_jd_risks, decode_black_market_terms, get_report_detail, update_report_metadata, export_file, download_report_pdf | 评估/分析 JD |
-| `resume` | 简历优化 | read_file, import_resume, generate_cv, evaluate_jd, export_file, get_reference_detail, optimize_resume_section, save_resume_section, check_ats_compatibility | 简历/优化/CV |
+| `resume` | 简历优化 | read_file, get_recent_jd_context, import_resume, generate_cv, evaluate_jd, export_file, get_reference_detail, optimize_resume_section, create_resume_edit_proposal, apply_resume_edit_proposal, discard_resume_edit_proposal, rollback_resume_edit_proposal, save_resume_section, save_reference_resume, check_ats_compatibility | 简历/优化/CV |
 | `interview` | 面试教练 | generate_interview_questions, score_interview_answer, start_interview_session, prepare_interview_full, read_file, get_recent_jd_context, search_applications, get_report_detail | 面试/准备 |
 | `profile` | 求职画像 | get_profile, get_recommendations, get_profile_insights, self_positioning, check_pipeline_health, get_recent_activity, mine_profile | 定位/画像 |
 | `offer` | Offer 评估 | evaluate_offer, read_offer_report, generate_offer_negotiation_strategy, generate_offer_hr_question_list, compare_offers_deep, export_file, download_report_pdf | Offer/对比/选offer/谈判 |
