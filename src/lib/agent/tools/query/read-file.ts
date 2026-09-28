@@ -301,7 +301,7 @@ export const readFile: ToolDefinition = {
   },
   description:
     "读取项目文件或数据资源。路由: 含'参考简历'→参考简历库; '我的简历'→完整简历文本;" +
-    " 文件路径→服务端读取。支持 offset/limit 续读和 section 定向读。",
+    " 已保存或刚才的 JD→使用 get_recent_jd_context；其他文件路径→服务端读取。支持 offset/limit 续读和 section 定向读。",
   matchHints: ["简历", "我的简历", "参考简历", "上传的简历", "参考", "文件", "cv", "打开", "读"],
   category: "query",
   toolCtxCap: 30000,

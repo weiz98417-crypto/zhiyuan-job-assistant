@@ -77,4 +77,11 @@ describe("Worker tool exposure", () => {
       }).toEqual({ agent: agent.id, unavailable: [] });
     }
   });
+
+  it("exposes saved JD context to the resume Agent", async () => {
+    const resumeAgent = getAllAgents().find((agent) => agent.id === "resume");
+
+    expect(resumeAgent?.toolNames).toContain("read_file");
+    expect(resumeAgent?.toolNames).toContain("get_recent_jd_context");
+  });
 });
