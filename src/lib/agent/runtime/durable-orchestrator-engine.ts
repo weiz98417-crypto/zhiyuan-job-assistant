@@ -495,6 +495,7 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
       : null;
     if (careerPositioningFallback) assistantText = careerPositioningFallback;
 
+    if (waitingUserRequested) terminalToolFailure = undefined;
     if (terminalToolFailure) pendingRecoverableFailure = "";
     if (pendingRecoverableFailure) {
       const interruptedCheckpoint = await this.saveInterruptedOutput({

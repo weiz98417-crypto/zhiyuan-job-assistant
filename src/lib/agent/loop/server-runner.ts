@@ -237,6 +237,20 @@ export function buildRequiredResumeDraftToolCall(input: {
   };
 }
 
+export function normalizeReadFileParams(input: {
+  taskType?: AgentTaskContract["taskType"] | null;
+  userText: string;
+  params: Record<string, unknown>;
+}): Record<string, unknown> {
+  if (input.params.path && String(input.params.path).trim()) return input.params;
+  if (input.params.file && String(input.params.file).trim()) {
+    return { ...input.params, path: String(input.params.file).trim() };
+  }
+  const resumeTask = input.taskType === "resume_edit" || input.taskType === "resume_query";
+  if (!resumeTask || !/简历|履历|resume|cv/i.test(input.userText)) return input.params;
+  return { ...input.params, path: "我的简历" };
+}
+
 async function callLLM(
   messages: DeepSeekMessage[],
   systemPrompt: string,
@@ -514,6 +528,13 @@ export async function* agentLoopServer(opts: {
     for (const tc of toolCalls) {
       let params: Record<string, unknown>;
       try { params = JSON.parse(tc.arguments); } catch { continue; }
+      if (tc.name === "read_file") {
+        params = normalizeReadFileParams({
+          taskType: taskContract?.taskType,
+          userText: latestUserText(ctx),
+          params,
+        });
+      }
       if (taskContract?.taskType === "jd_evaluation" && blockedResumeTools.has(tc.name)) {
         yield { type: "tool_error", name: tc.name, error: "JD 评估由专用工具统一处理简历匹配", recoverable: true, category: "policy_denied" };
         ctx.push({ role: "user", content: "请调用 JD 评估工具继续；简历匹配由该工具按当前 JD 的用户偏好处理。" });

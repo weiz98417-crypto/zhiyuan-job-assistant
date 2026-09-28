@@ -4,6 +4,8 @@ import {
   InMemoryAgentRunStore,
 } from "@/lib/agent/runtime/durable-agent-run";
 import { DurableOrchestratorExecutionEngine } from "@/lib/agent/runtime/durable-orchestrator-engine";
+import { AgentWorker } from "@/lib/agent/runtime/agent-worker";
+import { createAgentTaskContract } from "@/lib/agent/task-contract";
 
 describe("resolved Agent Gate resume regression", () => {
   it("starts a new model cycle after a waiting-user completion is approved", async () => {
@@ -84,5 +86,97 @@ describe("resolved Agent Gate resume regression", () => {
 
     expect(resumedResult.outcome).toBe("succeeded");
     expect(orchestrateCalls).toBe(2);
+  });
+
+  it("keeps a gate wait directive authoritative over its tool denial so approval resumes the same Run", async () => {
+    const runtime = new DurableAgentRunService(new InMemoryAgentRunStore());
+    const created = await runtime.createRun(
+      { userId: "user-scan-gate" },
+      {
+        requestId: "request-scan-gate",
+        conversationId: 100,
+        taskType: "job_search",
+        agentId: "general",
+        input: { content: "开始岗位发现" },
+        contract: createAgentTaskContract({ taskType: "job_search", target: "开始岗位发现" }),
+      },
+    );
+    let gateId = "";
+    let orchestrateCalls = 0;
+    let resumedFrozenCall: { name: string; args: Record<string, unknown> } | undefined;
+    const engine = new DurableOrchestratorExecutionEngine({
+      runtime,
+      loadConversation: async () => [],
+      saveConversation: async () => undefined,
+      contextSource: {
+        load: async () => ({
+          completedToolFacts: [],
+          recoveryObservations: [],
+          evidence: [],
+          factRefs: [],
+          gates: gateId
+            ? [{
+                gateId,
+                toolName: "scan_portals",
+                status: "approved",
+                scopeHash: "scan-scope",
+                request: { toolName: "scan_portals", args: { confirmed: true } },
+              }]
+            : [],
+        }),
+      },
+      orchestrate: async function* ({ runId, workerId, fencingToken, frozenToolCall }) {
+        orchestrateCalls += 1;
+        if (orchestrateCalls === 1) {
+          const gate = await runtime.openGate({
+            runId,
+            workerId,
+            fencingToken,
+            toolName: "scan_portals",
+            risk: "high",
+            scopeHash: "scan-scope",
+            request: { toolName: "scan_portals", args: { confirmed: true } },
+          });
+          gateId = gate.id;
+          yield { type: "run_directive", directive: "wait_user", reason: "等待岗位发现批准" };
+          yield {
+            type: "tool_result",
+            name: "scan_portals",
+            success: false,
+            result: "该动作需要用户确认后才能执行",
+            data: { gateId: gate.id },
+            uiPayload: { type: "run_gate", gateId: gate.id, status: "pending", request: gate.request },
+          };
+          yield {
+            type: "tool_error",
+            name: "scan_portals",
+            error: "该动作需要用户确认后才能执行",
+            recoverable: false,
+            category: "need_user_input",
+          };
+          yield { type: "done" };
+          return;
+        }
+        resumedFrozenCall = frozenToolCall;
+        yield {
+          type: "tool_result",
+          name: "scan_portals",
+          success: true,
+          data: { scanId: "scan-1", readBackVerified: true },
+          uiPayload: { type: "job_discovery_run", scanId: "scan-1", status: "queued", readBackVerified: true },
+        };
+        yield { type: "text", content: "岗位发现已开始。" };
+        yield { type: "done" };
+      },
+    });
+    const worker = new AgentWorker({ workerId: "worker-scan-gate", runtime, engine });
+
+    expect((await worker.runOnce())?.status).toBe("waiting_user");
+    expect((await runtime.getRun({ userId: "user-scan-gate" }, created.run.id))?.status).toBe("waiting_user");
+
+    await runtime.respondGate({ userId: "user-scan-gate" }, gateId, "approve-scan-gate", "approved");
+    expect((await worker.runOnce())?.status).toBe("succeeded");
+    expect(orchestrateCalls).toBe(2);
+    expect(resumedFrozenCall).toEqual({ name: "scan_portals", args: { confirmed: true } });
   });
 });

@@ -22,7 +22,7 @@ import {
   inferCompletedCriteriaFromToolResult,
   resolveTaskContractRunOutcome,
 } from "@/lib/agent/task-contract";
-import { buildRequiredResumeDraftToolCall } from "@/lib/agent/loop/server-runner";
+import { buildRequiredResumeDraftToolCall, normalizeReadFileParams } from "@/lib/agent/loop/server-runner";
 import { RESUME_RUNTIME_INCIDENT_20260717 } from "@/__tests__/fixtures/agent-resume-runtime-regression-fixtures";
 
 afterEach(() => {
@@ -31,6 +31,24 @@ afterEach(() => {
 });
 
 describe("agent runtime regression evals", () => {
+  it("repairs an empty current-resume read path after resume routing", () => {
+    expect(normalizeReadFileParams({
+      taskType: "resume_edit",
+      userText: "根据当前简历生成一份不落库的定制化草稿",
+      params: {},
+    })).toMatchObject({ path: "我的简历" });
+    expect(normalizeReadFileParams({
+      taskType: "resume_edit",
+      userText: "根据当前简历生成草稿",
+      params: { file: "我的简历" },
+    })).toMatchObject({ path: "我的简历", file: "我的简历" });
+    expect(normalizeReadFileParams({
+      taskType: "general_chat",
+      userText: "聊聊今天的安排",
+      params: {},
+    })).toEqual({});
+  });
+
   it("regression: a named current-resume continuation stays on the CV data resource", async () => {
     const longExperience = `AI 解决方案经历 ${"交付可验证业务结果。".repeat(180)}`;
     const fetchMock = vi.fn(async (url: string) => {
