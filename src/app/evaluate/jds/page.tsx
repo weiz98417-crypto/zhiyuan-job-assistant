@@ -43,6 +43,14 @@ const SOURCE_LABELS: Record<JDSourceType, string> = {
   discovery: "岗位发现",
 };
 
+function getSourceIcon(sourceType: string) {
+  return SOURCE_ICONS[sourceType as JDSourceType] || FileText;
+}
+
+function getSourceLabel(sourceType: string) {
+  return SOURCE_LABELS[sourceType as JDSourceType] || "其他来源";
+}
+
 function truncateBody(body: string, maxLen = 200): string {
   if (body.length <= maxLen) return body;
   return body.slice(0, maxLen) + "...";
@@ -270,7 +278,7 @@ export default function JDLibraryPage() {
       {/* JD Card Grid */}
       <StaggerList className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {filtered.map((jd) => {
-          const SourceIcon = SOURCE_ICONS[jd.sourceType];
+          const SourceIcon = getSourceIcon(jd.sourceType);
           return (
             <StaggerItem key={jd.id}>
               <div onClick={() => setSelectedJD(jd)} className="cursor-pointer">
@@ -308,7 +316,7 @@ export default function JDLibraryPage() {
                 <div className="flex items-center justify-between text-[10px] text-[var(--color-muted)]">
                   <span className="flex items-center gap-1">
                     <SourceIcon size={10} />
-                    {SOURCE_LABELS[jd.sourceType]}
+                    {getSourceLabel(jd.sourceType)}
                   </span>
                   <span>{new Date(jd.createdAt).toLocaleDateString("zh-CN")}</span>
                 </div>
@@ -364,10 +372,10 @@ export default function JDLibraryPage() {
                 <div className="flex items-center gap-2 mb-4">
                   <span className="text-xs px-2 py-0.5 rounded bg-[var(--color-primary-muted)] text-[var(--color-text-soft)] flex items-center gap-1">
                     {(() => {
-                      const SourceIcon = SOURCE_ICONS[selectedJD.sourceType];
+                      const SourceIcon = getSourceIcon(selectedJD.sourceType);
                       return <SourceIcon size={10} />;
                     })()}
-                    {SOURCE_LABELS[selectedJD.sourceType]}
+                    {getSourceLabel(selectedJD.sourceType)}
                   </span>
                   {selectedJD.sourceUrl && (
                     <a

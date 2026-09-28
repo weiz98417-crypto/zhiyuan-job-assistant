@@ -1,6 +1,7 @@
 "use client";
 
 import type { ProfileHistoryEntry } from "@/types";
+import { isPercentageScore } from "@/lib/score-scale";
 
 interface EvolutionTimelineProps {
   history: ProfileHistoryEntry[];
@@ -37,7 +38,7 @@ export default function EvolutionTimeline({ history }: EvolutionTimelineProps) {
             <ul className="mt-1 space-y-0.5">
               {entry.changes.map((c, j) => (
                 <li key={j} className="text-xs text-[var(--color-text-soft)]">
-                  {c}
+                  {sanitizeHistoryChange(c)}
                 </li>
               ))}
             </ul>
@@ -46,4 +47,11 @@ export default function EvolutionTimeline({ history }: EvolutionTimelineProps) {
       ))}
     </div>
   );
+}
+
+function sanitizeHistoryChange(change: string): string {
+  return change.replace(/(竞争力分数)\s*(-?\d+(?:\.\d+)?)/g, (_match, label: string, rawScore: string) => {
+    const score = Number(rawScore);
+    return `${label} ${isPercentageScore(score) ? score : "待复核"}`;
+  });
 }
