@@ -213,7 +213,9 @@ export async function* orchestrateGen(
   // Phase 5: Build tools array
   const toolNames = agent.toolNames?.length
     ? agent.toolNames
-    : agent.tools.map((t) => t.name);
+    : agent.tools.length > 0
+      ? agent.tools.map((t) => t.name)
+      : registry.getAll().map((t) => t.name);
   const allTools = registry.toOpenAITools(toolNames, ctx.durable === true);
   const tools = allTools.filter((t) => toolNames.includes(t.function.name));
 
@@ -331,7 +333,9 @@ export async function orchestrate(
   // 4. Build tools
   const toolNames = agent.toolNames?.length
     ? agent.toolNames
-    : agent.tools.map((t) => t.name);
+    : agent.tools.length > 0
+      ? agent.tools.map((t) => t.name)
+      : registry.getAll().map((t) => t.name);
   const allTools = registry.toOpenAITools();
   const tools = allTools.filter((t) => toolNames.includes(t.function.name));
 
