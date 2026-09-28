@@ -3,6 +3,20 @@ import { describe, expect, it } from "vitest";
 import { formatJDEvaluationSummary } from "@/lib/agent/tools/action/jd-evaluation-summary";
 
 describe("formatJDEvaluationSummary", () => {
+  it("marks historical out-of-range totals and blocks as needing review", () => {
+    const summary = formatJDEvaluationSummary({
+      company: "纸鸢科技",
+      role: "产品经理",
+      overallScore: 70,
+      blocks: { a: { score: 70, content: "岗位信息" } },
+    });
+
+    expect(summary).toContain("评分待复核（总分 待复核）");
+    expect(summary).toContain("A 职位概览（评分待复核）");
+    expect(summary).not.toContain("70/5");
+    expect(summary).not.toContain("建议投递");
+  });
+
   it("uses risk-bearing A-G blocks instead of resume advice table lines", () => {
     const summary = formatJDEvaluationSummary({
       company: "深圳华启数智科技有限公司",

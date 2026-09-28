@@ -1,4 +1,5 @@
 import { getAgentReadService } from "@/lib/agent/runtime/agent-read-service";
+import { formatFivePointScore } from "@/lib/score-scale";
 import type { ApplicationListFilters } from "@/lib/data-repositories";
 import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
 
@@ -52,7 +53,7 @@ function formatResult(result: ToolResult): string {
   if (apps.length === 0) return "未找到匹配的投递记录。";
   const lines = apps.map(a => {
     const reportNum = a.report_path ? a.report_path.match(/(\d{3})/)?.[1] : "";
-    return `#${a.num} ${a.company} — ${a.role} | ${a.score}/5 | ${a.status} | ${a.date}${reportNum ? ` | 报告#${reportNum}` : ""}`;
+    return `#${a.num} ${a.company} — ${a.role} | ${formatFivePointScore(a.score)} | ${a.status} | ${a.date}${reportNum ? ` | 报告#${reportNum}` : ""}`;
   });
   return `找到 ${apps.length} 条投递记录:\n${lines.join("\n")}`;
 }

@@ -1,4 +1,5 @@
 import type { EvaluationScores } from "@/types";
+import { isFivePointScore } from "@/lib/score-scale";
 
 type StoredBlock = string | { content?: unknown; score?: unknown };
 type StoredBlocks = Record<string, StoredBlock>;
@@ -37,7 +38,7 @@ export function normalizeReportScores(raw: unknown): EvaluationScores {
     const value = source[key];
     if (value && typeof value === "object" && typeof value.score === "number") {
       if (key === "g") scores.g = String(value.score);
-      else scores[key] = value.score;
+      else scores[key] = isFivePointScore(value.score) ? value.score : 0;
     }
   }
   return scores;

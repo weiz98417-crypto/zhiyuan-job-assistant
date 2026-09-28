@@ -3,6 +3,7 @@ import { loadProfile } from "@/lib/profile-storage";
 import { getCVFullText } from "@/lib/cv-storage";
 import { loadPreferences, getPreferenceBonus } from "@/lib/agent/memory";
 import type { AgentPreferenceModel, ZhiyuanProfile, EvaluationReport } from "@/types";
+import { isFivePointScore, isPercentageScore } from "@/lib/score-scale";
 
 export interface RecommendResult {
   jdId: number;
@@ -36,10 +37,10 @@ export async function getRecommendations(limit = 3): Promise<{
   message?: string;
 }> {
   const profile = await loadProfile();
-  const reports = await db.reports
+  const reports = (await db.reports
     .where("overallScore")
     .aboveOrEqual(3.5)
-    .toArray();
+    .toArray()).filter((report) => isFivePointScore(report.overallScore));
 
   // Filter to only evaluated (not yet applied)
   const apps = await db.applications.toArray();
@@ -137,8 +138,8 @@ function computeMatchScore(
     : 40;
 
   // Profile signal
-  const profileSignal = profile.marketFit.overallScore > 0
-    ? Math.min(100, profile.marketFit.overallScore)
+  const profileSignal = isPercentageScore(profile.marketFit.overallScore) && profile.marketFit.overallScore > 0
+    ? profile.marketFit.overallScore
     : 50;
 
   const baseScore = Math.round(skillMatch * 0.4 + prefFit * 0.3 + competitiveness * 0.2 + profileSignal * 0.1);

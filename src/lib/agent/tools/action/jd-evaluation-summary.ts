@@ -5,6 +5,8 @@
  * （指导模型生成 ≤6 行摘要），本文件面向用户可见的结构化摘要文本。
  */
 
+import { isFivePointScore } from "@/lib/score-scale";
+
 type JDEvalBlock = { content?: string; score?: number | string };
 type JDRiskSignal = { signal?: unknown; excerpt?: unknown; severity?: unknown };
 
@@ -19,10 +21,10 @@ const JD_SUMMARY_BLOCK_LABELS: Record<string, string> = {
 };
 
 function numericScore(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (isFivePointScore(value)) return value;
   if (typeof value === "string") {
     const parsed = Number(value);
-    if (Number.isFinite(parsed)) return parsed;
+    if (isFivePointScore(parsed)) return parsed;
   }
   return null;
 }
@@ -102,7 +104,9 @@ function blockSummaryFallback(blockKey: string): string {
 function formatBlockSummary(blockKey: string, value: JDEvalBlock | string | undefined): string {
   const block = typeof value === "string" ? { content: value } : value;
   const score = numericScore(block?.score);
-  const scoreText = score === null ? "" : `（${Number(score.toFixed(1))}/5）`;
+  const scoreText = score === null && block?.score !== undefined
+    ? "（评分待复核）"
+    : score === null ? "" : `（${Number(score.toFixed(1))}/5）`;
   const content = typeof block?.content === "string" ? cleanBlockLine(block.content) : "";
   return `${JD_SUMMARY_BLOCK_LABELS[blockKey]}${scoreText}：${content || blockSummaryFallback(blockKey)}`;
 }
@@ -141,9 +145,11 @@ export function formatJDEvaluationSummary(data: Record<string, unknown>): string
   const company = String(data.company || "未知公司");
   const role = String(data.role || "未知岗位");
   const score = numericScore(data.overallScore);
-  const scoreText = score === null ? "已生成" : `${Number(score.toFixed(1))}/5`;
+  const scoreText = score === null
+    ? data.overallScore === undefined ? "已生成" : "待复核"
+    : `${Number(score.toFixed(1))}/5`;
   const verdict = score === null
-    ? "已完成评估"
+    ? data.overallScore === undefined ? "已完成评估" : "评分待复核"
     : score >= 4.2
       ? "建议投递"
       : score >= 3.5

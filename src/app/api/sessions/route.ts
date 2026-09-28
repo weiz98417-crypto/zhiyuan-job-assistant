@@ -5,6 +5,7 @@ import {
   projectSessionMutationForPersistence,
   projectSessionRowForUser,
 } from "@/lib/agent/surface-projection";
+import { readSessionRowsWithDurableMessages } from "@/lib/agent/runtime/session-api-readback";
 
 export async function GET() {
   try {
@@ -15,7 +16,10 @@ export async function GET() {
       return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
     }
 
-    const rows = await getDataRepositories().sessions.list(user.userId);
+    const rows = await readSessionRowsWithDurableMessages(
+      await getDataRepositories().sessions.list(user.userId),
+      user.userId,
+    );
     return NextResponse.json({ success: true, data: rows.map(projectSessionRowForUser) });
   } catch (err) {
     return NextResponse.json({ success: false, error: String(err) }, { status: 500 });

@@ -8,6 +8,7 @@ import {
   indexMemorySourceBestEffort,
 } from "@/lib/memory/postgres-memory";
 import { admitMemory } from "@/lib/memory/admission";
+import { isFivePointScore } from "@/lib/score-scale";
 
 type JsonLike = string | number | boolean | null | undefined | JsonLike[] | { [key: string]: JsonLike };
 
@@ -61,11 +62,12 @@ export async function persistJDEvaluation(
   input: PersistJDEvaluationInput,
 ): Promise<PersistJDEvaluationResult> {
   if (!input.company.trim() || !input.role.trim()) throw new Error("缺少公司或岗位信息");
+  if (!isFivePointScore(input.overallScore)) throw new Error("JD 评分必须在 0–5 分之间");
   const normalized: NormalizedPersistenceInput = {
     userId: principal.userId,
     company: input.company.trim(),
     role: input.role.trim(),
-    score: Number.isFinite(input.overallScore) ? input.overallScore : 0,
+    score: input.overallScore,
     today: input.date || new Date().toISOString().slice(0, 10),
     archetype: input.archetype || "",
     legitimacy: input.legitimacy || "",

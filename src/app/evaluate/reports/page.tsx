@@ -23,6 +23,7 @@ import ReportBlocks from "@/components/ReportBlocks";
 import db from "@/lib/db";
 import { clearJDReportId } from "@/lib/jd-storage";
 import { normalizeReportBlocks, normalizeReportScores, parseJsonValue } from "@/lib/report-normalize";
+import { fivePointScoreOrZero, isFivePointScore } from "@/lib/score-scale";
 import type { EvaluationReport } from "@/types";
 
 type SortMode = "date-desc" | "date-asc" | "score-desc" | "score-asc";
@@ -46,13 +47,6 @@ const TIME_FILTERS = [
   { label: "最近 30 天", days: 30 },
   { label: "全部", days: 0 },
 ];
-
-function scoreColor(score: number): string {
-  if (score >= 4.5) return "text-emerald-600 dark:text-emerald-400";
-  if (score >= 4.0) return "text-blue-600 dark:text-blue-400";
-  if (score >= 3.5) return "text-yellow-600 dark:text-yellow-400";
-  return "text-gray-400";
-}
 
 export default function ReportsPage() {
   const router = useRouter();
@@ -125,10 +119,10 @@ export default function ReportsPage() {
       );
     }
     if (scoreMin != null) {
-      result = result.filter((r) => r.overallScore >= scoreMin);
+      result = result.filter((r) => isFivePointScore(r.overallScore) && r.overallScore >= scoreMin);
     }
     if (scoreMax != null) {
-      result = result.filter((r) => r.overallScore < scoreMax);
+      result = result.filter((r) => isFivePointScore(r.overallScore) && r.overallScore < scoreMax);
     }
     if (timeDays > 0) {
       const cutoff = new Date();
@@ -143,10 +137,10 @@ export default function ReportsPage() {
         result.sort((a, b) => a.date.localeCompare(b.date));
         break;
       case "score-desc":
-        result.sort((a, b) => b.overallScore - a.overallScore);
+        result.sort((a, b) => fivePointScoreOrZero(b.overallScore) - fivePointScoreOrZero(a.overallScore));
         break;
       case "score-asc":
-        result.sort((a, b) => a.overallScore - b.overallScore);
+        result.sort((a, b) => fivePointScoreOrZero(a.overallScore) - fivePointScoreOrZero(b.overallScore));
         break;
     }
     return result;
@@ -183,6 +177,10 @@ export default function ReportsPage() {
 
   const handleAddToTracker = async (report: EvaluationReport) => {
     if (!report.reportNum) return;
+    if (!isFivePointScore(report.overallScore)) {
+      setTrackerStatus("error");
+      return;
+    }
     setTrackerStatus("saving");
     try {
       const num = report.reportNum;
@@ -194,7 +192,7 @@ export default function ReportsPage() {
         date: today,
         company: report.company || "未知公司",
         role: report.role || "未知岗位",
-        score: report.overallScore || 0,
+        score: report.overallScore,
         status: "evaluated",
         pdfGenerated: true,
         reportPath,

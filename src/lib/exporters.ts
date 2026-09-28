@@ -3,6 +3,7 @@
 
 import type { Application } from "@/types";
 import { STATUS_LABELS } from "@/types";
+import { isFivePointScore } from "@/lib/score-scale";
 
 /** Export applications to applications.md markdown table format */
 export function exportApplicationsMD(applications: Application[]): string {
@@ -13,8 +14,9 @@ export function exportApplicationsMD(applications: Application[]): string {
   const rows = applications
     .sort((a, b) => a.num - b.num)
     .map((app) => {
-      const score =
-        app.score > 0 ? `**${app.score.toFixed(1)}/5**` : "N/A";
+      const score = !isFivePointScore(app.score)
+        ? "待复核"
+        : app.score > 0 ? `**${app.score.toFixed(1)}/5**` : "N/A";
       const pdf = app.pdfGenerated ? "✅" : "❌";
       const report = app.reportPath
         ? `[${app.num}](${app.reportPath})`

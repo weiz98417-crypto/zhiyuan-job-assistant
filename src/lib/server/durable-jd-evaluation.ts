@@ -14,6 +14,7 @@ import {
   type PersistJDEvaluationResult,
 } from "@/lib/server/jd-evaluation-persistence";
 import { scanJDRisks, type JDRiskSignal } from "@/lib/server/jd-risk-service";
+import { assertReadableJDPage } from "@/lib/server/jd-page-validation";
 import {
   getJDResumeMatchingPreference,
   setJDResumeMatchingPreference,
@@ -273,8 +274,10 @@ export async function fetchJDTextFromUrl(rawUrl: string, signal?: AbortSignal): 
     const html = await response.text();
     const cheerio = await import("cheerio");
     const document = cheerio.load(html);
+    const title = document("title").text().replace(/\s+/g, " ").trim();
     document("script, style, nav, footer, header").remove();
     const text = document("body").text().replace(/\s+/g, " ").trim().slice(0, 15_000);
+    assertReadableJDPage(title, text);
     if (text.length < 50) throw new Error("JD URL 未返回足够的职位正文");
     return `URL: ${url.toString()}\n\n${text}`;
   } finally {

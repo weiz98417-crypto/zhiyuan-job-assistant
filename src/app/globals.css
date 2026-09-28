@@ -1,5 +1,6 @@
 @import "tailwindcss";
-@import "lxgw-wenkai-webfont/style.css";
+@import "lxgw-wenkai-webfont/lxgwwenkai-regular.css";
+@import "lxgw-wenkai-webfont/lxgwwenkai-bold.css";
 
 /* ── Design System: 筝筝纸鸢 Frontend ── */
 /* Creative North Star: "一页翻开的手帳 · 双面画布" */
@@ -226,6 +227,70 @@ body {
   border-radius: 14px;
   box-shadow: var(--shadow-card);
   backdrop-filter: blur(10px);
+}
+
+.auth-layout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-height: 100vh;
+  font-family: var(--font-body);
+  background-color: #f7f1e8;
+  background-image: linear-gradient(90deg,
+    rgba(255, 252, 246, 0.08) 0%,
+    rgba(255, 252, 246, 0.16) 40%,
+    rgba(255, 252, 246, 0.42) 52%,
+    rgba(255, 252, 246, 0.76) 70%,
+    rgba(255, 252, 246, 0.86) 100%),
+    url('/backgrounds/login-hero.webp');
+  background-size: cover;
+  background-position: center;
+}
+
+.auth-form-panel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  padding: 3rem;
+}
+
+.dark .auth-layout {
+  background-color: #211e1b;
+  background-image: linear-gradient(90deg,
+    rgba(25, 23, 19, 0.3) 0%,
+    rgba(25, 23, 19, 0.42) 40%,
+    rgba(25, 23, 19, 0.76) 65%,
+    rgba(25, 23, 19, 0.88) 100%),
+    url('/backgrounds/login-hero.webp');
+}
+
+.journal-heading {
+  width: min(100%, 42rem);
+  padding: 0.7rem 1.4rem;
+  border-left: 3px solid var(--color-primary);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  background: linear-gradient(90deg, var(--card-surface-strong), transparent);
+}
+
+.journal-heading h1 {
+  font-size: clamp(2rem, 4vw, 3rem);
+}
+
+@media (max-width: 800px) {
+  .auth-layout {
+    grid-template-columns: minmax(0, 1fr);
+    background-position: 58% center;
+  }
+
+  .auth-hero {
+    display: none !important;
+  }
+
+  .auth-form-panel {
+    min-height: 100vh;
+    padding: 2rem 1.25rem;
+    background: color-mix(in srgb, var(--color-bg) 70%, transparent);
+  }
 }
 
 .surface-card {

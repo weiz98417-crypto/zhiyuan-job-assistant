@@ -79,6 +79,37 @@ describe("server Agent report tools", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it("keeps historical invalid scores out of Agent report summaries", async () => {
+    const report = {
+      report_num: 70,
+      company: "甲公司",
+      role: "AI 产品经理",
+      date: "2026-08-24",
+      overall_score: 70,
+      archetype: "builder",
+      blocks_json: "{}",
+    };
+    listReports.mockResolvedValue([report]);
+    getReport.mockResolvedValue(report);
+
+    const listed = await getReportDetail.handler({ list: true }, {
+      principal: { userId: "user-1" },
+      runId: "run-1",
+      allowlist: ["get_report_detail"],
+    });
+    const detail = await getReportDetail.handler({ reportNum: 70 }, {
+      principal: { userId: "user-1" },
+      runId: "run-1",
+      allowlist: ["get_report_detail"],
+    });
+
+    expect(listed.llmSummary).toContain("待复核");
+    expect(detail.llmSummary).toContain("总分 待复核");
+    expect(listed.llmSummary).not.toContain("70/5");
+    expect(detail.llmSummary).not.toContain("70/5");
+    expect(detail.rawData).toMatchObject({ overall_score: 70 });
+  });
+
   it("reads an Offer report through the execution principal", async () => {
     getOfferReport.mockResolvedValue({
       id: 7,

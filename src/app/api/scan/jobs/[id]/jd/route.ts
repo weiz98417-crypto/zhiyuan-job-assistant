@@ -9,6 +9,7 @@ import {
   updateScanJobErrorForUser,
 } from "@/lib/scan-data";
 import type { JDRow } from "@/lib/server-db";
+import { assertReadableJDPage, isJDVerificationPage, JD_VERIFICATION_PAGE_ERROR } from "@/lib/server/jd-page-validation";
 
 const FETCH_TIMEOUT_MS = 10_000;
 const MAX_RESPONSE_SIZE = 500_000;
@@ -93,6 +94,7 @@ async function fetchJDText(url: string): Promise<{ title: string; text: string }
       html += new TextDecoder().decode(value);
     }
     const parsed = extractText(html, url);
+    assertReadableJDPage(parsed.title, parsed.text);
     if (parsed.text.length < 80) throw new Error("没有抓到足够的 JD 正文");
     return { title: parsed.title, text: parsed.text.slice(0, 12000) };
   } finally {
@@ -110,7 +112,16 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
 
     if (job.jd_id) {
       const jd = await getDataRepositories().jds.get(Number(job.jd_id), userId);
-      if (jd) return NextResponse.json({ success: true, data: { job, jd: toClientJD(jd), reused: true } });
+      if (jd) {
+        if (isJDVerificationPage("", jd.body)) {
+          await updateScanJobErrorForUser(jobId, userId, JD_VERIFICATION_PAGE_ERROR);
+          return NextResponse.json({
+            success: true,
+            data: { job, jd: null, reused: false, fetched: null, error: JD_VERIFICATION_PAGE_ERROR },
+          });
+        }
+        return NextResponse.json({ success: true, data: { job, jd: toClientJD(jd), reused: true } });
+      }
     }
 
     try {
@@ -165,6 +176,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       } catch (err) {
         fetchError = err instanceof Error ? err.message : "JD 抓取失败";
       }
+    }
+    if (isJDVerificationPage("", jdBody)) {
+      await updateScanJobErrorForUser(jobId, userId, JD_VERIFICATION_PAGE_ERROR);
+      return NextResponse.json({ success: false, error: JD_VERIFICATION_PAGE_ERROR }, { status: 422 });
     }
     if (jdBody.length < 50) {
       await updateScanJobErrorForUser(jobId, userId, fetchError || "JD 正文不足");

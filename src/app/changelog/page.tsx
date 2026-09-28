@@ -59,9 +59,19 @@ const releaseChanges = [
   },
 ];
 
+const stabilityFixes = [
+  "Agent 的普通对话回复会显示在当前会话，重开历史会话也能读回已保存的回复和图片。",
+  "已保存简历中的工作经历与项目经历可准确分栏，后续导入会保留原文并检查内容完整性。",
+  "历史评估中超出 5 分制的分数标为“待复核”，不再参与推荐、画像和导出；新评估拒绝无效分数。",
+  "画像分数限制在有效范围，旧的异常数值不再作为当前竞争力展示。",
+  "扫描岗位只保存真实 JD 正文；遇到招聘网站的人机验证时明确提示补录，不再把验证页当职位描述。",
+  "登录页左右区域过渡更柔和，首页标题、状态菜单与卡片的层级和遮挡问题已调整。",
+  "版本更新页收紧排版，并列出可核实的历史生产版本。",
+];
+
 export default function ChangelogPage() {
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-8 pb-8">
+    <div className="mx-auto w-full max-w-7xl space-y-8 pb-8">
       <header className="page-heading space-y-3">
         <div className="flex items-center gap-2 text-sm text-[var(--color-primary)]">
           <ScrollText size={18} />
@@ -73,31 +83,48 @@ export default function ChangelogPage() {
         </p>
       </header>
 
-      <section aria-labelledby="current-version" className="surface-panel rounded-[var(--radius-lg)] p-5 sm:p-7">
-        <div className="flex flex-wrap items-center gap-3">
-          <h2 id="current-version" className="text-xl font-semibold text-[var(--color-text)]">V0.12.0</h2>
-          <span className="rounded-full bg-[var(--color-primary-muted)] px-3 py-1 text-xs font-medium text-[var(--color-text-soft)]">当前线上版本</span>
-        </div>
-        <p className="mt-2 text-sm text-[var(--color-text-soft)]">本次版本已完成生产发布。</p>
-        <div className="mt-5 divide-y divide-[var(--color-divider)]">
-          {releaseChanges.map((change) => (
-            <div key={change.title} className="py-4 first:pt-0 last:pb-0">
-              <h3 className="font-medium text-[var(--color-text)]">{change.title}</h3>
-              <p className="mt-1 text-sm leading-7 text-[var(--color-text-soft)]">{change.description}</p>
-            </div>
-          ))}
-        </div>
-      </section>
+      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
+        <section aria-labelledby="current-version" className="surface-panel rounded-[var(--radius-lg)] p-5 sm:p-7">
+          <div className="flex flex-wrap items-center gap-3">
+            <h2 id="current-version" className="text-2xl font-semibold text-[var(--color-text)]">V0.12.0</h2>
+            <span className="rounded-full bg-[var(--color-primary-muted)] px-3 py-1 text-xs font-medium text-[var(--color-primary)]">当前线上版本</span>
+          </div>
+          <p className="mt-2 text-sm text-[var(--color-text-soft)]">本次版本已完成生产发布。</p>
+          <div className="mt-6 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-raised)]/70 p-5">
+            <h3 className="font-semibold text-[var(--color-text)]">9 月 28 日稳定性修复</h3>
+            <ul className="mt-3 list-disc space-y-2 pl-5 text-sm leading-7 text-[var(--color-text-soft)]">
+              {stabilityFixes.map((fix) => <li key={fix}>{fix}</li>)}
+            </ul>
+          </div>
+          <div className="mt-6 grid gap-x-8 sm:grid-cols-2">
+            {releaseChanges.map((change) => (
+              <div key={change.title} className="border-t border-[var(--color-divider)] py-4">
+                <h3 className="font-medium text-[var(--color-text)]">{change.title}</h3>
+                <p className="mt-1 text-sm leading-7 text-[var(--color-text-soft)]">{change.description}</p>
+              </div>
+            ))}
+          </div>
+        </section>
 
-      <section aria-labelledby="previous-version" className="surface-panel rounded-[var(--radius-lg)] p-5 sm:p-7">
-        <div className="flex flex-wrap items-center gap-3">
-          <h2 id="previous-version" className="text-xl font-semibold text-[var(--color-text)]">V0.10.7</h2>
-          <span className="rounded-full border border-[var(--color-border)] px-3 py-1 text-xs text-[var(--color-text-soft)]">上一版本</span>
-        </div>
-        <p className="mt-3 text-sm leading-7 text-[var(--color-text-soft)]">
-          0.12.0 已替代 0.10.7 成为当前生产版本。
-        </p>
-      </section>
+        <aside aria-label="历史版本" className="surface-panel rounded-[var(--radius-lg)] p-5 sm:p-6 lg:sticky lg:top-8">
+          <h2 className="text-base font-semibold text-[var(--color-text)]">历史版本</h2>
+          <ol className="mt-5 space-y-5 border-l border-[var(--color-border)] pl-5">
+            <li className="relative">
+              <span className="absolute -left-[1.55rem] top-2 h-2.5 w-2.5 rounded-full border-2 border-[var(--color-primary)] bg-[var(--color-surface-raised)]" />
+              <h3 className="font-semibold text-[var(--color-text)]">V0.10.7</h3>
+              <p className="mt-1 text-sm leading-6 text-[var(--color-text-soft)]">0.12.0 发布前的生产版本，包含 Agent 稳定性与 JD 匹配范围改进。</p>
+            </li>
+            <li className="relative">
+              <span className="absolute -left-[1.55rem] top-2 h-2.5 w-2.5 rounded-full border-2 border-[var(--color-border)] bg-[var(--color-surface-raised)]" />
+              <h3 className="font-semibold text-[var(--color-text)]">V0.10.6</h3>
+              <p className="mt-1 text-sm leading-6 text-[var(--color-text-soft)]">较早的线上版本。逐项更新记录尚未核实。</p>
+            </li>
+          </ol>
+          <p className="mt-6 border-t border-[var(--color-divider)] pt-4 text-xs leading-6 text-[var(--color-muted)]">
+            0.10.8 与 0.11.0 为开发整合阶段，未单独列为生产发布。
+          </p>
+        </aside>
+      </div>
 
       <Link href="/agent" className="inline-flex items-center gap-2 text-sm font-medium text-[var(--color-primary)] hover:underline">
         返回纸鸢 Agent

@@ -80,6 +80,34 @@ describe("report PDF service", () => {
     expect(close).toHaveBeenCalledOnce();
   });
 
+  it("labels out-of-range historical scores for review in the PDF without changing the report", async () => {
+    const rootDir = await mkdtemp(path.join(tmpdir(), "zhiyuan-report-pdf-score-"));
+    roots.push(rootDir);
+    vi.stubEnv("AGENT_ARTIFACT_DIR", rootDir);
+    getReport.mockResolvedValue({
+      report_num: 70,
+      date: "2026-08-24",
+      company: "甲公司",
+      role: "AI 产品经理",
+      archetype: "builder",
+      overall_score: 70,
+      legitimacy: "high",
+      blocks_json: JSON.stringify({ a: { content: "职位概览", score: 70 } }),
+      keywords_json: "[]",
+    });
+    pdf.mockResolvedValue(Buffer.from("%PDF-1.4\n%%EOF\n", "utf8"));
+    newPage.mockResolvedValue({ setContent, evaluate: vi.fn(), pdf });
+    launch.mockResolvedValue({ newPage, close });
+
+    await createReportPdfArtifact({ userId: "user-1" }, 70);
+
+    const html = setContent.mock.calls[0][0] as string;
+    expect(html).toContain("总分 待复核");
+    expect(html).toContain("<span>待复核</span>");
+    expect(html).not.toContain("70/5");
+    await expect(getReport.mock.results[0].value).resolves.toMatchObject({ overall_score: 70 });
+  });
+
   it("executes report PDF export in the Worker without localhost HTTP", async () => {
     const rootDir = await mkdtemp(path.join(tmpdir(), "zhiyuan-worker-report-pdf-"));
     roots.push(rootDir);

@@ -21,6 +21,7 @@ import { projectToolResultForUser } from "@/lib/agent/surface-projection";
 import type { AgentArtifactRef } from "@/lib/agent/task-journey";
 import { buildOfferAgentHandoffUrl } from "@/lib/agent/offer-handoff";
 import { countAnsweredInterviewRounds } from "@/lib/agent/interview-session-state";
+import { formatFivePointScore } from "@/lib/score-scale";
 
 export interface EvalBlockProgress {
   block: string;
@@ -756,7 +757,7 @@ export function ReportSummaryCard({ payload, content }: { payload?: Record<strin
               报告 #{reportNum || "-"} · {company} — {role}
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[var(--color-muted)]">
-              {typeof score === "number" && <span>{score}/5</span>}
+              {typeof score === "number" && <span>{formatFivePointScore(score)}</span>}
               {archetype && <span>{archetype}</span>}
               <span>完整正文已放在报告详情页</span>
             </div>

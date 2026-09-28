@@ -176,12 +176,12 @@ export default function HomePage() {
   return (
     <div className="space-y-8">
       {/* Header */}
-      <div className="page-heading">
-        <p className="text-[var(--color-muted)] text-sm mb-2">{getGreeting()}</p>
+      <header className="journal-heading">
+        <p className="text-[var(--color-text-soft)] text-sm mb-1">{getGreeting()}</p>
         <HandwritingTitle as="h1">
           {isEmpty ? "欢迎打开你的求职手帳" : "今日手帳"}
         </HandwritingTitle>
-      </div>
+      </header>
 
       {/* News — top of dashboard */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

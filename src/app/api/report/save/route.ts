@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { getDataRepositories } from "@/lib/data-repositories";
 import { trackApplication } from "@/lib/application-workflow";
+import { isFivePointScore } from "@/lib/score-scale";
 
 interface SaveRequest {
   company: string;
@@ -33,6 +34,9 @@ export async function POST(request: Request) {
 
     if (!company || !role) {
       return NextResponse.json({ success: false, error: "缺少公司名或岗位名" }, { status: 400 });
+    }
+    if (!isFivePointScore(overallScore)) {
+      return NextResponse.json({ success: false, error: "JD 评分必须在 0–5 分之间" }, { status: 400 });
     }
 
     const date = new Date().toISOString().split("T")[0];

@@ -75,6 +75,61 @@ describe("resume document intake primitives", () => {
     expect(original[0].content).toContain("项目背景");
   });
 
+  it("keeps dated testing jobs when their work overview mentions projects", () => {
+    const workBlocks = [
+      [
+        "紫光云数科技有限公司杭州分公司",
+        "AI 服务器测试工程师",
+        "2023.04–2023.12",
+        "工作概述：负责 AI 服务器测试，参与服务器平台项目，执行测试计划并跟踪缺陷。",
+      ].join("\n"),
+      [
+        "浙江之科云启科技有限公司",
+        "车载测试",
+        "2022.02–2022.11",
+        "工作概述：负责车载测试项目，记录测试结果并协助定位问题。",
+      ].join("\n"),
+      [
+        "浙江斑智科技有限公司",
+        "软件测试",
+        "2021.03–2021.12",
+        "工作概述：参与软件项目测试，编写测试用例并验证发布版本。",
+      ].join("\n"),
+    ];
+    const projectBlocks = [
+      "【AI 数字员工（客服/行政场景）】\n项目背景：缩短多渠道工单处理时间。\n核心工作：设计能力边界与知识检索。",
+      "【服务器性能验证】\n项目背景：验证模型部署的性能。\n项目成果：形成性能基线。",
+      "【车载交互验证】\n项目背景：验证车载交互流程。\n项目成果：完成回归测试。",
+    ];
+    const source = [
+      "杭州某科技有限公司\nAI 产品经理\n2024.12–2025.10\n工作概述：负责 AI 产品设计。",
+      projectBlocks[0],
+      workBlocks[0],
+      projectBlocks[1],
+      workBlocks[1],
+      projectBlocks[2],
+      workBlocks[2],
+    ].join("\n\n");
+    const separated = separateCvExperienceProjects([
+      { id: "experience", title: "工作经历", content: source },
+      { id: "projects", title: "项目经验", content: "" },
+    ]);
+    const work = separated.sections.find((section) => section.id === "experience")!.content;
+    const projects = separated.sections.find((section) => section.id === "projects")!.content;
+
+    for (const block of workBlocks) {
+      expect(work).toContain(block);
+      expect(projects).not.toContain(block);
+    }
+    for (const block of projectBlocks) {
+      expect(projects).toContain(block);
+      expect(work).not.toContain(block);
+    }
+    const sourceLines = source.split("\n").filter((line) => line.trim()).sort();
+    const separatedLines = [work, projects].flatMap((text) => text.split("\n")).filter((line) => line.trim()).sort();
+    expect(separatedLines).toEqual(sourceLines);
+  });
+
   it("only allows preview undo when the user has not edited the preview", () => {
     const preview = [
       { id: "experience", title: "工作经历", content: "公司 A" },
@@ -100,6 +155,11 @@ describe("resume document intake primitives", () => {
     expect(separated.sections.map((section) => section.id)).toEqual(["experience", "projects"]);
     expect(separated.sections[0].content).toBe(work);
     expect(separated.sections[1].content).toContain("覆盖 100 家企业");
+  });
+
+  it("does not move an isolated project outcome bullet out of work duties", () => {
+    const work = "某科技公司\n产品经理\n2023.01 - 2024.01\n工作概述：负责交付。\n项目成果：提升团队交付效率。";
+    expect(separateCvExperienceProjects([{ id: "experience", title: "工作经历", content: work }]).movedText).toBe("");
   });
 
   it("marks missing source facts for review instead of silently activating", () => {

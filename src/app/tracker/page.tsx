@@ -103,6 +103,7 @@ export default function TrackerPage() {
   const [showInterviewModal, setShowInterviewModal] = useState<Application | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [updatingId, setUpdatingId] = useState<number | null>(null);
+  const [openStatusMenuId, setOpenStatusMenuId] = useState<number | null>(null);
   const [landingCelebration, setLandingCelebration] = useState<{ company: string; role: string } | null>(null);
   const [interviewForm, setInterviewForm] = useState<InterviewRound>({
     round: 1,
@@ -520,7 +521,7 @@ export default function TrackerPage() {
       {viewMode === "list" && (
         <StaggerList className="space-y-2">
           {filtered.map((app) => (
-            <StaggerItem key={app.id}>
+            <StaggerItem key={app.id} className={`relative ${openStatusMenuId === app.id ? "z-20" : "z-0"}`}>
               <PaperCard padding="sm" hover="lift">
                 <div className="flex items-center gap-4">
                   <input
@@ -545,24 +546,45 @@ export default function TrackerPage() {
                       {app.interviews[0].totalRounds ? ` / 共${app.interviews[0].totalRounds}轮` : ""}
                     </span>
                   )}
-                  <div className="relative group">
-                    <StatusTag status={app.status} interactive />
-                    <div className="absolute right-0 top-full mt-1 z-10 hidden group-hover:block bg-[var(--color-surface)] border border-[var(--color-border)] rounded-[var(--radius-md)] shadow-lg p-1 min-w-[120px]">
-                      {STATUS_ORDER.map((s) => (
-                        <button
-                          key={s}
-                          onClick={() => updateStatus(app, s)}
-                          disabled={updatingId === app.id}
-                          className={`block w-full text-left px-3 py-1.5 text-sm rounded-[var(--radius-sm)] transition-colors ${
-                            s === app.status
-                              ? "bg-[var(--color-primary-muted)] text-[var(--color-text)]"
-                              : "text-[var(--color-text-soft)] hover:bg-[var(--color-divider)]"
-                          }`}
-                        >
-                          {STATUS_LABELS[s]}
-                        </button>
-                      ))}
-                    </div>
+                  <div
+                    className="relative"
+                    onBlur={(event) => {
+                      if (!event.currentTarget.contains(event.relatedTarget)) setOpenStatusMenuId(null);
+                    }}
+                  >
+                    <button
+                      type="button"
+                      aria-label={`更改${app.company}的状态`}
+                      aria-expanded={openStatusMenuId === app.id}
+                      aria-controls={`tracker-status-${app.id}`}
+                      onClick={() => setOpenStatusMenuId((current) => current === app.id ? null : app.id ?? null)}
+                      className="inline-flex items-center gap-1 rounded-[var(--radius-sm)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-primary)]"
+                    >
+                      <StatusTag status={app.status} />
+                      <ChevronDown size={13} className="text-[var(--color-muted)]" />
+                    </button>
+                    {openStatusMenuId === app.id && (
+                      <div id={`tracker-status-${app.id}`} className="absolute right-0 top-full mt-1 z-30 min-w-[140px] rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-1 shadow-[var(--shadow-lg)]">
+                        {STATUS_ORDER.map((status) => (
+                          <button
+                            key={status}
+                            type="button"
+                            onClick={() => {
+                              setOpenStatusMenuId(null);
+                              void updateStatus(app, status);
+                            }}
+                            disabled={updatingId === app.id}
+                            className={`block w-full rounded-[var(--radius-sm)] px-3 py-1.5 text-left text-sm transition-colors ${
+                              status === app.status
+                                ? "bg-[var(--color-primary-muted)] text-[var(--color-text)]"
+                                : "text-[var(--color-text-soft)] hover:bg-[var(--color-divider)]"
+                            }`}
+                          >
+                            {STATUS_LABELS[status]}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   {getTrackerNextActions(app).slice(0, 1).map((action) => {
                     const Icon = action.icon;

@@ -10,6 +10,7 @@ import {
 } from "@/lib/server/export-artifact-service";
 import { markdownToSafeHtml } from "@/lib/server-markdown";
 import type { ReportRow } from "@/lib/server-db";
+import { formatFivePointScore } from "@/lib/score-scale";
 
 const BLOCK_LABELS: Record<string, string> = {
   a: "A 职位概览",
@@ -94,7 +95,7 @@ function buildReportHtml(report: ReportRow): string {
       const content = blockContent(rawBlocks[key]);
       if (!content.trim()) return "";
       const score = blockScore(rawBlocks[key]);
-      return `<section class="block"><div class="block-title"><h2>${label}</h2>${score == null ? "" : `<span>${score}/5</span>`}</div><div class="markdown">${markdownToSafeHtml(content)}</div></section>`;
+      return `<section class="block"><div class="block-title"><h2>${label}</h2>${score == null ? "" : `<span>${formatFivePointScore(score)}</span>`}</div><div class="markdown">${markdownToSafeHtml(content)}</div></section>`;
     })
     .join("");
 
@@ -122,7 +123,7 @@ function buildReportHtml(report: ReportRow): string {
     code { background: #f3f4f6; padding: 1px 3px; border-radius: 3px; }
     pre { background: #f3f4f6; padding: 8px; overflow-wrap: break-word; white-space: pre-wrap; }
     blockquote { margin: 8px 0; padding: 6px 10px; border-left: 3px solid #6b7280; background: #f9fafb; }
-  </style></head><body><header class="cover"><h1>${escapeHtml(report.company)} - ${escapeHtml(report.role)}</h1><div class="meta"><span class="pill">报告 #${report.report_num}</span><span class="pill">日期 ${escapeHtml(report.date)}</span><span class="pill">总分 ${report.overall_score}/5</span>${report.archetype ? `<span class="pill">${escapeHtml(report.archetype)}</span>` : ""}</div>${keywords.length ? `<div class="keywords">关键词：${keywords.map(escapeHtml).join("、")}</div>` : ""}</header>${sections}</body></html>`;
+  </style></head><body><header class="cover"><h1>${escapeHtml(report.company)} - ${escapeHtml(report.role)}</h1><div class="meta"><span class="pill">报告 #${report.report_num}</span><span class="pill">日期 ${escapeHtml(report.date)}</span><span class="pill">总分 ${formatFivePointScore(report.overall_score)}</span>${report.archetype ? `<span class="pill">${escapeHtml(report.archetype)}</span>` : ""}</div>${keywords.length ? `<div class="keywords">关键词：${keywords.map(escapeHtml).join("、")}</div>` : ""}</header>${sections}</body></html>`;
 }
 
 function parseJson<T>(value: string, fallback: T): T {

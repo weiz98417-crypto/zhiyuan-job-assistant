@@ -7,6 +7,7 @@ import { getDataRepositories } from "@/lib/data-repositories";
 import { computeEvaluationOverallScore, extractEvaluationBlockScore } from "@/lib/evaluation-scoring";
 import { getDeepSeekApiKey, DEEPSEEK_API_URL, DEEPSEEK_VISION_MODEL } from "@/lib/deepseek-provider";
 import { buildOCRImageCandidates, normalizeImageDataUri } from "@/lib/server-image-variants";
+import { assertReadableJDPage } from "@/lib/server/jd-page-validation";
 
 import { llmRetry, LLMError } from "@/lib/llm-retry";
 
@@ -442,8 +443,10 @@ export async function POST(request: Request) {
             if (!fetchRes.ok) throw new Error(`HTTP ${fetchRes.status}`);
             const html = await fetchRes.text();
             const $ = cheerio.load(html);
+            const title = $("title").text().replace(/\s+/g, " ").trim();
             $("script, style, nav, footer, header").remove();
             const text = $("body").text().replace(/\s+/g, " ").trim().slice(0, 15000);
+            assertReadableJDPage(title, text);
             state.jdText = `URL: ${jdUrl}\n\n${text}`;
           } catch (err) {
             const error = `URL 抓取失败: ${err instanceof Error ? err.message : "unknown"}。请尝试粘贴文本`;

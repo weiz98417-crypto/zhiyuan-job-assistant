@@ -1,6 +1,7 @@
 import db from "@/lib/db";
 import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
 import { getRecommendationsForUser } from "@/lib/server/agent-insight-service";
+import { formatFivePointScore } from "@/lib/score-scale";
 
 async function handler(
   params: Record<string, unknown>,
@@ -58,7 +59,7 @@ function formatResult(result: ToolResult): string {
   const data = result.data as { recentApps?: Array<{ company: string; role: string; score: number; status: string; date: string }>; profile?: unknown } | null;
   const apps = data?.recentApps || [];
   if (apps.length === 0) return "暂无匹配的推荐岗位。";
-  return `基于画像推荐 ${apps.length} 个岗位:\n${apps.map(a => `${a.company}-${a.role} | ${a.score}/5 | ${a.status} | ${a.date}`).join("\n")}`;
+  return `基于画像推荐 ${apps.length} 个岗位:\n${apps.map(a => `${a.company}-${a.role} | ${formatFivePointScore(a.score)} | ${a.status} | ${a.date}`).join("\n")}`;
 }
 
 export const getRecommendations: ToolDefinition = {

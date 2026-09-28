@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import * as cheerio from "cheerio";
+import { isJDVerificationPage, JD_VERIFICATION_PAGE_ERROR } from "@/lib/server/jd-page-validation";
 
 const FETCH_TIMEOUT_MS = 10_000;
 const MAX_RESPONSE_SIZE = 500_000; // 500KB
@@ -160,6 +161,10 @@ export async function POST(request: Request) {
     const $ = cheerio.load(html);
     const title = $("title").text().replace(/\s+/g, " ").trim() || parsedUrl.hostname;
     const text = extractText($, url);
+
+    if (isJDVerificationPage(title, text)) {
+      return NextResponse.json({ success: false, error: JD_VERIFICATION_PAGE_ERROR }, { status: 422 });
+    }
 
     if (text.length < 200) {
       return NextResponse.json(

@@ -853,6 +853,11 @@ describe("Durable Orchestrator execution engine", () => {
     })).rejects.toThrow("projection unavailable");
     const checkpoint = await runtime.getLatestCheckpoint({ userId: "user-after-model" }, run!.id);
     expect(checkpoint?.boundary).toBe("after_model");
+    const failedEvents = await runtime.listEvents({ userId: "user-after-model" }, run!.id, 0);
+    expect(failedEvents.some((event) => (
+      event.type === "run.ui_event"
+      && (event.payload.event as Record<string, unknown> | undefined)?.type === "text"
+    ))).toBe(false);
 
     failConversationProjection = false;
     const result = await engine.execute({
@@ -866,6 +871,10 @@ describe("Durable Orchestrator execution engine", () => {
     expect(orchestrateCalls).toBe(1);
     expect(savedConversations).toHaveLength(1);
     expect(events.filter((event) => event.type === "run.model_output_complete")).toHaveLength(1);
+    expect(events.filter((event) => (
+      event.type === "run.ui_event"
+      && (event.payload.event as Record<string, unknown> | undefined)?.type === "text"
+    ))).toHaveLength(1);
   });
 
   it("starts a new model cycle after recovery is decided for a failed completion", async () => {

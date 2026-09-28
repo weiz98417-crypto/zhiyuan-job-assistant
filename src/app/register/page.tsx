@@ -75,18 +75,12 @@ export default function RegisterPage() {
   ] as const;
 
   return (
-    <div style={{
-      display: 'grid', gridTemplateColumns: '1fr 1fr', minHeight: '100vh',
-      fontFamily: 'var(--font-body)',
-    }}>
+    <div className="auth-layout">
       {/* Left: Hero (same as login) */}
       <AuthHero subtitle="开始你的求职手帳" />
 
       {/* Right: Form */}
-      <div style={{
-        background: 'var(--color-bg)', display: 'flex', alignItems: 'center',
-        justifyContent: 'center', padding: 48,
-      }}>
+      <div className="auth-form-panel">
         <div style={{ width: '100%', maxWidth: 400 }}>
           <div style={{ marginBottom: 32 }}>
             <h2 style={{

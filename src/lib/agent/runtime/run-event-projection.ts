@@ -95,7 +95,7 @@ export function projectDurableUiEvent(
   }
   if (type === "text") {
     const content = typeof event.content === "string" ? event.content : "";
-    return { type, charCount: content.length };
+    return { type, content: safeAssistantText(content), charCount: content.length };
   }
   if (type === "thinking_content") {
     return {
@@ -134,6 +134,13 @@ function safeIdentifier(value: unknown): string {
 
 function safeText(value: unknown, max: number): string {
   return typeof value === "string" ? value.slice(0, max) : "";
+}
+
+export function safeAssistantText(content: string): string {
+  if (/(?:bearer\s+[a-z0-9._-]{12,}|sk-[a-z0-9_-]{12,}|postgres(?:ql)?:\/\/[^\s]+|-----begin [^-]+ key-----)/i.test(content)) {
+    return "已隐藏内部内容";
+  }
+  return content.slice(0, 20_000);
 }
 
 function safeCount(value: unknown): number {

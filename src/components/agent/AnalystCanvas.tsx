@@ -1,5 +1,7 @@
 "use client";
 
+import { isFivePointScore } from "@/lib/score-scale";
+
 /**
  * 分析面（0.11.0-D 双面画布）：深炭证据面。
  * 报告、提案预览、岗位池在此展开——对话面保持安静，证据在这立信。
@@ -93,8 +95,8 @@ export function AnalystCanvas({
               {typeof payload.score === "number" ? (
                 <div className="text-right">
                   <div className="display text-3xl" style={{ color: "var(--color-primary)", filter: "brightness(1.35)" }}>
-                    {payload.score.toFixed(1)}
-                    <span className="text-sm">/5</span>
+                    {isFivePointScore(payload.score) ? payload.score.toFixed(1) : "待复核"}
+                    {isFivePointScore(payload.score) && <span className="text-sm">/5</span>}
                   </div>
                 </div>
               ) : null}

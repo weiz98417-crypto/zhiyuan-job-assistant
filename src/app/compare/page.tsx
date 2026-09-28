@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Bot, CheckSquare, FileText, HelpCircle, Pencil, Plus, Scale, X } from "lucide-react";
 import { HandwritingTitle, PaperCard, ScoreBadge, WarmButton } from "@/components/design";
 import { createSession } from "@/lib/agent/sessions";
+import { formatFivePointScore } from "@/lib/score-scale";
 import type { Offer, OfferEvaluationModule, OfferVerdict } from "@/types";
 
 type OfferReportRow = {
@@ -503,7 +504,10 @@ export default function ComparePage() {
                   ["城市", (o: Offer) => o.location || "未录入"],
                   ["税前月薪", (o: Offer) => o.monthlySalary ? `${o.monthlySalary}K` : "未录入"],
                   ["年总包", (o: Offer) => o.monthlySalary ? `${totalAnnualComp(o)}K` : "未录入"],
-                  ["评估分", (o: Offer) => reportForOffer(o, reports)?.overall_score ? `${reportForOffer(o, reports)?.overall_score}/5` : "未评估"],
+                  ["评估分", (o: Offer) => {
+                    const report = reportForOffer(o, reports);
+                    return report?.overall_score ? formatFivePointScore(report.overall_score) : "未评估";
+                  }],
                 ].map(([label, render]) => (
                   <tr key={label as string}>
                     <td className="py-3 px-3 text-[var(--color-muted)]">{label as string}</td>
@@ -684,7 +688,7 @@ export default function ComparePage() {
                               <div key={module.id} className="rounded-[var(--radius-sm)] border border-[var(--color-border)] p-3">
                                 <div className="flex items-center justify-between gap-2">
                                   <span className="text-sm font-medium text-[var(--color-text)]">{module.label}</span>
-                                  <span className="text-xs text-[var(--color-muted)]">{module.score}/5</span>
+                                  <span className="text-xs text-[var(--color-muted)]">{formatFivePointScore(module.score)}</span>
                                 </div>
                                 <p className="mt-2 text-xs leading-5 text-[var(--color-text-soft)]">{module.notes}</p>
                               </div>

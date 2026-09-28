@@ -3,6 +3,7 @@ import { getAgentReadService } from "@/lib/agent/runtime/agent-read-service";
 import { assembleAgentMemoryContext } from "@/lib/agent/memory-context";
 import { getDataRepositories } from "@/lib/data-repositories";
 import type { ReportRow } from "@/lib/server-db";
+import { fivePointScoreOrZero, isPercentageScore } from "@/lib/score-scale";
 
 export async function getPipelineHealthForUser(
   principal: ExecutionPrincipal,
@@ -106,13 +107,24 @@ export async function getRecommendationsForUser(
     .map((application) => ({
       company: application.company,
       role: application.role,
-      score: application.score,
+      score: fivePointScoreOrZero(application.score),
       status: application.status,
       date: application.date,
     }));
+  const marketFit = objectValue(profile.data.marketFit);
   return {
     profile: {
-      data: profile.data,
+      data: {
+        ...profile.data,
+        ...(Object.keys(marketFit).length
+          ? { marketFit: {
+              ...marketFit,
+              overallScore: isPercentageScore(marketFit.overallScore)
+                ? marketFit.overallScore
+                : 0,
+            } }
+          : {}),
+      },
       goals: profile.goals,
       lastUpdated: profile.lastUpdated,
     },

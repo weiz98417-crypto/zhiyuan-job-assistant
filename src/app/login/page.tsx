@@ -63,25 +63,10 @@ export default function LoginPage() {
   });
 
   return (
-    <div style={{
-      display: 'grid',
-      gridTemplateColumns: '1fr 1fr',
-      minHeight: '100vh',
-      fontFamily: 'var(--font-body)',
-    }}>
+    <div className="auth-layout">
       <AuthHero subtitle="翻开这一页，写你的下一个篇章" />
 
-      <div style={{
-        backgroundColor: 'rgba(255, 252, 246, 0.72)',
-        backgroundImage: "linear-gradient(rgba(255, 252, 246, 0.72), rgba(255, 252, 246, 0.72)), url('/backgrounds/login-hero.webp')",
-        backgroundSize: 'cover',
-        backgroundPosition: 'center right',
-        backgroundBlendMode: 'screen',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 48,
-      }}>
+      <div className="auth-form-panel">
         <div style={{ width: '100%', maxWidth: 400 }}>
           <div style={{ marginBottom: 32 }}>
             <h2 style={{

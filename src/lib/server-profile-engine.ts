@@ -1,5 +1,6 @@
 import { getDataRepositories } from "@/lib/data-repositories";
 import type { ProfileMarketFit, ProfilePreferences, ProfileSkill, ZhiyuanProfile } from "@/types";
+import { isFivePointScore, isPercentageScore } from "@/lib/score-scale";
 import fs from "fs";
 import path from "path";
 import {
@@ -155,7 +156,7 @@ async function computeBehavioralStats(userId: string): Promise<BehavioralStats> 
   const reports = await repos.reports.list(userId);
   const totalApplications = apps.length;
   const passed = apps.filter((app) => app.status === "interview" || app.status === "offer").length;
-  const scored = reports.filter((report) => report.overall_score > 0);
+  const scored = reports.filter((report) => isFivePointScore(report.overall_score) && report.overall_score > 0);
 
   const industryDistribution: Record<string, number> = {};
   for (const report of reports) {
@@ -386,7 +387,15 @@ export async function runProfileEngine(options: EngineOptions = {}): Promise<Zhi
   });
 
   const preferences = fusePreferences(layer2, layer3, llmResult?.preferences || emptyPreferences());
-  const marketFit = llmResult?.marketFit || defaultMarketFit(layer3);
+  const fallbackMarketFit = defaultMarketFit(layer3);
+  const marketFit = llmResult?.marketFit
+    ? {
+        ...llmResult.marketFit,
+        overallScore: isPercentageScore(llmResult.marketFit.overallScore)
+          ? llmResult.marketFit.overallScore
+          : fallbackMarketFit.overallScore,
+      }
+    : fallbackMarketFit;
   const changes = [
     `识别 ${skills.length} 项高可信核心技能`,
     `过滤 JD/题干/聊天噪音后重建画像`,

@@ -40,6 +40,7 @@ async function loadRouteHarness() {
 }
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   vi.doUnmock("@/lib/auth");
   if (serverDb) {
     serverDb.getDb().close();
@@ -82,6 +83,34 @@ async function postSave(route: DiscoveryJdRoute, jobId: number, body: Record<str
 }
 
 describe("Discovery save-from-JD API", () => {
+  it("does not offer or save a 51job verification page as JD body", async () => {
+    const { db, route } = await loadRouteHarness();
+    const jobId = insertScanJob(db, { url: "https://jobs.51job.com/example/123" });
+    const challengeHtml = `<html><head><title>滑动验证页面</title></head><body><main>请完成滑动验证，拖动滑块到最右侧后继续访问。${"验证后即可查看职位详情。".repeat(20)}</main></body></html>`;
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(challengeHtml, {
+      status: 200,
+      headers: { "content-type": "text/html; charset=utf-8" },
+    })));
+
+    const preview = await route.GET(new Request(`http://localhost/api/scan/jobs/${jobId}/jd`) as never, {
+      params: Promise.resolve({ id: String(jobId) }),
+    });
+    const previewJson = await preview.json();
+    expect(previewJson.success).toBe(true);
+    expect(previewJson.data.fetched).toBeNull();
+    expect(previewJson.data.error).toContain("人机验证");
+
+    const save = await postSave(route, jobId, {});
+    const saveJson = await save.json();
+    expect(save.status).toBe(422);
+    expect(saveJson.error).toContain("人机验证");
+
+    const stalePreviewSave = await postSave(route, jobId, { jdBody: "请完成滑动验证，拖动滑块到最右侧后继续访问。".repeat(5) });
+    expect(stalePreviewSave.status).toBe(422);
+    const stored = db.prepare("SELECT COUNT(*) AS count FROM jds WHERE user_id = ?").get(TEST_USER_ID) as { count: number };
+    expect(stored.count).toBe(0);
+  });
+
   it("verifies read-back after direct JD create and update", async () => {
     const { db, dataJdsRoute } = await loadRouteHarness();
     const jdBody = "岗位职责：负责 AI 产品规划、需求分析、Agent 场景落地、数据指标建设和跨团队项目推进。任职要求：熟悉 LLM 应用和产品交付。";

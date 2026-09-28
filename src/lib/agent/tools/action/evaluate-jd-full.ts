@@ -1,5 +1,6 @@
 import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
 import type { ImageIntakeResult } from "@/lib/agent/image-intake";
+import { formatFivePointScore } from "@/lib/score-scale";
 import { fetchAgentMemoryContext } from "../memory-helpers";
 import {
   DurableJDEvaluationInputError,
@@ -239,7 +240,7 @@ function formatResult(result: ToolResult): string {
 
   const blocks = (d.blocks || {}) as Record<string, { content: string; score: number }>;
   const scoreLine = Object.entries(blocks)
-    .map(([k, b]) => `${k.toUpperCase()}:${b?.score || "-"}`)
+    .map(([k, b]) => `${k.toUpperCase()}:${b?.score === undefined ? "-" : formatFivePointScore(b.score)}`)
     .join(" ");
 
   const keywordList = (d.keywords as string[])?.length
@@ -247,7 +248,7 @@ function formatResult(result: ToolResult): string {
     : "无";
 
   return `评估已完成：${d.company} - ${d.role}
-总分：${d.overallScore}/5；类型：${d.archetype || "未识别"}；报告编号：${d.reportNum || "已保存"}
+总分：${formatFivePointScore(d.overallScore)}；类型：${d.archetype || "未识别"}；报告编号：${d.reportNum || "已保存"}
 关键词：${keywordList}
 风险摘要：${riskSummary}
 板块分数：${scoreLine}

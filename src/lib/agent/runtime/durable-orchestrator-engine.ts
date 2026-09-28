@@ -82,6 +82,7 @@ interface StoredModelCompletion {
   outcome: AgentRunExecutionResult["outcome"];
   charCount: number;
   toolResultCount: number;
+  assistantText?: string;
   contractEvaluation?: StoredContractEvaluation;
   failure?: StoredToolFailure;
 }
@@ -381,13 +382,15 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
         if (next.done) break;
         const event = next.value;
         if (input.signal.aborted) throw new Error("Agent execution cancelled");
-        await this.options.runtime.recordEvent({
-          runId: input.run.id,
-          workerId: input.run.ownerId!,
-          fencingToken: input.run.fencingToken,
-          type: "run.ui_event",
-          payload: { event: projectDurableUiEvent(event) },
-        });
+        if (event.type !== "text") {
+          await this.options.runtime.recordEvent({
+            runId: input.run.id,
+            workerId: input.run.ownerId!,
+            fencingToken: input.run.fencingToken,
+            type: "run.ui_event",
+            payload: { event: projectDurableUiEvent(event) },
+          });
+        }
         if (event.type === "text") assistantText += String(event.content || "");
         if (event.type === "tool_result") {
           const safeView = projectToolResultForUser({
@@ -581,6 +584,7 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
           : assistantText.trim() || projectedMessages.length > 0 ? "succeeded" : "failed"),
       charCount: contractRecoveryPending ? 0 : assistantText.length,
       toolResultCount: contractRecoveryPending ? 0 : projectedMessages.filter((message) => message.role === "tool").length,
+      assistantText: contractRecoveryPending ? undefined : assistantText,
       failure: terminalToolFailure,
       contractEvaluation: contractOutcome
         ? {
@@ -702,6 +706,25 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
       }
     }
     await this.saveConversation(principal, input.run.conversationId, conversationMessages);
+    if ((completion.outcome === "succeeded" || completion.outcome === "waiting_user") && completion.assistantText?.trim()) {
+      const textRecorded = events.some((event) => (
+        event.type === "run.ui_event"
+        && event.payload.completionId === completion.id
+        && (event.payload.event as Record<string, unknown> | undefined)?.type === "text"
+      ));
+      if (!textRecorded) {
+        await this.options.runtime.recordEvent({
+          runId: input.run.id,
+          workerId: input.run.ownerId!,
+          fencingToken: input.run.fencingToken,
+          type: "run.ui_event",
+          payload: {
+            completionId: completion.id,
+            event: projectDurableUiEvent({ type: "text", content: completion.assistantText }),
+          },
+        });
+      }
+    }
     return {
       outcome: completion.outcome,
       ...(completion.failure ? { failure: permanentToolObservation(completion.failure) } : {}),
@@ -832,6 +855,7 @@ function readStoredModelCompletion(value: unknown): StoredModelCompletion | null
     outcome: outcome as AgentRunExecutionResult["outcome"],
     charCount: safeCount(record.charCount),
     toolResultCount: safeCount(record.toolResultCount),
+    assistantText: typeof record.assistantText === "string" ? record.assistantText : undefined,
     contractEvaluation,
     failure: readStoredToolFailure(record.failure),
   };

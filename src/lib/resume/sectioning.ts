@@ -31,9 +31,9 @@ export function splitEmbeddedProjects(experience: string): { experience: string;
   const projectStarts = new Set<number>();
   for (let index = 0; index < lines.length; index += 1) {
     const normalized = normalizeSectionLine(lines[index]);
-    if (!isProjectHeading(normalized) && !isProjectField(normalized)) continue;
+    if (!isProjectHeading(normalized) && !isProjectStartField(normalized)) continue;
     let start = index;
-    if (isProjectField(normalized)) {
+    if (isProjectStartField(normalized)) {
       let previous = index - 1;
       while (previous >= 0 && !lines[previous].trim()) previous -= 1;
       if (previous >= 0 && /^【[^】]{2,80}】$/.test(lines[previous].trim())) start = previous;
@@ -61,21 +61,26 @@ function isProjectHeading(line: string): boolean {
   return /^(?:项目经历|项目经验|项目实践|代表项目|主要项目|项目案例|Projects?)\s*[:：]?\s*$/i.test(line);
 }
 
-function isProjectField(line: string): boolean {
-  return /^(?:项目经历|项目经验|项目实践|代表项目|主要项目|项目案例|项目名称|项目背景|项目描述|项目职责|项目成果|项目业绩|项目内容|项目亮点|项目概况|项目简介)\s*[:：]/i.test(line);
+function isProjectStartField(line: string): boolean {
+  return /^(?:项目经历|项目经验|项目实践|代表项目|主要项目|项目案例|项目名称|项目背景|项目描述|项目概况|项目简介)\s*[:：]/i.test(line);
 }
 
 function isWorkBoundary(lines: string[], index: number): boolean {
   const line = normalizeSectionLine(lines[index]);
-  const followingLines = lines.slice(index + 1, index + 4).map(normalizeSectionLine).filter(Boolean).join(" ");
-  const candidate = `${line} ${followingLines}`;
-  const hasRoleMarker = /(?:经理|工程师|总监|主管|专员|顾问|开发|设计|运营|产品|分析|研究|助理|实习|负责人|岗位|CEO|CTO|PM)/i.test(candidate);
-  const looksLikeProject = /(?:项目|平台项目|项目平台|风控平台|招聘平台|系统方案)/i.test(candidate);
+  const dateIndex = lines.slice(index, index + 4).findIndex((candidate) => hasDateMarker(normalizeSectionLine(candidate)));
+  if (dateIndex < 0) return /^(?:工作经历|任职经历|实习经历|工作经验)\s*[:：]?\s*$/i.test(line);
+  const header = lines.slice(index, index + dateIndex + 1).map(normalizeSectionLine).filter(Boolean).join(" ");
+  const hasRoleMarker = /(?:经理|工程师|总监|主管|专员|顾问|开发|设计|运营|产品|分析|研究|助理|实习|负责人|岗位|测试|QA|SDET|CEO|CTO|PM)/i.test(header);
+  const looksLikeProject = /(?:项目|平台项目|项目平台|风控平台|招聘平台|系统方案)/i.test(header);
   return /^(?:工作经历|任职经历|实习经历|工作经验)\s*[:：]?\s*$/i.test(line)
     || (line.length <= 100 && !/[：:]/.test(line) && /(?:公司|集团|银行|研究院|事务所|工作室)/.test(line)
       && !looksLikeProject
-      && (/(?:19|20)\d{2}/.test(line) || /(?:19|20)\d{2}/.test(followingLines))
       && hasRoleMarker);
+}
+
+function hasDateMarker(line: string): boolean {
+  return /(?:19|20)\d{2}\s*(?:[./年-]\s*\d{1,2})/.test(line)
+    || /(?:19|20)\d{2}\s*年/.test(line);
 }
 
 export function mergeSectionText(existingValue: string, additionValue: string): string {

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { getDataRepositories } from "@/lib/data-repositories";
+import { formatFivePointScore } from "@/lib/score-scale";
 
 export async function GET() {
   try {
@@ -26,7 +27,7 @@ export async function GET() {
       parts.push("最近评估:");
       for (const r of recent) {
         const riskHint = r.notes?.includes("高风险") ? "🔴" : r.notes?.includes("中风险") ? "🟡" : "🟢";
-        parts.push(`• ${r.company} | ${r.role} | ${r.score}/5 ${riskHint} | ${r.date}`);
+        parts.push(`• ${r.company} | ${r.role} | ${formatFivePointScore(r.score)} ${riskHint} | ${r.date}`);
       }
     } else {
       parts.push("暂无评估记录");

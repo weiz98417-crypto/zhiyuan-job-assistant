@@ -40,6 +40,7 @@ import {
   submitDurableAgentRunInputClient,
 } from "@/lib/agent/runtime/durable-run-client";
 import { reconcileRunGateMessages } from "@/lib/agent/run-gate-message-status";
+import { accumulateDurableTextEvent } from "@/lib/agent/runtime/durable-text-observer";
 import type { AgentRunSnapshot } from "@/lib/agent/runtime/durable-agent-run";
 import type { AgentRunStatus } from "@/lib/agent/run-ledger";
 import {
@@ -656,6 +657,11 @@ export function useAgentConversation() {
           currentSessionIdRef.current = latest.id!;
           setCurrentSessionId(latest.id!);
           setMessages(latest.messages);
+          const hydrated = await getSession(latest.id!, { preferServer: true }).catch(() => undefined);
+          if (hydrated && currentSessionIdRef.current === latest.id) {
+            setMessages(hydrated.messages);
+            setSessions((current) => current.map((item) => item.id === hydrated.id ? hydrated : item));
+          }
         } else {
           // 0.11.0-C: the worker is the sole transcript writer — sessions
           // persist empty; the welcome note is render-level only.
@@ -876,14 +882,15 @@ export function useAgentConversation() {
           } else if (eventType === "tool_call") {
             setExecutingTool(String(event.name || ""));
           } else if (eventType === "text") {
-            const content = String(event.content || "");
-            const item = itemAssemblerRef.current?.apply({
-              cursor: runEvent.sequence,
-              type: "delta",
-              itemId: `run:${runId}:assistant`,
-              content,
+            const textUpdate = accumulateDurableTextEvent({
+              assembler: itemAssemblerRef.current,
+              runId,
+              sequence: runEvent.sequence,
+              event,
+              currentText: streamContentRef.current,
             });
-            streamContentRef.current += content;
+            if (!textUpdate) continue;
+            streamContentRef.current = textUpdate.content;
             setStreamText(streamContentRef.current);
             setMessages((current) => {
               const next = [...current];
@@ -897,7 +904,7 @@ export function useAgentConversation() {
               );
               const assistant: AgentMessage = {
                 role: "assistant",
-                itemId: item?.itemId,
+                itemId: textUpdate.itemId,
                 content: streamContentRef.current,
                 timestamp: new Date().toISOString(),
                 toolResult: { durableRunId: runId },

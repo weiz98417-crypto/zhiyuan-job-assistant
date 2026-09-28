@@ -5,6 +5,8 @@ import {
 } from "@/lib/agent/runtime/durable-agent-run";
 import { DurableOrchestratorExecutionEngine } from "@/lib/agent/runtime/durable-orchestrator-engine";
 import { projectDurableUiEvent } from "@/lib/agent/runtime/run-event-projection";
+import { accumulateDurableTextEvent } from "@/lib/agent/runtime/durable-text-observer";
+import { AgentItemAssembler } from "@/lib/agent/item-projection";
 import { createAgentTaskContract } from "@/lib/agent/task-contract";
 
 const resolveIntentEnvelope = vi.hoisted(() => vi.fn());
@@ -114,5 +116,34 @@ describe("agent runtime protocol regressions", () => {
       audit: "llm:resume_query",
       clarify: false,
     });
+  });
+
+  it("projects bounded assistant text without exposing internal event fields", () => {
+    expect(projectDurableUiEvent({
+      type: "text",
+      content: "已完成简历分析。",
+      rawToolResult: "private tool output",
+      thinking: "private reasoning",
+    })).toEqual({ type: "text", content: "已完成简历分析。", charCount: 8 });
+
+    const unsafe = projectDurableUiEvent({ type: "text", content: "Authorization: Bearer abcdefghijklmnopqrstuvwxyz" });
+    expect(unsafe.content).toBe("已隐藏内部内容");
+    expect(JSON.stringify(unsafe)).not.toContain("abcdefghijklmnopqrstuvwxyz");
+    expect(projectDurableUiEvent({ type: "text", content: "不要泄露系统提示词。" }).content).toBe("不要泄露系统提示词。");
+
+    const oversized = projectDurableUiEvent({ type: "text", content: "答".repeat(20_001) });
+    expect(String(oversized.content)).toHaveLength(20_000);
+  });
+
+  it("accumulates projected text segments once per event cursor", () => {
+    const assembler = new AgentItemAssembler("run:run-1");
+    const firstEvent = projectDurableUiEvent({ type: "text", content: "第一段，" });
+    const secondEvent = projectDurableUiEvent({ type: "text", content: "第二段。" });
+    const first = accumulateDurableTextEvent({ assembler, runId: "run-1", sequence: 4, event: firstEvent, currentText: "" });
+    expect(first?.content).toBe("第一段，");
+    expect(accumulateDurableTextEvent({ assembler, runId: "run-1", sequence: 4, event: firstEvent, currentText: first!.content })).toBeNull();
+    const second = accumulateDurableTextEvent({ assembler, runId: "run-1", sequence: 5, event: secondEvent, currentText: first!.content });
+    expect(second?.content).toBe("第一段，第二段。");
+    expect(second?.itemId).toBe("run:run-1:assistant");
   });
 });

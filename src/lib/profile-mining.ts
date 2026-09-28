@@ -1,4 +1,5 @@
 import db from "@/lib/db";
+import { isFivePointScore } from "@/lib/score-scale";
 import type {
   ZhiyuanProfile,
   ProfileSkill,
@@ -33,7 +34,7 @@ async function computeStats(): Promise<MiningStats> {
     statusDistribution[a.status] = (statusDistribution[a.status] || 0) + 1;
   }
 
-  const scored = reports.filter((r) => r.overallScore > 0);
+  const scored = reports.filter((r) => isFivePointScore(r.overallScore) && r.overallScore > 0);
   const avgScore =
     scored.length > 0
       ? Math.round((scored.reduce((s, r) => s + r.overallScore, 0) / scored.length) * 10) / 10
@@ -110,8 +111,9 @@ export async function generateProfile(options?: {
 export function buildFallbackProfile(stats: MiningStats): ZhiyuanProfile {
   const skills: ProfileSkill[] = [];
 
+  const avgScore = isFivePointScore(stats.avgScore) ? stats.avgScore : 0;
   const overallScore = stats.totalApplications > 0
-    ? Math.round((stats.avgScore / 5) * 100)
+    ? Math.round((avgScore / 5) * 100)
     : 0;
 
   return {

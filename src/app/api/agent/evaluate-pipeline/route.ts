@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { getDataRepositories } from "@/lib/data-repositories";
 import type { AppRow, ReportRow } from "@/lib/server-db";
+import { isFivePointScore } from "@/lib/score-scale";
 
 export async function POST(request: Request) {
   try {
@@ -80,6 +81,11 @@ export async function POST(request: Request) {
           }
 
           const { company, role, overallScore, archetype, blocks } = evalJson.data;
+          if (!isFivePointScore(overallScore)) {
+            sse({ type: "error", error: "JD 评分超出 0–5 分，未保存评估结果" });
+            sse({ type: "done" });
+            return;
+          }
 
           // Emit per-block progress (blocks are generated in one shot, but we show completion sequentially)
           const blockLabels: Record<string, string> = { a: "A·概览", b: "B·匹配", c: "C·职级", d: "D·薪资", e: "E·定制", f: "F·面试", g: "G·合法" };

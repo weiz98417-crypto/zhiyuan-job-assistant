@@ -52,4 +52,20 @@ describe("evaluate_jd_full server execution", () => {
       data: expect.objectContaining({ reportReadBackVerified: true, jdReadBackVerified: true }),
     }));
   });
+
+  it("does not present an invalid historical score as a five-point result", () => {
+    const summary = evaluateJDFull.formatResult({
+      success: true,
+      data: {
+        company: "纸鸢科技",
+        role: "产品经理",
+        overallScore: 70,
+        blocks: { a: { content: "岗位信息", score: 70 } },
+      },
+    });
+
+    expect(summary).toContain("总分：待复核");
+    expect(summary).toContain("A:待复核");
+    expect(summary).not.toContain("70/5");
+  });
 });

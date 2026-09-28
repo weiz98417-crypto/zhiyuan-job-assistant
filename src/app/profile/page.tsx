@@ -20,6 +20,7 @@ import EditGoalsDialog from "@/components/profile/EditGoalsDialog";
 import EditSkillsDialog from "@/components/profile/EditSkillsDialog";
 import HistoryDetailDialog from "@/components/profile/HistoryDetailDialog";
 import type { ZhiyuanProfile, ProfileHistoryEntry } from "@/types";
+import { isPercentageScore } from "@/lib/score-scale";
 
 /* ── Helpers ── */
 
@@ -281,7 +282,8 @@ export default function ProfilePage() {
   const hasAnyPref = hasIndustryPrefs || hasSalaryPref || likedCompanies.length > 0 || dislikedCompanies.length > 0;
 
   // Level
-  const scoreLevel = getCompetitivenessLevel(marketFit?.overallScore || 0);
+  const marketScore = isPercentageScore(marketFit?.overallScore) ? marketFit.overallScore : null;
+  const scoreLevel = getCompetitivenessLevel(marketScore || 0);
 
   // Dimension breakdown (derived)
   const skillAvgProficiency = hasSkills
@@ -319,15 +321,16 @@ export default function ProfilePage() {
             <Link href="/agent" className="text-[var(--color-primary)] hover:underline ml-1">去更新 →</Link>
           </p>
         </div>
-        {marketFit?.overallScore > 0 && (
+        {marketScore !== null && marketScore > 0 && (
           <div className={`flex items-center gap-3 px-4 py-2 rounded-xl ${scoreLevel.bg}`}>
             <div className="text-right">
               <p className="text-xs text-[var(--color-muted)]">竞争力评级</p>
               <p className={`text-lg font-display font-bold ${scoreLevel.color}`}>{scoreLevel.label}</p>
             </div>
-            <div className="text-3xl font-display font-bold text-[var(--color-primary)]">{marketFit.overallScore}</div>
+            <div className="text-3xl font-display font-bold text-[var(--color-primary)]">{marketScore}</div>
           </div>
         )}
+        {marketScore === null && <p className="text-sm text-[var(--color-muted)]">历史评分超出 0–100，重新分析后显示</p>}
       </div>
 
       {/* ── Card 1: 目标方向 ── */}
@@ -568,12 +571,12 @@ export default function ProfilePage() {
         <div className="mb-4">
           <div className="flex items-center justify-between mb-1">
             <span className="text-xs text-[var(--color-muted)]">综合评分</span>
-            <span className={`text-xs font-medium ${scoreLevel.color}`}>{scoreLevel.label}</span>
+            <span className={`text-xs font-medium ${scoreLevel.color}`}>{marketScore === null ? "待重新分析" : scoreLevel.label}</span>
           </div>
           <div className="h-2.5 rounded-full bg-[var(--color-divider)] overflow-hidden">
             <div
               className={`h-full rounded-full transition-all duration-700 ${scoreLevel.barColor}`}
-              style={{ width: `${Math.max(5, marketFit?.overallScore || 0)}%` }}
+              style={{ width: `${marketScore === null ? 0 : Math.max(5, marketScore)}%` }}
             />
           </div>
           {/* Level markers */}

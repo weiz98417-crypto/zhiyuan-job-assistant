@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { llmRetry } from "@/lib/llm-retry";
+import { computeEvaluationOverallScore } from "@/lib/evaluation-scoring";
+import { isFivePointScore } from "@/lib/score-scale";
 
 const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
 const DEFAULT_MODEL = "deepseek-flash";
@@ -71,7 +73,7 @@ export async function evaluateJobDescription(
     signal: input.signal,
   });
   const parsed = parseCompletion(content);
-  return normalizeEvaluation(parsed, content, input.targetCompany, input.matchResume !== false);
+  return normalizeEvaluation(parsed, input.targetCompany, input.matchResume !== false);
 }
 
 function createDefaultCompletionAdapter(): JDEvaluationCompletionAdapter {
@@ -179,33 +181,50 @@ function parseCompletion(content: string): Record<string, unknown> {
 
 function normalizeEvaluation(
   parsed: Record<string, unknown>,
-  content: string,
   targetCompany?: string,
   matchResume = true,
 ): JDEvaluationResult {
   const scores = objectValue(parsed.scores);
   const keywordCoverage = objectValue(parsed.keywordCoverage);
   const levelMatch = objectValue(parsed.levelMatch);
+  const blockScores = {
+    a: normalizedBlockScore(scores.a),
+    b: matchResume ? normalizedBlockScore(scores.b) : 0,
+    c: normalizedBlockScore(scores.c),
+    d: normalizedBlockScore(scores.d),
+    e: normalizedBlockScore(scores.e),
+    f: normalizedBlockScore(scores.f),
+  };
+  const modelOverallScore = numberValue(parsed.overallScore, Number.NaN);
+  const expectedDimensionKeys = ["a", "b", "c", "d", "e", "f"].filter((key) => matchResume || key !== "b");
+  const validDimensions = expectedDimensionKeys
+    .map((key) => numberValue(scores[key], Number.NaN))
+    .filter(isFivePointScore);
+  const hasPositiveDimension = validDimensions.some((score) => score > 0);
+  if (!validDimensions.length || (!hasPositiveDimension && (
+    modelOverallScore !== 0 || validDimensions.length !== expectedDimensionKeys.length
+  ))) {
+    throw new Error("AI 评分缺少有效的 0–5 分项，请重新评估");
+  }
+  const overallScore = isFivePointScore(modelOverallScore)
+    ? modelOverallScore
+    : computeEvaluationOverallScore(Object.fromEntries(
+        Object.entries(blockScores).map(([key, score]) => [key, { score }]),
+      ));
+  const normalizedBlocks = {
+    ...stringRecord(parsed.blocks),
+    ...(matchResume ? {} : { b: "按用户要求，本次未进行简历匹配。" }),
+  };
+  const normalizedScores = { ...blockScores, g: stringValue(scores.g) };
   return {
     date: new Date().toISOString().slice(0, 10),
     company: targetCompany?.trim() || stringValue(parsed.company, "未知公司"),
     role: stringValue(parsed.role, "未知岗位"),
     archetype: stringValue(parsed.archetype, "未检测"),
-    overallScore: numberValue(parsed.overallScore),
+    overallScore,
     legitimacy: stringValue(parsed.legitimacy, "不确定"),
-    blocks: {
-      ...stringRecord(parsed.blocks),
-      ...(matchResume ? {} : { b: "按用户要求，本次未进行简历匹配。" }),
-    },
-    scores: {
-      a: numberValue(scores.a),
-      b: matchResume ? numberValue(scores.b) : 0,
-      c: numberValue(scores.c),
-      d: numberValue(scores.d),
-      e: numberValue(scores.e),
-      f: numberValue(scores.f),
-      g: stringValue(scores.g),
-    },
+    blocks: normalizedBlocks,
+    scores: normalizedScores,
     keywords: stringArray(parsed.keywords),
     keywordCoverage: matchResume ? {
       overall: numberValue(keywordCoverage.overall),
@@ -229,16 +248,24 @@ function normalizeEvaluation(
       resumeWeakness: stringValue(item.resumeWeakness),
       tip: stringValue(item.tip),
     })) : undefined,
-    fullMarkdown: matchResume ? content : JSON.stringify({
+    fullMarkdown: JSON.stringify({
       ...parsed,
-      blocks: { ...stringRecord(parsed.blocks), b: "按用户要求，本次未进行简历匹配。" },
-      scores: { ...scores, b: 0 },
-      keywordCoverage: undefined,
-      skillGaps: undefined,
-      levelMatch: undefined,
-      differentiationTips: undefined,
+      overallScore,
+      blocks: normalizedBlocks,
+      scores: normalizedScores,
+      ...(matchResume ? {} : {
+        keywordCoverage: undefined,
+        skillGaps: undefined,
+        levelMatch: undefined,
+        differentiationTips: undefined,
+      }),
     }),
   };
+}
+
+function normalizedBlockScore(value: unknown): number {
+  const score = numberValue(value, Number.NaN);
+  return isFivePointScore(score) ? score : 0;
 }
 
 function objectValue(value: unknown): Record<string, unknown> {

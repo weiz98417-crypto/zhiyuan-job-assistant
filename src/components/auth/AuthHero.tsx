@@ -8,11 +8,8 @@ interface AuthHeroProps {
 
 export default function AuthHero({ subtitle }: AuthHeroProps) {
   return (
-    <div style={{
-      background: 'var(--color-surface)',
-      backgroundImage: "linear-gradient(rgba(255, 252, 246, 0.2), rgba(255, 252, 246, 0.2)), url('/backgrounds/login-hero.webp')",
-      backgroundSize: 'cover',
-      backgroundPosition: 'center',
+    <div className="auth-hero" style={{
+      background: 'transparent',
       position: 'relative',
       display: 'flex',
       flexDirection: 'column',
@@ -21,7 +18,6 @@ export default function AuthHero({ subtitle }: AuthHeroProps) {
       padding: '48px',
       overflow: 'hidden',
       minHeight: '100vh',
-      borderRight: '1px solid var(--color-border)',
     }}>
       <div style={{
         position: 'absolute',

@@ -1,4 +1,5 @@
 import { getAgentReadService } from "@/lib/agent/runtime/agent-read-service";
+import { formatFivePointScore } from "@/lib/score-scale";
 import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
 
 async function handler(params: Record<string, unknown>, context?: ToolExecutionContext): Promise<ToolResult> {
@@ -11,7 +12,7 @@ async function handler(params: Record<string, unknown>, context?: ToolExecutionC
       if (listJson.success && Array.isArray(listJson.data)) {
         const reports = (listJson.data as Array<{ report_num: number; company: string; role: string; date: string; overall_score: number }>).slice(0, 20);
         const summary = reports.length === 0 ? "暂无报告" :
-          reports.map(r => `#${r.report_num} ${r.company}-${r.role} | ${r.overall_score}/5 | ${r.date}`).join("\n");
+          reports.map(r => `#${r.report_num} ${r.company}-${r.role} | ${formatFivePointScore(r.overall_score)} | ${r.date}`).join("\n");
         return { success: true, errorCategory: "ok", llmSummary: `共 ${reports.length} 份报告:\n${summary}`, data: listJson.data };
       }
     } catch (err) {
@@ -71,7 +72,7 @@ async function handler(params: Record<string, unknown>, context?: ToolExecutionC
     }
     const llmSummary = [
       `报告 #${d.report_num || "-"}: ${d.company || "未知公司"} — ${d.role || "未知岗位"}`,
-      `总分 ${d.overall_score || "-"}/5；类型 ${d.archetype || "未识别"}；日期 ${d.date || ""}`,
+      `总分 ${formatFivePointScore(d.overall_score)}；类型 ${d.archetype || "未识别"}；日期 ${d.date || ""}`,
       blockHints.length ? `板块摘要:\n${blockHints.join("\n")}` : "报告暂无板块内容。",
       "完整 A-G 正文只在报告详情页展示。聊天里只输出摘要和入口，不要复述完整报告。",
     ].join("\n");

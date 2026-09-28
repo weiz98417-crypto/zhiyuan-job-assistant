@@ -2,6 +2,7 @@ import {
   DurableJDEvaluationInputError,
   runDurableJDEvaluation,
 } from "@/lib/server/durable-jd-evaluation";
+import { formatFivePointScore, isFivePointScore } from "@/lib/score-scale";
 import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
 
 interface EvalJDParams {
@@ -88,13 +89,16 @@ async function handler(
     if (!json.success || !json.data) {
       return { success: false, data: null, error: json.error || "评估返回为空" };
     }
+    if (!isFivePointScore(json.data.overallScore)) {
+      return { success: false, data: null, error: "评估返回的总分超出 0–5 分，请重新评估" };
+    }
 
     return {
       success: true,
       data: {
         company: json.data.company || "未知",
         role: json.data.role || "未知",
-        overallScore: json.data.overallScore || 3,
+        overallScore: json.data.overallScore,
         archetype: json.data.archetype || "",
         blocks: json.data.blocks || {},
         jdText: hasText ? jdText : "",
@@ -111,7 +115,7 @@ async function handler(
 function formatResult(result: ToolResult): string {
   if (!result.success) return `JD 评估失败: ${result.error}`;
   const d = result.data as { company?: string; role?: string; overallScore?: number } | null;
-  return d ? `评估完成: ${d.company} ${d.role}，总分 ${d.overallScore}/5` : "评估完成";
+  return d ? `评估完成: ${d.company} ${d.role}，总分 ${formatFivePointScore(d.overallScore)}` : "评估完成";
 }
 
 export const evaluateJD: ToolDefinition = {

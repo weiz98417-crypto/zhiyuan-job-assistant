@@ -6,6 +6,7 @@ import { Briefcase, Check, FileText, Loader2, Sparkles, Trash2 } from "lucide-re
 import { ScoreBadge, WarmButton } from "@/components/design";
 import type { EvalStreamState } from "@/lib/use-evaluation-stream";
 import { createJD } from "@/lib/jd-storage";
+import { formatFivePointScore, isFivePointScore } from "@/lib/score-scale";
 
 type ButtonState = "idle" | "done";
 
@@ -58,6 +59,10 @@ export default function AgentEvalCard({ evalState }: AgentEvalCardProps) {
 
   const handleAddToTracker = useCallback(async () => {
     if (trackerSaved === "done") return;
+    if (!isFivePointScore(overallScore)) {
+      setActionError("评估分数异常，请重新评估后加入追踪");
+      return;
+    }
     setSaving(true);
     setActionError("");
     try {
@@ -157,11 +162,11 @@ export default function AgentEvalCard({ evalState }: AgentEvalCardProps) {
       {done && (
         <div className="space-y-3 px-4 py-3">
           <div className="space-y-1 text-sm text-[var(--color-text-soft)]">
-            <p>总分 {overallScore}/5 · {archetype || "unknown"}</p>
-            {overallScore >= 4.5 && <p className="text-[var(--color-text)]">匹配度很高，建议优先投递。</p>}
-            {overallScore >= 4.0 && overallScore < 4.5 && <p className="text-[var(--color-text)]">匹配度良好，值得认真准备。</p>}
-            {overallScore >= 3.5 && overallScore < 4.0 && <p className="text-[var(--color-text)]">匹配度尚可，可以尝试。</p>}
-            {overallScore < 3.5 && overallScore > 0 && <p className="text-[var(--color-text)]">匹配度偏低，建议谨慎考虑。</p>}
+            <p>总分 {formatFivePointScore(overallScore)} · {archetype || "unknown"}</p>
+            {isFivePointScore(overallScore) && overallScore >= 4.5 && <p className="text-[var(--color-text)]">匹配度很高，建议优先投递。</p>}
+            {isFivePointScore(overallScore) && overallScore >= 4.0 && overallScore < 4.5 && <p className="text-[var(--color-text)]">匹配度良好，值得认真准备。</p>}
+            {isFivePointScore(overallScore) && overallScore >= 3.5 && overallScore < 4.0 && <p className="text-[var(--color-text)]">匹配度尚可，可以尝试。</p>}
+            {isFivePointScore(overallScore) && overallScore < 3.5 && overallScore > 0 && <p className="text-[var(--color-text)]">匹配度偏低，建议谨慎考虑。</p>}
           </div>
 
           <div className="flex flex-wrap items-center gap-2 border-t border-[var(--color-divider)] pt-3">
@@ -170,7 +175,7 @@ export default function AgentEvalCard({ evalState }: AgentEvalCardProps) {
               {jdSaved === "done" ? "已保存" : "保存到 JD 库"}
             </WarmButton>
 
-            <WarmButton variant={trackerSaved === "done" ? "soft" : "primary"} size="sm" onClick={handleAddToTracker} disabled={trackerSaved === "done" || saving}>
+            <WarmButton variant={trackerSaved === "done" ? "soft" : "primary"} size="sm" onClick={handleAddToTracker} disabled={trackerSaved === "done" || saving || !isFivePointScore(overallScore)}>
               {trackerSaved === "done" ? <Check size={14} className="mr-1" /> : <Briefcase size={14} className="mr-1" />}
               {trackerSaved === "done" ? "已加入追踪" : "加入投递追踪"}
             </WarmButton>

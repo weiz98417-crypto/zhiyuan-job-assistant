@@ -1,3 +1,5 @@
+import { isFivePointScore } from "@/lib/score-scale";
+
 interface ScoreBadgeProps {
   score: number;
   maxScore?: number;
@@ -11,9 +13,12 @@ export default function ScoreBadge({
   size = "md",
   showLabel = true,
 }: ScoreBadgeProps) {
+  const valid = isFivePointScore(score);
   // Color warmth scales with score — warmer = better match
   const warmth =
-    score >= 4.5
+    !valid
+      ? "bg-[var(--color-divider)] text-[var(--color-muted)]"
+      : score >= 4.5
       ? "bg-[var(--color-primary)] text-[var(--color-surface-raised)]"
       : score >= 4.0
         ? "bg-[var(--color-primary-soft)] text-[var(--color-text)]"
@@ -27,12 +32,12 @@ export default function ScoreBadge({
     lg: "text-4xl px-6 py-3 rounded-[var(--radius-lg)]",
   };
 
-  const displayScore = score > 0 ? score.toFixed(1) : "—";
+  const displayScore = !valid ? "待复核" : score > 0 ? score.toFixed(1) : "—";
 
   return (
     <span className={`inline-flex items-baseline gap-1 font-[family-name:var(--font-display)] font-bold ${warmth} ${sizes[size]}`}>
       <span>{displayScore}</span>
-      {showLabel && (
+      {showLabel && valid && (
         <span className="font-[family-name:var(--font-body)] font-normal opacity-70 text-[0.5em]">
           /{maxScore}
         </span>

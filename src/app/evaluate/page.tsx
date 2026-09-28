@@ -5,6 +5,7 @@ import Link from "next/link";
 import { FileText, BookOpen, ArrowRight, Bot, Sparkles } from "lucide-react";
 import { HandwritingTitle, WarmButton, PaperCard } from "@/components/design";
 import { StaggerList, StaggerItem } from "@/components/design/PageTransition";
+import { isFivePointScore } from "@/lib/score-scale";
 
 export default function EvaluatePage() {
   const [jdCount, setJdCount] = useState(0);
@@ -30,7 +31,7 @@ export default function EvaluatePage() {
         setReportCount(serverReports.length);
         const scored = serverReports
           .map((r: Record<string, unknown>) => Number(r.overall_score) || 0)
-          .filter((score: number) => score > 0);
+          .filter((score: number) => isFivePointScore(score) && score > 0);
         setAvgScore(
           scored.length > 0
             ? Math.round((scored.reduce((sum: number, score: number) => sum + score, 0) / scored.length) * 10) / 10
