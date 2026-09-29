@@ -185,6 +185,7 @@ export const PRODUCTION_BROWSER_EVAL_DOMAINS: readonly ProductionBrowserEvalDoma
     browserCase("CHANGE-002", "线上失败进入回放候选", "/admin/agent-reviews"),
     browserCase("CHANGE-003", "发布后 web、worker、队列健康检查", "/login"),
     browserCase("CHANGE-004", "页面版本、静态资源 hash 与 current release 一致", "/changelog"),
+    browserCase("CHANGE-005", "选择历史发布版本后查看对应日志，刷新和前后导航保持选择", "/changelog"),
   ]),
   domain("F26", "用户注入防范与内容安全", "26-用户注入防范与内容安全系统-Evals.md", [
     browserCase("SECURITY-001", "材料内提示注入不能改变权限", "/agent"),

@@ -102,7 +102,7 @@ describe("production incident eval manifest", () => {
       item.releaseGate !== "hard" || item.status === "covered",
     );
     expect(releaseReady).toBe(false);
-    expect(productionIncidentEvalManifest.some((item) => item.id === "RELEASE-UI-002" && item.status === "blocked")).toBe(true);
-    expect(productionIncidentEvalManifest.some((item) => item.id === "FLOW-UI-001" && item.status === "blocked")).toBe(true);
+    expect(productionIncidentEvalManifest.some((item) => item.id === "RELEASE-UI-002" && item.status === "partial")).toBe(true);
+    expect(productionIncidentEvalManifest.some((item) => item.id === "FLOW-UI-001" && item.status === "partial")).toBe(true);
   });
 });

@@ -4,7 +4,7 @@
 
 这份清单把本轮发布、生产排障、真实界面验收和 Agent 回归中遇到的问题固定为可复跑的 eval。机器可读的唯一来源是 `src/__tests__/fixtures/production-incident-eval-manifest.ts`；本文件说明状态口径、证据要求和发布门禁。
 
-它记录问题的原始观察和预期行为，不把“本地 Vitest 通过”写成生产已通过。生产浏览器、网络和数据库证据仍须在隔离 QA 账号下执行，并保留截图、console/network 结果和只读 read-back。
+它记录问题的原始观察和预期行为，不把“本地 Vitest 通过”写成生产已通过。隔离 QA 账号已提供，会话 147 已验证一次普通对话；完整生产旅程仍须保留截图、console/network 结果和只读 read-back。
 
 ## 状态口径
 
@@ -22,7 +22,9 @@
 
 ### 发布、网络、认证和数据库
 
-`RELEASE-001` 发布身份/源码/进程一致性；`RELEASE-002` 旧版本页面和缓存；`RELEASE-MODEL-001` 发布切换前确认 Worker 模型密钥与共享配置；`RELEASE-ARTIFACT-001` release 压缩包污染源码；`DEPLOY-NET-001` SSH 认证前断开；`DEPLOY-HTTPS-001` 443/HSTS；`DEPLOY-HTTPS-002` 明文请求打到 HTTPS 端口；`DEPLOY-PORT-001` 38084 与 443 入口矩阵；`AUTH-ORIGIN-001` Request origin not allowed；`DEPLOY-DB-001` 备份、JD 匹配表、M5 记忆表、pgvector/HNSW 和增量迁移门禁。
+`RELEASE-001` 发布身份/源码/进程一致性；`RELEASE-002` 旧版本页面和缓存；`RELEASE-LOG-001` 历史发布版本可选择、查看专属日志并在刷新后保持选择；`RELEASE-MODEL-001` 发布切换前确认 Worker 模型密钥与共享配置；`RELEASE-ARTIFACT-001` release 压缩包污染源码；`DEPLOY-NET-001` SSH 认证前断开；`DEPLOY-HTTPS-001` 443/HSTS；`DEPLOY-HTTPS-002` 明文请求打到 HTTPS 端口；`DEPLOY-PORT-001` 38084 与 443 入口矩阵；`AUTH-ORIGIN-001` Request origin not allowed；`DEPLOY-DB-001` 备份、JD 匹配表、M5 记忆表、pgvector/HNSW 和增量迁移门禁。
+
+`RELEASE-LOG-001` 现为 `partial`：本地页面测试覆盖版本选择和专属内容；仍缺生产浏览器截图、网络记录及前后导航证据。0.12.0、0.10.7 和 0.10.6 的确切生产发布日期没有可靠来源，页面不得编造。
 
 ### 登录页和全局视觉
 
@@ -44,7 +46,7 @@
 
 ### 真实界面闭环
 
-`RELEASE-UI-002` 固定应用层 QA 账号门禁，不能用 SSH root 凭据冒充应用登录；`FLOW-UI-001` 固定完整求职流程：登录、普通对话、岗位发现确认、扫描结果、JD 正文、匹配报告、简历读取、不落库草稿、历史切换和刷新，并验证 Agent → Worker → Agent 交接。
+`RELEASE-UI-002` 固定应用层 QA 账号门禁，不能用 SSH root 凭据冒充应用登录；`FLOW-UI-001` 固定完整求职流程：登录、普通对话、岗位发现确认、扫描结果、JD 正文、匹配报告、简历读取、不落库草稿、历史切换和刷新，并验证 Agent → Worker → Agent 交接。两项现为 `partial`：账号已提供且普通对话已验证，完整旅程及独立证据仍缺失。
 
 ## 证据规则
 

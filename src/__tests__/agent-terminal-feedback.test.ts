@@ -96,4 +96,20 @@ describe("terminal Agent Run feedback", () => {
     ], { ...run, status: "succeeded" }, "2026-09-29T10:00:05Z");
     expect(result.at(-1)?.itemId).toBe("run-terminal:run-1");
   });
+
+  it("shows missing-reply feedback when local error notices are the only assistant messages", () => {
+    const result = ensureTerminalRunFeedback([
+      user("你好", "2026-09-29T10:00:01Z"),
+      { ...assistant("这条消息暂时未确认送达，请重新发送。", "2026-09-29T10:00:02Z"), itemId: "status:input-error" },
+      { ...assistant("停止请求暂未成功，任务可能仍在运行。", "2026-09-29T10:00:03Z"), itemId: "status:cancel-error" },
+    ], { ...run, status: "succeeded", updatedAt: "2026-09-29T10:00:05Z" }, "2026-09-29T10:00:05Z");
+
+    expect(result.map((message) => message.itemId)).toEqual([
+      undefined,
+      "status:input-error",
+      "status:cancel-error",
+      "run-terminal:run-1",
+    ]);
+    expect(result.at(-1)?.content).toContain("没有收到可展示的回复");
+  });
 });

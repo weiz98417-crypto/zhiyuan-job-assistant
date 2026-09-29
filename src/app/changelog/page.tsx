@@ -2,82 +2,26 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowRight, ScrollText } from "lucide-react";
 import { HandwritingTitle } from "@/components/design";
+import appPackage from "../../../package.json";
+import { releaseNotes } from "./release-notes";
 
 export const metadata: Metadata = {
   title: "版本更新 — 纸鸢 Agent",
-  description: "查看纸鸢 Agent 的版本更新与即将上线的改进。",
+  description: "查看纸鸢 Agent 的当前版本与历史更新。",
 };
 
-const releaseChanges = [
-  {
-    title: "全新界面:纸鸢配色与双面板",
-    description: "界面换上纸鸢朱砂新配色,去掉旧黄色主题;报告和证据材料移入独立的\"分析台\"面板,聊天界面保持清爽;左侧旅程栏一眼看清每段求职任务的进度。",
-  },
-  {
-    title: "任务响应更快、更透明",
-    description: "发出任务后几乎立即开始执行并给出回执,不再出现\"点了没反应\";正在理解、执行、核对到输出的每个阶段都有清晰的进度提示,委派和交接也以卡片形式可见。",
-  },
-  {
-    title: "对话记录不再闪烁或错乱",
-    description: "点击历史会话后立即展示该会话内容，后台刷新只更新当前选中的对话；快速切换也不会把其他对话的消息混进来。",
-  },
-  {
-    title: "简历工作与项目经历分栏",
-    description: "新导入简历会区分工作职责和项目段落；已保存的简历可先预览分栏并撤销，核对无误后再保存。",
-  },
-  {
-    title: "工作台卡片与文字更清晰",
-    description: "各页面改用暖色半透明卡片、细边框与柔和阴影；JD 管理的标题、说明和正文增加底衬与对比度。",
-  },
-  {
-    title: "输入与滚动体验升级",
-    description: "输入框随内容自动伸缩,Enter 发送、Shift+Enter 换行,支持 Ctrl+V 粘贴截图;长对话自动停留在最新消息,向上翻阅时不会被强行拉回底部。",
-  },
-  {
-    title: "高风险操作统一审批卡",
-    description: "写入画像、保存简历等敏感操作会弹出统一的批准/拒绝卡片,处理结果和历史状态一目了然。",
-  },
-  {
-    title: "统一 AI 模型与图片识别",
-    description: "回答、JD 和简历识图及岗位页提取统一使用 deepseek-flash；长图分段识别，部分图片超时仍可先分析已读内容。",
-  },
-  {
-    title: "JD 与简历图片评估",
-    description: "简历截图或 PDF 没有对应 JD 时，也可以直接获得内容、结构和可读性建议；图片读不清时，可以在原对话粘贴文字继续。",
-  },
-  {
-    title: "对话与任务状态",
-    description: "消息确认超时后先核实是否已送达，减少重复执行；切换对话时只显示当前对话的任务，发送失败时保留输入以便重试。",
-  },
-  {
-    title: "JD 匹配范围",
-    description: "JD 默认对照简历；明确要求不匹配后，同一份 JD 的重新分析会延续该要求，换一份 JD 时恢复默认。",
-  },
-  {
-    title: "界面体验",
-    description: "管理入口收进侧边抽屉，并新增版本更新入口；优化对话滚动、历史栏和任务停止操作。",
-  },
-];
+type ChangelogPageProps = {
+  searchParams: Promise<{ version?: string | string[] }>;
+};
 
-const stabilityFixes = [
-  "Agent 的普通对话回复会显示在当前会话，重开历史会话也能读回已保存的回复和图片。",
-  "已保存简历中的工作经历与项目经历可准确分栏，后续导入会保留原文并检查内容完整性。",
-  "历史评估中超出 5 分制的分数标为“待复核”，不再参与推荐、画像和导出；新评估拒绝无效分数。",
-  "画像分数限制在有效范围，旧的异常数值不再作为当前竞争力展示。",
-  "扫描岗位只保存真实 JD 正文；遇到招聘网站的人机验证时明确提示补录，不再把验证页当职位描述。",
-  "登录页左右区域过渡更柔和，首页标题、状态菜单与卡片的层级和遮挡问题已调整。",
-  "版本更新页收紧排版，并列出可核实的历史生产版本。",
-];
+export default async function ChangelogPage({ searchParams }: ChangelogPageProps) {
+  const { version } = await searchParams;
+  const selectedVersion = typeof version === "string" ? version : appPackage.version;
+  const requestedRelease = releaseNotes.find((release) => release.version === selectedVersion);
+  const selectedRelease = requestedRelease
+    ?? releaseNotes.find((release) => release.version === appPackage.version)
+    ?? releaseNotes[0];
 
-const patchFixes = [
-  "本地登录兼容 localhost、127.0.0.1 和 ::1 的回环来源；生产环境继续严格匹配 APP_ORIGIN。",
-  "线上 release 与当前 Git 提交重新对齐，登录页品牌资源、Web 和 Agent Worker 一起更新。",
-  "发布前增加同源与跨源登录验收，避免合法登录再次显示“Request origin is not allowed”。",
-  "修复对话消息对账：一次发送只显示一个用户气泡，真实的连续两次发送仍分别保留。",
-  "修复普通对话无回复：Worker 继承共享模型配置，失败或无正文时给出明确提示。",
-];
-
-export default function ChangelogPage() {
   return (
     <div className="mx-auto w-full max-w-7xl space-y-8 pb-8">
       <header className="page-heading space-y-3">
@@ -87,62 +31,73 @@ export default function ChangelogPage() {
         </div>
         <HandwritingTitle as="h1">版本更新</HandwritingTitle>
         <p className="text-sm leading-7 text-[var(--color-text-soft)]">
-          这里记录已经确认的版本信息，以及正在准备上线的改进。
+          选择版本查看完整记录。开发整合版本会单独标明，未核实的历史变更不会补写。
         </p>
       </header>
 
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
-        <section aria-labelledby="current-version" className="surface-panel rounded-[var(--radius-lg)] p-5 sm:p-7">
-          <div className="flex flex-wrap items-center gap-3">
-            <h2 id="current-version" className="text-2xl font-semibold text-[var(--color-text)]">V0.12.1</h2>
-            <span className="rounded-full bg-[var(--color-primary-muted)] px-3 py-1 text-xs font-medium text-[var(--color-primary)]">当前线上版本</span>
-          </div>
-          <p className="mt-2 text-sm text-[var(--color-text-soft)]">本次补丁已完成生产发布。</p>
-          <div className="mt-6 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-raised)]/70 p-5">
-            <h3 className="font-semibold text-[var(--color-text)]">9 月 29 日 0.12.1 补丁</h3>
-            <ul className="mt-3 list-disc space-y-2 pl-5 text-sm leading-7 text-[var(--color-text-soft)]">
-              {patchFixes.map((fix) => <li key={fix}>{fix}</li>)}
-            </ul>
-          </div>
-          <div className="mt-6 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-raised)]/70 p-5">
-            <h3 className="font-semibold text-[var(--color-text)]">0.12.0 稳定性与体验改进</h3>
-            <ul className="mt-3 list-disc space-y-2 pl-5 text-sm leading-7 text-[var(--color-text-soft)]">
-              {stabilityFixes.map((fix) => <li key={fix}>{fix}</li>)}
-            </ul>
-          </div>
-          <div className="mt-6 grid gap-x-8 sm:grid-cols-2">
-            {releaseChanges.map((change) => (
-              <div key={change.title} className="border-t border-[var(--color-divider)] py-4">
-                <h3 className="font-medium text-[var(--color-text)]">{change.title}</h3>
-                <p className="mt-1 text-sm leading-7 text-[var(--color-text-soft)]">{change.description}</p>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <aside aria-label="历史版本" className="surface-panel rounded-[var(--radius-lg)] p-5 sm:p-6 lg:sticky lg:top-8">
+        <aside aria-label="版本选择" className="surface-panel rounded-[var(--radius-lg)] p-5 sm:p-6 lg:sticky lg:top-8 lg:col-start-2 lg:row-start-1">
           <h2 className="text-base font-semibold text-[var(--color-text)]">历史版本</h2>
-          <ol className="mt-5 space-y-5 border-l border-[var(--color-border)] pl-5">
-            <li className="relative">
-              <span className="absolute -left-[1.55rem] top-2 h-2.5 w-2.5 rounded-full border-2 border-[var(--color-border)] bg-[var(--color-surface-raised)]" />
-              <h3 className="font-semibold text-[var(--color-text)]">V0.12.0</h3>
-              <p className="mt-1 text-sm leading-6 text-[var(--color-text-soft)]">纸鸢 Agent 的主版本，完成双面板工作台、任务轨道、简历分栏和 Agent 运行时稳定性改进。</p>
-            </li>
-            <li className="relative">
-              <span className="absolute -left-[1.55rem] top-2 h-2.5 w-2.5 rounded-full border-2 border-[var(--color-primary)] bg-[var(--color-surface-raised)]" />
-              <h3 className="font-semibold text-[var(--color-text)]">V0.10.7</h3>
-              <p className="mt-1 text-sm leading-6 text-[var(--color-text-soft)]">0.12.0 发布前的生产版本，包含 Agent 稳定性与 JD 匹配范围改进。</p>
-            </li>
-            <li className="relative">
-              <span className="absolute -left-[1.55rem] top-2 h-2.5 w-2.5 rounded-full border-2 border-[var(--color-border)] bg-[var(--color-surface-raised)]" />
-              <h3 className="font-semibold text-[var(--color-text)]">V0.10.6</h3>
-              <p className="mt-1 text-sm leading-6 text-[var(--color-text-soft)]">较早的线上版本。逐项更新记录尚未核实。</p>
-            </li>
-          </ol>
-          <p className="mt-6 border-t border-[var(--color-divider)] pt-4 text-xs leading-6 text-[var(--color-muted)]">
-            0.10.8 与 0.11.0 为开发整合阶段，未单独列为生产发布。
-          </p>
+          <nav aria-label="选择版本" className="mt-4">
+            <ol className="space-y-2">
+              {releaseNotes.map((release) => {
+                const isSelected = release.version === selectedRelease.version;
+                return (
+                  <li key={release.version}>
+                    <Link
+                      href={`/changelog?version=${release.version}`}
+                      aria-current={isSelected ? "page" : undefined}
+                      className={`block rounded-[var(--radius-md)] border px-4 py-3 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-primary)] ${isSelected
+                        ? "border-[var(--color-primary)] bg-[var(--color-primary-muted)]"
+                        : "border-[var(--color-border)] bg-[var(--color-surface-raised)]/50 hover:border-[var(--color-primary)]"}`}
+                    >
+                      <span className="flex items-center justify-between gap-2">
+                        <span className="font-semibold text-[var(--color-text)]">V{release.version}</span>
+                        <span className="text-xs text-[var(--color-text-soft)]">
+                          {release.version === appPackage.version ? "当前线上" : release.stage === "development" ? "开发整合" : "已发布"}
+                        </span>
+                      </span>
+                      <span className="mt-1 block text-xs leading-5 text-[var(--color-text-soft)]">{release.summary}</span>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ol>
+          </nav>
         </aside>
+
+        <section aria-labelledby="selected-version" className="surface-panel rounded-[var(--radius-lg)] p-5 sm:p-7 lg:col-start-1 lg:row-start-1">
+          {!requestedRelease && typeof version === "string" && (
+            <p role="status" className="mb-5 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-raised)]/70 px-4 py-3 text-sm text-[var(--color-text-soft)]">
+              未找到该版本的更新记录，已显示当前版本。
+            </p>
+          )}
+          <div className="flex flex-wrap items-center gap-3">
+            <h2 id="selected-version" className="text-2xl font-semibold text-[var(--color-text)]">V{selectedRelease.version}</h2>
+            <span className="rounded-full bg-[var(--color-primary-muted)] px-3 py-1 text-xs font-medium text-[var(--color-primary)]">
+              {selectedRelease.version === appPackage.version ? "当前线上版本" : selectedRelease.stage === "development" ? "开发整合阶段" : "历史生产版本"}
+            </span>
+          </div>
+          <p className="mt-2 text-sm leading-7 text-[var(--color-text-soft)]">{selectedRelease.summary}</p>
+          {selectedRelease.sections.map((section) => (
+            <div key={section.title} className="mt-6 border-t border-[var(--color-divider)] pt-5">
+              <h3 className="text-base font-semibold text-[var(--color-text)]">{section.title}</h3>
+              <div className="mt-3 grid gap-x-8 sm:grid-cols-2">
+                {section.changes.map((change) => (
+                  <div key={change.title ?? change.description} className="border-t border-[var(--color-divider)] py-4 first:border-t-0 sm:[&:nth-child(2)]:border-t-0">
+                    {change.title && <h4 className="font-medium text-[var(--color-text)]">{change.title}</h4>}
+                    <p className="text-sm leading-7 text-[var(--color-text-soft)]">{change.description}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+          {selectedRelease.caveat && (
+            <p className="mt-5 border-t border-[var(--color-divider)] pt-4 text-sm leading-7 text-[var(--color-text-soft)]">
+              {selectedRelease.caveat}
+            </p>
+          )}
+        </section>
       </div>
 
       <Link href="/agent" className="inline-flex items-center gap-2 text-sm font-medium text-[var(--color-primary)] hover:underline">
