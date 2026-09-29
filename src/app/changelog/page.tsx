@@ -69,6 +69,12 @@ const stabilityFixes = [
   "版本更新页收紧排版，并列出可核实的历史生产版本。",
 ];
 
+const patchFixes = [
+  "本地登录兼容 localhost、127.0.0.1 和 ::1 的回环来源；生产环境继续严格匹配 APP_ORIGIN。",
+  "线上 release 与当前 Git 提交重新对齐，登录页品牌资源、Web 和 Agent Worker 一起更新。",
+  "发布前增加同源与跨源登录验收，避免合法登录再次显示“Request origin is not allowed”。",
+];
+
 export default function ChangelogPage() {
   return (
     <div className="mx-auto w-full max-w-7xl space-y-8 pb-8">
@@ -86,12 +92,18 @@ export default function ChangelogPage() {
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
         <section aria-labelledby="current-version" className="surface-panel rounded-[var(--radius-lg)] p-5 sm:p-7">
           <div className="flex flex-wrap items-center gap-3">
-            <h2 id="current-version" className="text-2xl font-semibold text-[var(--color-text)]">V0.12.0</h2>
+            <h2 id="current-version" className="text-2xl font-semibold text-[var(--color-text)]">V0.12.1</h2>
             <span className="rounded-full bg-[var(--color-primary-muted)] px-3 py-1 text-xs font-medium text-[var(--color-primary)]">当前线上版本</span>
           </div>
-          <p className="mt-2 text-sm text-[var(--color-text-soft)]">本次版本已完成生产发布。</p>
+          <p className="mt-2 text-sm text-[var(--color-text-soft)]">本次补丁已完成生产发布。</p>
           <div className="mt-6 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-raised)]/70 p-5">
-            <h3 className="font-semibold text-[var(--color-text)]">9 月 28 日稳定性修复</h3>
+            <h3 className="font-semibold text-[var(--color-text)]">9 月 29 日 0.12.1 补丁</h3>
+            <ul className="mt-3 list-disc space-y-2 pl-5 text-sm leading-7 text-[var(--color-text-soft)]">
+              {patchFixes.map((fix) => <li key={fix}>{fix}</li>)}
+            </ul>
+          </div>
+          <div className="mt-6 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-raised)]/70 p-5">
+            <h3 className="font-semibold text-[var(--color-text)]">0.12.0 稳定性与体验改进</h3>
             <ul className="mt-3 list-disc space-y-2 pl-5 text-sm leading-7 text-[var(--color-text-soft)]">
               {stabilityFixes.map((fix) => <li key={fix}>{fix}</li>)}
             </ul>
@@ -109,6 +121,11 @@ export default function ChangelogPage() {
         <aside aria-label="历史版本" className="surface-panel rounded-[var(--radius-lg)] p-5 sm:p-6 lg:sticky lg:top-8">
           <h2 className="text-base font-semibold text-[var(--color-text)]">历史版本</h2>
           <ol className="mt-5 space-y-5 border-l border-[var(--color-border)] pl-5">
+            <li className="relative">
+              <span className="absolute -left-[1.55rem] top-2 h-2.5 w-2.5 rounded-full border-2 border-[var(--color-border)] bg-[var(--color-surface-raised)]" />
+              <h3 className="font-semibold text-[var(--color-text)]">V0.12.0</h3>
+              <p className="mt-1 text-sm leading-6 text-[var(--color-text-soft)]">纸鸢 Agent 的主版本，完成双面板工作台、任务轨道、简历分栏和 Agent 运行时稳定性改进。</p>
+            </li>
             <li className="relative">
               <span className="absolute -left-[1.55rem] top-2 h-2.5 w-2.5 rounded-full border-2 border-[var(--color-primary)] bg-[var(--color-surface-raised)]" />
               <h3 className="font-semibold text-[var(--color-text)]">V0.10.7</h3>
