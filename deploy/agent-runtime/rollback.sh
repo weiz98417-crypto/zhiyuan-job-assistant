@@ -5,6 +5,20 @@ APP_ROOT="$(readlink -f "${1:?app root required}")"
 TARGET_RELEASE="$(readlink -f "${2:?rollback release required}")"
 RELEASES_ROOT="$(readlink -f "$APP_ROOT/releases")"
 ARTIFACT_DIR="$APP_ROOT/shared/agent-artifacts"
+SHARED_ENV="$APP_ROOT/shared/secrets/production.env"
+
+clear_inherited_production_env() {
+  local line name
+  unset DB_DRIVER DATABASE_URL DEEPSEEK_API_KEY AGENT_RUNTIME_MODE
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" =~ ^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*= ]]; then
+      name="${BASH_REMATCH[2]}"
+      if [[ "$name" != "AGENT_ARTIFACT_DIR" ]]; then
+        unset "$name"
+      fi
+    fi
+  done < "$SHARED_ENV"
+}
 
 delete_pm2_process() {
   local process_name="$1"
@@ -34,6 +48,19 @@ esac
 
 mkdir -p "$ARTIFACT_DIR"
 export AGENT_ARTIFACT_DIR="$ARTIFACT_DIR"
+if [[ ! -s "$SHARED_ENV" || ! -r "$SHARED_ENV" ]]; then
+  echo "missing shared production environment: $SHARED_ENV" >&2
+  exit 1
+fi
+clear_inherited_production_env
+if [[ -e "$TARGET_RELEASE/.env.local" || -L "$TARGET_RELEASE/.env.local" ]]; then
+  if [[ "$(readlink -f "$TARGET_RELEASE/.env.local")" != "$(readlink -f "$SHARED_ENV")" ]]; then
+    echo "rollback .env.local must point to the shared production environment" >&2
+    exit 1
+  fi
+else
+  ln -s "$SHARED_ENV" "$TARGET_RELEASE/.env.local"
+fi
 if pm2 describe zhiyuan-agent-worker >/dev/null 2>&1; then
   export AGENT_WORKER_PAUSE_CLAIMS=1
   pm2 restart zhiyuan-agent-worker --update-env

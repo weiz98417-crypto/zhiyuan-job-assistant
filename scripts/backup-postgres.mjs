@@ -5,7 +5,7 @@ import path from "path";
 import dotenv from "dotenv";
 import { Pool } from "pg";
 
-dotenv.config({ path: ".env.local" });
+dotenv.config({ path: ".env.local", override: true });
 dotenv.config();
 
 function parseArgs(argv) {

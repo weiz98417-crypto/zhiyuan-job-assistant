@@ -12,7 +12,7 @@ describe("durable interview state live read-back regression", () => {
     const end = source.indexOf("void refreshPersistedMessages();", start);
     const readBack = source.slice(start, end);
 
-    expect(readBack).toContain("setMessages(mergeServerTranscript(messages as MergeableMessage[], session.messages as MergeableMessage[]) as typeof messages);");
+    expect(readBack).toContain("setMessages((current) => mergeServerTranscript(current as MergeableMessage[], session.messages as MergeableMessage[]) as AgentMessage[]);");
     expect(readBack).toContain("setSessions((current) => current.map((item) => item.id === sessionId ? session : item));");
   });
 });

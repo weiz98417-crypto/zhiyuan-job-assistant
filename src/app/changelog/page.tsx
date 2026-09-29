@@ -73,6 +73,8 @@ const patchFixes = [
   "本地登录兼容 localhost、127.0.0.1 和 ::1 的回环来源；生产环境继续严格匹配 APP_ORIGIN。",
   "线上 release 与当前 Git 提交重新对齐，登录页品牌资源、Web 和 Agent Worker 一起更新。",
   "发布前增加同源与跨源登录验收，避免合法登录再次显示“Request origin is not allowed”。",
+  "修复对话消息对账：一次发送只显示一个用户气泡，真实的连续两次发送仍分别保留。",
+  "修复普通对话无回复：Worker 继承共享模型配置，失败或无正文时给出明确提示。",
 ];
 
 export default function ChangelogPage() {

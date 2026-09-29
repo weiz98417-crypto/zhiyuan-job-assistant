@@ -22,11 +22,11 @@
 
 ### 发布、网络、认证和数据库
 
-`RELEASE-001` 发布身份/源码/进程一致性；`RELEASE-002` 旧版本页面和缓存；`RELEASE-ARTIFACT-001` release 压缩包污染源码；`DEPLOY-NET-001` SSH 认证前断开；`DEPLOY-HTTPS-001` 443/HSTS；`DEPLOY-HTTPS-002` 明文请求打到 HTTPS 端口；`DEPLOY-PORT-001` 38084 与 443 入口矩阵；`AUTH-ORIGIN-001` Request origin not allowed；`DEPLOY-DB-001` 备份、JD 匹配表、M5 记忆表、pgvector/HNSW 和增量迁移门禁。
+`RELEASE-001` 发布身份/源码/进程一致性；`RELEASE-002` 旧版本页面和缓存；`RELEASE-MODEL-001` 发布切换前确认 Worker 模型密钥与共享配置；`RELEASE-ARTIFACT-001` release 压缩包污染源码；`DEPLOY-NET-001` SSH 认证前断开；`DEPLOY-HTTPS-001` 443/HSTS；`DEPLOY-HTTPS-002` 明文请求打到 HTTPS 端口；`DEPLOY-PORT-001` 38084 与 443 入口矩阵；`AUTH-ORIGIN-001` Request origin not allowed；`DEPLOY-DB-001` 备份、JD 匹配表、M5 记忆表、pgvector/HNSW 和增量迁移门禁。
 
 ### 登录页和全局视觉
 
-`AUTH-UI-001` 登录页透明/半透明面板与背景层次；`UI-BG-002` 内部背景、白色卡片和文字对比度；`UI-SESSION-001` 历史会话真实切换；`CHAT-REPLY-001` 普通对话无回复；`CHAT-REPLY-002` 空流、断流和 raw tool/DSML 泄露。
+`AUTH-UI-001` 登录页透明/半透明面板与背景层次；`UI-BG-002` 内部背景、白色卡片和文字对比度；`UI-SESSION-001` 历史会话真实切换；`CHAT-REPLY-001` 普通对话无回复；`CHAT-INPUT-001` 单次发送的乐观消息与持久化消息必须对账为一个气泡；`CHAT-REPLY-002` 空流、断流和 raw tool/DSML 泄露。
 
 ### JD、简历和评分页面
 

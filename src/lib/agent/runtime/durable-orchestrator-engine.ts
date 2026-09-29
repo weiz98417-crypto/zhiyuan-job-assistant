@@ -290,6 +290,7 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
     // ambiguous turn into a clarification contract; both are recorded as
     // events so the UI and the audit trail see the same decision.
     let effectiveAgentId = input.run.agentId;
+    let clarificationQuestion: string | null = null;
     try {
       const { resolveIntentEnvelope } = await import("@/lib/agent/intent-envelope");
       const { taskAgentId: envelopeTaskAgentId } = await import("@/lib/agent/guided-session-state");
@@ -302,7 +303,7 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
           runId: input.run.id,
           workerId: input.run.ownerId!,
           fencingToken: input.run.fencingToken,
-          eventType: "run.ui_event",
+          type: "run.ui_event",
           payload: {
             event: {
               type: "intent",
@@ -311,12 +312,15 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
               clarify: envelope.kind === "clarify",
             },
           },
-        } as never);
-        if (envelope.kind === "clarify" || !envelope.envelope.primaryTask) {
+        });
+        if (envelope.kind === "clarify") {
+          clarificationQuestion = envelope.question;
           contract = {
             ...buildContractForTask("general_chat", latestInput),
             successCriteria: ["clarification question asked"],
           };
+        } else if (!envelope.envelope.primaryTask) {
+          contract = buildContractForTask("general_chat", latestInput);
         } else if (
           // Only a confident source may redirect the contract; the regex
           // fallback records its guess as audit but never mutates the run.
@@ -332,18 +336,67 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
             runId: input.run.id,
             workerId: input.run.ownerId!,
             fencingToken: input.run.fencingToken,
-            eventType: "run.ui_event",
+            type: "run.ui_event",
             payload: {
               event: {
                 type: "agent_switch",
                 agentId: effectiveAgentId,
               },
             },
-          } as never);
+          });
         }
       }
     } catch {
       // Envelope failures must never block execution — the admitted contract stands.
+    }
+    if (clarificationQuestion && contract) {
+      const timestamp = new Date().toISOString();
+      const assistantMessage: ExecutionConversationMessage = {
+        role: "assistant",
+        content: clarificationQuestion,
+        timestamp,
+      };
+      const completedConversationMessages = [...conversationMessages, assistantMessage];
+      const completedRunContext = compactExecutionConversation(
+        [...executionContext.messages, assistantMessage],
+        contextLimit,
+      );
+      const contractOutcome = resolveTaskContractRunOutcome(
+        contract,
+        ["clarification question asked"],
+        { requiresClarification: true, hasAssistantResponse: true },
+      );
+      const completion: StoredModelCompletion = {
+        id: randomUUID(),
+        outcome: contractOutcome.status,
+        charCount: clarificationQuestion.length,
+        toolResultCount: 0,
+        assistantText: clarificationQuestion,
+        contractEvaluation: {
+          canClaimSuccess: contractOutcome.gate.canClaimSuccess,
+          completedCriteria: contractOutcome.gate.completedCriteria,
+          unmetCriteria: contractOutcome.gate.unmetCriteria,
+          outcome: contractOutcome.status,
+        },
+      };
+      await this.options.runtime.saveCheckpoint({
+        runId: input.run.id,
+        workerId: input.run.ownerId!,
+        fencingToken: input.run.fencingToken,
+        boundary: "after_model",
+        context: {
+          messages: completedRunContext.messages,
+          conversationMessages: completedConversationMessages,
+          latestInput,
+          compacted: completedRunContext.compacted,
+          omittedMessageCount: completedRunContext.omittedCount,
+          modelCompletion: completion,
+        },
+        plan: rebuiltContext.plan,
+        budgets: input.checkpoint?.budgets || input.run.budgets,
+        factRefs: rebuiltContext.factRefs,
+      });
+      return this.finalizeStoredCompletion(input, completion, completedConversationMessages);
     }
     // M1 gap closure: rebuild the interview/guided prompt context server-side
     // (previously assembled by the browser for the deleted legacy loop).

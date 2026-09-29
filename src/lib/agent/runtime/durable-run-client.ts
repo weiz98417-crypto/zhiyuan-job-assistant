@@ -240,6 +240,15 @@ export async function listActiveDurableAgentRunsClient(
   return Array.isArray(result?.data) ? result.data : [];
 }
 
+export async function listRecentDurableAgentRunsClient(
+  conversationId: number,
+): Promise<AgentRunSnapshot[]> {
+  const result = await requestJson<AgentRunSnapshot[]>(
+    `/api/agent/runs?conversationId=${encodeURIComponent(String(conversationId))}&activeOnly=false`,
+  );
+  return Array.isArray(result?.data) ? result.data : [];
+}
+
 export async function getDurableAgentRunClient(
   runId: string,
 ): Promise<AgentRunSnapshot | null> {

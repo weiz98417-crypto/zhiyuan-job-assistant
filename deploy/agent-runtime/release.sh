@@ -1,10 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 APP_ROOT="$(readlink -f "${1:?app root required}")"
 RELEASE_DIR="$(readlink -f "${2:?release directory required}")"
 RELEASES_ROOT="$(readlink -f "$APP_ROOT/releases")"
 ARTIFACT_DIR="$APP_ROOT/shared/agent-artifacts"
+SHARED_ENV="$APP_ROOT/shared/secrets/production.env"
+
+clear_inherited_production_env() {
+  local line name
+  unset DB_DRIVER DATABASE_URL DEEPSEEK_API_KEY AGENT_RUNTIME_MODE
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" =~ ^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*= ]]; then
+      name="${BASH_REMATCH[2]}"
+      if [[ "$name" != "AGENT_ARTIFACT_DIR" ]]; then
+        unset "$name"
+      fi
+    fi
+  done < "$SHARED_ENV"
+}
 
 delete_pm2_process() {
   local process_name="$1"
@@ -35,11 +50,25 @@ esac
 mkdir -p "$ARTIFACT_DIR"
 export AGENT_ARTIFACT_DIR="$ARTIFACT_DIR"
 
+if [[ ! -s "$SHARED_ENV" || ! -r "$SHARED_ENV" ]]; then
+  echo "missing shared production environment: $SHARED_ENV" >&2
+  exit 1
+fi
+clear_inherited_production_env
+if [[ -e "$RELEASE_DIR/.env.local" || -L "$RELEASE_DIR/.env.local" ]]; then
+  if [[ "$(readlink -f "$RELEASE_DIR/.env.local")" != "$(readlink -f "$SHARED_ENV")" ]]; then
+    echo "release .env.local must point to the shared production environment" >&2
+    exit 1
+  fi
+else
+  ln -s "$SHARED_ENV" "$RELEASE_DIR/.env.local"
+fi
+
 cd "$RELEASE_DIR"
 npm ci --include=dev
 npm run build:production
-npm run backup:postgres
 npm run check:agent-runtime
+npm run backup:postgres
 
 if pm2 describe zhiyuan-agent-worker >/dev/null 2>&1; then
   export AGENT_WORKER_PAUSE_CLAIMS=1

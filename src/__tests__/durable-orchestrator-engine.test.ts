@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   DurableAgentRunService,
   InMemoryAgentRunStore,
@@ -6,6 +6,7 @@ import {
 import { DurableOrchestratorExecutionEngine } from "@/lib/agent/runtime/durable-orchestrator-engine";
 import { AgentWorker } from "@/lib/agent/runtime/agent-worker";
 import { createAgentTaskContract, type AgentTaskType } from "@/lib/agent/task-contract";
+import * as intentEnvelope from "@/lib/agent/intent-envelope";
 
 const ADVISORY_TASKS: AgentTaskType[] = [
   "general_chat",
@@ -28,6 +29,91 @@ const USER_INPUT_TASKS: AgentTaskType[] = [
 ];
 
 describe("Durable Orchestrator execution engine", () => {
+  it("CHAT-REPLY-001 delivers a low-confidence clarification once and resumes the next user turn", async () => {
+    const runtime = new DurableAgentRunService(new InMemoryAgentRunStore());
+    const created = await runtime.createRun(
+      { userId: "user-clarification" },
+      {
+        requestId: "request-clarification",
+        conversationId: 40,
+        taskType: "general_chat",
+        agentId: "general",
+        input: { content: "我想聊聊" },
+        contract: createAgentTaskContract({ taskType: "general_chat", target: "我想聊聊" }),
+      },
+    );
+    const constraints = {
+      writePolicy: "allowed" as const,
+      noProfileWrite: false,
+      noResumeWrite: false,
+      noReferenceResumeWrite: false,
+    };
+    const resolveEnvelope = vi.spyOn(intentEnvelope, "resolveIntentEnvelope")
+      .mockResolvedValueOnce({
+        kind: "clarify",
+        question: "你想先聊岗位选择还是简历？",
+        source: "llm_low_confidence",
+        envelope: {
+          primaryTask: null,
+          constraints,
+          referencedMaterials: [],
+          confidence: "low",
+          audit: ["envelope.llm:low"],
+        },
+      })
+      .mockResolvedValueOnce({
+        kind: "resolved",
+        source: "llm",
+        envelope: {
+          primaryTask: "general_chat",
+          constraints,
+          referencedMaterials: [],
+          confidence: "high",
+          audit: ["envelope.llm:general_chat"],
+        },
+      });
+    let savedConversation: Array<{ role: string; content: string }> = [];
+    const orchestrate = vi.fn(async function* () {
+      yield { type: "text", content: "可以，我们先聊岗位选择。" };
+    });
+    const engine = new DurableOrchestratorExecutionEngine({
+      runtime,
+      loadConversation: async () => savedConversation,
+      saveConversation: async (_principal, _conversationId, messages) => {
+        savedConversation = messages;
+      },
+      orchestrate,
+    });
+    const worker = new AgentWorker({ workerId: "worker-clarification", runtime, engine });
+
+    try {
+      expect((await worker.runOnce())?.status).toBe("waiting_user");
+      expect(orchestrate).not.toHaveBeenCalled();
+      expect(savedConversation.filter((message) => message.role === "assistant").map((message) => message.content)).toEqual([
+        "你想先聊岗位选择还是简历？",
+      ]);
+      const firstEvents = await runtime.listEvents({ userId: "user-clarification" }, created.run.id, 0);
+      expect(firstEvents.filter((event) => event.type === "run.ui_event" && (event.payload.event as { type?: string })?.type === "text")).toHaveLength(1);
+      expect(firstEvents.some((event) => event.type === "run.ui_event" && (event.payload.event as { type?: string })?.type === "intent")).toBe(true);
+      expect(firstEvents.some((event) => event.type === "run.contract_evaluated" && event.payload.canClaimSuccess === true)).toBe(true);
+
+      await runtime.submitInput(
+        { userId: "user-clarification" },
+        created.run.id,
+        "request-clarification-answer",
+        { content: "先聊岗位选择" },
+      );
+      expect((await worker.runOnce())?.status).toBe("succeeded");
+      expect(orchestrate).toHaveBeenCalledTimes(1);
+      expect(savedConversation.filter((message) => message.role === "assistant").map((message) => message.content)).toEqual([
+        "你想先聊岗位选择还是简历？",
+        "可以，我们先聊岗位选择。",
+      ]);
+    } finally {
+      resolveEnvelope.mockRestore();
+    }
+  });
+
   it("satisfies the durable general-chat contract with an assistant response", async () => {
     const runtime = new DurableAgentRunService(new InMemoryAgentRunStore());
     const contract = createAgentTaskContract({ taskType: "general_chat", target: "给出三步计划" });

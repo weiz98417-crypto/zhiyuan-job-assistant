@@ -32,6 +32,7 @@ import {
   DurableRunOwnershipUnknownError,
   getDurableAgentRunClient,
   listActiveDurableAgentRunsClient,
+  listRecentDurableAgentRunsClient,
   observeDurableAgentRun,
   requestDurableAgentRunCancelClient,
   requestDurableAgentRunPauseClient,
@@ -45,6 +46,7 @@ import type { AgentRunSnapshot } from "@/lib/agent/runtime/durable-agent-run";
 import type { AgentRunStatus } from "@/lib/agent/run-ledger";
 import {
   buildRunRecoveryMessage,
+  ensureTerminalRunFeedback,
   shortRunId,
   upsertRunRecoveryStatusMessage,
 } from "@/lib/agent/run-recovery-message";
@@ -762,6 +764,7 @@ export function useAgentConversation() {
     let cancelled = false;
     const sessionId = currentSessionId;
     const generation = sessionGenerationRef.current;
+    const turnGeneration = turnGenerationRef.current;
 
     setActiveRunNotice(null);
     listActiveDurableAgentRunsClient(sessionId)
@@ -770,11 +773,31 @@ export function useAgentConversation() {
         const run = data.find((item) => item.conversationId === sessionId);
         if (run?.status === "waiting_user") {
           const session = await getSession(sessionId, { preferServer: true }).catch(() => undefined);
-          if (cancelled || currentSessionIdRef.current !== sessionId || sessionGenerationRef.current !== generation) return;
+          if (cancelled || currentSessionIdRef.current !== sessionId || sessionGenerationRef.current !== generation
+            || turnGenerationRef.current !== turnGeneration) return;
           if (session) {
-            setMessages(mergeServerTranscript(messages as MergeableMessage[], session.messages as MergeableMessage[]) as typeof messages);
+            setMessages((current) => mergeServerTranscript(current as MergeableMessage[], session.messages as MergeableMessage[]) as AgentMessage[]);
             setSessions((current) => current.map((item) => item.id === sessionId ? session : item));
             durableRunCursorsRef.current[run.id] = Math.max(durableRunCursorsRef.current[run.id] || 0, run.eventCursor);
+          }
+        }
+        if (!run) {
+          const recentRuns = await listRecentDurableAgentRunsClient(sessionId).catch(() => []);
+          if (cancelled || currentSessionIdRef.current !== sessionId || sessionGenerationRef.current !== generation
+            || turnGenerationRef.current !== turnGeneration) return;
+          const latest = recentRuns.find((item) => item.conversationId === sessionId);
+          if (latest && (latest.status === "failed" || latest.status === "succeeded")) {
+            const session = await getSession(sessionId, { preferServer: true }).catch(() => undefined);
+            if (cancelled || currentSessionIdRef.current !== sessionId || sessionGenerationRef.current !== generation
+              || turnGenerationRef.current !== turnGeneration) return;
+            setMessages((current) => ensureTerminalRunFeedback(
+              session
+                ? mergeServerTranscript(current as MergeableMessage[], session.messages as MergeableMessage[]) as AgentMessage[]
+                : current,
+              latest,
+              latest.updatedAt || new Date().toISOString(),
+            ));
+            if (session) setSessions((current) => current.map((item) => item.id === sessionId ? session : item));
           }
         }
         setActiveRunNotice((current) => current?.conversationId === sessionId ? current : run ? activeNoticeFromRun(run) : null);
@@ -811,7 +834,7 @@ export function useAgentConversation() {
         if (!isCurrentConversation()) return;
         if (turnGenerationRef.current !== turnGeneration) return;
         if (session?.messages) {
-          setMessages(mergeServerTranscript(messages as MergeableMessage[], session.messages as MergeableMessage[]) as typeof messages);
+          setMessages((current) => mergeServerTranscript(current as MergeableMessage[], session.messages as MergeableMessage[]) as AgentMessage[]);
           setSessions((current) => current.map((item) => item.id === sessionId ? session : item));
         }
         if (attempt === 7) return;
@@ -845,11 +868,19 @@ export function useAgentConversation() {
               void refreshPersistedMessages();
             }
             if (!NON_TERMINAL_DURABLE_RUN_STATUSES.has(status)) {
+              const terminalTurnGeneration = turnGenerationRef.current;
               setStreaming(false);
               setPhase(null);
               setExecutingTool(undefined);
               if (TERMINAL_DURABLE_RUN_STATUSES.has(status)) {
                 setActiveRunNotice((current) => (current?.id === runId ? null : current));
+                if (status === "failed" || status === "succeeded") {
+                  setMessages((current) => ensureTerminalRunFeedback(
+                    current,
+                    { id: runId, status, createdAt: notice.createdAt, updatedAt: runEvent.createdAt },
+                    runEvent.createdAt,
+                  ));
+                }
               }
               if (sessionId) {
                 const refreshPersistedMessages = async () => {
@@ -858,8 +889,16 @@ export function useAgentConversation() {
                     const session = await getSession(sessionId, { preferServer: true }).catch(() => undefined);
                     if (!isCurrentConversation()) return;
                     if (session?.messages) {
-                      setMessages(mergeServerTranscript(messages as MergeableMessage[], session.messages as MergeableMessage[]) as typeof messages);
-                      setSessions((current) => current.map((item) => item.id === sessionId ? session : item));
+                      setMessages((current) => isCurrentConversation()
+                        ? ensureTerminalRunFeedback(
+                            mergeServerTranscript(current as MergeableMessage[], session.messages as MergeableMessage[]) as AgentMessage[],
+                            { id: runId, status, createdAt: notice.createdAt, updatedAt: runEvent.createdAt },
+                            runEvent.createdAt,
+                          )
+                        : current);
+                      if (turnGenerationRef.current === terminalTurnGeneration) {
+                        setSessions((current) => current.map((item) => item.id === sessionId ? session : item));
+                      }
                     }
                     if (attempt === 7) return;
                     await new Promise<void>((resolve) => window.setTimeout(resolve, 250));
@@ -1025,7 +1064,7 @@ export function useAgentConversation() {
       role: "assistant",
       content,
       timestamp: new Date().toISOString(),
-      itemId: `status:${Date.now()}`,
+      itemId: `status:${createBrowserRequestId()}`,
     }]);
   }, []);
 
@@ -1297,6 +1336,7 @@ export function useAgentConversation() {
       ) {
         const response: AgentMessage = {
           role: "assistant",
+          itemId: `status:${createBrowserRequestId()}`,
           content: "这份 PDF 没有读到可分析的文字。请在当前对话粘贴简历或 JD 正文，我会接着评估；这次没有修改或保存你的简历。",
           timestamp: new Date().toISOString(),
         };
@@ -1379,6 +1419,7 @@ export function useAgentConversation() {
             const next = current.filter((message) => message.timestamp !== userMsg.timestamp);
             return [...next, {
               role: "assistant",
+              itemId: `status:${createBrowserRequestId()}`,
               content: `这条消息暂时未确认送达，请重新发送；当前对话可以继续。 ${userFacingAgentRunError(error)}`,
               timestamp: new Date().toISOString(),
             }];
@@ -1401,7 +1442,7 @@ export function useAgentConversation() {
           setExecutingTool(undefined);
           setMessages((current) => [
             ...current.filter((message) => message.timestamp !== userMsg.timestamp),
-            { role: "assistant", content: "切换任务暂未成功，请重新发送这条消息；当前对话可以继续。", timestamp: new Date().toISOString() },
+            { role: "assistant", itemId: `status:${createBrowserRequestId()}`, content: "切换任务暂未成功，请重新发送这条消息；当前对话可以继续。", timestamp: new Date().toISOString() },
           ]);
           throw error;
         }
@@ -1863,11 +1904,13 @@ export function useAgentConversation() {
           if (next[lastIndex]?.role === "assistant" && !next[lastIndex]?.content) {
             next[lastIndex] = {
               ...next[lastIndex],
+              itemId: `status:${createBrowserRequestId()}`,
               content: "这个请求没有创建可执行的 Agent 任务。请换个说法，或到岗位发现工作台直接发起扫描。",
             };
           } else if (!next[lastIndex] || next[lastIndex]?.role !== "assistant") {
             next.push({
               role: "assistant",
+              itemId: `status:${createBrowserRequestId()}`,
               content: "这个请求没有创建可执行的 Agent 任务。请换个说法，或到岗位发现工作台直接发起扫描。",
               timestamp: new Date().toISOString(),
             });
@@ -1898,9 +1941,9 @@ export function useAgentConversation() {
           const copy = [...prev];
           const last = copy[copy.length - 1];
           if (last && last.role === "assistant" && last.content.trim() === "") {
-            copy[copy.length - 1] = { ...last, content: `注意：${errorMsg}` };
+            copy[copy.length - 1] = { ...last, itemId: `status:${createBrowserRequestId()}`, content: `注意：${errorMsg}` };
           } else if (!last || last.role !== "assistant") {
-            copy.push({ role: "assistant", content: `注意：${errorMsg}`, timestamp: new Date().toISOString() });
+            copy.push({ role: "assistant", itemId: `status:${createBrowserRequestId()}`, content: `注意：${errorMsg}`, timestamp: new Date().toISOString() });
           }
           return copy;
         });
@@ -1956,6 +1999,7 @@ export function useAgentConversation() {
         if (!isCurrentAction()) return;
         setMessages((current) => [...current, {
           role: "assistant",
+          itemId: `status:${createBrowserRequestId()}`,
           content: "停止请求暂未成功，任务可能仍在运行。你可以使用上方“取消”重试。",
           timestamp: new Date().toISOString(),
         }]);

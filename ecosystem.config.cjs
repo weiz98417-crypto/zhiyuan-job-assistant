@@ -1,14 +1,27 @@
 const path = require("path");
-require("dotenv").config({ path: path.join(__dirname, ".env.local") });
-require("dotenv").config();
 
 const releaseDirectory = __dirname;
 const releaseParent = path.dirname(releaseDirectory);
-const appRoot = path.basename(releaseParent) === "releases"
+const releaseMode = path.basename(releaseParent) === "releases";
+const appRoot = releaseMode
   ? path.dirname(releaseParent)
   : releaseParent;
-const artifactDirectory = process.env.AGENT_ARTIFACT_DIR
-  || path.join(appRoot, "shared", "agent-artifacts");
+if (releaseMode) {
+  for (const name of ["DB_DRIVER", "DATABASE_URL", "DEEPSEEK_API_KEY", "AGENT_RUNTIME_MODE"]) {
+    delete process.env[name];
+  }
+}
+const sharedEnvironment = require("dotenv").config({ path: path.join(appRoot, "shared", "secrets", "production.env"), override: true });
+if (releaseMode && ["DB_DRIVER", "DATABASE_URL", "DEEPSEEK_API_KEY", "AGENT_RUNTIME_MODE"].some(
+  (name) => !String(sharedEnvironment.parsed?.[name] || "").trim(),
+)) {
+  throw new Error("missing required shared production environment");
+}
+require("dotenv").config({ path: path.join(releaseDirectory, ".env.local") });
+require("dotenv").config();
+const artifactDirectory = releaseMode
+  ? path.join(appRoot, "shared", "agent-artifacts")
+  : process.env.AGENT_ARTIFACT_DIR || path.join(appRoot, "shared", "agent-artifacts");
 
 module.exports = {
   apps: [

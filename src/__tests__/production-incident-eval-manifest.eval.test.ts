@@ -81,6 +81,17 @@ describe("production incident eval manifest", () => {
     }
   });
 
+  it("keeps the missing reply and duplicate greeting incidents as production hard gates", () => {
+    for (const id of ["RELEASE-MODEL-001", "CHAT-INPUT-001"]) {
+      const incident = productionIncidentEvalManifest.find((item) => item.id === id);
+      expect(incident, id).toBeDefined();
+      expect(incident?.releaseGate, id).toBe("hard");
+      expect(["partial", "covered"], id).toContain(incident?.status);
+      expect(incident?.testIds?.length, id).toBeGreaterThan(0);
+      expect(incident?.requiredProductionEvidence.length, id).toBeGreaterThanOrEqual(4);
+    }
+  });
+
   it("reports every unresolved hard gate and never calls it release-ready", () => {
     const unresolvedHardGates = productionIncidentEvalManifest.filter((item) =>
       item.releaseGate === "hard" && ["blocked", "missing", "manual", "partial"].includes(item.status),

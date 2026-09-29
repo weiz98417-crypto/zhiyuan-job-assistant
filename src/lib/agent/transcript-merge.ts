@@ -2,8 +2,8 @@
  * Transcript 合并（0.11.0-C，ADR-0036）。
  *
  * Worker 是 transcript 唯一写者；本地乐观层只存在于渲染内存。刷新时按稳定
- * 条目标识（itemId，缺失时退化为 role+content+分钟时间戳的伪 id）合并：
- * - 服务端有同名条目 → 以服务端为准（权威落库版本）
+ * 条目标识、附件、内容和时间逐条对账：
+ * - 服务端有对应条目 → 以服务端为准（权威落库版本）
  * - 服务端没有、本地有 → 保留（可能是尚未落库的乐观项）
  * - 顺序以服务端为骨架，本地乐观项按时间就近插入尾部
  */
@@ -13,6 +13,7 @@ export interface MergeableMessage {
   role: string;
   content: string;
   timestamp?: string;
+  images?: string[];
   toolName?: string;
   toolResult?: unknown;
 }
@@ -55,47 +56,57 @@ function closeEnough(left: MergeableMessage, right: MergeableMessage): boolean {
   return Number.isFinite(leftTime) && Number.isFinite(rightTime) && Math.abs(leftTime - rightTime) <= 30_000;
 }
 
+function sameConversationTurn(left: MergeableMessage, right: MergeableMessage): boolean {
+  if (left.role !== right.role || (left.role !== "user" && left.role !== "assistant")) return false;
+  if (!closeEnough(left, right)) return false;
+  const leftImages = left.images || [];
+  const rightImages = right.images || [];
+  const sameImages = leftImages.length === rightImages.length
+    && leftImages.every((image, index) => image === rightImages[index]);
+  if (left.content && left.content === right.content) return sameImages;
+  if (left.role !== "user") return false;
+  if (!left.content && leftImages.length > 0 && sameImages) return true;
+  return leftImages.some((image) => image.startsWith("data:application/pdf"))
+    && rightImages.length === 0
+    && right.content.startsWith(`${left.content}\n\n---\n`);
+}
+
 export function mergeServerTranscript<
   T extends MergeableMessage,
 >(local: readonly T[], server: readonly T[]): Array<T | MergeableMessage> {
-  const serverKeys = new Set(server.map(keyOf));
-  const serverSemantic = new Map<string, T>();
+  const matchedLocal = new Set<number>();
   for (const serverItem of server) {
     const semanticKey = semanticToolKey(serverItem);
-    if (semanticKey) serverSemantic.set(semanticKey, serverItem);
+    const match = local.findIndex((localItem, index) => !matchedLocal.has(index) && (
+      keyOf(localItem) === keyOf(serverItem)
+      || Boolean(semanticKey && semanticKey === semanticToolKey(localItem)
+        && (semanticKey.split("|", 1)[0] || closeEnough(localItem, serverItem)))
+      || sameConversationTurn(localItem, serverItem)
+    ));
+    if (match >= 0) matchedLocal.add(match);
   }
   const merged: Array<T | MergeableMessage> = [];
-  const consumedLocal = new Set<string>();
+  const emittedLocal = new Set<number>();
 
   for (let index = 0; index < server.length; index += 1) {
     const serverItem = server[index];
     // Attach trailing local optimistic items that belong before this server item.
-    for (const localItem of local) {
-      const lKey = keyOf(localItem);
-      if (consumedLocal.has(lKey) || serverKeys.has(lKey)) continue;
-      const semanticKey = semanticToolKey(localItem);
-      const semanticMatch = semanticKey ? serverSemantic.get(semanticKey) : undefined;
-      const hasRunId = Boolean(semanticKey && semanticKey.split("|", 1)[0]);
-      if (semanticMatch && (hasRunId || closeEnough(localItem, semanticMatch))) {
-        consumedLocal.add(lKey);
-        continue;
-      }
+    for (let localIndex = 0; localIndex < local.length; localIndex += 1) {
+      if (matchedLocal.has(localIndex) || emittedLocal.has(localIndex)) continue;
+      const localItem = local[localIndex];
       const localTs = Date.parse(localItem.timestamp || "") || 0;
       const serverTs = Date.parse(serverItem.timestamp || "") || Number.MAX_SAFE_INTEGER;
       if (localTs <= serverTs) {
         merged.push(localItem);
-        consumedLocal.add(lKey);
+        emittedLocal.add(localIndex);
       }
     }
     merged.push(serverItem);
   }
   // Any remaining local items (never acknowledged by the server) keep render state.
-  for (const localItem of local) {
-    const lKey = keyOf(localItem);
-    if (!consumedLocal.has(lKey) && !serverKeys.has(lKey)) {
-      merged.push(localItem);
-      consumedLocal.add(lKey);
-    }
+  for (let localIndex = 0; localIndex < local.length; localIndex += 1) {
+    if (matchedLocal.has(localIndex) || emittedLocal.has(localIndex)) continue;
+    merged.push(local[localIndex]);
   }
   return merged;
 }

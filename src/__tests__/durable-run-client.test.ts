@@ -4,6 +4,7 @@ import {
   DurableRunOwnershipUnknownError,
   getDurableAgentRunClient,
   listActiveDurableAgentRunsClient,
+  listRecentDurableAgentRunsClient,
   observeDurableAgentRun,
   pollDurableAgentRunEventsClient,
   requestDurableAgentRunCancelClient,
@@ -279,6 +280,23 @@ describe("Durable Agent Run browser adapter", () => {
     expect(runs[0]?.id).toBe("run-1");
     expect(run?.eventCursor).toBe(4);
     expect(batch?.cursor).toBe(4);
+  });
+
+  it("reads terminal snapshots for a refreshed conversation", async () => {
+    const fetchMock = vi.fn(async () => Response.json({
+      success: true,
+      enabled: true,
+      data: [{ id: "run-1", status: "failed", conversationId: 12 }],
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const runs = await listRecentDurableAgentRunsClient(12);
+
+    expect(runs[0]?.status).toBe("failed");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/agent/runs?conversationId=12&activeOnly=false",
+      expect.objectContaining({ cache: "no-store" }),
+    );
   });
 
   it("falls back from SSE to cursor polling without cancelling the Run", async () => {

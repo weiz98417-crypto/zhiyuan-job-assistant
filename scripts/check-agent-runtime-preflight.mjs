@@ -3,8 +3,10 @@ import path from "node:path";
 import dotenv from "dotenv";
 import pg from "pg";
 
-dotenv.config({ path: path.join(process.cwd(), ".env.local") });
+const localEnvironment = dotenv.config({ path: path.join(process.cwd(), ".env.local"), override: true });
 dotenv.config();
+const releaseMode = path.basename(path.dirname(process.cwd())) === "releases";
+const runtimeConfig = releaseMode ? localEnvironment.parsed || {} : process.env;
 
 const WORKER_ARTIFACT = "build/agent-worker.mjs";
 const REQUIRED_TABLES = [
@@ -26,10 +28,10 @@ const failures = [];
 const report = {
   ok: false,
   workerArtifact: fs.existsSync(path.join(process.cwd(), WORKER_ARTIFACT)),
-  artifactDirectory: String(process.env.AGENT_ARTIFACT_DIR || "").trim(),
+  artifactDirectory: String(runtimeConfig.AGENT_ARTIFACT_DIR || "").trim(),
   artifactDirectoryWritable: false,
-  databaseDriver: String(process.env.DB_DRIVER || "").trim().toLowerCase(),
-  runtimeMode: String(process.env.AGENT_RUNTIME_MODE || "").trim(),
+  databaseDriver: String(runtimeConfig.DB_DRIVER || "").trim().toLowerCase(),
+  runtimeMode: String(runtimeConfig.AGENT_RUNTIME_MODE || "").trim(),
   tables: {},
   extensions: {},
   indexes: {},
@@ -43,16 +45,26 @@ function fail(message) { failures.push(message); }
 
 if (!report.workerArtifact) fail(`Missing ${WORKER_ARTIFACT}`);
 if (!report.artifactDirectory) fail("AGENT_ARTIFACT_DIR is required");
-else if (!fs.existsSync(report.artifactDirectory)) fail(`AGENT_ARTIFACT_DIR does not exist: ${report.artifactDirectory}`);
 else {
-  try {
-    fs.accessSync(report.artifactDirectory, fs.constants.W_OK);
-    report.artifactDirectoryWritable = true;
-  } catch { fail(`AGENT_ARTIFACT_DIR is not writable: ${report.artifactDirectory}`); }
+  if (releaseMode) {
+    const expectedArtifactDirectory = path.join(path.dirname(path.dirname(process.cwd())), "shared", "agent-artifacts");
+    if (path.resolve(report.artifactDirectory) !== path.resolve(expectedArtifactDirectory)) {
+      fail("AGENT_ARTIFACT_DIR must use the shared production artifact directory");
+    }
+  }
+  if (!fs.existsSync(report.artifactDirectory)) fail(`AGENT_ARTIFACT_DIR does not exist: ${report.artifactDirectory}`);
+  else {
+    try {
+      fs.accessSync(report.artifactDirectory, fs.constants.W_OK);
+      report.artifactDirectoryWritable = true;
+    } catch { fail(`AGENT_ARTIFACT_DIR is not writable: ${report.artifactDirectory}`); }
+  }
 }
 if (report.databaseDriver !== "postgres") fail("DB_DRIVER must be postgres");
 if (report.runtimeMode !== "worker_all") fail("AGENT_RUNTIME_MODE must be worker_all");
-const connectionString = String(process.env.DATABASE_URL || "").trim();
+const modelKey = String(runtimeConfig.DEEPSEEK_API_KEY || "").trim();
+if (!modelKey || modelKey === "your_deepseek_api_key_here") fail("DEEPSEEK_API_KEY is required for the Agent Worker");
+const connectionString = String(runtimeConfig.DATABASE_URL || "").trim();
 if (!connectionString) fail("DATABASE_URL is required");
 
 if (connectionString) {
