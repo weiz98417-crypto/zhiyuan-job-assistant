@@ -4,8 +4,8 @@ import AuthGate from "@/components/shell/AuthGate";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "筝筝纸鸢 — AI 求职助手",
-  description: "一个有温度的 AI 求职引擎——让求职从焦虑变掌控",
+  title: "纸鸢 Agent — AI 求职助手",
+  description: "让每一份认真，都走向更大的机会",
 };
 
 export default function RootLayout({

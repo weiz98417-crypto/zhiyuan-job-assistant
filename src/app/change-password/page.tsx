@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { KeyRound } from 'lucide-react';
+import BrandLogo from '@/components/brand/BrandLogo';
 
 export default function ChangePasswordPage() {
   const [currentPassword, setCurrentPassword] = useState('');
@@ -40,6 +41,7 @@ export default function ChangePasswordPage() {
   return (
     <main className="min-h-screen bg-[var(--color-bg)] flex items-center justify-center p-6">
       <section className="w-full max-w-md border border-[var(--color-border)] bg-[var(--color-surface)] p-8 rounded-[var(--radius-sm)]">
+        <BrandLogo variant="full" size="sm" className="mb-6" />
         <div className="flex items-center gap-3 mb-6">
           <KeyRound size={22} />
           <h1 className="text-xl font-semibold">设置新密码</h1>

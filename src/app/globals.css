@@ -2,7 +2,7 @@
 @import "lxgw-wenkai-webfont/lxgwwenkai-regular.css";
 @import "lxgw-wenkai-webfont/lxgwwenkai-bold.css";
 
-/* ── Design System: 筝筝纸鸢 Frontend ── */
+/* ── Design System: 纸鸢 Agent Frontend ── */
 /* Creative North Star: "一页翻开的手帳 · 双面画布" */
 /* Color Strategy: 纸鸢令牌 v2（0.11.0-D 样张定稿）— 暖白瓷画布 / 朱砂情感轴 / 深炭分析面 */
 /* 基准: 去黄化 claude 系 DESIGN.md(awesome-design-md),色值与样张 v2 一致 */
@@ -10,20 +10,31 @@
 /* ── Light Mode (Default) ── */
 /* Scene: 暖白瓷纸上的手帳,朱砂只作情感与决策色 */
 :root {
-  /* Primary — 朱砂 zhusha #c0502f: the committed voice */
-  --color-primary: oklch(53% 0.135 40);
-  --color-primary-hover: oklch(46% 0.125 40);
-  --color-primary-soft: oklch(92% 0.03 50);
-  --color-primary-muted: oklch(95% 0.018 50);
+  --brand-coral: #E26B5A;
+  --brand-paper: #F7F3EC;
+  --brand-ink: #2E2E2E;
+  --brand-neutral: #D9D5CC;
+  --brand-background: #FAFAF8;
+  --brand-logo-ink: var(--brand-ink);
+  --brand-logo-paper: var(--brand-paper);
+  --brand-logo-coral: var(--brand-coral);
+  --brand-logo-neutral: var(--brand-neutral);
+  --brand-logo-background: var(--brand-background);
+
+  /* Primary action — 深朱砂 #C65345; Logo and route accents use --brand-coral */
+  --color-primary: #C65345;
+  --color-primary-hover: #A84438;
+  --color-primary-soft: #F6D9D2;
+  --color-primary-muted: #FBEDE9;
 
   /* Semantic amber — 仅警示用(风险/待办),不作主色 */
   --color-warn: oklch(68% 0.12 75);
 
   /* Surface — 暖白瓷 baseline, never pure white */
-  --color-bg: oklch(97.5% 0.004 90);
-  --color-surface: oklch(99% 0.003 95 / 0.88);
-  --color-surface-soft: oklch(95% 0.006 95);
-  --color-surface-raised: oklch(100% 0 0);
+  --color-bg: var(--brand-background);
+  --color-surface: #FCFAF5;
+  --color-surface-soft: var(--brand-paper);
+  --color-surface-raised: #FEFDFB;
 
   --card-surface: color-mix(in srgb, var(--color-surface) 78%, transparent);
   --card-surface-hover: color-mix(in srgb, var(--color-primary-soft) 30%, var(--card-surface) 70%);
@@ -33,13 +44,13 @@
   --card-highlight: color-mix(in srgb, var(--color-surface-raised) 68%, transparent);
 
   /* Text — 墨色阶 ink/body/muted */
-  --color-text: oklch(23% 0.005 90);
-  --color-text-soft: oklch(36% 0.006 95);
-  --color-muted: oklch(45% 0.008 95);
+  --color-text: var(--brand-ink);
+  --color-text-soft: #514F4B;
+  --color-muted: #77736D;
 
   /* Borders & Dividers — hairline #e8e5de */
-  --color-border: oklch(91% 0.007 95);
-  --color-divider: oklch(94% 0.005 95);
+  --color-border: var(--brand-neutral);
+  --color-divider: #E8E4DC;
 
   /* Analyst face — 深炭 #191712 / #22201a / #35322a(AnalystCanvas 消费 --color-analyst-*) */
   --color-analyst-bg: #191712;
@@ -97,17 +108,20 @@
 /* ── Dark Mode ── */
 /* Scene: 深炭画布上的手帳 — 朱砂提亮一档,墨色阶反转 */
 .dark {
-  --color-primary: oklch(68% 0.115 40);
-  --color-primary-hover: oklch(73% 0.12 40);
-  --color-primary-soft: oklch(32% 0.06 40);
-  --color-primary-muted: oklch(26% 0.03 40);
+  --brand-logo-ink: var(--brand-background);
+  --brand-logo-paper: var(--brand-paper);
+  --brand-logo-coral: #F07A68;
+  --color-primary: #F07A68;
+  --color-primary-hover: #FF9989;
+  --color-primary-soft: #4B2924;
+  --color-primary-muted: #38231F;
 
   --color-warn: oklch(75% 0.12 75);
 
-  --color-bg: oklch(17% 0.006 90);
-  --color-surface: oklch(21% 0.007 95 / 0.9);
-  --color-surface-soft: oklch(25% 0.008 95);
-  --color-surface-raised: oklch(26% 0.008 95);
+  --color-bg: #1D1B19;
+  --color-surface: #25221F;
+  --color-surface-soft: #302B26;
+  --color-surface-raised: #37312B;
 
   --card-surface: color-mix(in srgb, var(--color-surface) 82%, transparent);
   --card-surface-hover: color-mix(in srgb, var(--color-primary-soft) 30%, var(--card-surface) 70%);
@@ -116,12 +130,12 @@
   --card-border: color-mix(in srgb, var(--color-border) 80%, var(--color-primary) 20%);
   --card-highlight: color-mix(in srgb, white 14%, transparent);
 
-  --color-text: oklch(93% 0.005 95);
-  --color-text-soft: oklch(80% 0.006 95);
-  --color-muted: oklch(70% 0.008 95);
+  --color-text: #F7F3EC;
+  --color-text-soft: #D9D5CC;
+  --color-muted: #AAA39A;
 
-  --color-border: oklch(32% 0.008 95);
-  --color-divider: oklch(26% 0.006 95);
+  --color-border: #514A43;
+  --color-divider: #3A342F;
   --workbench-backdrop-overlay: rgba(17, 18, 15, 0.7);
   --workbench-analyst-overlay: rgba(17, 18, 15, 0.73);
 
@@ -159,6 +173,68 @@ body {
   font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+.brand-logo {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--brand-logo-ink, var(--brand-ink));
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.brand-logo-tone-auto {
+  --brand-logo-ink: var(--brand-ink);
+  --brand-logo-paper: var(--brand-paper);
+  --brand-logo-coral: var(--brand-coral);
+  --brand-logo-neutral: var(--brand-neutral);
+  --brand-logo-background: var(--brand-background);
+}
+
+.brand-logo-tone-light {
+  --brand-logo-ink: var(--brand-background);
+  --brand-logo-paper: var(--brand-paper);
+  --brand-logo-coral: #F07A68;
+  --brand-logo-neutral: #D9D5CC;
+  --brand-logo-background: var(--brand-background);
+}
+
+.brand-logo-tone-dark {
+  --brand-logo-ink: var(--brand-ink);
+  --brand-logo-paper: var(--brand-paper);
+  --brand-logo-coral: var(--brand-coral);
+  --brand-logo-neutral: var(--brand-neutral);
+  --brand-logo-background: var(--brand-background);
+}
+
+.dark .brand-logo-tone-auto {
+  --brand-logo-ink: #FAFAF8;
+  --brand-logo-paper: var(--brand-paper);
+  --brand-logo-coral: #F07A68;
+  --brand-logo-neutral: #D9D5CC;
+  --brand-logo-background: #2E2E2E;
+}
+
+.brand-logo-wordmark {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.24em;
+  color: var(--brand-logo-ink, var(--brand-ink));
+  line-height: 1;
+}
+
+.brand-logo-cn {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.brand-logo-en {
+  font-family: var(--font-body);
+  font-size: 0.58em;
+  font-weight: 400;
+  letter-spacing: 0.14em;
 }
 
 /* Reduced motion */

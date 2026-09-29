@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-labelledby="title desc">
+  <title id="title">纸鸢 Agent</title>
+  <desc id="desc">深色背景上的折纸飞鸟与朱砂飞行轨迹</desc>
+  <path d="M14 68V25l43 20-17 18z" fill="#F7F3EC" stroke="#D9D5CC" stroke-width="1.5"/>
+  <path d="M14 25 70 9 42 52 42 35z" fill="#F07A68"/>
+  <path d="m14 25 28 10-2 28z" fill="#FAFAF8"/>
+  <path d="M14 76c15-12 27-13 39-24 8-7 10-14 17-23" fill="none" stroke="#F07A68" stroke-linecap="round" stroke-width="2.5"/>
+  <circle cx="72" cy="27" r="4" fill="#F07A68"/>
+</svg>

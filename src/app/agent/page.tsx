@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { User, Bot } from "lucide-react";
 import { HandwritingTitle, WarmButton } from "@/components/design";
+import BrandLogo from "@/components/brand/BrandLogo";
 import AgentChat from "@/components/agent/AgentChat";
 import { DEFAULT_SUGGESTIONS } from "@/components/agent/SuggestionChips";
 import type { SuggestionChip } from "@/components/agent/SuggestionChips";
@@ -145,6 +146,7 @@ function AgentPageInner() {
                 AI 求职伙伴
               </p>
               <div className="flex items-center gap-2">
+                <BrandLogo variant="mark" size="sm" />
                 <HandwritingTitle as="h1">纸鸢 Agent</HandwritingTitle>
                 {activeAgent && activeAgent.id !== "general" && (
                   <span

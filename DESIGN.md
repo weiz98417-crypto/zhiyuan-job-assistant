@@ -2,12 +2,18 @@
 
 ---
 name: Career-Ops Frontend
-description: 一个有温度的 AI 求职引擎界面——让求职从焦虑变掌控
+description: 纸鸢 Agent，一个让每一份认真走向更大机会的 AI 求职引擎
 ---
 
 # Design System: Career-Ops Frontend
 
 ## 1. Overview
+
+Visible brand: **纸鸢 Agent**. The repository's historical product identifier remains internal and is not used in user-facing copy.
+
+The visual identity is built from a folded paper bird, a coral flight path, and small route nodes. The bird represents a candidate's direction, the path represents guided progress, and the nodes represent decisions that can be checked and revisited. Use the supplied board images as brand references; use the transparent mark assets in `public/brand` in the product UI.
+
+Asset usage: `zhiyuan-mark.svg` is for light paper surfaces, `zhiyuan-mark-dark.svg` is for dark surfaces, and `BrandLogo` is the responsive in-app wordmark component. Do not use the full brand board image as a UI background because its sample text and layout compete with live content.
 
 **Creative North Star: "一页翻开的手帐"**
 
@@ -28,11 +34,18 @@ description: 一个有温度的 AI 求职引擎界面——让求职从焦虑变
 
 **The Committed Rule.** 一个主色承担界面 30-50% 的色彩面积。它不是点缀——它是这个产品的身份。辅色淡雅柔和，服务于层级区分而非视觉竞争。
 
+### Brand Palette
+- **Coral** `#E26B5A`: flight paths, active steps, primary actions.
+- **Paper** `#F7F3EC`: warm surfaces and folded-paper motifs.
+- **Ink** `#2E2E2E`: headings and high-contrast text.
+- **Neutral** `#D9D5CC`: dividers, outlines, and inactive nodes.
+- **Background** `#FAFAF8`: page canvas and logo negative space.
+
 ### Primary
-- **[纸鸢朱砂 Zhusha]**（已定稿，0.11.0-D 样张 v2）: 主品牌色，#c0502f ≈ oklch(53% 0.135 40)。用于关键操作按钮（批准/发送）、主责徽章、审批卡描边、活跃旅程图标。求职语境里红色读作"喜"，黄色读作"黄了"——这是 0.11.0 去黄化的原因。Hover 用深一档 #a0411f；淡出层 zhusha-soft #f5e3da。
+- **[纸鸢朱砂 Coral]**: 主品牌色 `#E26B5A`。用于 Logo、飞行轨迹和节点；关键操作使用满足对比度要求的深朱砂 `#C65345`，hover 使用 `#A84438`，淡出层使用 `#FBEDE9`。
 
 ### Neutral
-- **[暖白瓷 Porcelain Canvas]**（已定稿）: 页面底色 #f8f7f4；卡面 #fdfcf9；软面 #f2f0eb；hairline #e8e5de。
+- **[暖白瓷 Porcelain Canvas]**: 页面底色 `#FAFAF8`；卡面 `#FCFAF5`；软面 `#F7F3EC`；hairline `#D9D5CC`。
 - **[墨色阶 Ink]**（已定稿）: ink #1f1e1b / body #3d3c38 / muted #76736b。
 - **[深炭分析面 Analyst Dark]**（已定稿）: 分析面底 #191712、卡面 #22201a、边界 #35322a、字 #f2efe7 / #9b968a。工作台 = 分析面全屏态。
 

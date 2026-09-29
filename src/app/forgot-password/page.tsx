@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { ArrowLeft, KeyRound } from 'lucide-react';
+import BrandLogo from '@/components/brand/BrandLogo';
 
 export default function ForgotPasswordPage() {
   const [account, setAccount] = useState('');
@@ -37,11 +38,9 @@ export default function ForgotPasswordPage() {
     <main className="flex min-h-screen items-center justify-center bg-[var(--color-bg)] px-6 py-12">
       <div className="w-full max-w-[420px]">
         <header className="mb-10 text-center">
-          <p className="text-[11px] font-semibold uppercase text-[var(--color-muted)]">
-            AI &times; Career Journal
-          </p>
-          <p className="mt-2 font-[family-name:var(--font-display)] text-2xl font-bold text-[var(--color-text)]">
-            筝筝<span className="text-[var(--color-primary)]">纸鸢</span>
+          <BrandLogo variant="full" size="md" />
+          <p className="mt-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--color-muted)]">
+            AI CAREER AGENT
           </p>
         </header>
 

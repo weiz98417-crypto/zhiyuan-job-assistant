@@ -54,6 +54,7 @@ import { useTheme } from "@/components/providers/ThemeProvider";
 import { createPortal } from "react-dom";
 import { motion } from "framer-motion";
 import { ToastProvider } from "@/lib/use-toast";
+import BrandLogo from "@/components/brand/BrandLogo";
 interface PaletteSession { id: number; title: string; }
 
 interface UserInfo {
@@ -263,12 +264,10 @@ export default function WorkbenchShell({ children }: { children: ReactNode }) {
             }`}
           >
             {/* Brand */}
-            <div className={`mb-6 ${isWorkspacePage && navCollapsed ? "px-1 text-center" : "px-4"}`}>
-              <h1 className={`font-[family-name:var(--font-display)] text-xl font-bold text-[var(--color-text)] ${isWorkspacePage && navCollapsed ? "text-base" : ""}`}>
-                筝筝纸鸢
-              </h1>
+            <div className={`mb-6 ${isWorkspacePage && navCollapsed ? "px-1 flex justify-center" : "px-4"}`}>
+              {isWorkspacePage && navCollapsed ? <BrandLogo variant="mark" size="sm" /> : <BrandLogo variant="full" size="sm" />}
               {!(isWorkspacePage && navCollapsed) && (
-                <p className="text-xs text-[var(--color-muted)] mt-1">AI 求职手帳</p>
+                <p className="text-xs text-[var(--color-muted)] mt-2 pl-10">AI 求职助手</p>
               )}
             </div>
 
@@ -436,7 +435,7 @@ export default function WorkbenchShell({ children }: { children: ReactNode }) {
                 <Menu size={18} />
                 菜单
               </button>
-              <span className="font-[family-name:var(--font-display)] font-bold text-[var(--color-text)]">筝筝纸鸢</span>
+              <BrandLogo variant="full" size="xs" />
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -535,7 +534,7 @@ export default function WorkbenchShell({ children }: { children: ReactNode }) {
               <div className="absolute inset-0 bg-black/40" onClick={() => setMobileRailOpen(false)} />
               <div className="absolute left-0 top-0 bottom-0 w-[min(300px,85vw)] bg-[var(--color-surface)] border-r border-[var(--color-border)] flex flex-col">
                 <div className="flex items-center justify-between border-b border-[var(--color-divider)] px-4 py-3">
-                  <span className="font-[family-name:var(--font-display)] font-bold text-[var(--color-text)]">筝筝纸鸢</span>
+                  <BrandLogo variant="full" size="sm" />
                   <button type="button" onClick={() => setMobileRailOpen(false)} aria-label="关闭菜单" className="rounded-[var(--radius-sm)] p-2 text-[var(--color-muted)] hover:bg-[var(--color-primary-muted)]">
                     <X size={18} />
                   </button>

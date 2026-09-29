@@ -4,8 +4,8 @@ import { ArrowRight, ScrollText } from "lucide-react";
 import { HandwritingTitle } from "@/components/design";
 
 export const metadata: Metadata = {
-  title: "版本更新 — 筝筝纸鸢",
-  description: "查看筝筝纸鸢的版本更新与即将上线的改进。",
+  title: "版本更新 — 纸鸢 Agent",
+  description: "查看纸鸢 Agent 的版本更新与即将上线的改进。",
 };
 
 const releaseChanges = [

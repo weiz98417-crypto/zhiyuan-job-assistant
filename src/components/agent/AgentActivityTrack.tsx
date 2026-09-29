@@ -15,28 +15,28 @@ import { useTheme } from "@/components/providers/ThemeProvider";
  * 避免暗色模式下 antd 默认亮面反白。
  */
 const PAPER_SEED = {
-  colorPrimary: "#c0502f",
-  colorInfo: "#c0502f",
+  colorPrimary: "var(--color-primary)",
+  colorInfo: "var(--color-primary)",
   borderRadius: 8,
   fontFamily: '"Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif',
 };
 
 const LIGHT_SEED = {
   ...PAPER_SEED,
-  colorBorder: "#e8e5de",
-  colorBorderSecondary: "#e8e5de",
-  colorBgContainer: "#fdfcf9",
-  colorText: "#1f1e1b",
-  colorTextDescription: "#76736b",
+  colorBorder: "var(--color-border)",
+  colorBorderSecondary: "var(--color-border)",
+  colorBgContainer: "var(--color-surface)",
+  colorText: "var(--color-text)",
+  colorTextDescription: "var(--color-muted)",
 };
 
 const DARK_SEED = {
   ...PAPER_SEED,
-  colorBorder: "#3a362e",
-  colorBorderSecondary: "#3a362e",
-  colorBgContainer: "#262420",
-  colorText: "#f2efe7",
-  colorTextDescription: "#9b968a",
+  colorBorder: "var(--color-border)",
+  colorBorderSecondary: "var(--color-border)",
+  colorBgContainer: "var(--color-surface)",
+  colorText: "var(--color-text)",
+  colorTextDescription: "var(--color-muted)",
 };
 
 interface AgentActivityTrackProps {
@@ -94,17 +94,17 @@ export default function AgentActivityTrack({
   const progress = evalProgress.length > 0 ? Math.round((completedBlocks / evalProgress.length) * 100) : undefined;
   const timelineItems = [
     ...(thinkingContent ? [{
-      color: isPaused ? "#d99a38" : isWaiting ? "#d99a38" : "#8c6a4a",
+      color: isPaused ? "var(--color-warn)" : isWaiting ? "var(--color-warn)" : "var(--color-primary)",
       dot: isPaused ? <PauseCircle size={15} /> : isWaiting ? <CircleDashed size={15} /> : <ShieldCheck size={15} />,
       children: <span className="text-xs text-[var(--color-text-soft)]">{safeSummary}</span>,
     }] : []),
     ...(artifacts.length > 0 ? [{
-      color: "#8c6a4a",
+      color: "var(--color-primary)",
       dot: <CheckCircle2 size={15} />,
       children: <span className="text-xs text-[var(--color-text-soft)]">已绑定 {artifacts.length} 个版本化材料</span>,
     }] : []),
     ...(resultQuality ? [{
-      color: resultQuality === "good" ? "#4c9a72" : "#d99a38",
+      color: resultQuality === "good" ? "var(--color-primary)" : "var(--color-warn)",
       dot: <CheckCircle2 size={15} />,
       children: <span className="text-xs text-[var(--color-text-soft)]">结果校验：{resultQuality === "good" ? "通过" : "需要关注"}</span>,
     }] : []),
@@ -160,7 +160,7 @@ export default function AgentActivityTrack({
         )}
       </div>
       {progress !== undefined && (
-        <Progress percent={progress} size="small" showInfo={false} strokeColor="#c0502f" trailColor="rgba(192,80,47,.16)" className="ml-7 max-w-52" />
+        <Progress percent={progress} size="small" showInfo={false} strokeColor="var(--color-primary)" trailColor="var(--color-primary-muted)" className="ml-7 max-w-52" />
       )}
       {detailsOpen && hasDetails && (
         <div id={detailsId} className="ml-7 mt-1 max-w-lg pt-1">

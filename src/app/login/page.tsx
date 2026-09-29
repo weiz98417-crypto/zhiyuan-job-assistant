@@ -64,7 +64,7 @@ export default function LoginPage() {
 
   return (
     <div className="auth-layout">
-      <AuthHero subtitle="翻开这一页，写你的下一个篇章" />
+      <AuthHero subtitle="让每一份认真，都走向更大的机会" />
 
       <div className="auth-form-panel">
         <div style={{ width: '100%', maxWidth: 400 }}>

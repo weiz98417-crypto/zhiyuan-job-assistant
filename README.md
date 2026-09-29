@@ -1,4 +1,6 @@
-# 筝筝纸鸢 (Zhiyuan) — AI Job Search Assistant
+# 纸鸢 Agent (Zhiyuan) — AI Job Search Assistant
+
+> Former repository name: 筝筝纸鸢 (Zhiyuan). The product UI uses 纸鸢 Agent.
 
 <p align="center">
   <img src="https://img.shields.io/badge/Next.js_16-000?style=flat&logo=next.js&logoColor=white" alt="Next.js 16">

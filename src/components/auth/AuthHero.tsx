@@ -1,6 +1,7 @@
 'use client';
 
 import ParticleCanvas from './ParticleCanvas';
+import BrandLogo from '@/components/brand/BrandLogo';
 
 interface AuthHeroProps {
   subtitle: string;
@@ -115,30 +116,9 @@ export default function AuthHero({ subtitle }: AuthHeroProps) {
             background: 'radial-gradient(circle, var(--color-primary-muted) 0%, transparent 70%)',
             animation: 'auth-glowPulse 3s ease-in-out infinite',
           }} />
-          <svg
-            width="80"
-            height="80"
-            viewBox="0 0 80 80"
-            fill="none"
-            stroke="var(--color-primary)"
-            strokeWidth="2"
-            style={{
-              animation: 'auth-bookFloat 4s ease-in-out infinite',
-              filter: 'drop-shadow(0 4px 20px oklch(75% 0.12 75 / 0.2))',
-              position: 'relative',
-              zIndex: 1,
-            }}
-          >
-            <rect x="16" y="10" width="22" height="60" rx="3" fill="none" />
-            <rect x="42" y="10" width="22" height="60" rx="3" fill="none" />
-            <line x1="40" y1="14" x2="40" y2="66" strokeWidth="1" strokeDasharray="3 4" opacity="0.6" />
-            <line x1="20" y1="28" x2="36" y2="28" strokeWidth="1" opacity="0.5" />
-            <line x1="20" y1="36" x2="36" y2="36" strokeWidth="1" opacity="0.5" />
-            <line x1="20" y1="44" x2="32" y2="44" strokeWidth="1" opacity="0.5" />
-            <line x1="46" y1="32" x2="60" y2="32" strokeWidth="1" opacity="0.5" />
-            <line x1="46" y1="40" x2="62" y2="40" strokeWidth="1" opacity="0.5" />
-            <line x1="46" y1="48" x2="56" y2="48" strokeWidth="1" opacity="0.5" />
-          </svg>
+          <div style={{ animation: 'auth-bookFloat 4s ease-in-out infinite', position: 'relative', zIndex: 1, display: 'inline-flex' }}>
+            <BrandLogo variant="full" size="hero" />
+          </div>
         </div>
 
         <div style={{
@@ -149,24 +129,14 @@ export default function AuthHero({ subtitle }: AuthHeroProps) {
           textTransform: 'uppercase',
           marginBottom: 12,
         }}>
-          AI &times; Career Journal
+          AI CAREER AGENT
         </div>
-        <h1 style={{
-          fontFamily: 'var(--font-display)',
-          fontSize: '3.75rem',
-          fontWeight: 700,
-          color: 'var(--color-text)',
-          letterSpacing: '0.04em',
-          lineHeight: 1.1,
-          marginBottom: 6,
-        }}>
-          筝筝<span style={{ color: 'var(--color-primary)' }}>纸鸢</span>
-        </h1>
 
         <p style={{
-          fontSize: '1rem',
+          fontSize: '1.05rem',
           color: 'var(--color-text-soft)',
           opacity: 0.85,
+          letterSpacing: '0.08em',
           position: 'relative',
           zIndex: 1,
         }}>
