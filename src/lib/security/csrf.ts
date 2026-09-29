@@ -38,13 +38,39 @@ function configuredOrigin(request: NextRequest): string | null {
   }
 }
 
+function isLoopbackHostname(hostname: string): boolean {
+  const normalized = hostname.toLowerCase().replace(/\.$/, '');
+  return normalized === 'localhost'
+    || normalized === '127.0.0.1'
+    || normalized === '[::1]'
+    || normalized === '::1';
+}
+
+function originsMatch(supplied: string, expected: string): boolean {
+  if (supplied === expected) return true;
+  if (process.env.NODE_ENV === 'production') return false;
+
+  try {
+    const suppliedUrl = new URL(supplied);
+    const expectedUrl = new URL(expected);
+    return suppliedUrl.protocol === expectedUrl.protocol
+      && suppliedUrl.port === expectedUrl.port
+      && isLoopbackHostname(suppliedUrl.hostname)
+      && isLoopbackHostname(expectedUrl.hostname);
+  } catch {
+    return false;
+  }
+}
+
 export function validateRequestOrigin(request: NextRequest): RequestOriginResult {
   const expected = configuredOrigin(request);
   if (!expected) return { ok: false, code: 'ORIGIN_MISCONFIGURED' };
   const supplied = request.headers.get('origin');
   if (!supplied) return { ok: false, code: 'ORIGIN_REQUIRED' };
   try {
-    if (new URL(supplied).origin !== expected) return { ok: false, code: 'ORIGIN_FORBIDDEN' };
+    if (!originsMatch(new URL(supplied).origin, expected)) {
+      return { ok: false, code: 'ORIGIN_FORBIDDEN' };
+    }
   } catch {
     return { ok: false, code: 'ORIGIN_FORBIDDEN' };
   }

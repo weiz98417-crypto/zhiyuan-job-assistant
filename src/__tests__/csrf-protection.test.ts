@@ -8,6 +8,7 @@ import {
 
 const originalOrigin = process.env.APP_ORIGIN;
 const originalSecret = process.env.CSRF_SECRET;
+const originalNodeEnv = process.env.NODE_ENV;
 
 function mutationRequest(options: {
   origin?: string;
@@ -35,6 +36,8 @@ describe('CSRF and origin protection', () => {
     else process.env.APP_ORIGIN = originalOrigin;
     if (originalSecret === undefined) delete process.env.CSRF_SECRET;
     else process.env.CSRF_SECRET = originalSecret;
+    if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = originalNodeEnv;
   });
 
   it('rejects an untrusted or missing browser origin', () => {
@@ -43,6 +46,31 @@ describe('CSRF and origin protection', () => {
     });
     expect(validateRequestOrigin(mutationRequest({}))).toEqual({
       ok: false, code: 'ORIGIN_REQUIRED',
+    });
+  });
+
+  it('accepts localhost loopback aliases during local development', () => {
+    process.env.NODE_ENV = 'development';
+    process.env.APP_ORIGIN = 'http://localhost:3100';
+    const request = new NextRequest('http://localhost:3100/api/auth/login', {
+      method: 'POST',
+      headers: { origin: 'http://127.0.0.1:3100' },
+    });
+
+    expect(validateRequestOrigin(request)).toEqual({ ok: true });
+  });
+
+  it('does not accept loopback aliases in production', () => {
+    process.env.NODE_ENV = 'production';
+    process.env.APP_ORIGIN = 'https://localhost:3100';
+    const request = new NextRequest('https://localhost:3100/api/auth/login', {
+      method: 'POST',
+      headers: { origin: 'https://127.0.0.1:3100' },
+    });
+
+    expect(validateRequestOrigin(request)).toEqual({
+      ok: false,
+      code: 'ORIGIN_FORBIDDEN',
     });
   });
 
