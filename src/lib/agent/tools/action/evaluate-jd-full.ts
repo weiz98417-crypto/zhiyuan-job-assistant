@@ -6,6 +6,7 @@ import {
   DurableJDEvaluationInputError,
   runDurableJDEvaluation,
 } from "@/lib/server/durable-jd-evaluation";
+import { markScanJobsEvaluatedForJdForUser } from "@/lib/scan-data";
 
 interface EvalJDFullParams {
   jd_text?: string;
@@ -16,6 +17,7 @@ interface EvalJDFullParams {
   images?: string[];
   allow_web_search?: boolean;
   language?: "zh" | "en";
+  jd_id?: number;
 }
 
 function apiPath(path: string): string {
@@ -205,7 +207,26 @@ async function handler(
       allowWebSearch: input.allow_web_search === true,
       language: input.language === "en" ? "en" : "zh",
     }, { signal: context.signal });
-    return { success: true, data: result };
+    const jdId = Number(input.jd_id);
+    let scanJobStatus: "evaluated" | "unchanged" | undefined;
+    let scanJobsUpdated = 0;
+    if (Number.isInteger(jdId) && jdId > 0) {
+      try {
+        const statusWriteBack = await markScanJobsEvaluatedForJdForUser(jdId, context.principal.userId);
+        scanJobsUpdated = statusWriteBack.updated;
+        scanJobStatus = statusWriteBack.updated > 0 ? "evaluated" : "unchanged";
+      } catch (error) {
+        throw new Error(`评估已保存，但岗位状态同步失败：${error instanceof Error ? error.message : "数据库暂不可用"}`);
+      }
+    }
+    return {
+      success: true,
+      data: {
+        ...result,
+        scanJobStatus,
+        scanJobsUpdated,
+      },
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : "JD 评估失败";
     if (error instanceof DurableJDEvaluationInputError) {
@@ -270,6 +291,7 @@ export const evaluateJDFull: ToolDefinition = {
     cv_text: { type: "string", required: false, description: "用户简历文本。用户要求结合简历时，先用 read_file(path='我的简历') 读取后传入。" },
     match_resume: { type: "boolean", required: false, description: "是否匹配用户简历。用户明确说不要匹配简历时传 false；此参数由服务端任务契约强制覆盖。" },
     target_company: { type: "string", required: false, description: "用户在对话中补充的目标公司名。即使 JD 正文没有公司名，也要传入，例如'字节跳动'。" },
+    jd_id: { type: "number", required: false, description: "来源 JD 库 ID。由已保存 JD 的评估 handoff 传入，用于把关联岗位卡从 evaluating 回写为 evaluated。" },
     images: { type: "array", required: false, description: "JD 截图 base64 数组" },
     allow_web_search: { type: "boolean", required: false, description: "是否允许评估流程联网查薪资/公开信息。默认 false；只有用户明确要求联网查询时才设 true。" },
     language: { type: "string", required: false, description: "语言: zh/en，默认 zh" },

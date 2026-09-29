@@ -812,7 +812,7 @@ function latestJDSourceKey(messages: RunContextMessage[]): string | undefined {
 function jdSourceKeyForMessage(message: { content: string; images?: string[] }): string | undefined {
   const images = (message.images || []).filter((image) => image.startsWith("data:image/"));
   if (images.length > 0) return `image:${hashJDSource(images.join("\n"))}`;
-  const jdId = message.content.match(/\bjdId\s*[=:：]\s*(\d+)/i)?.[1];
+  const jdId = message.content.match(/\bjd\s*(?:id|_id)\s*[=:：]?\s*(\d+)/i)?.[1];
   if (jdId) return `id:${jdId}`;
   // 0.11.0-A: detection runs on the original text (structure regexes need
   // spacing/punctuation); only the identity hash is normalized so the same JD

@@ -191,6 +191,20 @@ describe("agent task routing", () => {
     expect(decision.auditSummary).toContain("envelope_override:jd_evaluation");
   });
 
+  it("keeps the production proposal wording out of the JD evaluation contract", () => {
+    const decision = routeAgentTask({
+      agentId: "general",
+      content: "基于刚才的 JD 和匹配诊断，为“个人概述”生成一份简历修改提案，只出草稿，不写入或覆盖当前简历。",
+      envelopeTask: "jd_evaluation",
+    });
+
+    expect(decision.taskType).toBe("resume_edit");
+    expect(decision.auditSummary).toBe("intent:resume_edit:proposal_only:envelope_override:jd_evaluation");
+    expect(decision.allowedTools).toContain("get_recent_jd_context");
+    expect(decision.allowedTools).toContain("optimize_resume_section");
+    expect(decision.allowedTools).not.toContain("evaluate_jd_full");
+  });
+
   it("routes matching JD image requests into JD evaluation", () => {
     const imageIntake: ImageIntakeResult = {
       documentType: "jd",

@@ -322,16 +322,20 @@ export function inferCompletedCriteriaFromToolResult(
   }
 
   if (contract.taskType === "jd_evaluation" && signals.toolName === "evaluate_jd_full") {
-    if (hasNonEmptyString(data.jdText, 30) || hasReportBlocks(data)) {
+    const reportNum = typeof data.reportNum === "number" && data.reportNum > 0;
+    const reportReadBackVerified = signals.readBackVerified === true
+      || data.reportReadBackVerified === true;
+    const persistedEvaluation = reportNum && reportReadBackVerified;
+    if (hasNonEmptyString(data.jdText, 30) || hasReportBlocks(data) || persistedEvaluation) {
       completed.add("source content extracted or fetched");
     }
-    if (hasReportBlocks(data)) {
+    if (hasReportBlocks(data) || persistedEvaluation) {
       completed.add("A-G evaluation generated");
     }
-    if (typeof data.reportNum === "number" && data.reportNum > 0) {
+    if (reportNum) {
       completed.add("report persisted");
     }
-    if (signals.readBackVerified === true || data.reportReadBackVerified === true) {
+    if (reportReadBackVerified) {
       completed.add("saved report read-back verification passes");
     }
   }

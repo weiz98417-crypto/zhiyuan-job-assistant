@@ -22,7 +22,7 @@ import {
   inferCompletedCriteriaFromToolResult,
   resolveTaskContractRunOutcome,
 } from "@/lib/agent/task-contract";
-import { buildRequiredResumeDraftToolCall, normalizeReadFileParams } from "@/lib/agent/loop/server-runner";
+import { buildRequiredResumeDraftToolCall, inferJdIdFromMessages, normalizeReadFileParams } from "@/lib/agent/loop/server-runner";
 import { RESUME_RUNTIME_INCIDENT_20260717 } from "@/__tests__/fixtures/agent-resume-runtime-regression-fixtures";
 
 afterEach(() => {
@@ -31,6 +31,15 @@ afterEach(() => {
 });
 
 describe("agent runtime regression evals", () => {
+  it("accepts compact and spaced JD IDs from saved-JD handoff messages", () => {
+    expect(inferJdIdFromMessages([{ role: "user", content: "JD ID：34" }])).toBe(34);
+    expect(inferJdIdFromMessages([{ role: "user", content: "jdId=35" }])).toBe(35);
+    expect(inferJdIdFromMessages([{ role: "user", content: "普通对话" }])).toBeUndefined();
+    expect(inferJdIdFromMessages([
+      { role: "user", content: "JD ID：34" },
+      { role: "user", content: "请评估另一份新 JD，不要关联上一份" },
+    ])).toBeUndefined();
+  });
   it("repairs an empty current-resume read path after resume routing", () => {
     expect(normalizeReadFileParams({
       taskType: "resume_edit",

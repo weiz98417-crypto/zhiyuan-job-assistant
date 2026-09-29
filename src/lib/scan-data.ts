@@ -140,6 +140,28 @@ export async function attachJdToScanJobForUser(jobId: number, userId: string, jd
   ));
 }
 
+export async function markScanJobsEvaluatedForJdForUser(jdId: number, userId: string) {
+  if (!Number.isInteger(jdId) || jdId <= 0) return { updated: 0 };
+
+  if (getDatabaseDriver() !== "postgres") {
+    const result = getDb().prepare(`
+      UPDATE scan_jobs
+      SET status = 'evaluated', last_error = '', last_interaction_at = datetime('now')
+      WHERE jd_id = ? AND user_id = ? AND status IN ('viewed', 'saved', 'evaluating')
+    `).run(jdId, userId);
+    return { updated: Number(result.changes || 0) };
+  }
+
+  return withPostgresClient(async (client) => {
+    const result = await client.query(`
+      UPDATE scan_jobs
+      SET status = 'evaluated', last_error = '', last_interaction_at = now()
+      WHERE jd_id = $1 AND user_id = $2 AND status IN ('viewed', 'saved', 'evaluating')
+    `, [jdId, userId]);
+    return { updated: Number(result.rowCount || 0) };
+  });
+}
+
 export async function enqueueEvaluatedScanJobForUser(
   userId: string,
   input: { url: string; company?: string; title?: string; jdSnippet?: string },

@@ -71,6 +71,7 @@ export const PRODUCTION_BROWSER_EVAL_DOMAINS: readonly ProductionBrowserEvalDoma
     browserCase("ROUTE-002", "职业定位的否定写入约束不覆盖主目标", "/agent", "career_positioning_guidance"),
     browserCase("ROUTE-003", "模糊续跑和明确任务安全切换", "/agent"),
     browserCase("ROUTE-004", "主责交接与只读委派展示归因链和输出契约", "/agent"),
+    browserCase("ROUTE-005", "已保存 JD 后简历提案请求不降级为 JD 缺失", "/agent", "resume_edit"),
   ]),
   domain("F07", "Agent 工具治理与读回校验", "07-Agent工具治理与读回校验-Evals.md", [
     browserCase("GOV-001", "只读任务不能绕过策略写入", "/agent"),
@@ -93,6 +94,7 @@ export const PRODUCTION_BROWSER_EVAL_DOMAINS: readonly ProductionBrowserEvalDoma
     browserCase("SCAN-004", "保存 JD 的完整正文可展开、滚动到底并读回", "/evaluate/jds"),
     browserCase("SCAN-005", "JD 标题、描述和标签在卡片与抽屉中可读", "/evaluate/jds"),
     browserCase("SCAN-006", "同一任务的岗位搜索确认卡在实时流、刷新和重放后只出现一次", "/agent"),
+    browserCase("SCAN-007", "评估完成后岗位卡状态从 evaluating 持久化为 evaluated", "/discover", "jd_evaluation"),
   ]),
   domain("F10", "投递追踪系统", "10-投递追踪系统-Evals.md", [
     browserCase("TRACK-001", "从职位或报告创建投递", "/tracker"),

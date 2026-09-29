@@ -1,13 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { runDurableJDEvaluation } = vi.hoisted(() => ({
+const { runDurableJDEvaluation, markScanJobsEvaluatedForJdForUser } = vi.hoisted(() => ({
   runDurableJDEvaluation: vi.fn(),
+  markScanJobsEvaluatedForJdForUser: vi.fn(async () => ({ updated: 1 })),
 }));
 
 vi.mock("@/lib/server/durable-jd-evaluation", () => ({
   DurableJDEvaluationInputError: class DurableJDEvaluationInputError extends Error {},
   runDurableJDEvaluation,
 }));
+
+vi.mock("@/lib/scan-data", () => ({ markScanJobsEvaluatedForJdForUser }));
 
 import { evaluateJDFull } from "@/lib/agent/tools/action/evaluate-jd-full";
 
@@ -51,6 +54,22 @@ describe("evaluate_jd_full server execution", () => {
       success: true,
       data: expect.objectContaining({ reportReadBackVerified: true, jdReadBackVerified: true }),
     }));
+  });
+
+  it("writes the linked discovery job back to evaluated after durable read-back succeeds", async () => {
+    const result = await evaluateJDFull.handler(
+      { jd_text: "公司：纸鸢科技。岗位职责：负责产品规划与交付。".repeat(3), jd_id: 34 },
+      {
+        principal: { userId: "user-1" },
+        runId: "run-1",
+        allowlist: ["evaluate_jd_full"],
+        requestId: "request-1",
+      },
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual(expect.objectContaining({ scanJobStatus: "evaluated", scanJobsUpdated: 1 }));
+    expect(markScanJobsEvaluatedForJdForUser).toHaveBeenCalledWith(34, "user-1");
   });
 
   it("does not present an invalid historical score as a five-point result", () => {

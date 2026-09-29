@@ -105,6 +105,19 @@ function latestUserText(messages: DeepSeekMessage[]): string {
   return "";
 }
 
+export function inferJdIdFromMessages(messages: DeepSeekMessage[]): number | undefined {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message.role !== "user") continue;
+    const content = message.content.trim();
+    if (!content || content.startsWith("<!--") || content.startsWith("[TOOL_")) continue;
+    const match = content.match(/\bjd\s*(?:id|_id)\s*[=:：]?\s*(\d+)/i);
+    const jdId = Number(match?.[1]);
+    return Number.isInteger(jdId) && jdId > 0 ? jdId : undefined;
+  }
+  return undefined;
+}
+
 function inferJobDiscoveryParams(text: string): Record<string, unknown> {
   const location = text.match(/北京|上海|深圳|广州|杭州|成都|南京|苏州|武汉|远程/i)?.[0];
   const countMatch = text.match(/(\d{1,3})\s*(?:个|条|份|家|职位|岗位)/i);
@@ -556,6 +569,8 @@ export async function* agentLoopServer(opts: {
           delete params.jd_text;
           delete params.jd_url;
         }
+        const sourceJdId = inferJdIdFromMessages(ctx);
+        if (sourceJdId && !Number.isInteger(Number(params.jd_id))) params.jd_id = sourceJdId;
       }
       if (tc.name === "evaluate_jd_full" && typeof params.target_company !== "string") {
         const inferredCompany = inferCompanyFromMessages(ctx);

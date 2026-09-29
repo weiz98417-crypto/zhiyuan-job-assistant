@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   createAgentTaskContract,
+  inferCompletedCriteriaFromToolResult,
   resolveTaskContractRunOutcome,
   type AgentTaskType,
 } from "@/lib/agent/task-contract";
@@ -85,6 +86,30 @@ describe("Run Contract delivery outcome", () => {
     expect(outcome.status).toBe("waiting_user");
     expect(outcome.gate.unmetCriteria).toContain("saved report read-back verification passes");
     expect(outcome.safeMessage).not.toMatch(/落库|校验|已保存/);
+  });
+
+  it("does not downgrade a read-back verified report to a missing JD", () => {
+    const contract = createAgentTaskContract({ taskType: "jd_evaluation", target: "评估字节跳动 JD" });
+    const completedCriteria = inferCompletedCriteriaFromToolResult(contract, {
+      toolName: "evaluate_jd_full",
+      toolSuccess: true,
+      data: {
+        reportNum: 15,
+        reportReadBackVerified: true,
+        jdReadBackVerified: true,
+      },
+      readBackVerified: true,
+    });
+
+    expect(completedCriteria).toEqual(expect.arrayContaining(contract.successCriteria));
+    const outcome = resolveTaskContractRunOutcome(contract, completedCriteria, {
+      hasAssistantResponse: true,
+      hasUserVisibleArtifact: true,
+    });
+
+    expect(outcome.status).toBe("succeeded");
+    expect(outcome.replaceAssistantMessage).toBe(false);
+    expect(outcome.safeMessage).toBeUndefined();
   });
 
   it.each(ADVISORY_TASKS)("still recovers %s when no user-visible output exists", (taskType) => {
