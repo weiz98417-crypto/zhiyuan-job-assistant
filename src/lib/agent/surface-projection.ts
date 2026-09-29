@@ -1,4 +1,5 @@
 import type { AgentMessage } from "@/types";
+import { stableValue } from "@/lib/agent/transcript-merge";
 
 export type SurfaceAudience =
   | "model_context"
@@ -238,7 +239,12 @@ export function adaptLegacyAgentMessage(message: AgentMessage): AgentMessage | n
   return {
     ...message,
     content: safeView.summary,
-    toolResult: safeView,
+    toolResult: {
+      ...safeView,
+      ...(typeof raw.durableRunId === "string" && /^[a-zA-Z0-9:_-]{1,180}$/.test(raw.durableRunId)
+        ? { durableRunId: raw.durableRunId }
+        : {}),
+    },
   };
 }
 
@@ -253,10 +259,37 @@ export function projectAgentMessages(messages: AgentMessage[]): AgentMessage[] {
     const key = resumeProposalProjectionKey(message);
     if (key) latestProposalIndex.set(key, index);
   });
+  const duplicateConfirmationIndexes = new Set<number>();
+  const latestConfirmations = new Map<string, { index: number; timestamp: number; runId: string }>();
+  projected.forEach((message, index) => {
+    const confirmation = jobDiscoveryConfirmationSignature(message);
+    if (!confirmation) return;
+    const timestamp = Date.parse(message.timestamp);
+    const key = `${confirmation.runId}|${confirmation.signature}`;
+    const previous = latestConfirmations.get(key);
+    if (previous && (
+      confirmation.runId && previous.runId === confirmation.runId
+      || !confirmation.runId && !previous.runId && Number.isFinite(timestamp)
+        && Number.isFinite(previous.timestamp) && Math.abs(timestamp - previous.timestamp) <= 30_000
+    )) duplicateConfirmationIndexes.add(previous.index);
+    latestConfirmations.set(key, { index, timestamp, runId: confirmation.runId });
+  });
   return projected.filter((message, index) => {
     const key = resumeProposalProjectionKey(message);
-    return !key || latestProposalIndex.get(key) === index;
+    return (!key || latestProposalIndex.get(key) === index) && !duplicateConfirmationIndexes.has(index);
   });
+}
+
+function jobDiscoveryConfirmationSignature(message: AgentMessage): { signature: string; runId: string } | null {
+  if (message.role !== "tool" || !isRecord(message.toolResult)) return null;
+  const payload = isRecord(message.toolResult.uiPayload) ? message.toolResult.uiPayload : null;
+  if (payload?.type !== "job_discovery_confirmation") return null;
+  const itemRunId = typeof message.itemId === "string" ? message.itemId.split(":tool:")[0] : "";
+  const runId = typeof message.toolResult.durableRunId === "string" ? message.toolResult.durableRunId : itemRunId;
+  return {
+    signature: `${message.toolName || "scan_portals"}|${stableValue(payload)}`,
+    runId,
+  };
 }
 
 function resumeProposalProjectionKey(message: AgentMessage): string | null {
@@ -295,8 +328,10 @@ function sanitizeValue(value: unknown, key = "", depth = 0, topLevel = false): u
   }
   if (isRecord(value)) {
     const nested: Record<string, unknown> = {};
+    const isStructuredMap = key === "blocks" || key === "labels";
     for (const [nestedKey, nestedValue] of Object.entries(value)) {
-      const safeValue = sanitizeValue(nestedValue, nestedKey, depth + 1);
+      if (isStructuredMap && !/^[a-g]$/.test(nestedKey)) continue;
+      const safeValue = sanitizeValue(nestedValue, nestedKey, depth + 1, isStructuredMap);
       if (safeValue !== undefined) nested[nestedKey] = safeValue;
     }
     return nested;

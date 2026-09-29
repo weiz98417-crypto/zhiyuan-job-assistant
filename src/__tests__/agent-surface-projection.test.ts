@@ -32,6 +32,28 @@ describe("agent user-safe surface projection", () => {
     expect(view.uiPayload).not.toHaveProperty("data");
   });
 
+  it("preserves report block maps for the inline report card", () => {
+    const view = projectToolResultForUser({
+      toolName: "get_report_detail",
+      success: true,
+      uiPayload: {
+        type: "report_blocks",
+        reportNum: 17,
+        blocks: {
+          a: { content: "职位概览正文", score: 4 },
+          g: { content: "职位合法性正文", score: 3 },
+        },
+        labels: { a: "A · 职位概览", g: "G · 职位合法性", internalNotes: "不可展示" },
+      },
+    });
+    expect(view.uiPayload?.blocks).toMatchObject({
+      a: { content: "职位概览正文", score: 4 },
+      g: { content: "职位合法性正文", score: 3 },
+    });
+    expect(view.uiPayload?.labels).toMatchObject({ a: "A · 职位概览", g: "G · 职位合法性" });
+    expect(view.uiPayload?.labels).not.toHaveProperty("internalNotes");
+  });
+
   it("uses a field allowlist instead of passing innocuous-looking secrets", () => {
     const view = projectToolResultForUser({
       toolName: "get_profile",

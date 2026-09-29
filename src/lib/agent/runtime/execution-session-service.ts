@@ -10,6 +10,7 @@ import { getSessionMemoryAdapter, type SessionMemoryMessage } from "@/lib/memory
 
 export interface ExecutionConversationMessage {
   id?: string;
+  itemId?: string;
   role: string;
   content: string;
   images?: string[];
@@ -137,7 +138,7 @@ function toSessionMemoryMessage(message: ExecutionConversationMessage, index: nu
   if (message.toolName) metadata.toolName = message.toolName;
   if (message.toolResult !== undefined) metadata.toolResult = message.toolResult;
   return {
-    id: message.id || createHash("sha256")
+    id: message.id || message.itemId || createHash("sha256")
       .update(`${message.role}\u0000${message.timestamp || ""}\u0000${index}`)
       .digest("hex"),
     role: message.role,
@@ -154,6 +155,7 @@ function fromSessionMemoryMessage(message: SessionMemoryMessage): ExecutionConve
     : {};
   return {
     id: message.id,
+    itemId: message.id,
     role: typeof metadata.role === "string" ? metadata.role : message.role,
     content: message.content,
     images: Array.isArray(metadata.images) ? metadata.images.filter((value): value is string => typeof value === "string") : undefined,

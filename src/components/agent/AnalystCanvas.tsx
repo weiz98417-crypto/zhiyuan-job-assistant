@@ -1,5 +1,8 @@
 "use client";
 
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { ExternalLink, Loader2 } from "lucide-react";
+import MarkdownRenderer from "@/components/MarkdownRenderer";
 import { isFivePointScore } from "@/lib/score-scale";
 
 /**
@@ -14,6 +17,41 @@ export interface AnalystCanvasPayload {
   score?: number;
   reportNum?: number;
   readBackVerified?: boolean;
+  blocks?: Record<string, unknown>;
+  labels?: Record<string, string>;
+}
+
+const REPORT_BLOCK_KEYS = ["a", "b", "c", "d", "e", "f", "g"] as const;
+const DEFAULT_REPORT_BLOCK_LABELS: Record<string, string> = {
+  a: "A · 职位概览",
+  b: "B · 简历匹配",
+  c: "C · 职级与策略",
+  d: "D · 薪资与市场",
+  e: "E · 定制化方案",
+  f: "F · 面试准备",
+  g: "G · 职位合法性",
+};
+
+function parseReportBlocks(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  if (typeof value !== "string") return {};
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function blockContent(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+  const content = (value as Record<string, unknown>).content;
+  return typeof content === "string" ? content : "";
 }
 
 export function AnalystCanvas({
@@ -27,12 +65,58 @@ export function AnalystCanvas({
   onMaximize?: () => void;
   maximized?: boolean;
 }) {
+  const [reportBlocks, setReportBlocks] = useState<Record<string, unknown>>(() => payload?.blocks || {});
+  const [detailState, setDetailState] = useState<"idle" | "loading" | "ready" | "error">(
+    payload?.blocks && Object.keys(payload.blocks).length > 0 ? "ready" : "idle",
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!payload) {
+      setReportBlocks({});
+      setDetailState("idle");
+      return () => { cancelled = true; };
+    }
+    const inlineBlocks = payload.blocks || {};
+    setReportBlocks(inlineBlocks);
+    if (payload.kind !== "report" || !payload.reportNum) {
+      setDetailState(Object.keys(inlineBlocks).length > 0 ? "ready" : "idle");
+      return () => { cancelled = true; };
+    }
+
+    setDetailState("loading");
+    fetch(`/api/data/reports/${encodeURIComponent(String(payload.reportNum))}`, { cache: "no-store" })
+      .then(async (response) => {
+        const json = await response.json().catch(() => ({}));
+        if (!response.ok || json.success !== true) throw new Error(json.error || "报告详情读取失败");
+        const data = json.data && typeof json.data === "object" ? json.data as Record<string, unknown> : {};
+        const blocks = parseReportBlocks(data.blocks_json || data.blocks);
+        if (cancelled) return;
+        setReportBlocks(blocks);
+        setDetailState(Object.keys(blocks).length > 0 ? "ready" : "error");
+      })
+      .catch(() => {
+        if (!cancelled) setDetailState("error");
+      });
+    return () => { cancelled = true; };
+  }, [payload]);
+
+  const visibleBlocks = useMemo(
+    () => REPORT_BLOCK_KEYS
+      .map((key) => [key, blockContent(reportBlocks[key])] as const)
+      .filter(([, content]) => content.trim().length > 0),
+    [reportBlocks],
+  );
   if (!payload) return null;
+  const reportHref = payload.reportNum ? `/evaluate/reports?report=${encodeURIComponent(String(payload.reportNum))}` : "/evaluate/reports";
   return (
     <aside
       data-testid="analyst-canvas"
       /* 样张 v2 任务 2.3:窄屏以覆盖层呈现;lg+ 保持行内双面画布(默认 40% 宽) */
-      className="fixed inset-0 z-40 flex flex-col lg:static lg:z-auto lg:w-[min(420px,40vw)] lg:shrink-0 lg:border-l"
+      className="pointer-events-auto fixed inset-0 z-40 flex min-w-0 flex-col lg:static lg:z-auto lg:w-full lg:border-l"
+      role="dialog"
+      aria-modal={maximized ? true : undefined}
+      aria-label="分析面板"
       style={{
         ...(maximized ? { width: "100%" } : {}),
         background: "var(--color-analyst-bg)",
@@ -53,6 +137,17 @@ export function AnalystCanvas({
           </span>
         ) : null}
         <span className="ml-auto flex items-center gap-1.5">
+          {payload.kind === "report" && (
+            <a
+              href={reportHref}
+              data-testid="analyst-open-report"
+              className="inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] transition-colors hover:bg-white/10"
+              title="打开完整报告"
+            >
+              完整报告
+              <ExternalLink size={12} />
+            </a>
+          )}
           {onMaximize ? (
             <button
               type="button"
@@ -112,6 +207,40 @@ export function AnalystCanvas({
                 报告已落库并通过读回校验 · 可在报告库查看完整 A-G 分析
               </div>
             ) : null}
+            <div
+              className="space-y-2"
+              data-testid="analyst-report-details"
+              style={{
+                "--color-text": "var(--color-analyst-text)",
+                "--color-text-soft": "var(--color-analyst-text)",
+                "--color-muted": "var(--color-analyst-muted)",
+                "--color-divider": "var(--color-analyst-border)",
+                "--color-surface": "var(--color-analyst-surface)",
+                "--color-bg": "var(--color-analyst-bg)",
+                "--color-primary-muted": "var(--color-analyst-border)",
+              } as CSSProperties}
+            >
+              {detailState === "loading" && (
+                <div className="flex items-center gap-2 text-xs" style={{ color: "var(--color-analyst-muted)" }}>
+                  <Loader2 size={13} className="animate-spin" /> 正在读取 A-G 详细分析…
+                </div>
+              )}
+              {detailState === "error" && (
+                <div className="rounded-lg px-3 py-2 text-xs" style={{ background: "var(--color-analyst-surface)", color: "var(--color-analyst-muted)" }}>
+                  完整报告暂时无法读取，下方预览可能不完整。请点击右上角“完整报告”查看。
+                </div>
+              )}
+              {visibleBlocks.map(([key, content]) => (
+                <details key={key} open={key === "a"} className="rounded-lg" style={{ background: "var(--color-analyst-surface)" }}>
+                  <summary className="cursor-pointer px-3 py-2 text-xs font-medium" style={{ color: "var(--color-analyst-text)" }}>
+                    {payload.labels?.[key] || DEFAULT_REPORT_BLOCK_LABELS[key]}
+                  </summary>
+                  <div className="border-t px-3 py-3 text-sm leading-relaxed" style={{ borderColor: "var(--color-analyst-border)", color: "var(--color-analyst-text)" }}>
+                    <MarkdownRenderer content={content} />
+                  </div>
+                </details>
+              ))}
+            </div>
           </>
         ) : (
           <div className="text-sm" style={{ color: "var(--color-analyst-muted)" }}>

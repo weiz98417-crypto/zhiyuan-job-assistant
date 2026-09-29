@@ -929,10 +929,13 @@ export function useAgentConversation() {
                 return { ...current, artifacts: Array.from(refs.values()).slice(-12) };
               });
             }
+            const projectedItemId = typeof event.itemId === "string" && event.itemId
+              ? event.itemId
+              : `run:${runId}:tool:${runEvent.sequence}`;
             const item = itemAssemblerRef.current?.apply({
               cursor: runEvent.sequence,
               type: "completed",
-              itemId: `run:${runId}:tool:${name}:${runEvent.sequence}`,
+              itemId: projectedItemId,
               content: safeView.summary,
               toolView: safeView,
             });

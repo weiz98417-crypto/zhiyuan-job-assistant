@@ -373,11 +373,12 @@ export class ConversationItemProjector {
             uiPayload: recordOrUndefined(event.uiPayload),
           });
       if (safeView.kind === "silent") return null;
+      const projectedItemId = stringOrUndefined(event.itemId);
       const artifact = this.validArtifact(safeView);
       if (safeView.kind === "card" && artifact) {
         return this.upsert({
-          itemId: `${runId}:artifact:${sequence}`,
-          dedupeKey: `${runId}:artifact:${sequence}`,
+          itemId: projectedItemId || `${runId}:artifact:${sequence}`,
+          dedupeKey: projectedItemId || `${runId}:artifact:${sequence}`,
           type: "artifact_card",
           displayState: safeView.status === "failed" ? "failed" : "visible",
           runId,
@@ -389,8 +390,8 @@ export class ConversationItemProjector {
         });
       }
       return this.upsert({
-        itemId: `${runId}:tool:${sequence}`,
-        dedupeKey: `${runId}:tool:${sequence}`,
+        itemId: projectedItemId || `${runId}:tool:${sequence}`,
+        dedupeKey: projectedItemId || `${runId}:tool:${sequence}`,
         type: "safe_tool_status",
         displayState: safeView.status === "failed" ? "failed" : "visible",
         runId,

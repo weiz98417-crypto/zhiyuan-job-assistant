@@ -11,6 +11,7 @@ function toSessionTranscriptMessage(message: SessionMemoryMessage, fallbackTimes
     role: typeof metadata.role === "string" ? metadata.role : message.role,
     content: message.role === "assistant" ? safeAssistantText(message.content) : message.content,
     timestamp: message.createdAt || fallbackTimestamp,
+    ...(message.id ? { id: message.id, itemId: message.id } : {}),
     ...(includeImages && Array.isArray(metadata.images) ? { images: metadata.images } : {}),
     ...(typeof metadata.toolName === "string" ? { toolName: metadata.toolName } : {}),
     ...(metadata.toolResult !== undefined ? { toolResult: metadata.toolResult } : {}),

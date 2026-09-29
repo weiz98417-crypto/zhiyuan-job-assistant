@@ -267,6 +267,11 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
 
     let assistantText = "";
     const projectedMessages: ExecutionConversationMessage[] = [];
+    let eventSequenceCursor = input.run.eventCursor;
+    try {
+      const priorEvents = await this.options.runtime.listEvents(principal, input.run.id, 0);
+      eventSequenceCursor = Math.max(eventSequenceCursor, ...priorEvents.map((item) => item.sequence), 0);
+    } catch {}
     let pendingRecoverableFailure = "";
     let terminalToolFailure: StoredToolFailure | undefined;
     let waitingUserRequested = false;
@@ -383,14 +388,22 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
         if (next.done) break;
         const event = next.value;
         if (input.signal.aborted) throw new Error("Agent execution cancelled");
+        const projectionItemId = event.type === "tool_result"
+          ? `${input.run.id}:tool:${eventSequenceCursor + 1}`
+          : undefined;
+        const eventForProjection = projectionItemId
+          ? { ...event, itemId: projectionItemId }
+          : event;
+        let recordedEvent: { sequence: number } | undefined;
         if (event.type !== "text") {
-          await this.options.runtime.recordEvent({
+          recordedEvent = await this.options.runtime.recordEvent({
             runId: input.run.id,
             workerId: input.run.ownerId!,
             fencingToken: input.run.fencingToken,
             type: "run.ui_event",
-            payload: { event: projectDurableUiEvent(event) },
+            payload: { event: projectDurableUiEvent(eventForProjection) },
           });
+          eventSequenceCursor = recordedEvent.sequence;
         }
         if (event.type === "text") assistantText += String(event.content || "");
         if (event.type === "tool_result") {
@@ -432,10 +445,13 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
           }
           if (safeView.kind !== "silent") {
             projectedMessages.push({
+              ...(projectionItemId || recordedEvent?.sequence
+                ? { id: projectionItemId || `${input.run.id}:tool:${recordedEvent?.sequence}` }
+                : {}),
               role: "tool",
               content: safeView.summary,
               toolName: safeView.toolName,
-              toolResult: safeView,
+              toolResult: { ...safeView, durableRunId: input.run.id },
               timestamp: new Date().toISOString(),
             });
           }

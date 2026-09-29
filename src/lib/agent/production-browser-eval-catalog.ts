@@ -58,6 +58,7 @@ export const PRODUCTION_BROWSER_EVAL_DOMAINS: readonly ProductionBrowserEvalDoma
     browserCase("CHAT-004", "点击历史会话后 transcript、URL 和刷新读回一致", "/agent"),
     browserCase("CHAT-005", "简单对话出现唯一非空回复并持久化", "/agent", "general_chat"),
     browserCase("CHAT-006", "空流/断流显示可重试错误且不泄露工具文本", "/agent"),
+    browserCase("CHAT-007", "AgentChat 报告卡可展开 A-G 详情并保留报告入口", "/agent"),
   ]),
   domain("F05", "图片识别与截图路由", "05-图片识别与截图路由系统-Evals.md", [
     browserCase("IMAGE-001", "JD 截图进入 JD 评估", "/agent", "jd_evaluation"),
@@ -83,6 +84,7 @@ export const PRODUCTION_BROWSER_EVAL_DOMAINS: readonly ProductionBrowserEvalDoma
     browserCase("SCORE-004", "历史 70 分在五分制页面显示待复核", "/evaluate/reports"),
     browserCase("SCORE-005", "派生指标不会显示 276 或超范围百分比", "/analytics"),
     browserCase("SCORE-006", "报告页深色背景上的标题和正文保持可读", "/evaluate/reports"),
+    browserCase("SCORE-007", "分析面完整报告入口与 A-G 板块可交互", "/agent"),
   ]),
   domain("F09", "岗位发现扫描系统", "09-岗位发现扫描系统-Evals.md", [
     browserCase("SCAN-001", "条件澄清、确认后才创建扫描", "/discover"),
@@ -90,6 +92,7 @@ export const PRODUCTION_BROWSER_EVAL_DOMAINS: readonly ProductionBrowserEvalDoma
     browserCase("SCAN-003", "扫描失败、取消和历史读回", "/discover"),
     browserCase("SCAN-004", "保存 JD 的完整正文可展开、滚动到底并读回", "/evaluate/jds"),
     browserCase("SCAN-005", "JD 标题、描述和标签在卡片与抽屉中可读", "/evaluate/jds"),
+    browserCase("SCAN-006", "同一任务的岗位搜索确认卡在实时流、刷新和重放后只出现一次", "/agent"),
   ]),
   domain("F10", "投递追踪系统", "10-投递追踪系统-Evals.md", [
     browserCase("TRACK-001", "从职位或报告创建投递", "/tracker"),
@@ -108,6 +111,7 @@ export const PRODUCTION_BROWSER_EVAL_DOMAINS: readonly ProductionBrowserEvalDoma
     browserCase("PROPOSAL-001", "Agent 指定区块草稿和提案详情", "/agent", "resume_edit"),
     browserCase("PROPOSAL-002", "批准、应用、读回和版本快照", "/agent", "resume_edit"),
     browserCase("PROPOSAL-003", "拒绝、丢弃、回滚不误写", "/cv"),
+    browserCase("PROPOSAL-004", "简历修改提案双栏内容可读", "/agent"),
   ]),
   domain("F13", "简历优化 Judge 引擎", "13-简历优化Judge引擎-Evals.md", [
     browserCase("JUDGE-001", "质量和占位符检测", "/cv"),

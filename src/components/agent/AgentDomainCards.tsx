@@ -22,6 +22,7 @@ import type { AgentArtifactRef } from "@/lib/agent/task-journey";
 import { buildOfferAgentHandoffUrl } from "@/lib/agent/offer-handoff";
 import { countAnsweredInterviewRounds } from "@/lib/agent/interview-session-state";
 import { formatFivePointScore } from "@/lib/score-scale";
+import { parseJsonValue } from "@/lib/report-normalize";
 
 export interface EvalBlockProgress {
   block: string;
@@ -558,7 +559,7 @@ export function ResumeEditProposalCard({
   };
 
   return (
-    <div className={COMPACT_AGENT_CARD_CLASS}>
+    <div className="w-full max-w-[min(760px,96%)] min-w-0" data-testid="resume-edit-proposal-card">
       <motion.div
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
@@ -579,25 +580,25 @@ export function ResumeEditProposalCard({
               这个提案已经废弃，CV 正文没有改动。
             </div>
           ) : isRolledBack ? (
-            <div className="grid gap-3 md:grid-cols-2">
+            <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 18rem), 1fr))" }}>
               <div className="min-w-0 rounded-[var(--radius-sm)] border border-red-100 bg-red-50/60 px-3 py-2">
                 <div className="mb-1 text-[11px] font-medium text-red-700">已撤销内容</div>
-                <div className="max-h-56 overflow-y-auto whitespace-pre-wrap break-words text-xs text-[var(--color-text)]">{proposedContent || "无"}</div>
+                <div className="max-h-80 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-6 text-[var(--color-text)]">{proposedContent || "无"}</div>
               </div>
               <div className="min-w-0 rounded-[var(--radius-sm)] border border-emerald-100 bg-emerald-50/60 px-3 py-2">
                 <div className="mb-1 text-[11px] font-medium text-emerald-700">已恢复内容</div>
-                <div className="max-h-56 overflow-y-auto whitespace-pre-wrap break-words text-xs text-[var(--color-text)]">{restoredContent || originalContent || "无"}</div>
+                <div className="max-h-80 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-6 text-[var(--color-text)]">{restoredContent || originalContent || "无"}</div>
               </div>
             </div>
           ) : (
-            <div className="grid gap-3 md:grid-cols-2">
+            <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 18rem), 1fr))" }}>
               <div className="min-w-0 rounded-[var(--radius-sm)] border border-[var(--color-divider)] bg-[var(--color-bg)] px-3 py-2">
                 <div className="mb-1 text-[11px] font-medium text-[var(--color-muted)]">当前内容</div>
-                <div className="max-h-64 overflow-y-auto whitespace-pre-wrap break-words text-xs text-[var(--color-text)]">{originalContent || "无"}</div>
+                <div className="max-h-80 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-6 text-[var(--color-text)]">{originalContent || "无"}</div>
               </div>
               <div className="min-w-0 rounded-[var(--radius-sm)] border border-emerald-100 bg-emerald-50/60 px-3 py-2">
                 <div className="mb-1 text-[11px] font-medium text-emerald-700">建议修改</div>
-                <div className="max-h-64 overflow-y-auto whitespace-pre-wrap break-words text-xs text-[var(--color-text)]">{proposedContent || "无"}</div>
+                <div className="max-h-80 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-6 text-[var(--color-text)]">{proposedContent || "无"}</div>
               </div>
             </div>
           )}
@@ -738,13 +739,58 @@ export function ReportMessage({ content }: { content: string }) {
 }
 
 export function ReportSummaryCard({ payload, content }: { payload?: Record<string, unknown>; content: string }) {
-  const reportNum = payload?.reportNum as number | undefined;
+  const reportNum = Number(payload?.reportNum || 0);
   const company = (payload?.company as string | undefined) || "未知公司";
   const role = (payload?.role as string | undefined) || "未知岗位";
   const score = payload?.overallScore as number | undefined;
   const archetype = payload?.archetype as string | undefined;
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [storedBlocks, setStoredBlocks] = useState<Record<string, unknown> | null>(null);
+  const [detailState, setDetailState] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const blocks = payload?.blocks && typeof payload.blocks === "object" && !Array.isArray(payload.blocks)
+    ? payload.blocks as Record<string, unknown>
+    : {};
+  const labels = payload?.labels && typeof payload.labels === "object" && !Array.isArray(payload.labels)
+    ? payload.labels as Record<string, unknown>
+    : {};
+  useEffect(() => {
+    if (!detailsOpen || !reportNum) return;
+    let cancelled = false;
+    setDetailState("loading");
+    setStoredBlocks(null);
+    fetch(`/api/data/reports/${encodeURIComponent(String(reportNum))}`, { cache: "no-store" })
+      .then(async (response) => {
+        const json = await response.json().catch(() => ({}));
+        if (!response.ok || json.success !== true) throw new Error("报告详情读取失败");
+        const data = json.data && typeof json.data === "object" ? json.data as Record<string, unknown> : {};
+        const parsed = parseJsonValue(data.blocks_json || data.blocks, {});
+        if (cancelled) return;
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("报告板块为空");
+        setStoredBlocks(parsed as Record<string, unknown>);
+        setDetailState("ready");
+      })
+      .catch(() => {
+        if (!cancelled) setDetailState("error");
+      });
+    return () => { cancelled = true; };
+  }, [detailsOpen, reportNum]);
+  const visibleBlocks = reportNum
+    ? storedBlocks || (detailState === "loading" ? {} : blocks)
+    : blocks;
+  const detailBlocks = (["a", "b", "c", "d", "e", "f", "g"] as const)
+    .map((key) => {
+      const raw = visibleBlocks[key];
+      const block = typeof raw === "string" ? raw : raw && typeof raw === "object" && !Array.isArray(raw)
+        ? textValue((raw as Record<string, unknown>).content)
+        : "";
+      return { key, block, label: textValue(labels[key]) || ({
+        a: "A · 职位概览", b: "B · 简历匹配", c: "C · 职级与策略", d: "D · 薪资与市场",
+        e: "E · 定制化方案", f: "F · 面试准备", g: "G · 职位合法性",
+      } as Record<string, string>)[key] };
+    })
+    .filter((item) => item.block.trim().length > 0);
   return (
-    <div className={COMPACT_AGENT_CARD_CLASS}>
+    <div className="w-full max-w-[min(760px,96%)] min-w-0">
       <motion.div
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
@@ -759,7 +805,18 @@ export function ReportSummaryCard({ payload, content }: { payload?: Record<strin
             <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[var(--color-muted)]">
               {typeof score === "number" && <span>{formatFivePointScore(score)}</span>}
               {archetype && <span>{archetype}</span>}
-              <span>完整正文已放在报告详情页</span>
+              {reportNum > 0 || Object.keys(blocks).length > 0 ? (
+                <button
+                  type="button"
+                  aria-expanded={detailsOpen}
+                  onClick={() => setDetailsOpen((current) => !current)}
+                  className="inline-flex items-center gap-1 text-[var(--color-primary)] hover:underline"
+                >
+                  {detailsOpen ? "收起 A-G 详情" : "展开 A-G 详情"}
+                </button>
+              ) : (
+                <span>完整正文已放在报告详情页</span>
+              )}
             </div>
             {!payload && content && (
               <div className="mt-2 text-xs text-[var(--color-muted)] line-clamp-2">{content.slice(0, 140)}</div>
@@ -784,6 +841,21 @@ export function ReportSummaryCard({ payload, content }: { payload?: Record<strin
             </div>
           )}
         </div>
+        {detailsOpen && (
+          <div className="space-y-2 border-t border-[var(--color-divider)] px-4 py-3" data-testid="report-inline-details">
+            {detailState === "loading" && <div className="text-xs text-[var(--color-muted)]">正在读取完整报告…</div>}
+            {detailState === "error" && <div className="text-xs text-[var(--color-muted)]">详细内容暂时读取失败，请使用“打开”查看报告。</div>}
+            {detailState === "ready" && detailBlocks.length === 0 && <div className="text-xs text-[var(--color-muted)]">报告暂无详细板块。</div>}
+            {detailBlocks.map(({ key, label, block }) => (
+              <section key={key} className="rounded-[var(--radius-sm)] border border-[var(--color-divider)] bg-[var(--color-bg)] px-3 py-2">
+                <h4 className="mb-1 text-xs font-semibold text-[var(--color-text)]">{label}</h4>
+                <div className="text-sm leading-relaxed text-[var(--color-text-soft)]">
+                  <MarkdownRenderer content={block} />
+                </div>
+              </section>
+            ))}
+          </div>
+        )}
       </motion.div>
     </div>
   );

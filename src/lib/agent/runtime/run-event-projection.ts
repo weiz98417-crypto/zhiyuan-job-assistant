@@ -20,6 +20,7 @@ export function projectDurableUiEvent(
     });
     return {
       type,
+      ...(typeof event.itemId === "string" ? { itemId: event.itemId.slice(0, 180) } : {}),
       name: safeIdentifier(event.name),
       success,
       summary: safeView.summary || (success ? "工具执行成功" : "工具执行未成功"),
