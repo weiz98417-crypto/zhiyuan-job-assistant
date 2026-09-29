@@ -72,6 +72,27 @@ describe("evaluate_jd_full server execution", () => {
     expect(markScanJobsEvaluatedForJdForUser).toHaveBeenCalledWith(34, "user-1");
   });
 
+  it("leaves discovery status untouched when durable evaluation fails", async () => {
+    runDurableJDEvaluation.mockRejectedValueOnce(new Error("model unavailable"));
+
+    const result = await evaluateJDFull.handler(
+      { jd_text: "公司：纸鸢科技。岗位职责：负责产品规划与交付。".repeat(3), jd_id: 34 },
+      {
+        principal: { userId: "user-1" },
+        runId: "run-1",
+        allowlist: ["evaluate_jd_full"],
+        requestId: "request-1",
+      },
+    );
+
+    expect(result).toEqual(expect.objectContaining({
+      success: false,
+      errorCategory: "transient",
+      recoverable: true,
+    }));
+    expect(markScanJobsEvaluatedForJdForUser).not.toHaveBeenCalled();
+  });
+
   it("does not present an invalid historical score as a five-point result", () => {
     const summary = evaluateJDFull.formatResult({
       success: true,

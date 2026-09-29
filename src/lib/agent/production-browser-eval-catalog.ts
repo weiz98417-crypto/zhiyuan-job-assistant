@@ -59,6 +59,7 @@ export const PRODUCTION_BROWSER_EVAL_DOMAINS: readonly ProductionBrowserEvalDoma
     browserCase("CHAT-005", "简单对话出现唯一非空回复并持久化", "/agent", "general_chat"),
     browserCase("CHAT-006", "空流/断流显示可重试错误且不泄露工具文本", "/agent"),
     browserCase("CHAT-007", "AgentChat 报告卡可展开 A-G 详情并保留报告入口", "/agent"),
+    browserCase("CHAT-008", "JD handoff ID 只绑定当前用户 Turn，不复用旧 JD", "/agent", "jd_evaluation"),
   ]),
   domain("F05", "图片识别与截图路由", "05-图片识别与截图路由系统-Evals.md", [
     browserCase("IMAGE-001", "JD 截图进入 JD 评估", "/agent", "jd_evaluation"),
