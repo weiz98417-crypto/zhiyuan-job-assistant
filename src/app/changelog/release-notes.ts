@@ -13,7 +13,7 @@ export const releaseNotes: ReleaseNote[] = [
   {
     version: "0.12.2",
     stage: "production",
-    summary: "9 月 30 日体验补丁：窄屏执行态和对话可读性修复。",
+    summary: "9 月 30 日补丁：执行态布局、对话可读性、简历草稿完成条件和记忆回写修复。",
     sections: [
       {
         title: "执行态布局",
@@ -27,6 +27,15 @@ export const releaseNotes: ReleaseNote[] = [
         changes: [
           { description: "助手回复增加低透明度暖色纸张层、细边界和轻阴影，保留品牌底图层次并提升正文对比度。" },
           { description: "新增窄屏执行态与底图对比度回归 eval，避免布局和可读性问题再次回退。" },
+        ],
+      },
+      {
+        title: "任务完成与记忆",
+        changes: [
+          { description: "明确只生成简历建议或草稿时，以草稿持久化和读回为完成条件，不再要求批准、应用或新增简历版本；应用修改仍需要用户批准。" },
+          { description: "任务未完成时使用清晰的中文提示，不再把内部英文判据直接展示给用户。" },
+          { description: "修复记忆清除抑制查询的 PostgreSQL bigint/text 类型冲突，避免 JD 分析后的记忆回写报错。" },
+          { description: "新增生产事故 eval、只读 Event/Checkpoint 投影核验和测试数据清理证据；候选版本验收结果以实际生产测试报告为准。" },
         ],
       },
     ],

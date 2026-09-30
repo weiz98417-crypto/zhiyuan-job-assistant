@@ -216,8 +216,12 @@ export async function* orchestrateGen(
     : agent.tools.length > 0
       ? agent.tools.map((t) => t.name)
       : registry.getAll().map((t) => t.name);
-  const allTools = registry.toOpenAITools(toolNames, ctx.durable === true);
-  const tools = allTools.filter((t) => toolNames.includes(t.function.name));
+  const contractTools = ctx.taskContract?.routing?.allowedTools;
+  const effectiveToolNames = contractTools?.length
+    ? toolNames.filter((name) => contractTools.includes(name))
+    : toolNames;
+  const allTools = registry.toOpenAITools(effectiveToolNames, ctx.durable === true);
+  const tools = allTools.filter((t) => effectiveToolNames.includes(t.function.name));
 
   // Phase 6: Delegate to agent loop
   // Dynamic import to avoid circular deps
@@ -237,10 +241,11 @@ export async function* orchestrateGen(
       ? {
           principal: ctx.principal,
           runId: ctx.runId,
-          allowlist: toolNames,
+          allowlist: effectiveToolNames,
           signal: ctx.signal,
           workerId: ctx.workerId,
           fencingToken: ctx.fencingToken,
+          taskContract: ctx.taskContract || undefined,
         }
       : undefined,
   });
@@ -336,13 +341,17 @@ export async function orchestrate(
     : agent.tools.length > 0
       ? agent.tools.map((t) => t.name)
       : registry.getAll().map((t) => t.name);
-  const allTools = registry.toOpenAITools();
-  const tools = allTools.filter((t) => toolNames.includes(t.function.name));
+  const contractTools = ctx.taskContract?.routing?.allowedTools;
+  const effectiveToolNames = contractTools?.length
+    ? toolNames.filter((name) => contractTools.includes(name))
+    : toolNames;
+  const allTools = registry.toOpenAITools(effectiveToolNames);
+  const tools = allTools.filter((t) => effectiveToolNames.includes(t.function.name));
 
   return {
     agent,
     systemPrompt,
-    toolWhitelist: toolNames,
+    toolWhitelist: effectiveToolNames,
     tools,
     annotatedMessages: ctx.messages,
   };

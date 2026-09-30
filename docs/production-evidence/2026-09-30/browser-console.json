@@ -1,0 +1,8 @@
+{
+  "capturedAt": "2026-09-30T09:23:04.984Z",
+  "release": "0.12.1",
+  "tabId": "2",
+  "scope": "QA tab session151, historical150, refresh, cancel and soft-delete",
+  "limits": "Retained console warn/error entries only; not a browser HAR",
+  "entries": []
+}

@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   decideFactOperationsDeterministic,
@@ -115,5 +117,15 @@ describe("layered session memory seam", () => {
     const adapter = new MastraSessionMemoryAdapter({ async append() {}, async load() { return []; } });
     await expect(adapter.eraseTarget({ userId: "u-1", conversationId: 42 }, "sensitive"))
       .rejects.toBeInstanceOf(SessionMemoryConfigurationError);
+  });
+});
+
+describe("memory erasure SQL safety", () => {
+  it("qualifies jsonb array values before comparing them with bigint fact ids", () => {
+    const source = fs.readFileSync(path.join(process.cwd(), "src", "lib", "memory", "fact-ledger.ts"), "utf8");
+    const admission = fs.readFileSync(path.join(process.cwd(), "src", "lib", "memory", "admission.ts"), "utf8");
+    const combined = `${source}\n${admission}`;
+    expect(combined).not.toMatch(/jsonb_array_elements_text\([^)]*\)\s+id\s+WHERE\s+id\s*=/);
+    expect((combined.match(/AS erased_fact\(value\)/g) || []).length).toBeGreaterThanOrEqual(6);
   });
 });

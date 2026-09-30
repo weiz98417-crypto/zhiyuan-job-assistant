@@ -105,4 +105,20 @@ describe("production incident eval manifest", () => {
     expect(productionIncidentEvalManifest.some((item) => item.id === "RELEASE-UI-002" && item.status === "partial")).toBe(true);
     expect(productionIncidentEvalManifest.some((item) => item.id === "FLOW-UI-001" && item.status === "partial")).toBe(true);
   });
+
+  it("separates pre-cutover evidence from the post-cutover canary", () => {
+    const byId = new Map(productionIncidentEvalManifest.map((item) => [item.id, item]));
+    expect(byId.get("RELEASE-001")?.verificationPhase).toBe("both");
+    expect(byId.get("RELEASE-002")?.verificationPhase).toBe("post_cutover_canary");
+    expect(byId.get("RELEASE-LOG-001")?.verificationPhase).toBe("post_cutover_canary");
+    expect(byId.get("RELEASE-MODEL-001")?.verificationPhase).toBe("both");
+    expect(byId.get("MEMORY-007")?.status).toBe("partial");
+    expect(byId.get("MEMORY-007")?.testIds).toContain("qualifies jsonb array values before comparing them with bigint fact ids");
+    expect(byId.get("DEPLOY-HTTPS-001")?.requiredProductionEvidence).toContain("HTTPS :38084/login 200");
+    expect(byId.get("DEPLOY-HTTPS-002")?.requiredProductionEvidence).toContain("documented plain-http negative control");
+    expect(byId.get("DEPLOY-PORT-001")?.requiredProductionEvidence).toContain("canonical redirect or documented HTTPS-only policy");
+    for (const id of ["RELEASE-002", "RELEASE-LOG-001", "DEPLOY-HTTPS-001", "DEPLOY-HTTPS-002"]) {
+      expect(byId.get(id)?.verificationPhase, id).toBe("post_cutover_canary");
+    }
+  });
 });

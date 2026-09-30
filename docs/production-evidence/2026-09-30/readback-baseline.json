@@ -1,0 +1,41 @@
+{
+  "format": "zhiyuan-production-readback-baseline-v1",
+  "generatedAt": "2026-09-30",
+  "readOnly": true,
+  "release": {"current": "20260929-v0121-changelog-62654e4", "version": "0.12.1"},
+  "applicationQa": {"status": "active", "role": "superadmin", "lastLogin": "2026-09-30T05:30:56.843Z"},
+  "tables": {
+    "agent_conversation_items": {"present": true, "count": 0, "artifactColumns": ["artifact_id", "artifact_version", "artifact_hash"]},
+    "agent_eval_runs": {"present": true, "count": 0},
+    "agent_eval_layer_results": {"present": true, "count": 0},
+    "sessions": {"present": true, "count": 117, "countForQa": 61},
+    "agent_runs": {"present": true, "count": 201},
+    "agent_run_events": {"present": true, "count": 4634},
+    "agent_run_gates": {"present": true, "count": 13},
+    "scan_queue": {"present": true, "count": 14},
+    "scan_jobs": {"present": true, "count": 26},
+    "scan_source_runs": {"present": true, "count": 123},
+    "jds": {"present": true, "count": 26},
+    "reports": {"present": true, "count": 19},
+    "resume_documents": {"present": true, "count": 0},
+    "resume_source_artifacts": {"present": true, "count": 0},
+    "resume_drafts": {"present": true, "count": 8},
+    "cv_data": {"present": true, "qaCount": 1, "qaDataLength": 10295, "qaDataMd5": "765c154bce83c1ed884eb6fde06306ed"}
+  },
+  "journey": {
+    "普通对话": {"sessionId": "147", "status": "observed"},
+    "岗位搜索确认与扫描": {"sessionId": "149", "runId": "aaf6f022-5a5d-4627-a1f3-8ff8e707dc0c", "status": "succeeded", "scanId": "1770f995-5e5c-4256-b35b-4550dd6de3fb", "scanStatus": "done", "companies": [28, 28], "jobsNew": 3, "gate": "approved"},
+    "JD正文与匹配报告": {"sessionId": "150", "runId": "f5c43012-4eed-47fe-a197-436ba2a45a91", "status": "succeeded", "reportNum": 18, "score": 3.8, "blockCount": 7, "jdId": 28, "jdBodyLength": 106},
+    "简历读取与草稿": {"resumeDocuments": 0, "resumeSourceArtifacts": 0, "unappliedDraftsForQa": 3, "status": "partial"},
+    "session151": {"ordinaryRunId": "355fbca5-9d0e-4611-b0df-f44a09ee62de", "ordinaryRunStatus": "succeeded", "resumeRunId": "8c09f68a-e3cd-4f4e-a617-95bb59f4de61", "resumeRunStatusBeforeCleanup": "waiting_user", "resumeRunStatusAfterCancel": "cancelled", "resumeRunCompletedAt": "2026-09-30T09:06:33.652Z", "draftId": "draft_1_9feff838c6f0fdd844d78647", "draftStatusBeforeCleanup": "draft", "draftStatusAfterCleanup": "discarded", "draftApplied": false, "draftContentMd5": "beb5b99832a0a4d6700e2b6a7109084b", "draftPatchesMd5": "c97cddbaca46af57c8707a99a973904e", "sessionDeletedAtBeforeCleanup": null, "sessionDeletedAtAfterCleanup": "2026-09-30T09:14:09.617Z"},
+    "conversationProjection": {"count": 0, "status": "missing"},
+    "evalRuns": {"count": 0, "status": "missing"},
+    "cleanup": {"performed": true, "status": "partial", "scope": "session151-and-associated-draft", "allQaDataCleared": false}
+  },
+  "scanSourceSummary": {"sourceRunCount": 37, "failedOrBlockedOrEmpty": 36, "successful": 1, "statusCounts": {"blocked": 3, "done": 1, "empty": 26, "failed": 7}, "errorLogCount": 36},
+  "productionErrors": [{"category": "jd_evaluation_persistence", "postgresCode": "42883", "errorClass": "operator does not exist: bigint = text", "count": 4, "writeback": "memory index/writeback failed"}],
+  "sqlValidation": {"readOnlyExecute": true, "correctedErasureAliasQueries": {"validated": 6, "total": 6, "errors": 0, "fixtureVisibleFactIds": [202], "fixtureSuppressedFactIds": [101]}},
+  "cvDataReadback": {"activeVersion": "v2", "dataLength": 10295, "dataMd5": "765c154bce83c1ed884eb6fde06306ed", "updatedAt": "2026-09-28T07:29:15.375Z", "sectionMd5": {"summary": "a96ef7169fcf4aaff65572b8c97f101c", "experience": "1c6bb13fb473066ab07b7ca7028461cb", "projects": "5cee60c332327ba6cdb1d35926eb9c44", "education": "881be2189b6244d1f5a655d5c9ffbb67", "skills": "00cc41f8f5d00dd17aae3142004c6b45"}},
+  "cleanupReadback": {"session151DeletedAt": "2026-09-30T09:14:09.617Z", "resumeRunCancelled": true, "draftId": "draft_1_9feff838c6f0fdd844d78647", "draftStatus": "discarded", "contentPreserved": true, "otherDraftsTouched": false, "cvDataChanged": false},
+  "gate": {"flowUi001": "partial", "releaseAllowed": false, "missing": ["same-flow Agent→Worker→Agent evidence", "conversation item/artifact readback", "resume stage evidence", "production eval run", "full QA data cleanup", "candidate version online retest"]}
+}

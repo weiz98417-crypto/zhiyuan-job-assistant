@@ -252,7 +252,7 @@ export async function listActiveMemoryFacts(userId: string, agentId = "user"): P
          FROM memory_erasure_suppressions s
          JOIN memory_erasure_requests r ON r.id = s.request_id AND r.user_id = s.user_id
          WHERE s.user_id = f.user_id AND s.lifted_at IS NULL
-           AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(r.scope_json->'factIds') id WHERE id = f.id::text)
+           AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(r.scope_json->'factIds') AS erased_fact(value) WHERE erased_fact.value = f.id::text)
        )
      ORDER BY f.valid_at DESC, f.importance DESC`,
     [userId, readablePartitions],

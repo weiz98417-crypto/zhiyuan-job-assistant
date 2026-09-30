@@ -34,6 +34,16 @@ export function hasResumeWriteIntent(content: string): boolean {
   return /(优化|修改|改写|润色|重写|生成|创建|保存|写入|应用|用这个|撤销|回滚|导入|同步|替换).{0,16}(简历|履历|resume|cv)|(简历|履历|resume|cv).{0,16}(优化|修改|改写|润色|重写|生成|创建|保存|写入|应用|用这个|撤销|回滚|导入|同步|替换)/i.test(content);
 }
 
+/** A draft request may coexist with a prohibition on editing the saved CV. */
+export function hasExplicitResumeDraftOnlyIntent(content: string): boolean {
+  const text = content.replace(/\s+/g, "");
+  const resumeContext = /(简历|履历|resume|cv)/i.test(text);
+  const draftOutput = /(草稿|优化建议|修改建议|改写建议|优化方案)/i.test(text);
+  const draftOnly = /(只|仅|先).{0,14}(生成|出|给|提供|做).{0,16}(草稿|建议|方案)|(草稿|建议|方案).{0,12}(只|仅).{0,8}(生成|出|给)/i.test(text);
+  const noApply = /(不|不要|不用|无需|别|禁止).{0,5}(应用|保存|覆盖|写入|新增简历版本|生成简历版本)/i.test(text);
+  return resumeContext && draftOutput && draftOnly && noApply;
+}
+
 export function hasProfileWriteIntent(content: string): boolean {
   if (detectNegatedWriteIntent(content) === "profile") return false;
   return /(更新|保存|写入|记录|沉淀|提取|同步|刷新|完善|加入|修改|生成|建立|做).{0,16}(求职画像|职业画像|个人画像|画像|profile)|(求职画像|职业画像|个人画像|画像|profile).{0,16}(更新|保存|写入|记录|沉淀|提取|同步|刷新|完善|加入|修改|生成|建立)/i.test(content);

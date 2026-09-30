@@ -1,0 +1,27 @@
+{
+  "release": "0.12.1",
+  "sessionId": 151,
+  "observation": "Real production browser baseline, not candidate acceptance",
+  "resumeRead": {
+    "displayedCharacters": 4719,
+    "sections": [
+      { "title": "个人概述", "characters": 550 },
+      { "title": "工作经历", "characters": 1027 },
+      { "title": "项目经验", "characters": 2942 },
+      { "title": "教育背景", "characters": 39 },
+      { "title": "技能", "characters": 110 }
+    ],
+    "privateContentIncluded": false
+  },
+  "draft": {
+    "section": "experience",
+    "readBackBadge": "已持久化并回读",
+    "applied": false,
+    "observedProblems": [
+      "Explicit draft-only request incorrectly waited for user approval and application",
+      "User-facing output exposed internal English success criteria",
+      "Generated draft contained unfilled quantification placeholders"
+    ]
+  },
+  "rawCapture": "Kept locally outside tracked evidence; no resume text or contact data included"
+}

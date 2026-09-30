@@ -426,7 +426,7 @@ export async function listOpenFacts(
          FROM memory_erasure_suppressions s
          JOIN memory_erasure_requests r ON r.id = s.request_id AND r.user_id = s.user_id
          WHERE s.user_id = memory_facts.user_id AND s.lifted_at IS NULL
-           AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(r.scope_json->'factIds') id WHERE id = memory_facts.id::text)
+           AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(r.scope_json->'factIds') AS erased_fact(value) WHERE erased_fact.value = memory_facts.id::text)
        )
      ORDER BY importance DESC, valid_at DESC
      LIMIT $4`,
@@ -468,7 +468,7 @@ export async function listFactProvenance(
          FROM memory_erasure_suppressions s
          JOIN memory_erasure_requests r ON r.id = s.request_id AND r.user_id = s.user_id
          WHERE s.user_id = f.user_id AND s.lifted_at IS NULL
-           AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(r.scope_json->'factIds') id WHERE id = f.id::text)
+           AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(r.scope_json->'factIds') AS erased_fact(value) WHERE erased_fact.value = f.id::text)
        )
      GROUP BY f.id, e.source_type, e.source_id`,
     [factId, principal.userId, readablePartitions],
@@ -519,7 +519,7 @@ export async function listFactsByEpisode(
          FROM memory_erasure_suppressions s
          JOIN memory_erasure_requests r ON r.id = s.request_id AND r.user_id = s.user_id
          WHERE s.user_id = f.user_id AND s.lifted_at IS NULL
-           AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(r.scope_json->'factIds') id WHERE id = f.id::text)
+           AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(r.scope_json->'factIds') AS erased_fact(value) WHERE erased_fact.value = f.id::text)
        )
      GROUP BY f.id, e.source_type, e.source_id
      ORDER BY f.created_at, f.id`,
@@ -638,7 +638,7 @@ export async function searchFactsHybrid(
          FROM memory_erasure_suppressions s
          JOIN memory_erasure_requests r ON r.id = s.request_id AND r.user_id = s.user_id
          WHERE s.user_id = f.user_id AND s.lifted_at IS NULL
-           AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(r.scope_json->'factIds') id WHERE id = f.id::text)
+           AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(r.scope_json->'factIds') AS erased_fact(value) WHERE erased_fact.value = f.id::text)
        )
      ORDER BY fusion.score DESC
      LIMIT $4`,
@@ -743,7 +743,7 @@ export async function getProfileBlocks(
          JOIN memory_erasure_suppressions s ON s.user_id = $1 AND s.lifted_at IS NULL
          JOIN memory_erasure_requests r ON r.id = s.request_id AND r.user_id = s.user_id
          WHERE pbf.profile_block_id = pb.id
-           AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(r.scope_json->'factIds') id WHERE id = pbf.fact_id::text)
+           AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(r.scope_json->'factIds') AS erased_fact(value) WHERE erased_fact.value = pbf.fact_id::text)
        )
      GROUP BY pb.id
      HAVING COUNT(pf.id) > 0

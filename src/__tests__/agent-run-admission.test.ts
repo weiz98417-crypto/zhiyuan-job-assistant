@@ -56,4 +56,26 @@ describe("Agent Run Admission", () => {
     expect(decision.currentRunId).toBe("resume-diagnosis-run");
     expect(decision.route?.requiresClarification).toBe(false);
   });
+
+  it("keeps an explicit draft-only resume request read-only after the production wording", () => {
+    const decision = admitAgentRun({
+      conversationId: 151,
+      input: {
+        content: "请只读查看当前已保存的简历，分别概括工作经历和项目经历。然后基于已保存报告18的JD给我一个简历优化草稿，只生成建议，不应用、不覆盖、不新增简历版本，也不要把测试内容加入活跃记忆。",
+      },
+      entryHints: { agentId: "general", source: "agent_chat" },
+    });
+
+    expect(decision.kind).toBe("start_new_run");
+    expect(decision.taskType).toBe("resume_edit");
+    const routing = decision.contract?.routing as { resumeEditMode?: string; allowedTools?: string[] } | undefined;
+    expect(routing?.resumeEditMode).toBe("draft_only");
+    expect(routing?.allowedTools).toContain("read_file");
+    expect(routing?.allowedTools).toContain("optimize_resume_section");
+    expect(routing?.allowedTools).not.toContain("create_resume_edit_proposal");
+    expect(routing?.allowedTools).not.toContain("apply_resume_edit_proposal");
+    expect(routing?.allowedTools).not.toContain("save_resume_section");
+    expect(decision.contract?.requiresUserApproval).toBe(false);
+    expect(decision.contract?.successCriteria).toEqual(["draft generated", "draft read-back verification passes"]);
+  });
 });

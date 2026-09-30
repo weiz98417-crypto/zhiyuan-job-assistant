@@ -34,6 +34,18 @@ export type ProductionIncidentEvidence =
   | "screenshot"
   | "database";
 
+/**
+ * Release evidence is collected in two different windows.  A candidate cannot
+ * prove its live `current` target or PM2/UI parity before the switch, while a
+ * post-switch canary must not be treated as a preflight result.  Keeping this
+ * phase on the manifest prevents the release report from accidentally claiming
+ * that one window proved the other.
+ */
+export type ProductionIncidentVerificationPhase =
+  | "pre_cutover"
+  | "post_cutover_canary"
+  | "both";
+
 export interface ProductionIncidentEval {
   id: string;
   cluster: ProductionIncidentCluster;
@@ -51,6 +63,7 @@ export interface ProductionIncidentEval {
   testIds?: readonly string[];
   catalogIds?: readonly string[];
   requiredProductionEvidence: readonly string[];
+  verificationPhase?: ProductionIncidentVerificationPhase;
 }
 
 export const productionIncidentEvalManifest: readonly ProductionIncidentEval[] = [
@@ -71,6 +84,7 @@ export const productionIncidentEvalManifest: readonly ProductionIncidentEval[] =
     testIds: ["current.next", "requires replacement ownership"],
     catalogIds: ["CHANGE-001", "CHANGE-003"],
     requiredProductionEvidence: ["current target", "VERSION", "git SHA", "PM2 cwd", "Web/Worker health"],
+    verificationPhase: "both",
   },
   {
     id: "RELEASE-002",
@@ -88,6 +102,7 @@ export const productionIncidentEvalManifest: readonly ProductionIncidentEval[] =
     testFiles: ["src/__tests__/agent-production-cutover.test.ts"],
     catalogIds: ["CHANGE-004"],
     requiredProductionEvidence: ["/changelog screenshot", "/login asset URLs", "version endpoint", "no stale cache"],
+    verificationPhase: "post_cutover_canary",
   },
   {
     id: "RELEASE-LOG-001",
@@ -106,6 +121,7 @@ export const productionIncidentEvalManifest: readonly ProductionIncidentEval[] =
     testIds: ["selects historical release details through a persistent version URL"],
     catalogIds: ["CHANGE-005"],
     requiredProductionEvidence: ["historical version list", "each version selection screenshot", "version-specific body read-back", "refresh and back-forward trace", "unknown-version behavior"],
+    verificationPhase: "post_cutover_canary",
   },
   {
     id: "RELEASE-MODEL-001",
@@ -124,6 +140,7 @@ export const productionIncidentEvalManifest: readonly ProductionIncidentEval[] =
     testIds: ["rejects a release with no Worker model key", "shared/secrets/production.env"],
     catalogIds: ["CHANGE-003", "CHAT-005"],
     requiredProductionEvidence: ["preflight rejection before current switch", "shared env link", "PM2 Web/Worker key presence without secret value", "one greeting Run succeeded", "assistant read-back"],
+    verificationPhase: "both",
   },
   {
     id: "DEPLOY-NET-001",
@@ -133,31 +150,33 @@ export const productionIncidentEvalManifest: readonly ProductionIncidentEval[] =
     sourceIncident: "22 端口可达，但服务端在密码验证前主动关闭连接。",
     fixture: "read-only TCP, SSH banner and authentication preflight",
     expected: "报告 TCP/banner/auth 三个阶段；认证前断开时不执行发布命令、不误报应用故障。",
-    observed: "无法进入密码验证，生产备份、迁移和 PM2 切换均未执行。",
+    observed: "曾在密码验证前断开；本轮已可通过 SSH 完成候选构建和备份，但原始异常的 TCP/banner/auth 分段证据仍未归档。",
     layer: "manual",
     evidence: ["network", "screenshot"],
-    status: "blocked",
+    status: "manual",
     releaseGate: "hard",
     testFiles: [],
     requiredProductionEvidence: ["TCP result", "SSH banner result", "auth-stage result", "zero side effects"],
+    verificationPhase: "pre_cutover",
   },
   {
     id: "DEPLOY-HTTPS-001",
     cluster: "network",
     severity: "P0",
-    title: "443 HTTPS 和 HSTS 门禁",
-    sourceIncident: "443 曾不可用，HTTPS/HSTS 发布安全门禁无法通过。",
-    fixture: "curl/browser probes for canonical HTTPS endpoint",
-    expected: "443 TLS 可达、证书有效、响应带 HSTS max-age，应用 URL 不生成明文入口。",
-    observed: "443 不可用，不能安全发布。",
+    title: "授权 38084 HTTPS 和 HSTS 门禁",
+    sourceIncident: "历史上曾把 443 当成默认入口并记录不可用；当前实际授权 UI 入口是 HTTPS 38084。",
+    fixture: "curl/browser probes for the authorized HTTPS endpoint https://121.43.198.13:38084",
+    expected: "授权的 38084 TLS 入口可达、证书/代理策略可解释、响应带 HSTS max-age，应用 URL 不生成明文入口。若未来启用 443，另行登记其证书和跳转门禁。",
+    observed: "此前按 443 编写的阻塞描述已过时；当前用户授权入口是 HTTPS 38084，需在候选发布 canary 中重新采集证书、HSTS 和 /login 证据。",
     layer: "release",
     evidence: ["network", "ui", "read_back"],
-    status: "blocked",
+    status: "partial",
     releaseGate: "hard",
     testFiles: ["src/__tests__/auth-security-preflight.test.ts"],
     testIds: ["rejects HTTP origin and insecure cookies"],
     catalogIds: ["AUTH-004"],
-    requiredProductionEvidence: ["TLS handshake", "certificate hostname", "strict-transport-security", "HTTPS /login 200"],
+    requiredProductionEvidence: ["38084 TLS handshake", "certificate/proxy result", "strict-transport-security", "HTTPS :38084/login 200"],
+    verificationPhase: "post_cutover_canary",
   },
   {
     id: "DEPLOY-HTTPS-002",
@@ -165,33 +184,35 @@ export const productionIncidentEvalManifest: readonly ProductionIncidentEval[] =
     severity: "P0",
     title: "明文 HTTP 不能打到 HTTPS 端口",
     sourceIncident: "访问错误协议后出现 nginx 400：The plain HTTP request was sent to HTTPS port。",
-    fixture: "HTTP and HTTPS probes for 121.43.198.13:38084 and canonical 443",
-    expected: "HTTP 入口明确 301 到 canonical HTTPS 或明确作为 HTTP 服务；任何入口不会把错误协议转发到 TLS listener。",
-    observed: "38084、443 和代理配置混用，用户收到 400。",
+    fixture: "HTTP and HTTPS probes for the authorized 121.43.198.13:38084 endpoint",
+    expected: "38084 的明文 HTTP 请求必须明确 301 到 HTTPS 或被安全拒绝；HTTPS 请求稳定返回应用响应；不能把普通 HTTP 发送到 TLS listener 后误报为应用故障。",
+    observed: "此前用户访问 http://121.43.198.13:38084 收到 nginx 400（plain HTTP sent to HTTPS port）；这是协议使用错误，需保留负向证据并验证 HTTPS 正向入口。",
     layer: "manual",
     evidence: ["network", "ui"],
-    status: "blocked",
+    status: "partial",
     releaseGate: "hard",
     testFiles: ["src/__tests__/auth-security-preflight.test.ts"],
     catalogIds: ["AUTH-004"],
-    requiredProductionEvidence: ["HTTP status/Location", "HTTPS status", "no plain-http-to-TLS 400", "HSTS"],
+    requiredProductionEvidence: ["HTTP :38084 status/Location", "HTTPS :38084 status", "documented plain-http negative control", "HSTS"],
+    verificationPhase: "post_cutover_canary",
   },
   {
     id: "DEPLOY-PORT-001",
     cluster: "network",
     severity: "P1",
-    title: "38084 和 443 入口语义不能混淆",
+    title: "38084 入口语义不能与其他端口混淆",
     sourceIncident: "用户明确使用 121.43.198.13:38084，但排障过程误把 443 当成应用入口。",
-    fixture: "canonical endpoint matrix: scheme, host, port, proxy headers, cookie mode",
-    expected: "每个入口有唯一 scheme/port 语义；应用 origin、跳转、cookie 和 E2E 地址来自同一矩阵。",
-    observed: "端口误用导致错误协议、Origin 和登录判断互相冲突。",
+    fixture: "authorized endpoint matrix: https://121.43.198.13:38084 (production UI), internal http://127.0.0.1:3100 (health only)",
+    expected: "生产 UI、内部健康检查和 QA E2E 均使用明确的 scheme/host/port；APP_ORIGIN、代理 Origin、cookie 和浏览器地址一致。443 若未启用不作为当前 UI 入口。",
+    observed: "排障中曾把 443 当作应用入口；用户明确授权并实际使用 HTTPS 38084，需重新采集入口矩阵证据。",
     layer: "release",
     evidence: ["network", "ui", "read_back"],
-    status: "blocked",
+    status: "partial",
     releaseGate: "hard",
     testFiles: ["src/__tests__/auth-security-preflight.test.ts", "src/__tests__/middleware-csrf.test.ts"],
     catalogIds: ["AUTH-004"],
-    requiredProductionEvidence: ["endpoint matrix", "location/origin match", "cookie Secure/SameSite", "canonical redirect"],
+    requiredProductionEvidence: ["endpoint matrix", "location/origin match", "cookie Secure/SameSite", "canonical redirect or documented HTTPS-only policy"],
+    verificationPhase: "both",
   },
   {
     id: "AUTH-ORIGIN-001",
@@ -243,6 +264,7 @@ export const productionIncidentEvalManifest: readonly ProductionIncidentEval[] =
     testFiles: ["scripts/check-agent-runtime-preflight.mjs", "scripts/check-memory-release-gates.mjs", "scripts/check-postgres-cutover.mjs"],
     catalogIds: ["DATA-005"],
     requiredProductionEvidence: ["backup hash and timestamp", "schema/table inventory", "pgvector extension", "HNSW index", "migration dry-run", "JD matching read-back"],
+    verificationPhase: "pre_cutover",
   },
   {
     id: "AUTH-UI-001",
@@ -1311,21 +1333,57 @@ export const productionIncidentEvalManifest: readonly ProductionIncidentEval[] =
     requiredProductionEvidence: ["source/status counts", "pending expiration", "sensitive exclusion", "migration audit", "post-migration retrieval"],
   },
   {
+    id: "MEMORY-007",
+    cluster: "memory",
+    severity: "P1",
+    title: "记忆清除抑制查询必须保持 PostgreSQL 类型安全",
+    sourceIncident: "生产 JD 评估回写曾因 jsonb_array_elements_text 的未限定 id 别名与 bigint fact id 比较，触发 PostgreSQL 42883。",
+    fixture: "memory_facts bigint ids with memory_erasure_requests.scope_json.factIds text values, including suppressed and visible facts",
+    expected: "六处 suppression 查询都显式使用 erased_fact(value)，生产只读 fixture 可执行；被抑制 fact 不返回，未抑制 fact 仍返回，不能再次出现 bigint = text。",
+    observed: "旧 SQL 在生产错误日志中出现 4 次；本地已修正六处查询，生产只读 VALUES fixture 验证 6/6，无写入。",
+    layer: "integration",
+    evidence: ["database", "read_back", "event"],
+    status: "partial",
+    releaseGate: "hard",
+    testFiles: ["src/__tests__/fact-ledger.test.ts"],
+    testIds: ["qualifies jsonb array values before comparing them with bigint fact ids"],
+    requiredProductionEvidence: ["six-query SQL inventory", "read-only PostgreSQL fixture", "suppressed fact excluded", "visible fact retained", "zero 42883 after release"],
+    verificationPhase: "both",
+  },
+  {
+    id: "CV-DRAFT-ONLY-001",
+    cluster: "resume",
+    severity: "P1",
+    title: "只生成简历草稿不能要求批准应用",
+    sourceIncident: "生产会话151明确要求只生成建议、不应用、不覆盖、不新增版本，仍等待批准并向用户暴露英文完成判据。",
+    fixture: "production draft-only wording with a persisted/read-back draft and no CV version mutation",
+    expected: "服务端绑定 draft_only 合同；草稿读回即可完成；提案、应用和导入工具不可执行；提示不泄露内部判据；真实简历版本和哈希不变。",
+    observed: "0.12.1 基线已复现 waiting_user 和英文判据；本轮草稿已丢弃，真实简历哈希与版本未变化；候选在线复测待完成。",
+    layer: "runtime_e2e",
+    evidence: ["run", "event", "artifact", "read_back", "ui", "database"],
+    status: "partial",
+    releaseGate: "hard",
+    testFiles: ["src/__tests__/agent-run-admission.test.ts", "src/__tests__/agent-runtime-regressions.eval.test.ts", "src/__tests__/task-program-stop-guard.test.ts"],
+    testIds: ["keeps an explicit draft-only resume request read-only after the production wording", "regression: draft-only optimization succeeds after persisted read-back without approval", "uses the active draft-only contract criteria instead of the default apply criteria"],
+    requiredProductionEvidence: ["draft_only contract and tool allowlist", "succeeded after draft read-back", "no approval/application prompt", "CV version/hash unchanged", "discarded QA draft"],
+    verificationPhase: "both",
+  },
+  {
     id: "RELEASE-UI-002",
     cluster: "journey",
     severity: "P1",
     title: "生产真实 E2E 先确认应用账号",
     sourceIncident: "SSH root 凭据不能代替应用层账号；最初真实浏览器 E2E 因缺少应用账号受阻。",
-    fixture: "isolated QA application account with no production personal data",
+    fixture: "authorized application account; record actual isolation and protect existing personal data",
     expected: "账号门禁先通过才开始真实 UI 操作；缺账号时状态为 blocked，不伪造通过。",
-    observed: "应用账号后来已提供，会话 147 完成普通对话浏览器验证；独立登录、账号隔离和登出证据尚未归档。",
+    observed: "用户提供的应用账号实际是含真实简历的 superadmin；本轮已限定只读简历和不应用草稿，不能称为无个人数据的隔离账号。",
     layer: "manual",
     evidence: ["ui", "network", "screenshot"],
     status: "partial",
     releaseGate: "hard",
     testFiles: [],
     catalogIds: ["AUTH-002", "AUTH-004"],
-    requiredProductionEvidence: ["QA account login", "isolated user id", "session cookie", "logout cleanup"],
+    requiredProductionEvidence: ["QA account login", "actual owner and data isolation scope", "session cookie without token values", "test session cleanup"],
   },
   {
     id: "FLOW-UI-001",
@@ -1333,16 +1391,16 @@ export const productionIncidentEvalManifest: readonly ProductionIncidentEval[] =
     severity: "P0",
     title: "完整求职流程必须在真实界面闭环",
     sourceIncident: "用户要求验证登录、普通对话、岗位发现、JD、简历草稿、历史切换、刷新和 Agent 间传递。",
-    fixture: "isolated QA account and synthetic JD/resume; no persistent resume write",
+    fixture: "authorized owner, QA-marked sessions and synthetic JD; existing resume read only, draft artifact permitted but no active CV write",
     expected: "登录→对话回复→岗位条件→确认扫描→JD 正文→匹配报告→简历读取→不落库草稿→历史切换→刷新全部有证据。",
-    observed: "会话 147 已完成一次普通对话浏览器验证；岗位、JD、简历草稿、历史切换和 Agent 交接的完整证据尚未归档。",
+    observed: "已收 session149 扫描和150 JD的数据库基线；151真实浏览器普通对话、简历读取、草稿、历史切换与刷新及其清理读回。0.12.2候选完整任务链与可重放投影仍待核验。",
     layer: "browser",
     evidence: ["run", "event", "gate", "artifact", "read_back", "ui", "network", "screenshot", "database"],
     status: "partial",
     releaseGate: "hard",
     testFiles: ["src/__tests__/production-browser-eval-catalog.test.ts", "src/__tests__/agent-e2e-matrix.test.ts"],
     catalogIds: ["LONG-002", "LONG-006", "LONG-008"],
-    requiredProductionEvidence: ["nine issue checklist", "screenshots", "console/network", "Run/Gate/Artifact DB read-back", "cleanup"],
+    requiredProductionEvidence: ["nine issue checklist", "screenshots", "console/network", "Run/Gate/Artifact DB read-back and Event/Checkpoint item replay", "cleanup"],
   },
 ];
 

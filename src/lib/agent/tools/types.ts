@@ -46,6 +46,7 @@ export interface ToolExecutionContext {
   requestId?: string;
   workerId?: string;
   fencingToken?: number;
+  taskContract?: { resumeEditMode?: "draft_only" | "propose" | "apply" };
 }
 
 export interface ToolReconciliationOutcome {

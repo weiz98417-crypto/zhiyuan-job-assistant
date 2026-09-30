@@ -35,6 +35,11 @@ async function handler(
 ): Promise<ToolResult> {
   const { section, instruction, operation = "full", effort = 3, referenceIds } = params as OptimizeParams & { referenceIds?: number[] };
   const sectionId = resolveSection(section);
+  const draftOnly = context?.taskContract?.resumeEditMode === "draft_only"
+    || (context?.allowlist.includes("optimize_resume_section") === true && !context?.allowlist.includes("create_resume_edit_proposal"));
+  const completionHint = draftOnly
+    ? "草稿已持久化并完成读回核对，没有修改或新增活动简历版本。"
+    : "请在草稿卡中选择方案后，再创建待审批修改提案。";
 
   if (context) {
     try {
@@ -55,7 +60,7 @@ async function handler(
           draftIds: data.variants.map((draft) => draft.id),
           readBackVerified: true,
         },
-        llmSummary: `已为 ${data.sectionId} 生成并持久化 ${data.variants.length} 个简历草稿。artifactId=${data.artifactId}。可选草稿：${data.variants.map((draft) => `${draft.label}:${draft.id}`).join("；")}。等待用户选择后，调用 create_resume_edit_proposal(draftId=所选ID)。`,
+        llmSummary: `已为 ${data.sectionId} 生成并持久化 ${data.variants.length} 个简历草稿。artifactId=${data.artifactId}。可选草稿：${data.variants.map((draft) => `${draft.label}:${draft.id}`).join("；")}。${completionHint}`,
         uiPayload: { type: "resume_draft", ...data },
         rawData: data,
       };
@@ -186,7 +191,7 @@ async function handler(
       draftIds: draftData.variants.map((draft: { id: string }) => draft.id),
       readBackVerified: true,
     },
-    llmSummary: `已为 ${sectionId} 生成并持久化 ${draftData.variants.length} 个简历草稿。artifactId=${draftData.artifactId}。可选草稿：${draftData.variants.map((draft: { id: string; label?: string }) => `${draft.label || "方案"}:${draft.id}`).join("；")}。等待用户选择后，调用 create_resume_edit_proposal(draftId=所选ID)，不要从 Markdown 重建正文。`,
+    llmSummary: `已为 ${sectionId} 生成并持久化 ${draftData.variants.length} 个简历草稿。artifactId=${draftData.artifactId}。可选草稿：${draftData.variants.map((draft: { id: string; label?: string }) => `${draft.label || "方案"}:${draft.id}`).join("；")}。${completionHint}`,
     uiPayload: {
       type: "resume_draft",
       artifactId: draftData.artifactId,

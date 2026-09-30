@@ -85,6 +85,7 @@ export interface ExecuteGovernedToolAttemptInput {
   idempotencyKey?: string;
   policyDenial?: ToolResult;
   signal?: AbortSignal;
+  taskContract?: { resumeEditMode?: "draft_only" | "propose" | "apply" };
 }
 
 export interface GovernedToolAttemptOutcome {
@@ -325,6 +326,7 @@ export class GovernedToolAttemptExecutor {
       requestId: idempotencyKey,
       workerId: input.workerId,
       fencingToken: input.fencingToken,
+      taskContract: input.taskContract,
     });
     const uncertainWrite = !result.success
       && tool?.capability?.reconciliation !== "none"

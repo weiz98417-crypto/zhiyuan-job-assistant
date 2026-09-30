@@ -127,3 +127,7 @@ openspec/changes/*
 !openspec/changes/harden-authentication-and-admin-security/**
 /auth
 /auth-wal
+
+# Local production packages and raw QA captures may contain personal content.
+/release-*.tar.gz
+/.private/

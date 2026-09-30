@@ -35,6 +35,7 @@ export interface GovernedRuntimeToolInput {
   requestId?: string;
   policyDenial?: ToolResult;
   signal?: AbortSignal;
+  taskContract?: { resumeEditMode?: "draft_only" | "propose" | "apply" };
 }
 
 export function executeGovernedRuntimeTool(input: GovernedRuntimeToolInput): Promise<GovernedToolAttemptOutcome> {
@@ -49,6 +50,7 @@ export function executeGovernedRuntimeTool(input: GovernedRuntimeToolInput): Pro
     idempotencyKey: input.requestId,
     policyDenial: input.policyDenial,
     signal: input.signal,
+    taskContract: input.taskContract,
   });
 }
 

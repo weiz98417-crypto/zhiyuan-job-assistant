@@ -323,7 +323,10 @@ export async function* agentLoopServer(opts: {
   let agent = opts.agent;
   let tools = opts.tools;
   let modelPreference = agent?.model;
-  let toolWhitelist = agent?.toolNames?.length ? agent.toolNames : undefined;
+  const contractToolAllowlist = taskContract?.routing?.allowedTools;
+  let toolWhitelist = contractToolAllowlist?.length
+    ? [...contractToolAllowlist]
+    : agent?.toolNames?.length ? agent.toolNames : undefined;
   const resumeDiagnosis = taskContract?.taskType === "resume_diagnosis";
   const jdWithoutResume = taskContract?.taskType === "jd_evaluation" && taskContract.routing?.jdMatchResume === false;
   const blockedResumeTools = new Set(["read_file", "get_profile"]);
@@ -479,20 +482,26 @@ export async function* agentLoopServer(opts: {
     }
 
     if (toolCalls.length === 0) {
+      const requiredDraftCall = buildRequiredResumeDraftToolCall({
+        contract: taskContract,
+        userText: latestUserText(ctx),
+        successfulTools,
+        allowedTools: toolWhitelist,
+      });
       // M3 stop-guard (ADR-0019): a deterministic Program may not end while any
       // success criterion is unmet. One nudge, then an explicit incomplete
       // response — the model never gets to claim success past this gate.
-      const stopGuard = taskContract ? createTaskProgramStopGuard(taskContract.taskType) : null;
+      const stopGuard = taskContract ? createTaskProgramStopGuard(taskContract) : null;
       const missingCriteria = stopGuard
         ? stopGuard.missingCriteria(completedProgramCriteria)
         : [];
-      if (stopGuard && missingCriteria.length > 0 && !stopGuardNudged) {
+      if (stopGuard && missingCriteria.length > 0 && !requiredDraftCall && !stopGuardNudged) {
         stopGuardNudged = true;
         ctx.push({ role: "user", content: stopGuard.nudgeMessage(missingCriteria) });
         state.contextSize = estimateTokens(ctx);
         continue;
       }
-      if (stopGuard && missingCriteria.length > 0) {
+      if (stopGuard && missingCriteria.length > 0 && !requiredDraftCall) {
         state.phase = "responding";
         yield { type: "phase", phase: "responding" };
         yield { type: "text", content: stopGuard.incompleteResponse(missingCriteria) };
@@ -502,12 +511,6 @@ export async function* agentLoopServer(opts: {
 
       // Enforced product rule: a resume_edit run must produce a confirmable
       // draft before it may end.
-      const requiredDraftCall = buildRequiredResumeDraftToolCall({
-        contract: taskContract,
-        userText: latestUserText(ctx),
-        successfulTools,
-        allowedTools: toolWhitelist,
-      });
       if (requiredDraftCall) {
         toolCalls = [requiredDraftCall];
         ctx.push({
@@ -645,6 +648,7 @@ export async function* agentLoopServer(opts: {
             requestId: executionContext!.requestId,
             policyDenial,
             signal: executionContext!.signal,
+            taskContract: taskContract || undefined,
           });
           durableRunDirective = outcome.runDirective;
           toolResult = outcome.attempt.result || {
@@ -848,7 +852,10 @@ export async function* agentLoopServer(opts: {
         if (nextAgent) {
           agent = nextAgent;
           modelPreference = agent.model;
-          const nextToolNames = agent.toolNames?.length ? agent.toolNames : agent.tools.map((t) => t.name);
+          const nextAgentToolNames = agent.toolNames?.length ? agent.toolNames : agent.tools.map((t) => t.name);
+          const nextToolNames = contractToolAllowlist?.length
+            ? nextAgentToolNames.filter((name) => contractToolAllowlist.includes(name))
+            : nextAgentToolNames;
           toolWhitelist = nextToolNames;
           tools = registry.toOpenAITools(nextToolNames, executionContext?.workerId !== undefined)
             .filter((t) => nextToolNames.includes(t.function.name));

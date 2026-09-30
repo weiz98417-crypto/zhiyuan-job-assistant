@@ -12,6 +12,7 @@ import {
   routeAgentTask,
   type AgentTaskRouteDecision,
   mapAgentTaskToMemoryTask,
+  isDraftOnlyResumeIntent,
 } from "@/lib/agent/task-routing";
 import type { ArtifactKind } from "@/lib/agent/task-journey";
 import { getTaskContractPolicy, listToolNamesForTask } from "@/lib/agent/tool-governance";
@@ -93,6 +94,24 @@ const AGENT_TASK_TYPES = new Set<AgentTaskType>([
   "job_search",
 ]);
 
+const DRAFT_ONLY_ALLOWED_TOOLS = new Set([
+  "read_file",
+  "get_recent_jd_context",
+  "optimize_resume_section",
+  "get_reference_detail",
+  "check_ats_compatibility",
+]);
+
+function specializeResumeEditRoute(route: AgentTaskRouteDecision, target: string): AgentTaskRouteDecision {
+  if (route.taskType !== "resume_edit" || !isDraftOnlyResumeIntent(target)) return route;
+  return {
+    ...route,
+    resumeEditMode: "draft_only",
+    allowedTools: route.allowedTools.filter((tool) => DRAFT_ONLY_ALLOWED_TOOLS.has(tool)),
+    auditSummary: route.auditSummary.includes("draft_only") ? route.auditSummary : `${route.auditSummary}:draft_only`,
+  };
+}
+
 export function admitAgentRun(input: AgentRunAdmissionInput): AgentRunAdmissionDecision {
   const content = input.input.content.trim();
   if (!content) {
@@ -138,14 +157,15 @@ export function admitAgentRun(input: AgentRunAdmissionInput): AgentRunAdmissionD
     envelopeTask,
     envelopeAudit,
   });
-  const taskType = route.taskType;
+  const boundedRoute = specializeResumeEditRoute(route, content);
+  const taskType = boundedRoute.taskType;
   if (!taskType) {
     return {
       kind: "reject",
       taskType: null,
       agentId: null,
       contract: null,
-      route,
+      route: boundedRoute,
       primaryGoal: null,
       constraints: [],
       evidence: [...evidence, "admission.task_not_resolved"],
@@ -154,9 +174,9 @@ export function admitAgentRun(input: AgentRunAdmissionInput): AgentRunAdmissionD
   }
 
   const agentId = taskAgentId(taskType);
-  const contract = createServerOwnedContract(taskType, content, route, input.entryHints?.journeyArtifacts);
+  const contract = createServerOwnedContract(taskType, content, boundedRoute, input.entryHints?.journeyArtifacts);
   const primaryGoal = taskLabelZh(taskType);
-  const constraints = route.requiresClarification
+  const constraints = boundedRoute.requiresClarification
     ? ["clarification_required"]
     : [];
 
@@ -170,7 +190,7 @@ export function admitAgentRun(input: AgentRunAdmissionInput): AgentRunAdmissionD
         taskType,
         agentId,
         contract,
-        route,
+        route: boundedRoute,
         primaryGoal,
         constraints: ["clarify_continuation"],
         evidence: [...evidence, "admission.clarify_run_continuation"],
@@ -183,7 +203,7 @@ export function admitAgentRun(input: AgentRunAdmissionInput): AgentRunAdmissionD
         taskType,
         agentId,
         contract,
-        route,
+        route: boundedRoute,
         primaryGoal,
         constraints,
         evidence: [...evidence, "admission.continue_current_run"],
@@ -195,7 +215,7 @@ export function admitAgentRun(input: AgentRunAdmissionInput): AgentRunAdmissionD
       taskType,
       agentId,
       contract,
-      route,
+      route: boundedRoute,
       primaryGoal,
       constraints,
       evidence: [...evidence, "admission.active_run_switch_deferred"],
@@ -204,13 +224,13 @@ export function admitAgentRun(input: AgentRunAdmissionInput): AgentRunAdmissionD
     };
   }
 
-  if (route.requiresClarification) {
+  if (boundedRoute.requiresClarification) {
     return {
       kind: "clarify",
       taskType,
       agentId,
       contract,
-      route,
+      route: boundedRoute,
       primaryGoal,
       constraints,
       evidence: [...evidence, "admission.clarification_required"],
@@ -222,7 +242,7 @@ export function admitAgentRun(input: AgentRunAdmissionInput): AgentRunAdmissionD
     taskType,
     agentId,
     contract,
-    route,
+    route: boundedRoute,
     primaryGoal,
     constraints,
     evidence: [...evidence, "admission.start_run"],
@@ -234,7 +254,9 @@ export function createServerOwnedContract(
   target: string,
   route: AgentTaskRouteDecision,
   journeyArtifacts?: AgentRunEntryHints["journeyArtifacts"],
-): AgentTaskContract {  const requiresClarification = route.requiresClarification;
+): AgentTaskContract {
+  route = specializeResumeEditRoute(route, target);
+  const requiresClarification = route.requiresClarification;
   const validArtifacts: Array<{ artifactId: string; kind: ArtifactKind; version: string; hash: string }> = (journeyArtifacts || [])
     .filter((artifact) => artifact.artifactId && artifact.kind && artifact.version && artifact.hash && !artifact.stale)
     .filter((artifact) => ARTIFACT_KINDS.has(artifact.kind))
@@ -244,11 +266,23 @@ export function createServerOwnedContract(
       version: artifact.version,
       hash: artifact.hash,
     }));
+  const resumeEditMode = taskType === "resume_edit" ? (route.resumeEditMode || "propose") : undefined;
+  const draftOnly = resumeEditMode === "draft_only";
   return createAgentTaskContract({
     taskType,
     target,
-    successCriteria: requiresClarification ? ["clarification question asked"] : undefined,
-    validators: requiresClarification ? ["user_intent_clarification"] : undefined,
+    requiresUserApproval: draftOnly ? false : undefined,
+    resumeEditMode,
+    successCriteria: requiresClarification
+      ? ["clarification question asked"]
+      : draftOnly
+        ? ["draft generated", "draft read-back verification passes"]
+        : undefined,
+    validators: requiresClarification
+      ? ["user_intent_clarification"]
+      : draftOnly
+        ? ["draft_read_back"]
+        : undefined,
     routing: {
       contractPolicy: route.contractPolicy,
       memoryTask: route.memoryTask,
@@ -260,6 +294,7 @@ export function createServerOwnedContract(
       ...(taskType === "jd_evaluation"
         ? { jdMatchResume: inferJDResumeMatchingDirective(target) }
         : {}),
+      ...(resumeEditMode ? { resumeEditMode } : {}),
     },
     journey: validArtifacts.length > 0
       ? { graphVersion: "task-journey/v1", artifacts: validArtifacts }

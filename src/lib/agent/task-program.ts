@@ -1,4 +1,4 @@
-import type { AgentTaskType } from "@/lib/agent/task-contract";
+import type { AgentTaskContract, AgentTaskType } from "@/lib/agent/task-contract";
 
 export type TaskProgramExecutionDepth = "deterministic" | "conversational";
 
@@ -62,10 +62,13 @@ export interface TaskProgramStopGuard {
   incompleteResponse(missing: string[]): string;
 }
 
-export function createTaskProgramStopGuard(taskType: AgentTaskType): TaskProgramStopGuard | null {
+export function createTaskProgramStopGuard(taskOrContract: AgentTaskType | AgentTaskContract): TaskProgramStopGuard | null {
+  const taskType = typeof taskOrContract === "string" ? taskOrContract : taskOrContract.taskType;
   const taskProgram = TASK_PROGRAM_REGISTRY[taskType];
   if (!taskProgram || taskProgram.executionDepth !== "deterministic") return null;
-  const criteria = taskProgram.successCriteria;
+  const criteria = typeof taskOrContract === "string"
+    ? taskProgram.successCriteria
+    : taskOrContract.successCriteria;
   const label = TASK_LABELS[taskType];
   return {
     missingCriteria(completedCriteria) {
@@ -76,14 +79,14 @@ export function createTaskProgramStopGuard(taskType: AgentTaskType): TaskProgram
       return [
         "<!-- system:program-stop-guard -->",
         `当前「${label}」是确定性任务，以下完成判据还没有满足，不能直接结束：`,
-        ...missing.map((criterion) => `- ${criterion}`),
+        ...missing.map((criterion) => `- ${CRITERION_LABELS[criterion] || criterion}`),
         "请继续执行能推进这些判据的下一个动作（读取材料 / 发起确认或批准 / 执行工具 / 校验读回）。不要向用户宣称任务已完成。",
       ].join("\n");
     },
     incompleteResponse(missing) {
       return [
         `「${label}」还没有完成，我先不把它标记为成功。缺少的部分：`,
-        ...missing.map((criterion) => `- ${criterion}`),
+        ...missing.map((criterion) => `- ${CRITERION_LABELS[criterion] || criterion}`),
         "请补充材料或确认后继续；已产生的中间结果不会丢。",
       ].join("\n");
     },
@@ -103,6 +106,26 @@ const TASK_LABELS: Record<AgentTaskType, string> = {
   reference_resume_save: "优秀简历沉淀",
   file_export: "文件导出",
   job_search: "岗位发现",
+};
+
+const CRITERION_LABELS: Record<string, string> = {
+  "draft generated": "优化草稿已生成",
+  "draft read-back verification passes": "优化草稿已持久化并完成读回核对",
+  "user approved draft": "用户确认了优化方案",
+  "target section read-back hash matches applied content": "应用后的简历板块读回一致",
+  "content validator passes": "简历内容校验通过",
+  "version snapshot created": "简历版本快照已创建",
+  "source content extracted or fetched": "岗位正文已读取",
+  "A-G evaluation generated": "A-G 评估已生成",
+  "report persisted": "评估报告已保存",
+  "saved report read-back verification passes": "评估报告已完成读回核对",
+  "offer content extracted or fetched": "Offer 内容已读取",
+  "offer modules generated": "Offer 分析模块已生成",
+  "offer/report persisted": "Offer 报告已保存",
+  "saved offer/report read-back verification passes": "Offer 报告已完成读回核对",
+  "job discovery criteria confirmed": "岗位发现条件已确认",
+  "scan creation gated by user confirmation": "扫描已通过确认门禁",
+  "scan read-back or opportunity pool response returned": "扫描结果已读回",
 };
 
 function program(

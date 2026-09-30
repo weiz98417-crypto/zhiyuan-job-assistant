@@ -235,6 +235,37 @@ describe("agent runtime regression evals", () => {
     expect(outcome.gate.unmetCriteria).toContain("user approved draft");
   });
 
+  it("regression: draft-only optimization succeeds after persisted read-back without approval", () => {
+    const contract = createAgentTaskContract({
+      taskType: "resume_edit",
+      target: "只生成建议，不应用、不覆盖当前简历",
+      requiresUserApproval: false,
+      successCriteria: ["draft generated", "draft read-back verification passes"],
+      validators: ["draft_read_back"],
+      routing: { resumeEditMode: "draft_only" } as never,
+    });
+    const completedCriteria = inferCompletedCriteriaFromToolResult(contract, {
+      toolName: "optimize_resume_section",
+      toolSuccess: true,
+      data: {
+        artifactId: "draft-artifact-1",
+        draftIds: ["draft-1"],
+        readBackVerified: true,
+      },
+      uiPayload: { type: "resume_draft", artifactId: "draft-artifact-1", readBackVerified: true },
+      readBackVerified: true,
+    });
+
+    const outcome = resolveTaskContractRunOutcome(contract, completedCriteria, {
+      hasAssistantResponse: true,
+      hasUserVisibleArtifact: true,
+    });
+
+    expect(completedCriteria).toEqual(["draft generated", "draft read-back verification passes"]);
+    expect(outcome.status).toBe("succeeded");
+    expect(outcome.gate.unmetCriteria).toEqual([]);
+  });
+
   it("regression: a redundant later tool failure cannot erase a completed resume read", () => {
     const contract = createAgentTaskContract({
       taskType: "resume_query",

@@ -16,11 +16,16 @@ export type AgentTaskType =
   | "file_export"
   | "job_search";
 
+/** How a resume_edit run is allowed to affect the canonical resume. */
+export type ResumeEditMode = "draft_only" | "propose" | "apply";
+
 export interface AgentTaskContract {
   taskType: AgentTaskType;
   program?: TaskProgramBinding;
   target: string;
   requiresUserApproval: boolean;
+  /** Present for resume_edit runs so the worker cannot infer write intent from prose. */
+  resumeEditMode?: ResumeEditMode;
   baseVersion?: string;
   baseHash?: string;
   successCriteria: string[];
@@ -38,6 +43,7 @@ export interface AgentTaskContract {
     activeTaskPhase?: string;
     routeLocked?: boolean;
     jdMatchResume?: boolean;
+    resumeEditMode?: ResumeEditMode;
   };
   journey?: {
     graphVersion: string;
@@ -177,23 +183,29 @@ export function createAgentTaskContract(input: {
   taskType: AgentTaskType;
   target: string;
   requiresUserApproval?: boolean;
+  resumeEditMode?: ResumeEditMode;
   baseVersion?: string;
   baseHash?: string;
   successCriteria?: string[];
   validators?: string[];
   routing?: AgentTaskContract["routing"];
-  journey?: AgentTaskContract["journey"];
+    journey?: AgentTaskContract["journey"];
 }): AgentTaskContract {
   const taskProgram = getTaskProgram(input.taskType);
+  const resumeEditMode = input.taskType === "resume_edit"
+    ? (input.resumeEditMode || input.routing?.resumeEditMode || "propose")
+    : undefined;
+  const draftOnly = resumeEditMode === "draft_only";
   return {
     taskType: input.taskType,
     program: bindTaskProgram(input.taskType),
     target: input.target,
-    requiresUserApproval: input.requiresUserApproval ?? (input.taskType === "resume_edit" || input.taskType === "job_search"),
+    requiresUserApproval: input.requiresUserApproval ?? (draftOnly ? false : input.taskType === "resume_edit" || input.taskType === "job_search"),
+    resumeEditMode,
     baseVersion: input.baseVersion,
     baseHash: input.baseHash,
-    successCriteria: input.successCriteria || [...taskProgram.successCriteria] || DEFAULT_SUCCESS_CRITERIA[input.taskType],
-    validators: input.validators || [...taskProgram.validators] || DEFAULT_VALIDATORS[input.taskType],
+    successCriteria: input.successCriteria || (draftOnly ? ["draft generated", "draft read-back verification passes"] : [...taskProgram.successCriteria]) || DEFAULT_SUCCESS_CRITERIA[input.taskType],
+    validators: input.validators || (draftOnly ? ["draft_read_back"] : [...taskProgram.validators]) || DEFAULT_VALIDATORS[input.taskType],
     routing: input.routing,
     journey: input.journey,
     createdAt: new Date().toISOString(),
@@ -277,9 +289,19 @@ export function inferCompletedCriteriaFromToolResult(
   const verifiedReadBack = hasVerifiedReadBack(signals.verifiedAction);
 
   if (contract.taskType === "resume_edit") {
+    const draftOnly = contract.resumeEditMode === "draft_only" || contract.routing?.resumeEditMode === "draft_only";
     if (signals.toolName === "optimize_resume_section" || signals.toolName === "create_resume_edit_proposal" || signals.toolName === "apply_resume_edit_proposal" || signals.toolName === "save_resume_section") {
       completed.add("draft generated");
     }
+    if (draftOnly && signals.toolName === "optimize_resume_section") {
+      const draftPersisted = hasNonEmptyString(data.artifactId)
+        && (Array.isArray(data.draftIds) || Array.isArray(uiPayload.variants) || Array.isArray(data.variants));
+      const readBack = signals.readBackVerified === true
+        || data.readBackVerified === true
+        || uiPayload.readBackVerified === true;
+      if (draftPersisted && readBack) completed.add("draft read-back verification passes");
+    }
+    if (draftOnly) return contract.successCriteria.filter((criterion) => completed.has(criterion));
     if (signals.toolName === "apply_resume_edit_proposal") {
       completed.add("user approved draft");
     }
@@ -426,6 +448,9 @@ export function buildContractUnmetAssistantMessage(
   unmetCriteria: string[],
 ): string {
   if (contract.taskType === "resume_edit") {
+    if (contract.resumeEditMode === "draft_only" || contract.routing?.resumeEditMode === "draft_only") {
+      return "简历优化草稿还没有完成持久化校验，我先不把它当作可用结果。请补充可读的简历内容或稍后重试。";
+    }
     return "这次简历修改还无法确认完成，我没有把它当作已保存的版本。你可以继续告诉我想调整的内容，我会在这里接着处理。";
   }
   if (contract.taskType === "career_positioning_guidance") {

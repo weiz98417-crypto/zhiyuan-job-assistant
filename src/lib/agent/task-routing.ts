@@ -31,6 +31,7 @@ export interface AgentTaskRouteDecision {
   requiresClarification: boolean;
   clarificationQuestion?: string;
   blockedReason?: string;
+  resumeEditMode?: "draft_only" | "propose" | "apply";
   imageDecision?: ImageIntakeRoutingDecision;
   auditSummary: string;
 }
@@ -92,6 +93,17 @@ function hasJobDiscoveryCriteria(text: string): boolean {
 
 function isResumeProposalIntent(content: string): boolean {
   return /(?:简历|履历|resume|cv).{0,30}(?:优化|修改|改写|润色|重写|生成).{0,30}(?:提案|草稿|建议)|(?:优化|修改|改写|润色|重写|生成).{0,30}(?:简历|履历|resume|cv).{0,30}(?:提案|草稿|建议)/i.test(content);
+}
+
+/** A draft-only request is an explicit read-only boundary, even though it
+ * routes through the resume-edit program to produce a persisted draft artifact. */
+export function isDraftOnlyResumeIntent(content: string): boolean {
+  const text = content.trim();
+  if (!/(简历|履历|resume|cv)/i.test(text)) return false;
+  const asksForDraft = /(?:草稿|提案|方案|建议|draft|proposal)/i.test(text)
+    && /(?:优化|修改|改写|润色|重写|生成|定制)/i.test(text);
+  const explicitDraftOnly = /(?:只|仅|先).{0,8}(?:生成|给我|做).{0,16}(?:草稿|建议|方案)|(?:草稿|建议|方案).{0,20}(?:不应用|不覆盖|不保存|不写入|不落库|不新增)/i.test(text);
+  return asksForDraft && explicitDraftOnly;
 }
 
 function isResumeDiagnosisIntent(content: string): boolean {
@@ -163,6 +175,7 @@ export function routeAgentTask(input: {
       return buildRouteDecision({
         taskType: "resume_edit",
         imageDecision,
+        resumeEditMode: isDraftOnlyResumeIntent(content) ? "draft_only" : "propose",
         auditSummary: "intent:resume_edit:proposal_only",
       });
     }
@@ -267,6 +280,7 @@ export function routeAgentTask(input: {
     return buildRouteDecision({
       taskType: "resume_edit",
       imageDecision,
+      resumeEditMode: isDraftOnlyResumeIntent(content) ? "draft_only" : "propose",
       auditSummary: `intent:resume_edit:proposal_only:envelope_override:${input.envelopeTask}`,
     });
   }
@@ -278,6 +292,7 @@ export function routeAgentTask(input: {
     return buildRouteDecision({
       taskType: input.envelopeTask,
       imageDecision,
+      resumeEditMode: input.envelopeTask === "resume_edit" && isDraftOnlyResumeIntent(content) ? "draft_only" : undefined,
       auditSummary: `envelope:${input.envelopeTask}${envelopeAuditPrefix ? `|${envelopeAuditPrefix}` : ""}`,
     });
   }
@@ -393,6 +408,7 @@ function taskTypeFromImageDocumentType(documentType: ImageDocumentType | undefin
 function buildRouteDecision(input: {
   taskType: AgentTaskType | null;
   imageDecision?: ImageIntakeRoutingDecision;
+  resumeEditMode?: "draft_only" | "propose" | "apply";
   requiresClarification?: boolean;
   clarificationQuestion?: string;
   blockedReason?: string;
@@ -406,7 +422,8 @@ function buildRouteDecision(input: {
     memoryTask: mapAgentTaskToMemoryTask(input.taskType),
     requiresClarification: input.requiresClarification || false,
     clarificationQuestion: input.clarificationQuestion,
-    blockedReason: input.blockedReason,
+  blockedReason: input.blockedReason,
+    resumeEditMode: input.resumeEditMode,
     imageDecision: input.imageDecision,
     auditSummary: input.auditSummary,
   };
