@@ -53,7 +53,7 @@ function AgentAssistantMessage() {
   return (
     <div className="flex w-full min-w-0 justify-start">
       {/* 样张 v2 对话脸:助手文字素面呈现,只有领域卡/审批卡带卡面 */}
-      <div className="max-w-[92%] min-w-0 text-sm leading-relaxed text-[var(--color-text)] cursor-default">
+      <div className="max-w-[92%] min-w-0 rounded-[var(--radius-md)] border border-[color:color-mix(in_srgb,var(--color-border)_55%,transparent)] bg-[color:color-mix(in_srgb,var(--color-surface)_82%,transparent)] px-4 py-3 text-sm leading-relaxed text-[var(--color-text)] shadow-[0_8px_24px_rgba(74,55,39,0.06)] backdrop-blur-[2px] cursor-default">
         <MessagePrimitive.Parts
           components={{
             Text: AgentTextPart,
