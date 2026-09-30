@@ -414,7 +414,7 @@ export default function WorkbenchShell({ children }: { children: ReactNode }) {
           </aside>
 
           {/* ── 主内容区:工作台页 = 旅程栏 + 内容 的行内双栏 ── */}
-          <main className={`min-w-0 flex-1 overflow-x-hidden flex ${navMarginClass(isWorkspacePage, navCollapsed)}`}>
+          <main className={`min-w-0 flex-1 overflow-x-hidden flex flex-col lg:flex-row ${navMarginClass(isWorkspacePage, navCollapsed)}`}>
             {isWorkspacePage && (
               <aside
                 data-testid="workbench-journey-rail"
@@ -424,7 +424,7 @@ export default function WorkbenchShell({ children }: { children: ReactNode }) {
                 <div ref={setDesktopSlot} className="flex min-h-0 flex-1 flex-col overflow-hidden" />
               </aside>
             )}
-            <header className="flex items-center justify-between gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 lg:hidden">
+            <header className="flex min-h-14 w-full flex-shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 lg:hidden">
               <button
                 type="button"
                 onClick={() => setMobileRailOpen(true)}

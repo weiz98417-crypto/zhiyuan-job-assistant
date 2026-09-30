@@ -38,7 +38,7 @@
 
 `PE2E-ROUTE-001` 至 `PE2E-ROUTE-005` 固定主意图、否定约束、材料引用、多轮 Task 归属，以及已有 JD 上下文下的简历提案不降级；`PE2E-EXEC-001` 至 `PE2E-EXEC-005` 固定 JD 报告、文件导出、岗位扫描、参考简历和发现岗位状态回写的执行/读回合同；`PE2E-GATE-001`、`PE2E-GATE-002` 固定 waiting_user 和 Gate approved 续跑；`PE2E-FLOW-001` 固定面试回答反馈和题号推进；`PE2E-QUESTION-001` 固定主问题/追问预算和安全收口；`PE2E-PERF-001` 固定长运行进度、超时和可恢复动作；`PE2E-UI-001` 固定 Gate denied 刷新投影；`PE2E-WAIT-001` 固定等待态输入和工具条；`PE2E-RESUME-READ-001` 至 `PE2E-RESUME-READ-003` 固定简历路径、JD 上下文和截图诊断；`PE2E-SESSION-002` 至 `PE2E-SESSION-005` 固定 requestId 幂等、迟到响应、历史切换刷新和 JD handoff 来源隔离；`PE2E-A2A-001` 固定主责交接、只读委派、child Run 归因和输出契约；`PE2E-WORKER-001`、`PE2E-WORKER-002` 固定 worker-only 所有权、lease 和 fencing；`PE2E-RUNTIME-001`、`PE2E-RUNTIME-002` 固定错误收口和永久失败。
 
-`PE2E-UI-003` 至 `PE2E-UI-006` 固定报告卡完整正文、JD 分析面交互与可读性、简历提案分栏宽度，以及岗位确认卡在实时、读回和重放时的去重。对应浏览器用例为 `CHAT-007`、`SCORE-007`、`PROPOSAL-004`、`SCAN-006`；本地回归通过仍不能替代生产页面截图和刷新证据。
+`PE2E-UI-003` 至 `PE2E-UI-006` 固定报告卡完整正文、JD 分析面交互与可读性、简历提案分栏宽度，以及岗位确认卡在实时、读回和重放时的去重。`UI-EXEC-RESP-001` 固定窄屏执行态的纵向布局、控件换行和桌面回归。对应浏览器用例为 `CHAT-007`、`SCORE-007`、`PROPOSAL-004`、`SCAN-006`、`CHAT-010`；本地回归通过仍不能替代生产页面截图和刷新证据。
 
 ### 模型、图片和记忆
 

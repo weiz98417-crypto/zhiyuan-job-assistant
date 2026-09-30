@@ -55,9 +55,9 @@ export interface AgentRunToolbarProps {
 
 export function AgentRunToolbar({ status, phase, artifacts, action, onResume, onPause, onCancel }: AgentRunToolbarProps) {
   return (
-    <div data-testid="agent-run-toolbar" className="mt-2 flex h-8 w-fit max-w-full flex-shrink-0 items-center gap-1 overflow-hidden text-xs text-[var(--color-muted)]">
-      <div className="flex min-w-0 items-center gap-2 rounded-full bg-[var(--color-bg)] px-3">
-        <span className="font-medium text-[var(--color-text)]">
+    <div data-testid="agent-run-toolbar" className="mt-2 flex w-full max-w-full flex-shrink-0 flex-col items-stretch gap-2 overflow-hidden text-xs text-[var(--color-muted)] sm:h-8 sm:w-fit sm:flex-row sm:items-center sm:gap-1">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 rounded-[var(--radius-sm)] bg-[var(--color-bg)] px-3 py-1.5 sm:rounded-full sm:py-0">
+        <span className="min-w-0 font-medium text-[var(--color-text)]">
           {status === "waiting_user"
             ? "等待你的回复"
             : status === "paused"
@@ -68,7 +68,7 @@ export function AgentRunToolbar({ status, phase, artifacts, action, onResume, on
         {phase && <span>{runPhaseLabel(phase)}</span>}
         {artifacts && artifacts.length > 0 && <span>材料 {artifacts.length}</span>}
       </div>
-      <div className="flex items-center gap-1">
+      <div className="flex items-center justify-end gap-1 sm:justify-start">
         {status === "paused" ? (
           <button
             type="button"

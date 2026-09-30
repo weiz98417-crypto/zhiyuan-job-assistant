@@ -139,15 +139,15 @@ function AgentPageInner() {
       {/* Chat Area(旅程栏已由 WorkbenchShell rail slot 承接) */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" style={{ cursor: "default" }}>
         {/* Header + Tab bar */}
-        <div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-3 border-b border-[var(--color-divider)] pb-3">
-          <div className="flex items-center gap-3">
+        <div className="flex flex-shrink-0 flex-col items-stretch gap-3 border-b border-[var(--color-divider)] pb-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-center gap-3">
             <div>
               <p className="text-[var(--color-muted)] text-sm mb-1">
                 AI 求职伙伴
               </p>
               <div className="flex items-center gap-2">
                 <BrandLogo variant="mark" size="sm" />
-                <HandwritingTitle as="h1">纸鸢 Agent</HandwritingTitle>
+                <HandwritingTitle as="h1" className="truncate">纸鸢 Agent</HandwritingTitle>
                 {activeAgent && activeAgent.id !== "general" && (
                   <span
                     className="inline-flex items-center gap-1 rounded-full bg-[var(--color-primary-soft)] px-2.5 py-0.5 text-xs font-medium text-[var(--color-primary-hover)] dark:text-[var(--color-primary)]"
@@ -171,7 +171,7 @@ function AgentPageInner() {
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2 sm:justify-end">
             <span className="flex items-center gap-1.5 text-xs text-[var(--color-muted)]">
               <span className="relative flex h-2 w-2">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
