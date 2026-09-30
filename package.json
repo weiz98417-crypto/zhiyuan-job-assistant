@@ -1,6 +1,6 @@
 {
   "name": "zhiyuan-job-assistant",
-  "version": "0.12.1",
+  "version": "0.12.2",
   "private": true,
   "description": "AI-powered job search assistant for the Chinese market",
   "scripts": {

@@ -11,6 +11,27 @@ export type ReleaseNote = {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: "0.12.2",
+    stage: "production",
+    summary: "9 月 30 日体验补丁：窄屏执行态和对话可读性修复。",
+    sections: [
+      {
+        title: "执行态布局",
+        changes: [
+          { description: "修复窄屏工作台横向错排：移动顶部栏改为占满宽度，正文不再被挤到右侧并留下半屏空白。" },
+          { description: "阶段进度、Agent 交接标签和暂停/取消控制在小屏自动换行，桌面双栏旅程栏保持不变。" },
+        ],
+      },
+      {
+        title: "对话可读性",
+        changes: [
+          { description: "助手回复增加低透明度暖色纸张层、细边界和轻阴影，保留品牌底图层次并提升正文对比度。" },
+          { description: "新增窄屏执行态与底图对比度回归 eval，避免布局和可读性问题再次回退。" },
+        ],
+      },
+    ],
+  },
+  {
     version: "0.12.1",
     stage: "production",
     summary: "9 月 29 日补丁：品牌上线与生产对话稳定性修复。",
