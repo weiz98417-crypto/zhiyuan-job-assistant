@@ -4,7 +4,7 @@
 
 ## Status
 
-本目录中的文档是可发布为 GitHub Issue 的本地草案。每份草案的目标标签均为 `ready-for-agent`。Spec 08–13 尚未在远端创建 Issue，发布状态以本索引为准。
+本目录中的文档是可发布为 GitHub Issue 的本地草案。每份草案的目标标签均为 `ready-for-agent`。Spec 08–19 尚未在远端创建 Issue，发布状态以本索引为准。Spec 14–19 来自 2026-10 Agent 能力引入计划（`docs/UPGRADE-PLAN-2026-10.md`、ADR-0039、ADR-0040）。
 
 ## Release Boundary
 
@@ -31,6 +31,12 @@ Spec 08–13 属于后续记忆运行时升级，不扩大 `0.10.8` 的既定发
 | 11 | Targeted Memory Erasure | 08–10、ADR-0028、0033 |
 | 12 | User Memory Governance | 08–11、ADR-0028、0032、0034 |
 | 13 | Memory Migration And Release Gates | 05–07、08–12、ADR-0028、0033、0034 |
+| 14 | Memory Embedding Failure Visibility And Dead Flag Removal | 08、13 的门禁证据要求 |
+| 15 | LLM Quality Scorers Behind The Staging Judge | 06 的门禁聚合与 fixtures、14 |
+| 16 | Governed Browser Tool Via Playwright MCP | 01 的 Admission 词汇、ADR-0008、0009、0039 |
+| 17 | Approval And Tool Card Visual Upgrade | 04 的 Conversation Item、ADR-0016、0037 |
+| 18 | Agent Trace Observability With Metadata-Only Production | 05 的 schema ownership、ADR-0040 |
+| 19 | Scheduled Unattended Job Digest | 01、02、ADR-0039、词表 无人值守 Run / 岗位精选 |
 
 ## Shared Seams
 
