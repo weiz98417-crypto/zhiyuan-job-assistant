@@ -4,7 +4,7 @@
 
 ## Status
 
-本目录中的文档是可发布为 GitHub Issue 的本地草案。每份草案的目标标签均为 `ready-for-agent`。Spec 08–19 尚未在远端创建 Issue，发布状态以本索引为准。Spec 14–19 来自 2026-10 Agent 能力引入计划（`docs/UPGRADE-PLAN-2026-10.md`、ADR-0039、ADR-0040）。
+本目录中的文档是可发布为 GitHub Issue 的本地草案。每份草案的目标标签均为 `ready-for-agent`（Spec 23 为 `proposed` 设计轮候选，除外）。Spec 08–23 尚未在远端创建 Issue，发布状态以本索引为准。Spec 14–19 来自 2026-10 Agent 能力引入计划（`docs/UPGRADE-PLAN-2026-10.md`、ADR-0039、ADR-0040）；Spec 20–23 来自同日 eng review 之后的缺陷修复轮与登录态路线决策。
 
 ## Release Boundary
 
@@ -37,6 +37,10 @@ Spec 08–13 属于后续记忆运行时升级，不扩大 `0.10.8` 的既定发
 | 17 | Approval And Tool Card Visual Upgrade | 04 的 Conversation Item、ADR-0016、0037 |
 | 18 | Agent Trace Observability With Metadata-Only Production | 05 的 schema ownership、ADR-0040 |
 | 19 | Scheduled Unattended Job Digest | 01、02、ADR-0039、词表 无人值守 Run / 岗位精选 |
+| 20 | Job Discovery Card Replay Reconciliation | ADR-0020/0030/0036、Spec 04 的投影原则；hotfix |
+| 21 | Digest Success Requires Delivered Digest | Spec 19、ADR-0039 |
+| 22 | MCP Server Reconnect On Dead Stdio Child | Spec 16 的 MCPManager 接缝 |
+| 23 | QR Login Session Handoff（proposed，设计轮候选） | Spec 16、ADR-0008/0009/0033 |
 
 ## Shared Seams
 
