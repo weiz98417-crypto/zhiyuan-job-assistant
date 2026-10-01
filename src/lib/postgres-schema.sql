@@ -1461,3 +1461,35 @@ CREATE TABLE IF NOT EXISTS memory_support_access_audit (
 );
 CREATE INDEX IF NOT EXISTS idx_memory_support_access_audit_user
   ON memory_support_access_audit (user_id, created_at DESC);
+
+-- Spec 18: agent trace observability (Langfuse-shaped, metadata-only).
+-- Third storage class: no FK to agent_runs; retention governed by purgeExpiredTraces (180d),
+-- independent of ADR-0012 payload/evidence retention. No prompt/completion content columns
+-- by design (ADR-0040): production stores metadata only.
+CREATE TABLE IF NOT EXISTS agent_traces (
+  run_id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL DEFAULT '',
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at TIMESTAMPTZ,
+  status TEXT NOT NULL DEFAULT 'running',
+  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+CREATE INDEX IF NOT EXISTS idx_agent_traces_started ON agent_traces (started_at DESC);
+
+CREATE TABLE IF NOT EXISTS agent_observations (
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  run_id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('span', 'generation', 'event')),
+  name TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'ok',
+  model TEXT NOT NULL DEFAULT '',
+  prompt_tokens INTEGER,
+  completion_tokens INTEGER,
+  total_tokens INTEGER,
+  latency_ms INTEGER,
+  level TEXT NOT NULL DEFAULT 'default',
+  source_event_sequence BIGINT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_agent_observations_run ON agent_observations (run_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_agent_observations_kind ON agent_observations (kind, created_at DESC);

@@ -11,6 +11,27 @@ export type ReleaseNote = {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: "0.13.0",
+    stage: "production",
+    summary: "10 月能力升级第一批：记忆嵌入故障显式化、简历幻觉评分门禁、浏览器工具（Playwright MCP）。",
+    sections: [
+      {
+        title: "信任红线",
+        changes: [
+          { description: "简历优化与 JD 摘要新增 LLM 质量评分器：编造工作经历/技能会阻断发布，JD 摘要低相关性仅记录。" },
+          { description: "记忆嵌入服务故障不再静默降级为假嵌入：显式失败并进入记忆运行时门禁证据。" },
+        ],
+      },
+      {
+        title: "浏览器能力",
+        changes: [
+          { description: "Agent 新增浏览器工具（微软官方 Playwright MCP）：可打开招聘站点读取页面并回答；页面填表/点击/提交需在对话中批准。" },
+          { description: "浏览器导航限定在招聘站点允许清单内，清单外直接拒绝；浏览器操作在会话间严格隔离并串行执行。" },
+        ],
+      },
+    ],
+  },
+  {
     version: "0.12.2",
     stage: "production",
     summary: "9 月 30 日补丁：执行态布局、对话可读性、简历草稿完成条件和记忆回写修复。",

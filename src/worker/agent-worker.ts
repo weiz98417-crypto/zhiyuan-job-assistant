@@ -16,6 +16,7 @@ import registry from "@/lib/agent/tools";
 import { createBackgroundToolHandlers } from "@/lib/agent/runtime/background-tool-handlers";
 import { PostgresRunContextSource } from "@/lib/agent/runtime/postgres-run-context-source";
 import { reconcileGovernedRuntimeTools } from "@/lib/agent/runtime/governed-tool-runtime";
+import { purgeExpiredTraces } from "@/lib/agent/runtime/agent-trace-store";
 import { expirePendingMemoryCandidates } from "@/lib/memory/admission";
 import { isPostgresConfigured } from "@/lib/postgres";
 import { registerMCPTools } from "@/lib/agent/mcp/tools";
@@ -71,6 +72,8 @@ const retentionTimer = setInterval(() => {
     retention.cleanup(),
     maintenance.expireWaitingUserRuns(),
     isPostgresConfigured() ? expirePendingMemoryCandidates() : Promise.resolve(0),
+    // Spec 18: trace 元数据保留 180 天（独立于 ADR-0012 的 payload/evidence 档）。
+    isPostgresConfigured() ? purgeExpiredTraces(180) : Promise.resolve(0),
   ]).catch((error) => {
     const message = error instanceof Error ? error.message : "runtime maintenance failed";
     console.error(`[agent-worker] ${message}`);

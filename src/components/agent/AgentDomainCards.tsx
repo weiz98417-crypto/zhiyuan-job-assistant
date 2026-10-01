@@ -9,7 +9,7 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowLeftRight, BookOpen, Check, CheckCircle, Download, ExternalLink, Image as ImageIcon, X, ChevronDown, ChevronUp, FileText, Loader2, MapPin, Maximize2, RefreshCw, ShieldCheck, Sparkles, Target, Briefcase, Trash2, User } from "lucide-react";
+import { ArrowLeftRight, BookOpen, Ban, Check, CheckCircle, Download, ExternalLink, Image as ImageIcon, X, ChevronDown, ChevronUp, FileText, Loader2, MapPin, Maximize2, RefreshCw, ShieldCheck, Sparkles, Target, Briefcase, Trash2, User } from "lucide-react";
 import { WarmButton, ScoreBadge } from "@/components/design";
 import MarkdownRenderer from "@/components/MarkdownRenderer";
 import { getToolDisplay } from "@/lib/agent/tool-display-names";
@@ -342,16 +342,33 @@ export function RunGateCard({
 
   return (
     <div className={COMPACT_AGENT_CARD_CLASS}>
-      {/* 样张 v2 审批卡形态:白瓷卡 + 朱砂描边,风险说明一行,主按钮「批准并应用」 */}
-      <div className="rounded-[14px] border-[1.5px] border-[var(--zhusha)] bg-[var(--color-surface)] px-4 py-4">
+      {/* Spec 17 三态审批卡:pending=白瓷卡+朱砂描边+双按钮;approved=翠色徽记;denied=朱红徽记 */}
+      <div className={`rounded-[14px] border-[1.5px] bg-[var(--color-surface)] px-4 py-4 ${status === "pending" ? "border-[var(--zhusha)]" : status === "approved" ? "border-emerald-300" : "border-red-300"}`}>
         <div className="mb-2 flex items-center gap-2">
-          <ShieldCheck size={16} className="text-[var(--zhusha)]" />
-          <span className="text-sm font-medium text-[var(--ink)]">需要你的批准 · {title}</span>
+          {status === "approved" ? (
+            <ShieldCheck size={16} className="text-emerald-600" />
+          ) : status === "denied" ? (
+            <Ban size={16} className="text-red-500" />
+          ) : (
+            <ShieldCheck size={16} className="text-[var(--zhusha)]" />
+          )}
+          <span className="text-sm font-medium text-[var(--ink)]">
+            {status === "approved" ? `已批准 · ${title}` : status === "denied" ? `已拒绝 · ${title}` : `需要你的批准 · ${title}`}
+          </span>
+          {status !== "pending" && (
+            <span className={`ml-auto rounded-full px-2 py-0.5 text-[11px] font-medium ${status === "approved" ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-600"}`}>
+              {status === "approved" ? "已批准" : "已拒绝"}
+            </span>
+          )}
         </div>
         <p className="mb-3 text-xs leading-5 text-[var(--muted)]">
-          此操作会修改已保存的数据，批准后才会继续
+          {status === "pending"
+            ? "此操作会修改已保存的数据，批准后才会继续"
+            : status === "approved"
+              ? "已按你的批准继续执行该动作"
+              : "已按你的决定拒绝该动作，任务会继续寻找安全路径"}
           {textValue(request.toolName) ? ` · 工具 ${textValue(request.toolName)}` : ""}
-          {" · 可回滚"}
+          {status === "pending" ? " · 可回滚" : ""}
         </p>
         <div className="flex items-center gap-2.5">
           {status === "pending" ? (
@@ -364,7 +381,7 @@ export function RunGateCard({
               </button>
             </>
           ) : (
-            <span className="text-xs text-[var(--muted)]">{status === "approved" ? "已批准，正在继续" : "已拒绝"}</span>
+            <span className="text-xs text-[var(--muted)]">{status === "approved" ? "正在继续" : "已结束该分支"}</span>
           )}
         </div>
       </div>
