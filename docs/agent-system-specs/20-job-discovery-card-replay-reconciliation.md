@@ -19,17 +19,17 @@
 
 ## Implementation Decisions
 
-- 新增 scan-data 批量函数 `getScanStatusesForUser(userId, scanIds)`：单条 SQL `WHERE scan_id = ANY($2)`（含 `updated_at`，作为终态时间来源），替代逐卡 N 次 `/api/scan/status` 请求。
-- 读回层对账（服务端，两处组装点共用一个纯函数）：`reconcileJobDiscoveryRunMessages(messages, scanStatuses)` 只动 `payload.type === "job_discovery_run"` 的条目，覆写 `uiPayload.status` 与 `resolvedAt`（取 scan_queue.updated_at）。
+- 新增 scan-data 批量函数 `getScanStatusesForUser(userId, scanIds)`：单条 SQL `WHERE id = ANY($2)`（scan_queue 主键列是 `id`；含 `updated_at`，作为终态时间来源），替代逐卡 N 次 `/api/scan/status` 请求。
+- 读回层对账（服务端，钩子挂 `readSessionRowsWithDurableMessages` **入口**——它在 legacy 驱动下会原样早退，挂 postgres 分支之后会静默漏掉 legacy 模式）：`reconcileJobDiscoveryRunMessages(messages, scanStatuses)` 只动 `payload.type === "job_discovery_run"` 的条目，覆写 `uiPayload.status` 与 `resolvedAt`（取 scan_queue.updated_at）；`surface-projection` 的 job_discovery_run 字段白名单同步补 `resolvedAt`（否则投影剥掉它，覆写了也到不了卡片）。
 - 终态映射（scan_queue 实际词表）：`done` → `done`；`failed` → `failed`；`canceled` → `canceled`（卡片呈现「已停止」，非 active）；**查无记录或卡内无 scanId → `unknown`**（呈现「状态未知」，非 active）——两种「无事实源」情况同规则，不留自相矛盾。
 - 读回层对账不改持久化 transcript（读时投影，非写回）；会话数据保持单写者原则（ADR-0030/0036）。
 - 渲染兜底（`AgentDomainCards.tsx:1322-1331,1339-1406`）：`status` 为 `unknown` 或缺失 scanId 时不得落入默认 `pending`/active 判定；轮询失败时停止 spinner 与「运行中」标题，降级为「状态未知」。
-- 与 Run Gate 对账的关系：Gate 是双端（服务端喂模型上下文 + 客户端决策修正）；本 spec 只做读回端——卡片是 UI 投影概念，不进 Run Context，不需要 worker 侧对账。
+- 与 Run Gate 对账的关系：Gate 是双端（服务端喂模型上下文 + 客户端决策修正）；本 spec 只做读回端——卡片是 UI 投影概念，不进 Run Context（当前 run-context 序列化不消费 toolResult/uiPayload；若未来把卡片摘要喂给模型，此论断需重审），不需要 worker 侧对账。
 
 ## Testing Decisions
 
 - reconcile 纯函数单测：`pending`/`running` 卡 + `done`/`failed`/`canceled` 终态 → 各自覆写；查无记录与无 scanId → `unknown`；非 job_discovery_run 消息原样通过。
-- 读回层集成断言：`session-api-readback` 与 `GET /api/sessions` 两条路径返回的消息均含覆写后状态。
+- 读回层集成断言：`session-api-readback`（postgres 与 legacy 两条驱动路径）、`GET /api/sessions` 列表、`GET /api/sessions/[id]` 单会话——返回的消息均含覆写后状态。
 - 渲染兜底单测：`unknown` 卡片不显示进行中；轮询 404 后 spinner 消失、显示状态未知。
 - 回归：现有 AgentDomainCards / use-agent-conversation / session-api-readback 测试全绿。
 

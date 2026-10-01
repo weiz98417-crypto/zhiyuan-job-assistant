@@ -28,7 +28,7 @@
 ## Testing Decisions
 
 - reconcile 单测：succeeded + 窗口内有非标记 assistant 消息 → succeeded 推进水位线；succeeded + 窗口内只有标记消息或无消息 → not_delivered、水位线不动、note 正确；failed/cancelled 维持既有行为。
-- 降级标记断言：`incompleteResponse` 输出带结构化标记；送达判定按标记排除。
+- 降级标记断言：`incompleteResponse` 输出带结构化标记；标记使用 HTML 注释形态（对用户不可见，markdown 渲染不显示），降级文案的用户可见呈现与加标记前完全一致；送达判定按标记排除。
 - 查询载体断言：durable 模式（messages_json 不更新）下送达判定仍正确——防「直查 messages_json」的回归。
 - 组合场景：not_delivered 之后的下一期精选 `since` 覆盖本期窗口（含重复岗位的去重说明）。
 - 写侧顺序回归锚点：succeeded 事件到达时对话消息已可读（防 finalize 顺序调整的静默破坏）。
