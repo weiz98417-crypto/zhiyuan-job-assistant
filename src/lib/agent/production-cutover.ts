@@ -1,5 +1,14 @@
 import type { AgentReleaseGateResult } from "@/lib/agent/eval-release-gates";
-import type { AgentFeatureFlagName } from "@/lib/agent/feature-flags";
+
+// Cutover flag names are fixed history from the 0.11→0.12 unified cutover. They live here as a
+// local union because feature-flags.ts was removed (Spec 14, 2026-10 plan decision #15).
+export type AgentCutoverFlagName =
+  | "admission_shadow"
+  | "continuation_kernel"
+  | "task_program_vertical_slice"
+  | "item_dual_write"
+  | "item_read_switch"
+  | "unified_production_cutover";
 
 export type AgentCutoverPhase = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
@@ -32,19 +41,19 @@ export interface AgentCutoverReadiness {
   blockers: string[];
   warnings: string[];
   rollbackTarget: string;
-  requiredFlags: AgentFeatureFlagName[];
+  requiredFlags: AgentCutoverFlagName[];
 }
 
 export interface AgentLegacyRemovalEvidence {
   legacyPath: string;
   replacementOwner: string;
   coveredFixtures: string[];
-  removedFlags: AgentFeatureFlagName[];
+  removedFlags: AgentCutoverFlagName[];
   staticReachabilityCheck: boolean;
   releaseReplayPassed: boolean;
 }
 
-export const AGENT_CUTOVER_FLAGS: AgentFeatureFlagName[] = [
+export const AGENT_CUTOVER_FLAGS: AgentCutoverFlagName[] = [
   "admission_shadow",
   "continuation_kernel",
   "task_program_vertical_slice",
@@ -80,7 +89,7 @@ export function evaluateAgentCutoverReadiness(input: {
     browserJourneysPassed: boolean;
     noRawPayloadFallback: boolean;
   };
-  flags: Partial<Record<AgentFeatureFlagName, boolean>>;
+  flags: Partial<Record<AgentCutoverFlagName, boolean>>;
   rollbackTarget?: string;
 }): AgentCutoverReadiness {
   const blockers = input.releaseGates.passed ? [] : [

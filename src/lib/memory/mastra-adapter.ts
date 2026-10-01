@@ -7,7 +7,6 @@ import { getPostgresPool, isPostgresConfigured } from "@/lib/postgres";
 import { complete, type GatewayMessage } from "@/lib/ai/model-gateway";
 import {
   createEmbeddingProvider,
-  MEMORY_EMBEDDING_DIMENSION,
   type EmbeddingProvider,
 } from "@/lib/memory/vector-memory";
 
@@ -57,20 +56,18 @@ async function getMemory(): Promise<Memory> {
   return memoryPromise;
 }
 
-function createMastraEmbedder() {
+export function createMastraEmbedder() {
+  // Spec 14 / plan A0: an unavailable embedder must surface as an explicit failure.
+  // A silent mock fallback disables semantic recall while every read-back still "succeeds".
   let provider: EmbeddingProvider;
   try {
     provider = createEmbeddingProvider();
-  } catch {
-    provider = createEmbeddingProvider({
-      provider: "mock",
-      apiUrl: "",
-      apiKey: "",
-      model: "zhiyuan-mastra-fallback",
-      apiDimension: MEMORY_EMBEDDING_DIMENSION,
-      dimension: MEMORY_EMBEDDING_DIMENSION,
-      maxRetries: 0,
-    });
+  } catch (error) {
+    console.error(
+      "[mastra-memory] embedding provider unavailable; Mastra session memory will fail until MEMORY_EMBEDDING_* is configured:",
+      error instanceof Error ? error.message : error,
+    );
+    throw error;
   }
   return {
     specificationVersion: "v3" as const,
