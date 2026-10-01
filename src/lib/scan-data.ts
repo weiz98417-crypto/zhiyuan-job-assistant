@@ -492,34 +492,41 @@ async function queryPostgresScanJobs(userId: string, filters: ScanJobFilters) {
   });
 }
 
-/** Spec 20: batch scan_queue terminal statuses for card reconciliation.
- *  Returns { scanId -> { status, updatedAt } } for the requesting user only. */
+/** Spec 20: 批量读取 scan_queue 终态（卡片对账的事实源）。
+ *  返回 { scanId -> { status, updatedAt } }，仅限请求用户自己的行；入参按 50 一批
+ *  分批查询——直接截断会让「记录其实存在」的卡被误判 unknown。 */
 export async function getScanStatusesForUser(
   userId: string,
   scanIds: string[],
 ): Promise<Record<string, { status: string; updatedAt: string | null }>> {
-  const ids = scanIds.map((id) => String(id).trim()).filter(Boolean).slice(0, 50);
+  const ids = scanIds.map((id) => String(id).trim()).filter(Boolean);
   const statuses: Record<string, { status: string; updatedAt: string | null }> = {};
   if (!ids.length) return statuses;
 
   if (getDatabaseDriver() !== "postgres") {
-    const placeholders = ids.map(() => "?").join(",");
-    const rows = getDb().prepare(
-      `SELECT id, status, updated_at FROM scan_queue WHERE user_id = ? AND id IN (${placeholders})`,
-    ).all(userId, ...ids) as AnyRow[];
-    for (const row of rows) {
-      statuses[String(row.id)] = { status: String(row.status || ""), updatedAt: row.updated_at ? String(row.updated_at) : null };
+    for (let offset = 0; offset < ids.length; offset += 50) {
+      const batch = ids.slice(offset, offset + 50);
+      const placeholders = batch.map(() => "?").join(",");
+      const rows = getDb().prepare(
+        `SELECT id, status, updated_at FROM scan_queue WHERE user_id = ? AND id IN (${placeholders})`,
+      ).all(userId, ...batch) as AnyRow[];
+      for (const row of rows) {
+        statuses[String(row.id)] = { status: String(row.status || ""), updatedAt: row.updated_at ? String(row.updated_at) : null };
+      }
     }
     return statuses;
   }
 
   return withPostgresClient(async (client) => {
-    const result = await client.query(
-      "SELECT id, status, updated_at FROM scan_queue WHERE user_id = $1 AND id = ANY($2::text[])",
-      [userId, ids],
-    );
-    for (const row of result.rows) {
-      statuses[String(row.id)] = { status: String(row.status || ""), updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null };
+    for (let offset = 0; offset < ids.length; offset += 50) {
+      const batch = ids.slice(offset, offset + 50);
+      const result = await client.query(
+        "SELECT id, status, updated_at FROM scan_queue WHERE user_id = $1 AND id = ANY($2::text[])",
+        [userId, batch],
+      );
+      for (const row of result.rows) {
+        statuses[String(row.id)] = { status: String(row.status || ""), updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null };
+      }
     }
     return statuses;
   });

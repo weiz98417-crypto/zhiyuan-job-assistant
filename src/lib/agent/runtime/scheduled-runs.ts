@@ -11,7 +11,7 @@
 import { randomUUID } from "crypto";
 import { withPostgresClient, isPostgresConfigured } from "@/lib/postgres";
 import { getDurableAgentRuntime } from "@/lib/agent/runtime/runtime-factory";
-import { getSessionMemoryAdapter, type SessionMemoryMessage } from "@/lib/memory/postgres-memory";
+import { getSessionMemoryAdapter, resolveExecutionRole, type SessionMemoryMessage } from "@/lib/memory/postgres-memory";
 import { TASK_INCOMPLETE_MARKER } from "@/lib/agent/task-program";
 import { admitScheduledDigestRun } from "@/lib/agent/run-admission";
 
@@ -283,16 +283,23 @@ export function digestDeliveredInWindow(
 }
 
 function isAssistantMessage(message: SessionMemoryMessage): boolean {
-  const execution = message.metadata?.execution;
-  const originalRole = execution && typeof execution === "object" && !Array.isArray(execution)
-    ? (execution as Record<string, unknown>).role
-    : undefined;
-  const role = typeof originalRole === "string" ? originalRole : message.role;
-  return role === "assistant";
+  return resolveExecutionRole(message) === "assistant";
 }
 
 /** 送达校验的读路径：与 session-api-readback 同源（memory adapter）——durable 模式下
- *  sessions.messages_json 不更新，直查会永远判 not_delivered。 */
+ *  sessions.messages_json 不更新，直查会永远判 not_delivered。校验失败按未送达处理
+ *  并显式记日志（宁可重读不假成功），绝不静默。 */
+async function checkDigestDelivered(userId: string, run: { conversationId: number | null; createdAt: string; updatedAt: string }): Promise<boolean> {
+  if (run.conversationId == null) return false;
+  try {
+    const assistantMessages = await loadConversationAssistantMessages(userId, Number(run.conversationId));
+    return digestDeliveredInWindow(assistantMessages, { startIso: run.createdAt, endIso: run.updatedAt });
+  } catch (error) {
+    console.error(`[scheduled-runs] delivery check failed: ${error instanceof Error ? error.message : error}`);
+    return false;
+  }
+}
+
 async function loadConversationAssistantMessages(userId: string, conversationId: number): Promise<Array<{ content: string; createdAt: string | null }>> {
   if (!isPostgresConfigured()) return [];
   const adapter = getSessionMemoryAdapter();
@@ -326,17 +333,7 @@ export async function reconcileFinishedDigestRuns(): Promise<{ reconciled: numbe
         // created-time slightly overlaps windows instead — the dedup note absorbs that.
         // Spec 21: succeeded 还必须真的送达（对话里有本 run 的 assistant 输出且非
         // 「任务未完成」降级文案）才推进水位线；否则 not_delivered，下期重读本期窗口。
-        const delivered = run.conversationId !== null && run.conversationId !== undefined
-          ? await loadConversationAssistantMessages(row.user_id, Number(run.conversationId))
-            .then((assistantMessages) => digestDeliveredInWindow(
-              assistantMessages,
-              { startIso: run.createdAt, endIso: run.updatedAt },
-            ))
-            .catch((error) => {
-              console.error(`[scheduled-runs] delivery check failed for ${row.id}: ${error instanceof Error ? error.message : error}`);
-              return false;
-            })
-          : false;
+        const delivered = await checkDigestDelivered(row.user_id, run);
         if (delivered) {
           await advanceSchedule(row.id, {
             lastStatus: "succeeded",

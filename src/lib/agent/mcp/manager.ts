@@ -16,7 +16,8 @@ interface MCPServerState {
  *  Known boundary (Out of Scope): a zombie child that hangs until timeout produces a
  *  timeout error, which intentionally does NOT match — no reconnect on timeouts. */
 export function isDisconnectError(errorText: string): boolean {
-  return /not connected|connection closed|ended|enoent|epipe/i.test(errorText);
+  // \bended\b：裸子串会命中 "recommended"/"appended" 之类工具错误文案，误触发重连。
+  return /not connected|connection closed|\bended\b|enoent|epipe/i.test(errorText);
 }
 
 export class MCPManager {
@@ -178,7 +179,7 @@ export class MCPManager {
       return {
         success: false,
         data: null,
-        error: `MCP server reconnect failed after disconnect: ${first.errorText}`,
+        error: `MCP server reconnect failed after disconnect: ${first.result.error}`,
         errorCategory: "transient",
         recoverable: true,
       };
@@ -188,7 +189,7 @@ export class MCPManager {
       return {
         success: false,
         data: null,
-        error: `MCP server disconnected again after reconnect: ${second.errorText}`,
+        error: `MCP server disconnected again after reconnect: ${second.result.error}`,
         errorCategory: "transient",
         recoverable: true,
       };
@@ -202,7 +203,7 @@ export class MCPManager {
     params: Record<string, unknown>,
     signal: AbortSignal | undefined,
     timeoutMs: number,
-  ): Promise<{ result: ToolResult; reconnectable: boolean; errorText: string }> {
+  ): Promise<{ result: ToolResult; reconnectable: boolean }> {
     const server = this.servers.get(serverName);
     if (!server) {
       return {
@@ -214,7 +215,6 @@ export class MCPManager {
           recoverable: true,
         },
         reconnectable: true,
-        errorText: `MCP server not connected: ${serverName}`,
       };
     }
 
@@ -230,7 +230,7 @@ export class MCPManager {
         .map((c) => c.text || "")
         .join("\n") || JSON.stringify(result);
 
-      return { result: { success: true, data: text, errorCategory: "ok", llmSummary: text }, reconnectable: false, errorText: "" };
+      return { result: { success: true, data: text, errorCategory: "ok", llmSummary: text }, reconnectable: false };
     } catch (err) {
       const errorText = err instanceof Error ? err.message : "MCP tool call failed";
       return {
@@ -242,7 +242,6 @@ export class MCPManager {
           recoverable: true,
         },
         reconnectable: isDisconnectError(errorText),
-        errorText,
       };
     }
   }
@@ -257,6 +256,7 @@ export class MCPManager {
       return this.servers.has(serverName);
     }
     this.servers.delete(serverName);
+    const startedAt = Date.now();
     const attempt = this.initServer(serverName, signal)
       .then(() => undefined)
       .finally(() => {
@@ -266,10 +266,11 @@ export class MCPManager {
     try {
       await attempt;
       const ok = this.servers.has(serverName);
-      if (ok) console.log(`[MCP] Reconnected to "${serverName}"`);
+      if (ok) console.log(`[MCP] Reconnected to "${serverName}" in ${Date.now() - startedAt}ms`);
       return ok;
     } catch (error) {
-      console.error(`[MCP] Reconnect to "${serverName}" failed: ${error instanceof Error ? error.message : error}`);
+      const classification = isDisconnectError(error instanceof Error ? error.message : String(error)) ? "disconnect" : "connect-failure";
+      console.error(`[MCP] Reconnect to "${serverName}" failed (${classification}): ${error instanceof Error ? error.message : error}`);
       return false;
     }
   }

@@ -405,6 +405,17 @@ export interface SessionMemoryIdentity { userId: string; conversationId: number 
 export interface SessionMemoryAdapter { readonly provider: "postgres" | "mastra"; append(identity: SessionMemoryIdentity, messages: SessionMemoryMessage[], requestId?: string): Promise<void>; load(identity: SessionMemoryIdentity): Promise<SessionMemoryMessage[]>; eraseTarget(identity: SessionMemoryIdentity, targetText: string): Promise<{ redactedCount: number }> }
 export class SessionMemoryConfigurationError extends Error { constructor(message: string) { super(message); this.name = "SessionMemoryConfigurationError"; } }
 
+/** 单一事实源：worker 写入时把原始 role 存进 metadata.execution.role（mastra 只认四种
+ *  role，其余映射为 signal）。读侧（transcript 组装、送达校验）统一从这里还原原始
+ *  role，避免各处手写同型提取。 */
+export function resolveExecutionRole(message: SessionMemoryMessage): string {
+  const execution = message.metadata?.execution;
+  const originalRole = execution && typeof execution === "object" && !Array.isArray(execution)
+    ? (execution as Record<string, unknown>).role
+    : undefined;
+  return typeof originalRole === "string" ? originalRole : message.role;
+}
+
 function assertSessionIdentity(identity: SessionMemoryIdentity): void {
   if (!identity.userId?.trim() || !Number.isInteger(identity.conversationId) || identity.conversationId <= 0) {
     throw new Error("Session memory requires a user and positive conversation id");

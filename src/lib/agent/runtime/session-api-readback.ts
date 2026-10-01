@@ -1,5 +1,5 @@
 import { getDatabaseDriver, isPostgresConfigured } from "@/lib/postgres";
-import { getSessionMemoryAdapter, type SessionMemoryMessage } from "@/lib/memory/postgres-memory";
+import { getSessionMemoryAdapter, resolveExecutionRole, type SessionMemoryMessage } from "@/lib/memory/postgres-memory";
 import { safeAssistantText } from "@/lib/agent/runtime/run-event-projection";
 import {
   collectJobDiscoveryScanIds,
@@ -14,7 +14,7 @@ function toSessionTranscriptMessage(message: SessionMemoryMessage, fallbackTimes
     ? execution as Record<string, unknown>
     : {};
   return {
-    role: typeof metadata.role === "string" ? metadata.role : message.role,
+    role: resolveExecutionRole(message),
     content: message.role === "assistant" ? safeAssistantText(message.content) : message.content,
     timestamp: message.createdAt || fallbackTimestamp,
     ...(message.id ? { id: message.id, itemId: message.id } : {}),
@@ -59,18 +59,18 @@ async function reconcileSessionRows<T extends Record<string, unknown>>(rows: T[]
     const parsed = rows.map((row) => {
       try {
         const raw = row.messages_json;
-        const messages = typeof raw === "string" && raw.trim() ? (JSON.parse(raw) as AgentMessage[]) : [];
+        // 哨兵：绝大多数会话没有岗位发现卡，字符串扫描先挡掉全量 JSON.parse。
+        if (typeof raw !== "string" || !raw.includes("job_discovery_run")) return { row, messages: [] as AgentMessage[] };
+        const messages = raw.trim() ? (JSON.parse(raw) as AgentMessage[]) : [];
         return { row, messages: Array.isArray(messages) ? messages : [] };
-      } catch {
+      } catch (error) {
+        console.error(`[session-readback] transcript parse failed during card reconciliation: ${error instanceof Error ? error.message : error}`);
         return { row, messages: [] as AgentMessage[] };
       }
     });
     const scanIds = Array.from(new Set(parsed.flatMap((entry) => collectJobDiscoveryScanIds(entry.messages))));
     if (!scanIds.length) return rows;
     const statuses = await getScanStatusesForUser(userId, scanIds);
-    if (!Object.keys(statuses).length && scanIds.length > 0) {
-      // 查无任何记录也要覆写 unknown，因此仅在 statuses 为空对象但确有卡时继续。
-    }
     return rows.map((row, index) => {
       const { messages } = parsed[index];
       if (!messages.length) return row;

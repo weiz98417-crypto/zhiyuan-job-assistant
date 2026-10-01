@@ -15,12 +15,15 @@ describe("Spec 22: disconnect predicate", () => {
     }
   });
 
-  it("does not match tool errors or timeouts (zombie boundary)", () => {
+  it("does not match tool errors, timeouts, or accidental substring hits (zombie boundary)", () => {
     for (const text of [
       "tool deadline exceeded",
       "API timeout after 30000ms",
       "页面不存在",
       "Call timeout",
+      // 词边界负例：裸子串 ended 曾命中这些工具错误文案，误触发重连。
+      "workflow recommended action failed",
+      "entry appended to ledger failed validation",
     ]) {
       expect(isDisconnectError(text)).toBe(false);
     }

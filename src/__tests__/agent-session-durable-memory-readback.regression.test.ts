@@ -17,7 +17,8 @@ vi.mock("@/lib/postgres", () => ({
   getDatabaseDriver: boundaries.databaseDriver,
   isPostgresConfigured: boundaries.postgresConfigured,
 }));
-vi.mock("@/lib/memory/postgres-memory", () => ({
+vi.mock("@/lib/memory/postgres-memory", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/memory/postgres-memory")>()),
   getSessionMemoryAdapter: () => ({ load: boundaries.load }),
 }));
 

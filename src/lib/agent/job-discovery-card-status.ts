@@ -20,6 +20,8 @@ const CARD_TYPE = "job_discovery_run";
 /** scan_queue 终态词表（scan-worker.mjs: done/failed；scan-data.ts: canceled）。 */
 const TERMINAL_STATUSES = new Set(["done", "failed", "canceled"]);
 const IN_FLIGHT_STATUSES = new Set(["pending", "running"]);
+/** 「无事实源」的统一落点：无 scanId、scan_queue 查无记录。渲染层据此呈现状态未知。 */
+export const JOB_DISCOVERY_UNKNOWN_STATUS = "unknown";
 
 interface LocatedCard {
   container: Record<string, unknown>;
@@ -86,7 +88,7 @@ export function reconcileJobDiscoveryRunMessages(messages: AgentMessage[], statu
       return message;
     } else {
       // 查无记录或 scanId 缺失：无事实源，unknown——绝不保留进行中判定。
-      nextStatus = "unknown";
+      nextStatus = JOB_DISCOVERY_UNKNOWN_STATUS;
       resolvedAt = null;
     }
     if (card.status === nextStatus) return message;

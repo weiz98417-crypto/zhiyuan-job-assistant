@@ -14,6 +14,7 @@ import { WarmButton, ScoreBadge } from "@/components/design";
 import MarkdownRenderer from "@/components/MarkdownRenderer";
 import { getToolDisplay } from "@/lib/agent/tool-display-names";
 import { getAgentDisplayName } from "@/lib/agent/client-metadata";
+import { JOB_DISCOVERY_UNKNOWN_STATUS } from "@/lib/agent/job-discovery-card-status";
 import { fetchDiscoveryJobDetail, getAgentEvaluationUrl, saveDiscoveryJobJD } from "@/lib/job-discovery";
 import type { AgentMessage, CoachMode, InterviewQuestion, InterviewSessionState } from "@/types";
 import { createJD } from "@/lib/jd-storage";
@@ -1324,7 +1325,7 @@ export function JobDiscoveryRunCard({
   // 一律按「状态未知」呈现，绝不落到转圈判定；终态（done/failed/canceled）自含事实，照常显示。
   const rawStatus = textValue(snapshot.status);
   const inFlightish = !rawStatus || rawStatus === "pending" || rawStatus === "running";
-  const status = inFlightish && !scanId ? "unknown" : (rawStatus || "pending");
+  const status = inFlightish && !scanId ? JOB_DISCOVERY_UNKNOWN_STATUS : (rawStatus || "pending");
   const companiesDone = numberValue(snapshot.companiesDone);
   const companiesTotal = numberValue(snapshot.companiesTotal);
   const jobsFound = numberValue(snapshot.jobsFound);
@@ -1333,7 +1334,7 @@ export function JobDiscoveryRunCard({
   const recovered = snapshot.recoveredExistingScan === true;
   const active = (status === "pending" || status === "running") && Boolean(scanId);
   const finished = status === "done";
-  const unknownState = status === "unknown";
+  const unknownState = status === JOB_DISCOVERY_UNKNOWN_STATUS;
 
   useEffect(() => {
     setSnapshot(payload);
