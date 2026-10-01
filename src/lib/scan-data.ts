@@ -491,3 +491,36 @@ async function queryPostgresScanJobs(userId: string, filters: ScanJobFilters) {
     return { jobs: normalizeRows(jobs.rows), total: Number(total.rows[0]?.count || 0), page };
   });
 }
+
+/** Spec 20: batch scan_queue terminal statuses for card reconciliation.
+ *  Returns { scanId -> { status, updatedAt } } for the requesting user only. */
+export async function getScanStatusesForUser(
+  userId: string,
+  scanIds: string[],
+): Promise<Record<string, { status: string; updatedAt: string | null }>> {
+  const ids = scanIds.map((id) => String(id).trim()).filter(Boolean).slice(0, 50);
+  const statuses: Record<string, { status: string; updatedAt: string | null }> = {};
+  if (!ids.length) return statuses;
+
+  if (getDatabaseDriver() !== "postgres") {
+    const placeholders = ids.map(() => "?").join(",");
+    const rows = getDb().prepare(
+      `SELECT id, status, updated_at FROM scan_queue WHERE user_id = ? AND id IN (${placeholders})`,
+    ).all(userId, ...ids) as AnyRow[];
+    for (const row of rows) {
+      statuses[String(row.id)] = { status: String(row.status || ""), updatedAt: row.updated_at ? String(row.updated_at) : null };
+    }
+    return statuses;
+  }
+
+  return withPostgresClient(async (client) => {
+    const result = await client.query(
+      "SELECT id, status, updated_at FROM scan_queue WHERE user_id = $1 AND id = ANY($2::text[])",
+      [userId, ids],
+    );
+    for (const row of result.rows) {
+      statuses[String(row.id)] = { status: String(row.status || ""), updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null };
+    }
+    return statuses;
+  });
+}

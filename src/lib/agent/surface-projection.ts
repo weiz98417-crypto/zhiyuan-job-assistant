@@ -118,7 +118,7 @@ const SAFE_PAYLOAD_FIELDS: Record<string, readonly string[]> = {
   job_discovery_confirmation: ["criteria", "profileDerived", "primaryAction"],
   job_discovery_detail: ["jobs", "offset", "nextOffset", "source", "hasMore"],
   job_discovery_error: ["error", "criteria", "retryHint"],
-  job_discovery_run: ["scanId", "status", "companiesDone", "companiesTotal", "jobsFound", "jobsNew", "criteria", "recoveredExistingScan", "readBackVerified", "readBackEvidence"],
+  job_discovery_run: ["scanId", "status", "resolvedAt", "companiesDone", "companiesTotal", "jobsFound", "jobsNew", "criteria", "recoveredExistingScan", "readBackVerified", "readBackEvidence"],
   offer_comparison: ["offers", "winner", "dimensions", "summary", "readBackVerified"],
   offer_evaluation: ["reportId", "offerId", "company", "role", "overallScore", "verdict", "readBackVerified", "readBackError", "redFlags", "missingInfo", "memoryContext"],
   offer_evaluation_error: ["phase", "offerId", "reportId", "readBackVerified", "readBackError", "missingInfo", "clarificationQuestion"],

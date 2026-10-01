@@ -1320,15 +1320,20 @@ export function JobDiscoveryRunCard({
   const [jobs, setJobs] = useState<Record<string, unknown>[]>([]);
   const [pollError, setPollError] = useState("");
   const scanId = textValue(snapshot.scanId);
-  const status = textValue(snapshot.status) || "pending";
+  // Spec 20 渲染兜底：进行中状态必须有 scanId 支撑——无 scanId 的 pending/running
+  // 一律按「状态未知」呈现，绝不落到转圈判定；终态（done/failed/canceled）自含事实，照常显示。
+  const rawStatus = textValue(snapshot.status);
+  const inFlightish = !rawStatus || rawStatus === "pending" || rawStatus === "running";
+  const status = inFlightish && !scanId ? "unknown" : (rawStatus || "pending");
   const companiesDone = numberValue(snapshot.companiesDone);
   const companiesTotal = numberValue(snapshot.companiesTotal);
   const jobsFound = numberValue(snapshot.jobsFound);
   const jobsNew = numberValue(snapshot.jobsNew);
   const progress = companiesTotal > 0 ? Math.min(100, Math.round((companiesDone / companiesTotal) * 100)) : 0;
   const recovered = snapshot.recoveredExistingScan === true;
-  const active = status === "pending" || status === "running";
+  const active = (status === "pending" || status === "running") && Boolean(scanId);
   const finished = status === "done";
+  const unknownState = status === "unknown";
 
   useEffect(() => {
     setSnapshot(payload);
@@ -1368,7 +1373,11 @@ export function JobDiscoveryRunCard({
           if (nextStatus === "done") await loadJobs();
         }
       } catch (error) {
-        if (!canceled) setPollError(error instanceof Error ? error.message : "岗位发现状态读取失败");
+        if (canceled) return;
+        setPollError(error instanceof Error ? error.message : "岗位发现状态读取失败");
+        // Spec 20 渲染兜底：轮询失败（404/401/500）不再挂着 spinner——降级为状态未知并停止轮询。
+        if (interval) clearInterval(interval);
+        setSnapshot((prev) => ({ ...prev, status: "unknown" }));
       }
     };
 
@@ -1387,8 +1396,8 @@ export function JobDiscoveryRunCard({
           className="overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-divider)] bg-[var(--color-surface)]">
           <div className="flex items-center gap-2 border-b border-[var(--color-divider)] bg-[var(--color-bg)] px-3 py-2">
             <RefreshCw size={14} className={active ? "animate-spin text-[var(--color-primary)]" : finished ? "text-emerald-500" : "text-amber-500"} />
-            <span className="text-xs font-medium text-[var(--color-text)]">{finished ? "岗位发现已完成" : active ? "岗位发现运行中" : "岗位发现已停止"}</span>
-            <span className="ml-auto text-xs text-[var(--color-muted)]">{status}</span>
+            <span className="text-xs font-medium text-[var(--color-text)]">{finished ? "岗位发现已完成" : active ? "岗位发现运行中" : unknownState ? "岗位发现状态未知" : "岗位发现已停止"}</span>
+            <span className="ml-auto text-xs text-[var(--color-muted)]">{unknownState ? "未知" : status}</span>
           </div>
           <div className="space-y-3 px-3 py-3 text-sm">
             <div className="flex flex-wrap gap-3 text-xs text-[var(--color-muted)]">
