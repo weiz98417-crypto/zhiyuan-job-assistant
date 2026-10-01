@@ -254,6 +254,7 @@ export async function* orchestrateGen(
           // Spec 18: metadata-only generation observation; failures are loud, never silent.
           recordModelGeneration({
             runId: ctx.runId,
+            userId: ctx.principal?.userId,
             model: report.modelUsed,
             promptTokens: report.promptTokens,
             completionTokens: report.completionTokens,

@@ -168,7 +168,6 @@ const DEFAULT_SUCCESS_CRITERIA: Record<AgentTaskType, string[]> = {
   job_digest: [
     "opportunity pool read since watermark",
     "digest summary generated (top opportunities with dedup note)",
-    "digest persisted to the digest conversation",
   ],
 };
 
@@ -368,6 +367,18 @@ export function inferCompletedCriteriaFromToolResult(
     }
     if (reportReadBackVerified) {
       completed.add("saved report read-back verification passes");
+    }
+  }
+
+  // Spec 19: the digest material tool marks both completable criteria — a successful
+  // read satisfies the pool-read criterion, and a material payload with totalNew
+  // satisfies summary generation. Digest persistence itself is structural: the worker
+  // is the single transcript writer (ADR-0030/0036), so the respond stage lands the
+  // digest in the digest conversation without a separate criterion.
+  if (contract.taskType === "job_digest" && signals.toolName === "get_job_digest") {
+    completed.add("opportunity pool read since watermark");
+    if (typeof data.totalNew === "number") {
+      completed.add("digest summary generated (top opportunities with dedup note)");
     }
   }
 

@@ -35,8 +35,9 @@ export const TASK_PROGRAM_REGISTRY: Record<AgentTaskType, TaskProgram> = {
   file_export: program("file_export", "deterministic", ["preflight", "execute", "verify_read_back", "persist_artifact", "respond"], ["export generated", "file exists", "file size is non-zero", "file hash verified"], ["file_exists", "file_size", "file_hash"]),
   job_search: program("job_search", "deterministic", ["preflight", "clarify_or_gate", "execute", "verify_read_back", "respond"], ["job discovery criteria confirmed", "scan creation gated by user confirmation", "scan read-back or opportunity pool response returned"], ["confirmation_required", "scan_read_back", "opportunity_pool_response"]),
   // Spec 19 / ADR-0039: unattended digest run — no clarify_or_gate stage (nobody to ask),
-  // read-only contract, and the digest must be persisted before success can be claimed.
-  job_digest: program("job_digest", "deterministic", ["preflight", "digest", "persist_artifact", "respond"], ["opportunity pool read since watermark", "digest summary generated (top opportunities with dedup note)", "digest persisted to the digest conversation"], ["digest_generated", "digest_persisted"]),
+  // read-only contract. Digest persistence is structural via the worker transcript
+  // single-writer; the two stop-guard criteria are tool-markable (get_job_digest).
+  job_digest: program("job_digest", "deterministic", ["preflight", "digest", "persist_artifact", "respond"], ["opportunity pool read since watermark", "digest summary generated (top opportunities with dedup note)"], ["digest_generated"]),
 };
 
 export function getTaskProgram(taskType: AgentTaskType): TaskProgram {

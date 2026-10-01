@@ -43,6 +43,7 @@ async function projectRunEvent(item: RunOutboxItem): Promise<void> {
   // Spec 18: metadata-only span into the trace tree (type/tool/status/sequence, no payload text).
   await recordTraceSpan({
     runId: item.runId,
+    userId: item.userId,
     name: type,
     status,
     sourceEventSequence: item.eventSequence,

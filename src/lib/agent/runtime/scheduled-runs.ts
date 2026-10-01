@@ -32,7 +32,7 @@ export interface ScheduledRunRow {
 
 export type DigestScheduleAction =
   | { action: "noop" }
-  | { action: "trigger"; nextRunAtIso: string }
+  | { action: "trigger"; dueAtIso: string }
   | { action: "skip_active_run" }
   | { action: "skip_missed"; note: string };
 
@@ -55,7 +55,6 @@ export function nextWeeklyMonday0800Utc(from: Date): Date {
 
 export function digestScheduleDecision(input: {
   nextRunAt: string;
-  lastRunAt: string | null;
   hasActiveDigestRun: boolean;
 }, now: Date): DigestScheduleAction {
   const nextRunAt = new Date(input.nextRunAt).getTime();
@@ -64,11 +63,28 @@ export function digestScheduleDecision(input: {
     return { action: "skip_missed", note: "调度窗口已错过超过 24 小时，本次精选跳过" };
   }
   if (input.hasActiveDigestRun) return { action: "skip_active_run" };
-  return { action: "trigger", nextRunAtIso: digestRequestIdSuffix(input.nextRunAt) };
+  return { action: "trigger", dueAtIso: digestRequestIdSuffix(input.nextRunAt) };
 }
 
 export function digestRequestIdSuffix(nextRunAt: string): string {
   return new Date(nextRunAt).toISOString();
+}
+
+/** 水位线读取（Spec 19）：精选工具据此只取「自上次精选以来」的新增；失败备注随素材进入本期文案。 */
+export async function getDigestWatermark(userId: string): Promise<{ since: string | null; note: string }> {
+  return withPostgresClient(async (client) => {
+    const result = await client.query(`
+      SELECT last_digest_at, note
+      FROM scheduled_runs
+      WHERE user_id = $1 AND task_type = 'job_digest' AND status = 'active'
+      ORDER BY created_at ASC LIMIT 1
+    `, [userId]);
+    const row = (result.rows[0] || {}) as { last_digest_at?: unknown; note?: unknown };
+    return {
+      since: row.last_digest_at ? new Date(row.last_digest_at as string).toISOString() : null,
+      note: typeof row.note === "string" ? row.note : "",
+    };
+  });
 }
 
 /* ── 存储与服务 ── */
@@ -163,7 +179,6 @@ export async function triggerDueScheduledRuns(now = new Date()): Promise<{ trigg
   for (const scheduledRun of due) {
     const decision = digestScheduleDecision({
       nextRunAt: scheduledRun.next_run_at,
-      lastRunAt: scheduledRun.last_run_at,
       hasActiveDigestRun: await hasActiveDigestRun(scheduledRun.user_id),
     }, now);
 
@@ -181,7 +196,7 @@ export async function triggerDueScheduledRuns(now = new Date()): Promise<{ trigg
       continue;
     }
 
-    const requestId = `scheduled:${scheduledRun.id}:${decision.nextRunAtIso}`;
+    const requestId = `scheduled:${scheduledRun.id}:${decision.dueAtIso}`;
     const runtime = getDurableAgentRuntime();
     const existing = await runtime.getRunByRequestId({ userId: scheduledRun.user_id }, requestId);
     if (existing) {

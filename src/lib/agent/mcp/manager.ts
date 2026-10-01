@@ -97,7 +97,7 @@ export class MCPManager {
           ? buildBrowserToolGovernance(`${name}_${t.name}`, classification.effect)
           : undefined,
         capability: cfg.policy === "browser"
-          ? buildBrowserToolCapability(`${name}_${t.name}`, classification.effect)
+          ? buildBrowserToolCapability(classification.effect)
           : undefined,
         parameters: (t.inputSchema?.properties
           ? Object.fromEntries(
@@ -125,6 +125,9 @@ export class MCPManager {
                 errorCategory: "policy_denied" as const,
               };
             }
+            // Spec 16 Further Notes: slow portals get a relaxed MCP call timeout
+            // (registry capability deadline 90s/120s still bounds the attempt).
+            return this.callTool(name, t.name, params as Record<string, unknown>, context?.signal, 85_000);
           }
           return this.callTool(name, t.name, params as Record<string, unknown>, context?.signal);
         },
@@ -154,6 +157,7 @@ export class MCPManager {
     toolName: string,
     params: Record<string, unknown>,
     signal?: AbortSignal,
+    timeoutMs = 30_000,
   ): Promise<ToolResult> {
     const server = this.servers.get(serverName);
     if (!server) {
@@ -170,7 +174,7 @@ export class MCPManager {
       const result = await server.client.callTool({
         name: toolName,
         arguments: params,
-      }, undefined, { signal, timeout: 30_000 });
+      }, undefined, { signal, timeout: timeoutMs });
 
       const content = result.content as { type: string; text?: string }[] | undefined;
       const text = content

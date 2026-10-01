@@ -74,9 +74,8 @@ export function buildBrowserToolGovernance(toolName: string, effect: "read" | "w
   };
 }
 
-export function buildBrowserToolCapability(toolName: string, effect: "read" | "write"): ToolCapability {
+export function buildBrowserToolCapability(effect: "read" | "write"): ToolCapability {
   const read = effect === "read";
-  void toolName;
   return {
     risk: read ? "low" : "high",
     deadlineClass: read ? "foreground_read" : "verified_write",

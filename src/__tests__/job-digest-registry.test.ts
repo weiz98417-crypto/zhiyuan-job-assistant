@@ -21,7 +21,12 @@ describe("Spec 19: job_digest program, contract and governance", () => {
     const program = getTaskProgram("job_digest");
     expect(program.executionDepth).toBe("deterministic");
     expect(program.stages).not.toContain("clarify_or_gate");
-    expect(program.successCriteria.some((criteria) => criteria.includes("digest persisted"))).toBe(true);
+    // 两条 stop-guard 判据都可由 get_job_digest 的工具结果标记；digest 落库由 worker
+    // 单写者结构性保证（ADR-0030/0036），不设不可标记的判据（评审修复）。
+    expect(program.successCriteria).toEqual([
+      "opportunity pool read since watermark",
+      "digest summary generated (top opportunities with dedup note)",
+    ]);
     expect(createTaskProgramStopGuard("job_digest")).not.toBeNull();
   });
 

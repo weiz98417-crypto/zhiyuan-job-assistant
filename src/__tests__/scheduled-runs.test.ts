@@ -20,7 +20,7 @@ describe("Spec 19: weekly Monday 08:00 Asia/Shanghai scheduling math", () => {
 });
 
 describe("Spec 19: digest schedule decision (catch-up, idempotency, active-run guard)", () => {
-  const base = { lastRunAt: null, hasActiveDigestRun: false };
+  const base = { hasActiveDigestRun: false };
   const due = "2026-10-05T00:00:00.000Z";
 
   it("is a no-op before the schedule is due", () => {
@@ -29,7 +29,7 @@ describe("Spec 19: digest schedule decision (catch-up, idempotency, active-run g
 
   it("triggers within the catch-up window with a stable idempotency key", () => {
     const decision = digestScheduleDecision({ ...base, nextRunAt: due }, new Date("2026-10-05T09:00:00Z"));
-    expect(decision).toEqual({ action: "trigger", nextRunAtIso: due });
+    expect(decision).toEqual({ action: "trigger", dueAtIso: due });
   });
 
   it("skips with a visible note when the window is missed by more than 24h", () => {

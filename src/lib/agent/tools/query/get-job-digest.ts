@@ -79,7 +79,9 @@ export async function buildJobDigestMaterial(userId: string, since: string | nul
   };
 }
 
-export function createGetJobDigestTool(): ToolDefinition {
+export function createGetJobDigestTool(options: {
+  watermark?: (userId: string) => Promise<{ since: string | null; note: string }>;
+} = {}): ToolDefinition {
   return {
     name: "get_job_digest",
     description: "读取用户机会池中自上次岗位精选以来的新增机会（只读，含去重提示与调度备注）。返回结构化素材，由你汇总为 Top 5 精选与点评。",
@@ -92,7 +94,10 @@ export function createGetJobDigestTool(): ToolDefinition {
         return { success: false, data: null, error: "缺少用户身份，无法读取机会池", errorCategory: "permanent" };
       }
       try {
-        const material = await buildJobDigestMaterial(userId, null, "");
+        // 水位线与调度备注来自 scheduled_runs（Spec 19）：精选范围为「自上次精选以来」，
+        // 失败/跳过备注随素材进入本期文案——静默失败视为缺陷（ADR-0039）。
+        const watermark = await (options.watermark || readDigestWatermark)(userId);
+        const material = await buildJobDigestMaterial(userId, watermark.since, watermark.note);
         return { success: true, data: material, errorCategory: "ok", llmSummary: `新增机会 ${material.totalNew} 条，精选候选 ${material.opportunities.length} 条` };
       } catch (error) {
         return {
@@ -117,3 +122,9 @@ export function createGetJobDigestTool(): ToolDefinition {
 }
 
 export const getJobDigestTool = createGetJobDigestTool();
+
+// 延迟依赖，避免 scheduled-runs（runtime 层）与 tools 层的循环导入。
+export async function readDigestWatermark(userId: string): Promise<{ since: string | null; note: string }> {
+  const { getDigestWatermark } = await import("@/lib/agent/runtime/scheduled-runs");
+  return getDigestWatermark(userId);
+}

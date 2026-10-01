@@ -13,6 +13,7 @@ export type TraceClient = Parameters<Parameters<typeof withPostgresClient>[0]>[0
 
 export interface ModelGenerationInput {
   runId?: string | null;
+  userId?: string | null;
   model: string;
   promptTokens: number;
   completionTokens: number;
@@ -22,6 +23,7 @@ export interface ModelGenerationInput {
 
 export interface TraceSpanInput {
   runId: string;
+  userId?: string | null;
   name: string;
   status: string;
   sourceEventSequence?: number | null;
@@ -67,7 +69,7 @@ export async function recordModelGeneration(input: ModelGenerationInput, injecte
   const promptTokens = nonNegative(input.promptTokens);
   const completionTokens = nonNegative(input.completionTokens);
   const run = async (client: TraceClient) => {
-    await upsertTraceRow(client, runId);
+    await upsertTraceRow(client, runId, input.userId);
     await client.query(`
       INSERT INTO agent_observations (
         id, run_id, kind, name, status, model, prompt_tokens, completion_tokens, total_tokens, latency_ms, level
@@ -78,14 +80,13 @@ export async function recordModelGeneration(input: ModelGenerationInput, injecte
       nonNegative(input.latencyMs),
     ]);
   };
-  if (injectedClient) return run(injectedClient);
-  await withPostgresClient(run);
+  await withTraceClient(injectedClient, run);
 }
 
 /** 从 Run Evidence 事件投影 span observation（元数据 only：类型/工具名/状态/序号）。 */
 export async function recordTraceSpan(input: TraceSpanInput, injectedClient?: TraceClient): Promise<void> {
   const run = async (client: TraceClient) => {
-    await upsertTraceRow(client, input.runId);
+    await upsertTraceRow(client, input.runId, input.userId);
     await client.query(`
       INSERT INTO agent_observations (
         id, run_id, kind, name, status, model, latency_ms, level, source_event_sequence
@@ -95,8 +96,7 @@ export async function recordTraceSpan(input: TraceSpanInput, injectedClient?: Tr
       input.level || "default", input.sourceEventSequence ?? null,
     ]);
   };
-  if (injectedClient) return run(injectedClient);
-  await withPostgresClient(run);
+  await withTraceClient(injectedClient, run);
 }
 
 export async function finishTrace(input: { runId: string; status: string }, injectedClient?: TraceClient): Promise<void> {
@@ -107,8 +107,7 @@ export async function finishTrace(input: { runId: string; status: string }, inje
       WHERE run_id = $1
     `, [input.runId, bounded(input.status, 40)]);
   };
-  if (injectedClient) return run(injectedClient);
-  await withPostgresClient(run);
+  await withTraceClient(injectedClient, run);
 }
 
 export async function purgeExpiredTraces(retentionDays = 180, injectedClient?: TraceClient): Promise<number> {
@@ -124,8 +123,7 @@ export async function purgeExpiredTraces(retentionDays = 180, injectedClient?: T
     `, [String(Math.max(1, Math.floor(retentionDays)))]);
     return Number((result.rows[0] as { purged?: number } | undefined)?.purged || 0);
   };
-  if (injectedClient) return run(injectedClient);
-  return withPostgresClient(run);
+  return withTraceClient(injectedClient, run);
 }
 
 export async function listAgentTraces(limit = 50): Promise<AgentTraceRow[]> {
@@ -156,11 +154,17 @@ export async function getAgentTrace(runId: string): Promise<{ trace: AgentTraceR
   });
 }
 
-async function upsertTraceRow(client: TraceClient, runId: string): Promise<void> {
+async function upsertTraceRow(client: TraceClient, runId: string, userId?: string | null): Promise<void> {
   await client.query(`
-    INSERT INTO agent_traces (run_id, status) VALUES ($1, 'running')
+    INSERT INTO agent_traces (run_id, user_id, status) VALUES ($1, $2, 'running')
     ON CONFLICT (run_id) DO NOTHING
-  `, [runId]);
+  `, [runId, bounded(userId || "", 120)]);
+}
+
+/** 测试可注入 client 的统一入口（评审修复：替代四处重复的 if/else）。 */
+async function withTraceClient<T>(injectedClient: TraceClient | undefined, run: (client: TraceClient) => Promise<T>): Promise<T> {
+  if (injectedClient) return run(injectedClient);
+  return withPostgresClient(run);
 }
 
 function normalizeTraceRow(row: Record<string, unknown>): AgentTraceRow {

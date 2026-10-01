@@ -62,14 +62,14 @@ describe("Spec 16: browser tool governance and capability", () => {
 
   it("attaches complete capability metadata so registry exposes the tools", () => {
     for (const effect of ["read", "write"] as const) {
-      const capability = buildBrowserToolCapability("playwright_browser_x", effect);
+      const capability = buildBrowserToolCapability(effect);
       expect(hasCompleteToolCapability(capability)).toBe(true);
     }
   });
 
   it("relaxes deadlines for slow portals while keeping read/write split", () => {
-    const read = buildBrowserToolCapability("playwright_browser_navigate", "read");
-    const write = buildBrowserToolCapability("playwright_browser_click", "write");
+    const read = buildBrowserToolCapability("read");
+    const write = buildBrowserToolCapability("write");
     expect(read.deadlineMs).toBeGreaterThan(30_000);
     expect(write.deadlineMs).toBeGreaterThan(30_000);
     expect(write.risk).toBe("high");
