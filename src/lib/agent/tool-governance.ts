@@ -698,6 +698,19 @@ export const TOOL_GOVERNANCE_REGISTRY: Record<string, ToolGovernance> = {
     successContract: "Read external web search results only.",
     userVisibleNameZh: "联网搜索",
   }),
+  // Spec 19: the digest run's single tool — reads the user's opportunity pool since the
+  // watermark. Read-only: the unattended run never writes (the scheduler advances the watermark).
+  get_job_digest: meta({
+    name: "get_job_digest",
+    effect: "read",
+    allowedTaskTypes: ["job_digest"],
+    agentAllowlist: ["general"],
+    documentTypes: ["session"],
+    requiresUserConfirmation: false,
+    requiresReadBack: false,
+    successContract: "Read opportunity pool entries since the watermark; no writes.",
+    userVisibleNameZh: "岗位精选素材",
+  }),
 };
 
 export const TASK_CONTRACT_POLICY: Record<AgentTaskType, TaskContractPolicy> = {
@@ -713,6 +726,7 @@ export const TASK_CONTRACT_POLICY: Record<AgentTaskType, TaskContractPolicy> = {
   reference_resume_save: "high_risk_verified_write",
   file_export: "export_verified",
   job_search: "verified_write",
+  job_digest: "read_only",
 };
 
 export function getTaskContractPolicy(taskType: AgentTaskType): TaskContractPolicy {

@@ -17,6 +17,7 @@ import { createBackgroundToolHandlers } from "@/lib/agent/runtime/background-too
 import { PostgresRunContextSource } from "@/lib/agent/runtime/postgres-run-context-source";
 import { reconcileGovernedRuntimeTools } from "@/lib/agent/runtime/governed-tool-runtime";
 import { purgeExpiredTraces } from "@/lib/agent/runtime/agent-trace-store";
+import { reconcileFinishedDigestRuns, triggerDueScheduledRuns } from "@/lib/agent/runtime/scheduled-runs";
 import { expirePendingMemoryCandidates } from "@/lib/memory/admission";
 import { isPostgresConfigured } from "@/lib/postgres";
 import { registerMCPTools } from "@/lib/agent/mcp/tools";
@@ -80,6 +81,28 @@ const retentionTimer = setInterval(() => {
   });
 }, positiveInteger(process.env.AGENT_RUNTIME_RETENTION_INTERVAL_MS, 60 * 60 * 1_000));
 retentionTimer.unref();
+// Spec 19: scheduler tick — only wakes due scheduled runs via the system admission entry;
+// it never executes work in the scheduler itself (ADR-0039).
+const schedulerRunning = { value: false };
+const schedulerTimer = setInterval(() => {
+  if (schedulerRunning.value) return;
+  schedulerRunning.value = true;
+  void Promise.all([triggerDueScheduledRuns(), reconcileFinishedDigestRuns()])
+    .then((results) => {
+      const [due, reconciled] = results;
+      if (due.triggered || due.skipped || due.missed || reconciled.reconciled) {
+        console.log(`[agent-worker] scheduler tick: triggered=${due.triggered} skipped=${due.skipped} missed=${due.missed} reconciled=${reconciled.reconciled}`);
+      }
+    })
+    .catch((error) => {
+      const message = error instanceof Error ? error.message : "scheduler tick failed";
+      console.error(`[agent-worker] ${message}`);
+    })
+    .finally(() => {
+      schedulerRunning.value = false;
+    });
+}, positiveInteger(process.env.AGENT_SCHEDULER_POLL_MS, 30_000));
+schedulerTimer.unref();
 
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.on(signal, () => {

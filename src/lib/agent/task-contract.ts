@@ -14,7 +14,9 @@ export type AgentTaskType =
   | "profile_update"
   | "reference_resume_save"
   | "file_export"
-  | "job_search";
+  | "job_search"
+  /** Spec 19: system-initiated only — never reachable from a user turn (kept out of TASK_ENUM). */
+  | "job_digest";
 
 /** How a resume_edit run is allowed to affect the canonical resume. */
 export type ResumeEditMode = "draft_only" | "propose" | "apply";
@@ -95,6 +97,7 @@ const RUN_CONTRACT_ENFORCEMENT: Record<AgentTaskType, RunContractEnforcement> = 
   reference_resume_save: "verified_effect",
   file_export: "verified_effect",
   job_search: "verified_effect",
+  job_digest: "advisory",
 };
 
 export function getRunContractEnforcement(taskType: AgentTaskType): RunContractEnforcement {
@@ -162,6 +165,11 @@ const DEFAULT_SUCCESS_CRITERIA: Record<AgentTaskType, string[]> = {
     "scan creation gated by user confirmation",
     "scan read-back or opportunity pool response returned",
   ],
+  job_digest: [
+    "opportunity pool read since watermark",
+    "digest summary generated (top opportunities with dedup note)",
+    "digest persisted to the digest conversation",
+  ],
 };
 
 const DEFAULT_VALIDATORS: Record<AgentTaskType, string[]> = {
@@ -177,6 +185,7 @@ const DEFAULT_VALIDATORS: Record<AgentTaskType, string[]> = {
   reference_resume_save: ["source_resume_present", "role_category", "read_back_match"],
   file_export: ["file_exists", "file_size", "file_hash"],
   job_search: ["confirmation_required", "scan_read_back", "opportunity_pool_response"],
+  job_digest: ["digest_generated", "digest_persisted"],
 };
 
 export function createAgentTaskContract(input: {

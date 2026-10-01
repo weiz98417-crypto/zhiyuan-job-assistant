@@ -444,6 +444,7 @@ export function mapAgentTaskToMemoryTask(taskType: AgentTaskType | null): AgentM
     reference_resume_save: "reference_resume_save",
     file_export: "general_chat",
     job_search: "general_chat",
+    job_digest: "general_chat",
   };
   return map[taskType];
 }

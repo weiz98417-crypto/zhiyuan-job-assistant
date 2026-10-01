@@ -58,6 +58,8 @@ const SERVER_EXECUTION_TOOLS = new Set([
   "search_jobs",
   "transfer_to_agent",
   "delegate_research",
+  // Spec 19: the digest run executes in the worker under a read-only contract.
+  "get_job_digest",
 ]);
 
 const WORKER_BACKGROUND_TOOLS = new Set([
