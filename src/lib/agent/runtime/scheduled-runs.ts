@@ -171,61 +171,83 @@ async function advanceSchedule(runId: string, patch: {
 }
 
 /** 到点唤醒：每个到期调度至多触发一次（幂等键 = scheduled:<id>:<next_run_at>）。 */
-export async function triggerDueScheduledRuns(now = new Date()): Promise<{ triggered: number; skipped: number; missed: number }> {
+export async function triggerDueScheduledRuns(now = new Date()): Promise<{ triggered: number; skipped: number; missed: number; failed: number }> {
   const due = await listDueScheduledRuns(now);
   let triggered = 0;
   let skipped = 0;
   let missed = 0;
+  let failed = 0;
   for (const scheduledRun of due) {
-    const decision = digestScheduleDecision({
-      nextRunAt: scheduledRun.next_run_at,
-      hasActiveDigestRun: await hasActiveDigestRun(scheduledRun.user_id),
-    }, now);
-
-    if (decision.action === "noop") continue;
-    const nextRunAt = nextWeeklyMonday0800Utc(new Date(scheduledRun.next_run_at));
-
-    if (decision.action === "skip_missed") {
-      missed += 1;
-      await advanceSchedule(scheduledRun.id, { nextRunAt, note: decision.note, lastStatus: "skipped_missed" });
-      continue;
+    // 逐行隔离（eng review #1A）：一个用户的确定性失败（如 FK 违规）不得饿死
+    // 排在其后的用户；失败落该行 note，调度表可见。
+    try {
+      await triggerOneScheduledRun(scheduledRun, now, (action) => {
+        if (action === "triggered") triggered += 1;
+        else if (action === "skipped") skipped += 1;
+        else if (action === "missed") missed += 1;
+      });
+    } catch (error) {
+      failed += 1;
+      const message = error instanceof Error ? error.message : "scheduled run trigger failed";
+      console.error(`[scheduled-runs] trigger failed for ${scheduledRun.id} (user ${scheduledRun.user_id}): ${message}`);
+      await advanceSchedule(scheduledRun.id, { lastStatus: "failed", note: `精选触发失败：${message.slice(0, 160)}` }).catch(() => undefined);
     }
-    if (decision.action === "skip_active_run") {
-      skipped += 1;
-      await advanceSchedule(scheduledRun.id, { nextRunAt, lastStatus: "skipped_active_run", note: "已有进行中的精选任务，本次顺延" });
-      continue;
-    }
-
-    const requestId = `scheduled:${scheduledRun.id}:${decision.dueAtIso}`;
-    const runtime = getDurableAgentRuntime();
-    const existing = await runtime.getRunByRequestId({ userId: scheduledRun.user_id }, requestId);
-    if (existing) {
-      await advanceSchedule(scheduledRun.id, { nextRunAt, lastRunAt: now, lastRequestId: requestId, lastStatus: "replayed" });
-      continue;
-    }
-    const conversationId = await ensureDigestConversation(scheduledRun.user_id);
-    const admission = admitScheduledDigestRun();
-    await runtime.createRun(
-      { userId: scheduledRun.user_id },
-      {
-        requestId,
-        conversationId,
-        taskType: admission.taskType!,
-        agentId: admission.agentId!,
-        input: { content: "[系统] 每周岗位精选：请汇总自上次精选以来的机会池新增，给出 Top 5 与一句话点评，并说明重复与失败情况。" },
-        contract: admission.contract,
-        runtimeMode: "worker_all",
-      },
-    );
-    await advanceSchedule(scheduledRun.id, {
-      nextRunAt,
-      lastRunAt: now,
-      lastRequestId: requestId,
-      lastStatus: "triggered",
-    });
-    triggered += 1;
   }
-  return { triggered, skipped, missed };
+  return { triggered, skipped, missed, failed };
+}
+
+async function triggerOneScheduledRun(
+  scheduledRun: ScheduledRunRow,
+  now: Date,
+  count: (action: "triggered" | "skipped" | "missed") => void,
+): Promise<void> {
+  const decision = digestScheduleDecision({
+    nextRunAt: scheduledRun.next_run_at,
+    hasActiveDigestRun: await hasActiveDigestRun(scheduledRun.user_id),
+  }, now);
+
+  if (decision.action === "noop") return;
+  const nextRunAt = nextWeeklyMonday0800Utc(new Date(scheduledRun.next_run_at));
+
+  if (decision.action === "skip_missed") {
+    count("missed");
+    await advanceSchedule(scheduledRun.id, { nextRunAt, note: decision.note, lastStatus: "skipped_missed" });
+    return;
+  }
+  if (decision.action === "skip_active_run") {
+    count("skipped");
+    await advanceSchedule(scheduledRun.id, { nextRunAt, lastStatus: "skipped_active_run", note: "已有进行中的精选任务，本次顺延" });
+    return;
+  }
+
+  const requestId = `scheduled:${scheduledRun.id}:${decision.dueAtIso}`;
+  const runtime = getDurableAgentRuntime();
+  const existing = await runtime.getRunByRequestId({ userId: scheduledRun.user_id }, requestId);
+  if (existing) {
+    await advanceSchedule(scheduledRun.id, { nextRunAt, lastRunAt: now, lastRequestId: requestId, lastStatus: "replayed" });
+    return;
+  }
+  const conversationId = await ensureDigestConversation(scheduledRun.user_id);
+  const admission = admitScheduledDigestRun();
+  await runtime.createRun(
+    { userId: scheduledRun.user_id },
+    {
+      requestId,
+      conversationId,
+      taskType: admission.taskType!,
+      agentId: admission.agentId!,
+      input: { content: "[系统] 每周岗位精选：请汇总自上次精选以来的机会池新增，给出 Top 5 与一句话点评，并说明重复与失败情况。" },
+      contract: admission.contract,
+      runtimeMode: "worker_all",
+    },
+  );
+  await advanceSchedule(scheduledRun.id, {
+    nextRunAt,
+    lastRunAt: now,
+    lastRequestId: requestId,
+    lastStatus: "triggered",
+  });
+  count("triggered");
 }
 
 /** 对账：精选 Run 终态后记录 last_status；失败进入下次精选的调度备注（用户可见）。 */

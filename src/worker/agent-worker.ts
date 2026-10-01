@@ -90,8 +90,8 @@ const schedulerTimer = setInterval(() => {
   void Promise.all([triggerDueScheduledRuns(), reconcileFinishedDigestRuns()])
     .then((results) => {
       const [due, reconciled] = results;
-      if (due.triggered || due.skipped || due.missed || reconciled.reconciled) {
-        console.log(`[agent-worker] scheduler tick: triggered=${due.triggered} skipped=${due.skipped} missed=${due.missed} reconciled=${reconciled.reconciled}`);
+      if (due.triggered || due.skipped || due.missed || due.failed || reconciled.reconciled) {
+        console.log(`[agent-worker] scheduler tick: triggered=${due.triggered} skipped=${due.skipped} missed=${due.missed} failed=${due.failed} reconciled=${reconciled.reconciled}`);
       }
     })
     .catch((error) => {

@@ -39,20 +39,21 @@ async function projectRunEvent(item: RunOutboxItem): Promise<void> {
       JSON.stringify(payload),
       item.eventSequence,
     ]);
+    // Spec 18: metadata-only span into the trace tree, same connection as the step
+    // projection (eng review #7A) — one connection per event instead of two.
+    await recordTraceSpan({
+      runId: item.runId,
+      userId: item.userId,
+      name: type,
+      status,
+      sourceEventSequence: item.eventSequence,
+      level: /fail|error|cancel/i.test(`${type} ${status}`) ? "error" : "default",
+    }, client);
+    if (type === "run.status_changed") {
+      const { finished, traceStatus } = traceStatusForRunEvent(type, String(payload.status || ""));
+      if (finished) await finishTrace({ runId: item.runId, status: traceStatus }, client);
+    }
   });
-  // Spec 18: metadata-only span into the trace tree (type/tool/status/sequence, no payload text).
-  await recordTraceSpan({
-    runId: item.runId,
-    userId: item.userId,
-    name: type,
-    status,
-    sourceEventSequence: item.eventSequence,
-    level: /fail|error|cancel/i.test(`${type} ${status}`) ? "error" : "default",
-  });
-  if (type === "run.status_changed") {
-    const { finished, traceStatus } = traceStatusForRunEvent(type, String(payload.status || ""));
-    if (finished) await finishTrace({ runId: item.runId, status: traceStatus });
-  }
 }
 
 async function triggerRunReview(item: RunOutboxItem): Promise<void> {
