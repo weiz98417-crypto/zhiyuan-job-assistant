@@ -82,11 +82,18 @@ export interface NativeToolCall {
   arguments: string;
 }
 
+export interface ChatUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens?: number;
+}
+
 export interface ChatResult {
   text: string;
   toolCalls: NativeToolCall[];
   modelUsed: string;
   finishReason: string;
+  usage?: ChatUsage;
 }
 
 export interface StreamingChatResult extends ChatResult {
@@ -206,6 +213,20 @@ export async function parseToolCallStream(
   return { text: fullText, toolCalls: Array.from(toolCallFragments.values()), finishReason };
 }
 
+function toChatUsage(raw: unknown): ChatUsage | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const value = raw as { prompt_tokens?: unknown; completion_tokens?: unknown; total_tokens?: unknown };
+  const promptTokens = Number(value.prompt_tokens);
+  const completionTokens = Number(value.completion_tokens);
+  if (!Number.isFinite(promptTokens) && !Number.isFinite(completionTokens)) return undefined;
+  const totalTokens = Number(value.total_tokens);
+  return {
+    promptTokens: Number.isFinite(promptTokens) ? promptTokens : 0,
+    completionTokens: Number.isFinite(completionTokens) ? completionTokens : 0,
+    ...(Number.isFinite(totalTokens) ? { totalTokens } : {}),
+  };
+}
+
 /** Non-streaming completion with fallback (classifier-style small requests). */
 export async function complete(request: ChatCompletionRequest): Promise<ChatResult> {
   const chain = resolveChain();
@@ -232,6 +253,7 @@ export async function complete(request: ChatCompletionRequest): Promise<ChatResu
         toolCalls,
         modelUsed: entry.model,
         finishReason: json.choices?.[0]?.finish_reason || "",
+        usage: toChatUsage(json.usage),
       };
     } catch (err) {
       lastError = `${entry.model} parse: ${err instanceof Error ? err.message : String(err)}`;
