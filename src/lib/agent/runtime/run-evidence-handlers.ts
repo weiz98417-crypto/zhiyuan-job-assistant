@@ -41,17 +41,23 @@ async function projectRunEvent(item: RunOutboxItem): Promise<void> {
     ]);
     // Spec 18: metadata-only span into the trace tree, same connection as the step
     // projection (eng review #7A) — one connection per event instead of two.
-    await recordTraceSpan({
-      runId: item.runId,
-      userId: item.userId,
-      name: type,
-      status,
-      sourceEventSequence: item.eventSequence,
-      level: /fail|error|cancel/i.test(`${type} ${status}`) ? "error" : "default",
-    }, client);
-    if (type === "run.status_changed") {
-      const { finished, traceStatus } = traceStatusForRunEvent(type, String(payload.status || ""));
-      if (finished) await finishTrace({ runId: item.runId, status: traceStatus }, client);
+    // Outside-voice #9: trace failure must NOT fail the step projection — spans are
+    // observational, and failing here would re-trigger the outbox handler for a fact row.
+    try {
+      await recordTraceSpan({
+        runId: item.runId,
+        userId: item.userId,
+        name: type,
+        status,
+        sourceEventSequence: item.eventSequence,
+        level: /fail|error|cancel/i.test(`${type} ${status}`) ? "error" : "default",
+      }, client);
+      if (type === "run.status_changed") {
+        const { finished, traceStatus } = traceStatusForRunEvent(type, String(payload.status || ""));
+        if (finished) await finishTrace({ runId: item.runId, status: traceStatus }, client);
+      }
+    } catch (error) {
+      console.error(`[agent-trace] span projection failed (step projection unaffected): ${error instanceof Error ? error.message : error}`);
     }
   });
 }

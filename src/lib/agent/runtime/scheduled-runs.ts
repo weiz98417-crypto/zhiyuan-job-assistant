@@ -89,7 +89,9 @@ export async function getDigestWatermark(userId: string): Promise<{ since: strin
 
 /* ── 存储与服务 ── */
 
-/** 用户第一次使用岗位发现时隐式开启每周精选（设置页开关属第二期，Spec 19）。 */
+/** 用户第一次使用岗位发现时隐式开启每周精选（设置页开关属第二期，Spec 19）。
+ *  Outside-voice #6: per-user 稳定 jitter（0-30 分钟，userId 哈希导出）——所有用户
+ *  同一秒到期会在单 ECS / concurrency=2 上制造周一 08:00 风暴。 */
 export async function ensureWeeklyDigestSchedule(userId: string): Promise<void> {
   await withPostgresClient(async (client) => {
     const existing = await client.query(
@@ -97,11 +99,21 @@ export async function ensureWeeklyDigestSchedule(userId: string): Promise<void> 
       [userId],
     );
     if (existing.rows.length > 0) return;
+    const jitterMinutes = stableJitterMinutes(userId);
+    const nextRunAt = new Date(nextWeeklyMonday0800Utc(new Date()).getTime() + jitterMinutes * 60_000);
     await client.query(`
       INSERT INTO scheduled_runs (id, user_id, task_type, status, next_run_at)
       VALUES ($1, $2, 'job_digest', 'active', $3)
-    `, [randomUUID(), userId, nextWeeklyMonday0800Utc(new Date()).toISOString()]);
+    `, [randomUUID(), userId, nextRunAt.toISOString()]);
   });
+}
+
+function stableJitterMinutes(userId: string): number {
+  let hash = 0;
+  for (let index = 0; index < userId.length; index++) {
+    hash = (hash * 31 + userId.charCodeAt(index)) >>> 0;
+  }
+  return hash % 30;
 }
 
 async function listDueScheduledRuns(now: Date): Promise<ScheduledRunRow[]> {
@@ -268,7 +280,15 @@ export async function reconcileFinishedDigestRuns(): Promise<{ reconciled: numbe
       if (run.status !== "succeeded" && run.status !== "failed" && run.status !== "cancelled") continue;
       reconciled += 1;
       if (run.status === "succeeded") {
-        await advanceSchedule(row.id, { lastStatus: "succeeded", lastDigestAt: new Date(run.updatedAt) });
+        // Outside-voice #4: watermark = run **created** time, not finished time. Material
+        // is read mid-run; jobs discovered between read and finish would fall outside both
+        // this digest and the next one (since > discovery) and be silently dropped forever.
+        // created-time slightly overlaps windows instead — the dedup note absorbs that.
+        await advanceSchedule(row.id, {
+          lastStatus: "succeeded",
+          lastDigestAt: new Date(run.createdAt),
+          note: " ",
+        });
       } else {
         await advanceSchedule(row.id, { lastStatus: run.status, note: `精选任务于 ${new Date(run.updatedAt).toLocaleString()} ${run.status === "failed" ? "失败" : "被取消"}，本次精选可能缺失` });
       }

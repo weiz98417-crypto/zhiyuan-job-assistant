@@ -1514,3 +1514,9 @@ CREATE TABLE IF NOT EXISTS scheduled_runs (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_scheduled_runs_due ON scheduled_runs (status, next_run_at);
+
+-- Outside-voice fixes (eng review 2026-10-02): enrollment uniqueness + span idempotency.
+ALTER TABLE scheduled_runs ADD CONSTRAINT scheduled_runs_user_task_unique UNIQUE (user_id, task_type);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_observations_event_seq
+  ON agent_observations (run_id, source_event_sequence)
+  WHERE source_event_sequence IS NOT NULL;

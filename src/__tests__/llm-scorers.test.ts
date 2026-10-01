@@ -65,14 +65,16 @@ describe("Spec 15: LLM quality scorers behind the staging judge", () => {
     expect(composed.releaseAllowed).toBe(false);
   });
 
-  it("lets a faithful resume output pass with merged dimensions and averaged score", async () => {
+  it("lets a faithful resume output pass with merged dimensions and the conservative min score", async () => {
     const base = judgeStagingOutput({ taskType: "resume_edit", output: CLEAN_RESUME_OUTPUT, expectedFacts: ["修改建议"] });
     const quality = await scoreAgentOutput(resumeInput(CLEAN_RESUME_OUTPUT), { complete: fakeComplete({}) });
     const composed = composeStagingJudgeResult(base, quality);
 
     expect(composed.hardVetoes).toEqual([]);
     expect(composed.releaseAllowed).toBe(true);
-    expect(composed.score).toBe(Number(((base.score + quality.score) / 2).toFixed(3)));
+    // Outside-voice #3: blocking tasks take min(base, quality) — averaging two
+    // uncalibrated scales could silently rescue a failing deterministic score.
+    expect(composed.score).toBe(Math.min(base.score, quality.score));
     expect(Object.keys(composed.dimensions)).toContain("faithfulness");
     expect(composed.judgeVersion).toContain("llm-scorer-v1");
   });

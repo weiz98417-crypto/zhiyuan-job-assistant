@@ -200,8 +200,11 @@ export async function scoreAgentOutput(
 
   const scores = Object.fromEntries(results.map((result) => [result.scorer, result.score]));
   const score = Number((results.reduce((sum, result) => sum + result.score, 0) / results.length).toFixed(3));
+  // Outside-voice #2: veto keys off the fabrication/unsupported arrays, not the aggregate
+  // score — a judge returning score 0.9 with a populated fabricated[] list is exactly the
+  // miss this gate exists to catch.
   const hardVetoes = plan.blocking
-    ? results.filter((result) => !result.passed && result.vetoCode).map((result) => result.vetoCode as QualityVetoCode)
+    ? results.filter((result) => result.vetoCode).map((result) => result.vetoCode as QualityVetoCode)
     : [];
   const qualityWarnings = plan.blocking
     ? []
@@ -222,11 +225,15 @@ export async function scoreAgentOutput(
   };
 }
 
-/** 把评分结果并进 StagingJudgeResult：维度合并、分数取均值、veto 合并后仍过同一过滤器。
- *  advisory（非阻断）任务不受合并分数影响：低分只留在 qualityWarnings，不改变发布判定。 */
+/** 把评分结果并进 StagingJudgeResult：维度合并、veto 合并后仍过同一过滤器。
+ *  Outside-voice #3: blocking 任务取两套评分的较小值——平均会在两个未对齐的量表间
+ *  静默把发布门往宽松方向重校准；min 保守且单调。
+ *  advisory（非阻断）任务不受合并分数影响：低分只留在 qualityWarnings。 */
 export function composeStagingJudgeResult(base: StagingJudgeResult, quality: QualityScoreResult): StagingJudgeResult {
   const hardVetoes = Array.from(new Set([...base.hardVetoes, ...quality.hardVetoes])).filter(hardVetoPasses);
-  const score = Number(((base.score + quality.score) / 2).toFixed(3));
+  const score = quality.blocking
+    ? Math.min(base.score, quality.score)
+    : Number(((base.score + quality.score) / 2).toFixed(3));
   return {
     ...base,
     judgeVersion: `${base.judgeVersion}+${quality.scorerVersion}`,

@@ -83,7 +83,9 @@ export async function recordModelGeneration(input: ModelGenerationInput, injecte
   await withTraceClient(injectedClient, run);
 }
 
-/** 从 Run Evidence 事件投影 span observation（元数据 only：类型/工具名/状态/序号）。 */
+/** 从 Run Evidence 事件投影 span observation（元数据 only：类型/工具名/状态/序号）。
+ *  Outside-voice #9: 幂等——outbox 重试会重放整个 handler，span 以
+ *  (run_id, source_event_sequence) 唯一索引去重。 */
 export async function recordTraceSpan(input: TraceSpanInput, injectedClient?: TraceClient): Promise<void> {
   const run = async (client: TraceClient) => {
     await upsertTraceRow(client, input.runId, input.userId);
@@ -91,6 +93,7 @@ export async function recordTraceSpan(input: TraceSpanInput, injectedClient?: Tr
       INSERT INTO agent_observations (
         id, run_id, kind, name, status, model, latency_ms, level, source_event_sequence
       ) VALUES ($1, $2, 'span', $3, $4, '', NULL, $5, $6)
+      ON CONFLICT (run_id, source_event_sequence) WHERE source_event_sequence IS NOT NULL DO NOTHING
     `, [
       randomUUID(), input.runId, bounded(input.name, 120), bounded(input.status, 40),
       input.level || "default", input.sourceEventSequence ?? null,
