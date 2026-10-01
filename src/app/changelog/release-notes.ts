@@ -11,6 +11,42 @@ export type ReleaseNote = {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: "0.14.0",
+    stage: "production",
+    summary: "10 月能力升级第三批：每周岗位精选——定时无人值守任务，把机会池新增汇总成 Top 5 与点评。",
+    sections: [
+      {
+        title: "岗位精选",
+        changes: [
+          { description: "每周一早 8 点自动生成岗位精选：汇总自上次以来的机会池新增 Top 5、一句话点评与重复说明，投递到常驻的「岗位精选」对话。" },
+          { description: "精选任务严格只读：不会修改简历、记忆或发起投递；错过调度 24 小时内补跑一次，超时跳过并在下次精选说明。" },
+          { description: "开始使用岗位发现后自动开启精选；精选任务失败的情况会在下一期精选中明确说明，不做静默断供。" },
+        ],
+      },
+    ],
+  },
+  {
+    version: "0.13.1",
+    stage: "production",
+    summary: "10 月能力升级第二批：审批卡与工具卡视觉统一、Agent 调用树与 token 成本可见。",
+    sections: [
+      {
+        title: "看得见的执行过程",
+        changes: [
+          { description: "审批卡升级为三态呈现：等待批准、已批准、已拒绝各有清晰的状态徽记与说明文案。" },
+          { description: "工具调用卡与任务进度卡统一为纸鸢纸面风格的组件来源，减少一次性手搓样式。" },
+        ],
+      },
+      {
+        title: "成本与延迟",
+        changes: [
+          { description: "管理后台新增 Agent Traces 页：每次运行的模型调用树、token 用量与延迟一目了然。" },
+          { description: "追踪数据仅存元数据，不存简历或对话正文；追踪保留 180 天后自动清理。" },
+        ],
+      },
+    ],
+  },
+  {
     version: "0.13.0",
     stage: "production",
     summary: "10 月能力升级第一批：记忆嵌入故障显式化、简历幻觉评分门禁、浏览器工具（Playwright MCP）。",

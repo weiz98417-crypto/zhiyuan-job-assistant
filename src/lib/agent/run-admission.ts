@@ -365,3 +365,32 @@ function isClarifyRun(activeRun: AgentRunAdmissionInput["activeRun"]): boolean {
 function isAgentTaskType(value: string): value is AgentTaskType {
   return AGENT_TASK_TYPES.has(value as AgentTaskType);
 }
+
+/* ── Spec 19 / ADR-0039: system-initiated admission entry ──
+ * Unattended digest runs enter through the same decision shape as user turns,
+ * but from the scheduler instead of a Conversation Turn. job_digest is kept out
+ * of TASK_ENUM on purpose, so no turn path can produce this decision. */
+export function admitScheduledDigestRun(): AgentRunAdmissionDecision {
+  return {
+    kind: "start_new_run",
+    taskType: "job_digest",
+    agentId: "general",
+    contract: createAgentTaskContract({
+      taskType: "job_digest",
+      target: "每周岗位精选：汇总自水位线以来的机会池新增",
+      requiresUserApproval: false,
+      routing: {
+        contractPolicy: "read_only",
+        memoryTask: null,
+        allowedTools: ["get_job_digest"],
+        requiresClarification: false,
+        auditSummary: "system scheduled digest: read-only unattended contract",
+      },
+    }),
+    route: null,
+    primaryGoal: "produce the weekly job digest",
+    constraints: ["unattended_run", "read_only"],
+    evidence: ["scheduled_run_due"],
+    safeMessage: "岗位精选",
+  };
+}

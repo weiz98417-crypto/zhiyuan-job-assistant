@@ -1493,3 +1493,24 @@ CREATE TABLE IF NOT EXISTS agent_observations (
 );
 CREATE INDEX IF NOT EXISTS idx_agent_observations_run ON agent_observations (run_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_agent_observations_kind ON agent_observations (kind, created_at DESC);
+
+-- Spec 19: scheduled unattended runs (岗位精选 / ADR-0039).
+-- The scheduler only wakes runs; it never executes work. Timezone is fixed-offset
+-- (Asia/Shanghai, UTC+8, no DST): weekly Monday 08:00 CST == Monday 00:00 UTC.
+CREATE TABLE IF NOT EXISTS scheduled_runs (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  task_type TEXT NOT NULL DEFAULT 'job_digest',
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused', 'cancelled')),
+  schedule TEXT NOT NULL DEFAULT 'weekly-monday-0800',
+  timezone TEXT NOT NULL DEFAULT 'Asia/Shanghai',
+  last_run_at TIMESTAMPTZ,
+  last_digest_at TIMESTAMPTZ,
+  next_run_at TIMESTAMPTZ NOT NULL,
+  last_request_id TEXT NOT NULL DEFAULT '',
+  last_status TEXT NOT NULL DEFAULT '',
+  note TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_scheduled_runs_due ON scheduled_runs (status, next_run_at);

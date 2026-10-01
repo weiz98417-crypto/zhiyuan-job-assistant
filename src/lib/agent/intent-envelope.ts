@@ -87,6 +87,8 @@ const TASK_LABELS: Record<AgentTaskType, string> = {
   reference_resume_save: "保存优秀简历样本",
   file_export: "导出文件",
   job_search: "岗位发现/扫描",
+  // Spec 19: system-initiated only — labeled for completeness, never in TASK_ENUM.
+  job_digest: "岗位精选（系统定时）",
 };
 
 /** Zero-ambiguity fast paths. Everything else must go through the LLM envelope. */
