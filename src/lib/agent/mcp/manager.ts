@@ -10,8 +10,19 @@ interface MCPServerState {
   tools: ToolDefinition[];
 }
 
+/** Spec 22: case-insensitive disconnect predicate — covers the SDK's "Not connected" /
+ *  "Connection closed" (dead child), spawn ENOENT / stdin EPIPE, and the manager's own
+ *  "MCP server not connected: X" early-return so a failed reconnect is retryable.
+ *  Known boundary (Out of Scope): a zombie child that hangs until timeout produces a
+ *  timeout error, which intentionally does NOT match — no reconnect on timeouts. */
+export function isDisconnectError(errorText: string): boolean {
+  return /not connected|connection closed|ended|enoent|epipe/i.test(errorText);
+}
+
 export class MCPManager {
   private servers = new Map<string, MCPServerState>();
+  /** Spec 22: per-server single-flight reconnect — concurrent callers wait on one attempt. */
+  private reconnecting = new Map<string, Promise<void>>();
 
   async init(signal?: AbortSignal): Promise<void> {
     const config = loadMCPConfig();
@@ -159,14 +170,51 @@ export class MCPManager {
     signal?: AbortSignal,
     timeoutMs = 30_000,
   ): Promise<ToolResult> {
-    const server = this.servers.get(serverName);
-    if (!server) {
+    const first = await this.invokeTool(serverName, toolName, params, signal, timeoutMs);
+    if (!first.reconnectable) return first.result;
+    // Spec 22: confirmed disconnect — reconnect once, replay the call once.
+    const reconnected = await this.reconnectServer(serverName, signal);
+    if (!reconnected) {
       return {
         success: false,
         data: null,
-        error: `MCP server not connected: ${serverName}`,
+        error: `MCP server reconnect failed after disconnect: ${first.errorText}`,
         errorCategory: "transient",
         recoverable: true,
+      };
+    }
+    const second = await this.invokeTool(serverName, toolName, params, signal, timeoutMs);
+    if (second.reconnectable) {
+      return {
+        success: false,
+        data: null,
+        error: `MCP server disconnected again after reconnect: ${second.errorText}`,
+        errorCategory: "transient",
+        recoverable: true,
+      };
+    }
+    return second.result;
+  }
+
+  private async invokeTool(
+    serverName: string,
+    toolName: string,
+    params: Record<string, unknown>,
+    signal: AbortSignal | undefined,
+    timeoutMs: number,
+  ): Promise<{ result: ToolResult; reconnectable: boolean; errorText: string }> {
+    const server = this.servers.get(serverName);
+    if (!server) {
+      return {
+        result: {
+          success: false,
+          data: null,
+          error: `MCP server not connected: ${serverName}`,
+          errorCategory: "transient",
+          recoverable: true,
+        },
+        reconnectable: true,
+        errorText: `MCP server not connected: ${serverName}`,
       };
     }
 
@@ -182,15 +230,47 @@ export class MCPManager {
         .map((c) => c.text || "")
         .join("\n") || JSON.stringify(result);
 
-      return { success: true, data: text, errorCategory: "ok", llmSummary: text };
+      return { result: { success: true, data: text, errorCategory: "ok", llmSummary: text }, reconnectable: false, errorText: "" };
     } catch (err) {
+      const errorText = err instanceof Error ? err.message : "MCP tool call failed";
       return {
-        success: false,
-        data: null,
-        error: err instanceof Error ? err.message : "MCP tool call failed",
-        errorCategory: "transient",
-        recoverable: true,
+        result: {
+          success: false,
+          data: null,
+          error: errorText,
+          errorCategory: "transient",
+          recoverable: true,
+        },
+        reconnectable: isDisconnectError(errorText),
+        errorText,
       };
+    }
+  }
+
+  /** Spec 22: single-flight reconnect; concurrent callers await the same attempt.
+   *  Failure clears the entry (self-produced "not connected" message then hits the
+   *  predicate, so the NEXT call retries the reconnect). */
+  private async reconnectServer(serverName: string, signal?: AbortSignal): Promise<boolean> {
+    const inFlight = this.reconnecting.get(serverName);
+    if (inFlight) {
+      await inFlight.catch(() => undefined);
+      return this.servers.has(serverName);
+    }
+    this.servers.delete(serverName);
+    const attempt = this.initServer(serverName, signal)
+      .then(() => undefined)
+      .finally(() => {
+        this.reconnecting.delete(serverName);
+      });
+    this.reconnecting.set(serverName, attempt);
+    try {
+      await attempt;
+      const ok = this.servers.has(serverName);
+      if (ok) console.log(`[MCP] Reconnected to "${serverName}"`);
+      return ok;
+    } catch (error) {
+      console.error(`[MCP] Reconnect to "${serverName}" failed: ${error instanceof Error ? error.message : error}`);
+      return false;
     }
   }
 
