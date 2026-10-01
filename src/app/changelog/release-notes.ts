@@ -11,6 +11,21 @@ export type ReleaseNote = {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: "0.14.0",
+    stage: "production",
+    summary: "10 月能力升级第三批：每周岗位精选——定时无人值守任务，把机会池新增汇总成 Top 5 与点评。",
+    sections: [
+      {
+        title: "岗位精选",
+        changes: [
+          { description: "每周一早 8 点自动生成岗位精选：汇总自上次以来的机会池新增 Top 5、一句话点评与重复说明，投递到常驻的「岗位精选」对话。" },
+          { description: "精选任务严格只读：不会修改简历、记忆或发起投递；错过调度 24 小时内补跑一次，超时跳过并在下次精选说明。" },
+          { description: "开始使用岗位发现后自动开启精选；精选任务失败的情况会在下一期精选中明确说明，不做静默断供。" },
+        ],
+      },
+    ],
+  },
+  {
     version: "0.13.1",
     stage: "production",
     summary: "10 月能力升级第二批：审批卡与工具卡视觉统一、Agent 调用树与 token 成本可见。",
