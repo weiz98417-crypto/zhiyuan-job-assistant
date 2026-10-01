@@ -66,6 +66,10 @@ export interface TaskProgramStopGuard {
   incompleteResponse(missing: string[]): string;
 }
 
+/** Spec 21: 降级文案的机器标记（HTML 注释，对用户不可见）——无人值守对账按它排除
+ *  「任务未完成」降级输出，不做脆弱的文案字符串匹配。 */
+export const TASK_INCOMPLETE_MARKER = "<!-- system:task-incomplete -->";
+
 export function createTaskProgramStopGuard(taskOrContract: AgentTaskType | AgentTaskContract): TaskProgramStopGuard | null {
   const taskType = typeof taskOrContract === "string" ? taskOrContract : taskOrContract.taskType;
   const taskProgram = TASK_PROGRAM_REGISTRY[taskType];
@@ -88,7 +92,10 @@ export function createTaskProgramStopGuard(taskOrContract: AgentTaskType | Agent
       ].join("\n");
     },
     incompleteResponse(missing) {
+      // Spec 21: 机器标记前缀（HTML 注释，对用户不可见）——无人值守对账按它排除
+      // 「任务未完成」降级文案，不做脆弱的文案字符串匹配。
       return [
+        TASK_INCOMPLETE_MARKER,
         `「${label}」还没有完成，我先不把它标记为成功。缺少的部分：`,
         ...missing.map((criterion) => `- ${CRITERION_LABELS[criterion] || criterion}`),
         "请补充材料或确认后继续；已产生的中间结果不会丢。",

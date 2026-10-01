@@ -9,8 +9,10 @@
  * - 时区固定偏移：Asia/Shanghai（UTC+8，无夏令时）——每周一 08:00 CST == 每周一 00:00 UTC。
  */
 import { randomUUID } from "crypto";
-import { withPostgresClient } from "@/lib/postgres";
+import { withPostgresClient, isPostgresConfigured } from "@/lib/postgres";
 import { getDurableAgentRuntime } from "@/lib/agent/runtime/runtime-factory";
+import { getSessionMemoryAdapter, type SessionMemoryMessage } from "@/lib/memory/postgres-memory";
+import { TASK_INCOMPLETE_MARKER } from "@/lib/agent/task-program";
 import { admitScheduledDigestRun } from "@/lib/agent/run-admission";
 
 const DIGEST_SESSION_TITLE = "岗位精选";
@@ -262,6 +264,44 @@ async function triggerOneScheduledRun(
   count("triggered");
 }
 
+/** Spec 21（纯函数）：run 时间窗内是否存在「真实送达」的 assistant 输出——
+ *  窗口 [run.createdAt, run.updatedAt]（快照无 startedAt）、非空内容、且不是
+ *  stop-guard 的「任务未完成」降级文案（按 TASK_INCOMPLETE_MARKER 结构化标记排除）。 */
+export function digestDeliveredInWindow(
+  assistantMessages: Array<{ content: string; createdAt: string | null }>,
+  window: { startIso: string; endIso: string },
+): boolean {
+  const start = new Date(window.startIso).getTime();
+  const end = new Date(window.endIso).getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return false;
+  return assistantMessages.some((message) => {
+    if (!message.content?.trim()) return false;
+    if (message.content.includes(TASK_INCOMPLETE_MARKER)) return false;
+    const created = message.createdAt ? new Date(message.createdAt).getTime() : NaN;
+    return Number.isFinite(created) && created >= start && created <= end;
+  });
+}
+
+function isAssistantMessage(message: SessionMemoryMessage): boolean {
+  const execution = message.metadata?.execution;
+  const originalRole = execution && typeof execution === "object" && !Array.isArray(execution)
+    ? (execution as Record<string, unknown>).role
+    : undefined;
+  const role = typeof originalRole === "string" ? originalRole : message.role;
+  return role === "assistant";
+}
+
+/** 送达校验的读路径：与 session-api-readback 同源（memory adapter）——durable 模式下
+ *  sessions.messages_json 不更新，直查会永远判 not_delivered。 */
+async function loadConversationAssistantMessages(userId: string, conversationId: number): Promise<Array<{ content: string; createdAt: string | null }>> {
+  if (!isPostgresConfigured()) return [];
+  const adapter = getSessionMemoryAdapter();
+  const messages = await adapter.load({ userId, conversationId });
+  return messages
+    .filter((message) => isAssistantMessage(message))
+    .map((message) => ({ content: message.content || "", createdAt: message.createdAt || null }));
+}
+
 /** 对账：精选 Run 终态后记录 last_status；失败进入下次精选的调度备注（用户可见）。 */
 export async function reconcileFinishedDigestRuns(): Promise<{ reconciled: number }> {
   return withPostgresClient(async (client) => {
@@ -284,11 +324,31 @@ export async function reconcileFinishedDigestRuns(): Promise<{ reconciled: numbe
         // is read mid-run; jobs discovered between read and finish would fall outside both
         // this digest and the next one (since > discovery) and be silently dropped forever.
         // created-time slightly overlaps windows instead — the dedup note absorbs that.
-        await advanceSchedule(row.id, {
-          lastStatus: "succeeded",
-          lastDigestAt: new Date(run.createdAt),
-          note: " ",
-        });
+        // Spec 21: succeeded 还必须真的送达（对话里有本 run 的 assistant 输出且非
+        // 「任务未完成」降级文案）才推进水位线；否则 not_delivered，下期重读本期窗口。
+        const delivered = run.conversationId !== null && run.conversationId !== undefined
+          ? await loadConversationAssistantMessages(row.user_id, Number(run.conversationId))
+            .then((assistantMessages) => digestDeliveredInWindow(
+              assistantMessages,
+              { startIso: run.createdAt, endIso: run.updatedAt },
+            ))
+            .catch((error) => {
+              console.error(`[scheduled-runs] delivery check failed for ${row.id}: ${error instanceof Error ? error.message : error}`);
+              return false;
+            })
+          : false;
+        if (delivered) {
+          await advanceSchedule(row.id, {
+            lastStatus: "succeeded",
+            lastDigestAt: new Date(run.createdAt),
+            note: " ",
+          });
+        } else {
+          await advanceSchedule(row.id, {
+            lastStatus: "not_delivered",
+            note: "精选未送达（任务输出缺失），下期将重读本期窗口",
+          });
+        }
       } else {
         await advanceSchedule(row.id, { lastStatus: run.status, note: `精选任务于 ${new Date(run.updatedAt).toLocaleString()} ${run.status === "failed" ? "失败" : "被取消"}，本次精选可能缺失` });
       }
