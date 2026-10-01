@@ -3,6 +3,7 @@ import type {
   RunEvidenceHandler,
   RunOutboxItem,
 } from "@/lib/agent/runtime/run-evidence-observer";
+import { finishTrace, recordTraceSpan, traceStatusForRunEvent } from "@/lib/agent/runtime/agent-trace-store";
 
 export function createRunEvidenceHandlers(): Record<string, RunEvidenceHandler> {
   return {
@@ -39,6 +40,18 @@ async function projectRunEvent(item: RunOutboxItem): Promise<void> {
       item.eventSequence,
     ]);
   });
+  // Spec 18: metadata-only span into the trace tree (type/tool/status/sequence, no payload text).
+  await recordTraceSpan({
+    runId: item.runId,
+    name: type,
+    status,
+    sourceEventSequence: item.eventSequence,
+    level: /fail|error|cancel/i.test(`${type} ${status}`) ? "error" : "default",
+  });
+  if (type === "run.status_changed") {
+    const { finished, traceStatus } = traceStatusForRunEvent(type, String(payload.status || ""));
+    if (finished) await finishTrace({ runId: item.runId, status: traceStatus });
+  }
 }
 
 async function triggerRunReview(item: RunOutboxItem): Promise<void> {

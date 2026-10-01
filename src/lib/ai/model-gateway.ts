@@ -157,20 +157,23 @@ function buildBody(request: StreamingChatRequest | ChatCompletionRequest, model:
     temperature: request.temperature ?? 0.7,
     max_tokens: request.maxTokens ?? 16384,
     stream: request.stream,
+    // Spec 18: ask the provider for a usage frame on the stream path so token cost is observable.
+    ...(request.stream ? { stream_options: { include_usage: true } } : {}),
     ...(request.tools?.length ? { tools: request.tools } : {}),
   };
 }
 
-/** Parse an OpenAI-compatible SSE stream into text + accumulated tool calls. */
+/** Parse an OpenAI-compatible SSE stream into text + accumulated tool calls (+ usage frame, Spec 18). */
 export async function parseToolCallStream(
   response: Response,
   signal?: AbortSignal,
-): Promise<{ text: string; toolCalls: NativeToolCall[]; finishReason: string }> {
+): Promise<{ text: string; toolCalls: NativeToolCall[]; finishReason: string; usage?: ChatUsage }> {
   const reader = response.body!.getReader();
   const decoder = new TextDecoder();
   let fullText = "";
   const toolCallFragments = new Map<number, { id: string; name: string; arguments: string }>();
   let finishReason = "";
+  let usage: ChatUsage | undefined;
   let buffer = "";
 
   try {
@@ -203,6 +206,7 @@ export async function parseToolCallStream(
               if (tc.function?.arguments) frag.arguments += tc.function.arguments;
             }
           }
+          if (parsed.usage) usage = toChatUsage(parsed.usage);
         } catch { /* skip malformed line */ }
       }
     }
@@ -210,7 +214,7 @@ export async function parseToolCallStream(
     reader.releaseLock();
   }
 
-  return { text: fullText, toolCalls: Array.from(toolCallFragments.values()), finishReason };
+  return { text: fullText, toolCalls: Array.from(toolCallFragments.values()), finishReason, usage };
 }
 
 function toChatUsage(raw: unknown): ChatUsage | undefined {
