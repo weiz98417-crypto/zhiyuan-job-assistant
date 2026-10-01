@@ -49,6 +49,12 @@ export class ToolRegistry {
     this.sealed = true;
   }
 
+  /** Re-open the registry for the MCP mount path (mcp/tools.ts) during worker startup,
+   *  before the worker claims its first run. No other caller may unseal. */
+  unseal(): void {
+    this.sealed = false;
+  }
+
   get(name: string): ToolDefinition | undefined {
     return this.tools.get(name);
   }
@@ -212,6 +218,8 @@ export class ToolRegistry {
 }
 
 function toolResource(tool: ToolDefinition): RuntimeResource {
+  // 浏览器工具共享一个 stdio 会话（--isolated）：读与写全部串行，跨 Run 不得交错（Spec 16）。
+  if (tool.name.startsWith("browser_")) return "browser";
   if (/ocr|image|document_image/i.test(tool.name)) return "ocr";
   if (
     tool.category === "action" &&

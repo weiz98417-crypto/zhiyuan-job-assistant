@@ -1,7 +1,6 @@
 import { randomUUID } from "crypto";
 import { withPostgresClient } from "@/lib/postgres";
 import { redactReviewText } from "@/lib/agent/run-review";
-import type { JourneyEvalRecord } from "@/lib/agent/journey-eval";
 import type { AgentEvalLayer, AgentEvalLayerResult } from "@/lib/agent/eval-release-gates";
 
 export type AgentEvalRunMode = "deterministic" | "staging" | "release";
@@ -101,42 +100,6 @@ export async function createAgentEvalRun(input: CreateAgentEvalRunInput): Promis
   });
 }
 
-export async function persistDeterministicJourneyEval(input: {
-  record: JourneyEvalRecord;
-  createdByUserId?: string | null;
-  codeCommit?: string;
-  modelVersion?: string;
-  promptVersion?: string;
-  toolVersion?: string;
-  judgeVersion?: string;
-  metadata?: Record<string, unknown>;
-}): Promise<AgentEvalRunRecord> {
-  return createAgentEvalRun({
-    createdByUserId: input.createdByUserId,
-    mode: "deterministic",
-    status: input.record.status,
-    codeCommit: input.codeCommit || process.env.GIT_COMMIT || "unknown",
-    modelVersion: input.modelVersion || "deterministic-adapter",
-    promptVersion: input.promptVersion || "fixture-prompt",
-    toolVersion: input.toolVersion || "fixture-tools",
-    fixtureId: input.record.fixtureId,
-    fixtureVersion: input.record.fixtureVersion,
-    graphVersion: input.record.graphVersion,
-    judgeVersion: input.judgeVersion || "deterministic-gates-v1",
-    score: input.record.hardGatePassed ? 1 : 0,
-    hardGatePassed: input.record.hardGatePassed,
-    gateResults: input.record.gates,
-    failureEvidence: input.record.failures,
-    metadata: {
-      ...(input.metadata || {}),
-      path: input.record.path,
-      fixtureHash: input.record.fixtureHash,
-      artifactRefs: input.record.evidence.artifactRefs,
-      userText: input.record.evidence.userText,
-    },
-  });
-}
-
 export async function updateAgentEvalRun(id: string, input: UpdateAgentEvalRunInput): Promise<AgentEvalRunRecord | null> {
   if (!id.trim()) return null;
   return withPostgresClient(async (client) => {
@@ -191,43 +154,6 @@ export async function listAgentEvalRuns(input: {
   return withPostgresClient(async (client) => {
     const result = await client.query(`SELECT * FROM agent_eval_runs ${whereSql} ORDER BY created_at DESC LIMIT $${params.length}`, params);
     return result.rows.map(normalizeEvalRun);
-  });
-}
-
-export async function persistAgentEvalLayerResults(
-  evalRunId: string,
-  results: AgentEvalLayerResult[],
-): Promise<void> {
-  if (!evalRunId.trim()) throw new Error("Eval Run id is required");
-  await withPostgresClient(async (client) => {
-    await client.query("BEGIN");
-    try {
-      for (const result of results) {
-        await client.query(`
-          INSERT INTO agent_eval_layer_results (
-            eval_run_id, layer, passed, deterministic, score, failures_json, evidence_json
-          ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb)
-          ON CONFLICT (eval_run_id, layer) DO UPDATE SET
-            passed = EXCLUDED.passed,
-            deterministic = EXCLUDED.deterministic,
-            score = EXCLUDED.score,
-            failures_json = EXCLUDED.failures_json,
-            evidence_json = EXCLUDED.evidence_json
-        `, [
-          evalRunId,
-          result.layer,
-          result.passed === true,
-          result.deterministic !== false,
-          normalizeScore(result.score),
-          JSON.stringify(sanitizeArray(result.failures)),
-          JSON.stringify(sanitizeRecord(result.evidence || {})),
-        ]);
-      }
-      await client.query("COMMIT");
-    } catch (error) {
-      await client.query("ROLLBACK");
-      throw error;
-    }
   });
 }
 

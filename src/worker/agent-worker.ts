@@ -18,6 +18,7 @@ import { PostgresRunContextSource } from "@/lib/agent/runtime/postgres-run-conte
 import { reconcileGovernedRuntimeTools } from "@/lib/agent/runtime/governed-tool-runtime";
 import { expirePendingMemoryCandidates } from "@/lib/memory/admission";
 import { isPostgresConfigured } from "@/lib/postgres";
+import { registerMCPTools } from "@/lib/agent/mcp/tools";
 
 dotenv.config({ path: ".env.local" });
 dotenv.config();
@@ -83,6 +84,15 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
     backgroundWorker.drain();
     shutdown.abort();
   });
+}
+
+// Spec 16: mount MCP tools (incl. the governed browser tool) before claiming runs;
+// a cold-start failure must be loud (see [MCP] init summary), not a silent tool gap.
+try {
+  await registerMCPTools();
+} catch (error) {
+  const message = error instanceof Error ? error.message : "MCP registration failed";
+  console.error(`[agent-worker] MCP registration failed: ${message}`);
 }
 
 process.send?.("ready");
