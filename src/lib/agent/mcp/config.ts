@@ -6,6 +6,12 @@ export interface MCPServerConfig {
   env: Record<string, string>;
   /** If true, connection failure is logged but not fatal */
   optional: boolean;
+  /** Extra CLI args for the stdio server command, e.g. ["--headless", "--isolated"]. */
+  args?: string[];
+  /** Connect/listTools timeout override in ms (default 8000). */
+  timeoutMs?: number;
+  /** Governance profile for auto-mounted tools; "browser" applies the closed browser classification. */
+  policy?: "browser" | "readonly" | "default";
 }
 
 interface MCPConfigFile {

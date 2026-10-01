@@ -1,4 +1,4 @@
-export type RuntimeResource = "model" | "ocr" | "write" | "tool";
+export type RuntimeResource = "model" | "ocr" | "write" | "tool" | "browser";
 
 export type RuntimeResourceLimits = Record<RuntimeResource, number>;
 
@@ -16,12 +16,14 @@ export class RuntimeResourceScheduler {
     ocr: 0,
     write: 0,
     tool: 0,
+    browser: 0,
   };
   private readonly queues: Record<RuntimeResource, Waiter[]> = {
     model: [],
     ocr: [],
     write: [],
     tool: [],
+    browser: [],
   };
 
   constructor(limits: Partial<RuntimeResourceLimits> = {}) {
@@ -30,6 +32,7 @@ export class RuntimeResourceScheduler {
       ocr: positiveLimit(limits.ocr, 1),
       write: positiveLimit(limits.write, 1),
       tool: positiveLimit(limits.tool, 4),
+      browser: positiveLimit(limits.browser, 1),
     };
   }
 
