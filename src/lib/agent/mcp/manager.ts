@@ -13,11 +13,11 @@ interface MCPServerState {
 /** Spec 22: case-insensitive disconnect predicate — covers the SDK's "Not connected" /
  *  "Connection closed" (dead child), spawn ENOENT / stdin EPIPE, and the manager's own
  *  "MCP server not connected: X" early-return so a failed reconnect is retryable.
+ *  "ended" 只以枚举短语出现：\bended\b 仍会命中 "ended up failing" 这类动词短语。
  *  Known boundary (Out of Scope): a zombie child that hangs until timeout produces a
  *  timeout error, which intentionally does NOT match — no reconnect on timeouts. */
 export function isDisconnectError(errorText: string): boolean {
-  // \bended\b：裸子串会命中 "recommended"/"appended" 之类工具错误文案，误触发重连。
-  return /not connected|connection closed|\bended\b|enoent|epipe/i.test(errorText);
+  return /not connected|connection closed|write after end|stream ended|connection ended|enoent|epipe/i.test(errorText);
 }
 
 export class MCPManager {

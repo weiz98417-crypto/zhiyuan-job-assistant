@@ -110,7 +110,8 @@ export async function ensureWeeklyDigestSchedule(userId: string): Promise<void> 
   });
 }
 
-function stableJitterMinutes(userId: string): number {
+/** 纯函数（不变量测试消费）：userId 的稳定抖动分钟数，值域 [0, 30)。 */
+export function stableJitterMinutes(userId: string): number {
   let hash = 0;
   for (let index = 0; index < userId.length; index++) {
     hash = (hash * 31 + userId.charCodeAt(index)) >>> 0;
