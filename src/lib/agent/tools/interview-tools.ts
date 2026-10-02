@@ -1,7 +1,7 @@
 import type { ToolDefinition, ToolExecutionContext, ToolResult } from "./types";
 import type { InterviewQuestion, AnswerScore, CoachMode } from "@/types";
 import { COACH_MODES } from "@/types";
-import { fetchAgentMemoryContext, writeCandidateAgentMemory } from "./memory-helpers";
+import { fetchAgentMemoryContext } from "./memory-helpers";
 import {
   generateInterviewQuestionsForAgent,
   scoreInterviewAnswerForAgent,
@@ -147,6 +147,7 @@ async function scoreHandler(
         answer,
         mode,
         context,
+        family: String(params.family || "") || undefined,
       }, { signal: executionContext.signal });
       return {
         success: true,
@@ -210,17 +211,14 @@ async function scoreHandler(
     }
 
     const score = json.data as AnswerScore;
-    const memoryWriteback = await writeCandidateAgentMemory({
-      memoryType: "interview_observation",
-      canonicalText: `Interview answer scored ${score.overall || 0}/5 for question: ${question.slice(0, 120)}.`,
-      sourceType: "interview_answer",
-      sourceId: Date.now(),
-      quote: answer.slice(0, 800),
-      confidence: 0.6,
-      importance: score.overall < 3 ? 0.75 : 0.55,
-      extractionMethod: "interview_answer_score",
-      metadata: { question, mode, suggestions: score.suggestions || [] },
-    });
+    // Spec 26（ADR-0042）：单场分数不再直写记忆（原 writeCandidateAgentMemory 路径已删）；
+    // 弱项跨 ≥3 场趋势由服务端 interview-trend 提炼候选事实，用户确认后才激活。
+    const memoryWriteback = {
+      status: "skipped" as const,
+      success: false,
+      readBackVerified: false,
+      note: "Spec 26：单场分数不入账本；趋势事实跨 ≥3 场后经确认入账。",
+    };
 
     return {
       success: true,
@@ -228,13 +226,13 @@ async function scoreHandler(
         ...score,
         memoryContext,
         memoryWriteback,
-        readBackVerified: memoryWriteback.readBackVerified === true,
+        readBackVerified: false,
       },
       uiPayload: {
         type: "interview_score",
         ...score,
         memoryWriteback,
-        readBackVerified: memoryWriteback.readBackVerified === true,
+        readBackVerified: false,
       },
       rawData: { score, memoryContext, memoryWriteback },
     };
@@ -301,6 +299,7 @@ export const scoreInterviewAnswer: ToolDefinition = {
     answer: { type: "string", required: false, description: "用户的回答文本。有 active interview session 时可留空，由已持久化的 transcript 补全。" },
     mode: { type: "string", required: false, description: "面试模式，影响评分权重。" },
     context: { type: "string", required: false, description: "JD/CV 上下文，可帮助评分更精准。" },
+    family: { type: "string", required: false, description: "岗位族（如 ai_product/ai_algorithm/tech_general/ai_business），用于弱项趋势入账的维度归组。" },
   },
   category: "action",
   handler: scoreHandler,

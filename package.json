@@ -57,7 +57,18 @@
     "security:preflight": "node scripts/check-auth-security-preflight.mjs",
     "security:retry-alerts": "node scripts/retry-security-alerts.mjs",
     "verify:canvas": "node scripts/verify-dual-canvas.mjs",
-    "verify:tokens": "node scripts/check-design-tokens.mjs"
+    "verify:tokens": "node scripts/check-design-tokens.mjs",
+    "gen:en-modes": "node scripts/gen-en-modes.mjs",
+    "gen:en-modes:translate": "node scripts/gen-en-modes.mjs --translate",
+    "check:knowledge-drift": "node scripts/check-knowledge-drift.mjs",
+    "check:prompt-hygiene": "node scripts/check-prompt-hygiene.mjs",
+    "seed:question-bank": "node scripts/seed-question-bank.mjs",
+    "eval:redteam:build": "node scripts/build-redteam-helpers.mjs",
+    "eval:redteam": "npx -y promptfoo@latest eval --config promptfoo/promptfooconfig.yaml",
+    "eval:redteam:core": "npx -y promptfoo@latest eval --config promptfoo/promptfooconfig.core.yaml",
+    "eval:capability-2026-10b": "vitest run src/__tests__/resume-factuality.eval.test.ts src/__tests__/interview-rubric-calibration.eval.test.ts src/__tests__/question-bank.eval.test.ts src/__tests__/outcome-salary.eval.test.ts src/__tests__/rejection-parsing.eval.test.ts src/__tests__/knowledge-registry.test.ts",
+    "eval:rubric-calibration:full": "node scripts/run-rubric-calibration.mjs",
+    "verify:capability-2026-10b": "npm run check:knowledge-drift && npm run check:prompt-hygiene && npm run eval:capability-2026-10b"
   },
   "dependencies": {
     "@ant-design/icons": "^6.3.2",

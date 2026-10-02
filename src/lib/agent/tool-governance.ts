@@ -611,6 +611,18 @@ export const TOOL_GOVERNANCE_REGISTRY: Record<string, ToolGovernance> = {
     userVisibleNameZh: "更新投递状态",
     conflictPriority: 86,
   }),
+  log_rejection_notice: meta({
+    name: "log_rejection_notice",
+    effect: "write",
+    allowedTaskTypes: ["general_chat", "interview_coaching", "job_search", "offer_evaluation"],
+    agentAllowlist: ["general", "interview", "evaluate", "offer"],
+    documentTypes: ["session"],
+    // 候选态写入、等用户确认——不是 verified write，不套读回门（否则每次调用被改写为永久失败）
+    requiresUserConfirmation: false,
+    requiresReadBack: false,
+    successContract: "Parse a pasted rejection notice into a closed label set with an evidence quote and return the candidate memory id; activation waits for user confirmation in memory governance.",
+    userVisibleNameZh: "记录拒信原因",
+  }),
   transfer_to_agent: meta({
     name: "transfer_to_agent",
     effect: "read",

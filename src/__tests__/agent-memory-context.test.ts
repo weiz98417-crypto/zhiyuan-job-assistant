@@ -265,7 +265,7 @@ describe("agent memory isolation and writeback", () => {
     expect(snippets[0].id).toBe(1);
   });
 
-  it("agent writeback creates candidate memory, not confirmed profile facts", () => {
+  it("agent writeback creates candidate memory, not confirmed profile facts (interview scores no longer write per Spec 26/ADR-0042)", () => {
     const writebackRoute = fs.readFileSync(
       path.join(process.cwd(), "src", "app", "api", "agent", "memory-writeback", "route.ts"),
       "utf-8",
@@ -277,8 +277,16 @@ describe("agent memory isolation and writeback", () => {
 
     expect(writebackRoute).toContain('status: "candidate"');
     expect(writebackRoute).toContain("readBackVerified: true");
-    expect(interviewService).toContain('status: "candidate"');
-    expect(interviewService).toContain("readBackVerified: true");
+    // Spec 26（ADR-0042）：单场面试分数不再直写记忆——writeback 恒 skipped；
+    // 趋势事实走 interview-trend 的候选路径（interview_weakness_trend，用户确认后激活）。
+    const trendModule = fs.readFileSync(
+      path.join(process.cwd(), "src", "lib", "server", "interview-trend.ts"),
+      "utf-8",
+    );
+    expect(interviewService).toContain("SKIPPED_MEMORY_WRITEBACK");
+    expect(interviewService).toContain("recordWeaknessEvent");
+    expect(trendModule).toContain("interview_weakness_trend");
+    expect(interviewService).not.toContain('predicate: "interview_observation"');
     expect(writebackRoute).not.toContain('status: "active"');
   });
 

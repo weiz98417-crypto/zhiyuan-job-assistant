@@ -32,7 +32,7 @@ const TASK_DIMENSIONS: Partial<Record<AgentTaskType, string[]>> = {
 };
 
 const HARD_VETO_PATTERNS = [
-  /permission|owner.?scope|tool.?policy|read.?back|stale.?artifact|protocol.?leak|empty.?visible|fabricat|unsupported.?claim/i,
+  /permission|owner.?scope|tool.?policy|read.?back|stale.?artifact|protocol.?leak|empty.?visible|fabricat|unsupported.?claim|missing.?evidence/i,
 ];
 
 /** Single source of truth for which veto strings survive into StagingJudgeResult. */

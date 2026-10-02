@@ -105,10 +105,15 @@ export async function saveExecutionConversation(
   const row = await sessions.get(conversationId, principal.userId);
   if (!row) throw new Error("Agent Conversation not found");
   const currentInterviewState = parseInterviewState(row.interview_state_json ?? row.interviewState);
-  const interviewState = rebuildInterviewStateFromMessages(
-    currentInterviewState,
-    messages.flatMap(toAgentMessage),
-  );
+  // Spec 27 / ADR-0044：durable 引擎状态存在时，questionGraph 直接从持久化状态投影，
+  // 不再从消息文本正则推断题型（单写者：durable 引擎是面试状态唯一写者）。
+  const { projectDurableInterviewEngineState } = await import("@/lib/agent/interview-session-state");
+  const durableProjection = projectDurableInterviewEngineState(row.interview_state_json ?? row.interviewState);
+  const interviewState = durableProjection
+    ?? rebuildInterviewStateFromMessages(
+      currentInterviewState,
+      messages.flatMap(toAgentMessage),
+    );
   if (!usesDurableSessionMemory()) {
     const updated = await sessions.update(conversationId, principal.userId, {
       messages,

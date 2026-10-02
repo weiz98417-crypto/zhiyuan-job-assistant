@@ -1,3 +1,10 @@
+---
+id: data.story-bank-template
+version: 0.1.0
+source: spec-29 (registered; activation in spec-29)
+lastReviewed: 2026-10-03
+---
+
 # Story Bank — Master STAR+R Stories
 
 This file accumulates your best interview stories over time. Each evaluation (Block F) adds new stories here. Instead of memorizing 100 answers, maintain 5-10 deep stories that you can bend to answer almost any behavioral question.

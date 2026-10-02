@@ -389,11 +389,154 @@ export function updateInterviewStateWithToolResult(
   };
 }
 
+/**
+ * Spec 27 / ADR-0044：durable 面试引擎状态的纯投影。
+ *
+ * durable 引擎（interview/engine.ts 的阶段机）是面试状态唯一写者；
+ * 本函数把它的持久化形状（company/role/phase/questions/answers/currentFollowups）
+ * 确定性投影为 chat 侧 InterviewSessionState——不再从消息文本正则推断题型。
+ * 返回 undefined 表示输入不是 durable 引擎形状（旧投影会话照走原路径）。
+ */
+export function projectDurableInterviewEngineState(value: unknown): InterviewSessionState | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const durable = value as Record<string, unknown>;
+  const company = typeof durable.company === "string" ? durable.company : "";
+  const role = typeof durable.role === "string" ? durable.role : "";
+  const phase = typeof durable.phase === "string" ? durable.phase : "";
+  if (!company || !role || !["intro", "tech", "behavioral", "reverse", "summary", "done"].includes(phase)) {
+    return undefined;
+  }
+  const planSnapshot: InterviewPlanSnapshot = {
+    snapshotId: makeId("plan"),
+    source: { resumeId: "durable-engine" },
+    jdSnapshot: { company, role, body: "" },
+    mode: "realistic",
+    difficulty: "normal",
+    focusAreas: [],
+    allowFollowUps: true,
+    createdAt: new Date().toISOString(),
+  };
+
+  const questions = Array.isArray(durable.questions) ? durable.questions as Array<Record<string, unknown>> : [];
+  const answers = Array.isArray(durable.answers) ? durable.answers as Array<Record<string, unknown>> : [];
+
+  const transcript: InterviewTurn[] = [];
+  const questionGraph: InterviewQuestionNode[] = [];
+  const scoreArtifacts: NonNullable<InterviewSessionState["scoreArtifacts"]> = [];
+  const answerByQuestionText = new Map<string, Record<string, unknown>>();
+  for (const answer of answers) {
+    if (typeof answer.question === "string") answerByQuestionText.set(answer.question, answer);
+  }
+
+  for (const question of questions) {
+    const text = typeof question.text === "string" ? question.text : "";
+    if (!text) continue;
+    const nodeId = makeId("q");
+    const node: InterviewQuestionNode = {
+      id: nodeId,
+      kind: "main",
+      reason: `durable 引擎阶段：${String(question.phase || "tech")}`,
+      question: text,
+      answerTurnIds: [],
+      createdAt: String(question.createdAt || new Date().toISOString()),
+    };
+    const answer = answerByQuestionText.get(text);
+    if (answer) {
+      const turn: InterviewTurn = {
+        id: makeId("turn_user"),
+        role: "user",
+        content: String(answer.answer || ""),
+        questionNodeId: nodeId,
+        createdAt: node.createdAt,
+      };
+      node.answerTurnIds = [turn.id];
+      transcript.push(turn);
+      if (answer.score !== undefined && answer.score !== null) {
+        scoreArtifacts.push({
+          questionNodeId: nodeId,
+          overall: Number(answer.score),
+          feedback: String(answer.feedback || ""),
+          createdAt: node.createdAt,
+        } as unknown as NonNullable<InterviewSessionState["scoreArtifacts"]>[number]);
+      }
+      // 追问归属原主问题（durable answers.followups），不推断、不建多层链
+      const followups = Array.isArray(answer.followups) ? answer.followups as Array<Record<string, unknown>> : [];
+      for (const followup of followups) {
+        const followupText = typeof followup.question === "string" ? followup.question : "";
+        if (!followupText) continue;
+        const followupNodeId = makeId("q");
+        questionGraph.push({
+          id: followupNodeId,
+          kind: "follow_up",
+          parentId: nodeId,
+          reason: "durable 引擎追问记录",
+          question: followupText,
+          answerTurnIds: typeof followup.answer === "string" && followup.answer
+            ? [(() => {
+                const fuTurn: InterviewTurn = {
+                  id: makeId("turn_user"),
+                  role: "user",
+                  content: String(followup.answer),
+                  questionNodeId: followupNodeId,
+                  createdAt: node.createdAt,
+                };
+                transcript.push(fuTurn);
+                return fuTurn.id;
+              })()]
+            : [],
+          createdAt: node.createdAt,
+        });
+      }
+    }
+    questionGraph.push(node);
+  }
+
+  // currentQuestion / currentFollowups（进行中、尚未进入 answers 的部分）
+  const current = durable.currentQuestion as Record<string, unknown> | undefined;
+  const currentText = current && typeof current.text === "string" ? current.text : "";
+  const currentPhase = current && typeof current.phase === "string" ? current.phase : phase;
+  if (currentText && !questionGraph.some((node) => node.question === currentText)) {
+    const nodeId = makeId("q");
+    questionGraph.push({
+      id: nodeId,
+      kind: "main",
+      reason: `durable 引擎当前题（阶段：${currentPhase}）`,
+      question: currentText,
+      answerTurnIds: [],
+      createdAt: new Date().toISOString(),
+    });
+  }
+  const currentFollowups = Array.isArray(durable.currentFollowups) ? durable.currentFollowups as string[] : [];
+  const lastMainId = [...questionGraph].reverse().find((node) => node.kind === "main")?.id;
+  for (const followupText of currentFollowups) {
+    if (!followupText || questionGraph.some((node) => node.question === followupText)) continue;
+    questionGraph.push({
+      id: makeId("q"),
+      kind: "follow_up",
+      parentId: lastMainId,
+      reason: "durable 引擎进行中追问",
+      question: followupText,
+      answerTurnIds: [],
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  return {
+    planSnapshot,
+    status: "active",
+    rebindHistory: [],
+    currentQuestionId: [...questionGraph].reverse().find((node) => node.kind === "main" && node.answerTurnIds.length === 0)?.id
+      || [...questionGraph].reverse().find((node) => node.kind === "main")?.id,
+    questionGraph,
+    transcript,
+    scoreArtifacts,
+  };
+}
+
 export function rebuildInterviewStateFromMessages(
   state: InterviewSessionState | undefined,
   messages: AgentMessage[],
-): InterviewSessionState | undefined {
-  let next: InterviewSessionState | undefined = state?.planSnapshot
+): InterviewSessionState | undefined {  let next: InterviewSessionState | undefined = state?.planSnapshot
     ? {
         ...state,
         currentQuestionId: undefined,

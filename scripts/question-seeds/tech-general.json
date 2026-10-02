@@ -1,0 +1,23 @@
+{
+  "family": "tech_general",
+  "provenance": "generated_seed",
+  "provenanceDetail": "spec-27 starter set (2026-10-03, hand-authored)",
+  "questions": [
+    { "question": "介绍一个你负责过的最复杂系统：架构是什么、你在其中的角色、最难的问题怎么解决的。", "topic": "系统复杂度驾驭", "phase": "tech", "difficulty": "medium", "answerPoints": "架构图式描述、自己负责的边界、难点的定位与解决过程" },
+    { "question": "讲一次线上重大故障：从告警到恢复的完整过程，以及事后改进。", "topic": "故障处理与复盘", "phase": "behavioral", "difficulty": "medium", "answerPoints": "时间线清晰、根因不是「人为失误」收尾、改进项落地" },
+    { "question": "数据库慢查询你是怎么排查和优化的？给一个带数字的例子。", "topic": "数据库优化", "phase": "tech", "difficulty": "medium", "answerPoints": "执行计划、索引设计、改写或缓存；优化前后耗时对比" },
+    { "question": "你如何做代码评审？哪些问题你一定会拦下？", "topic": "工程质量意识", "phase": "behavioral", "difficulty": "easy", "answerPoints": "正确性/安全/可维护性的优先级、有自己的一票否决项" },
+    { "question": "如果服务突然流量翻 10 倍，你的扩容和降级预案是什么？", "topic": "容量与降级设计", "phase": "case-study", "difficulty": "hard", "answerPoints": "无状态扩容、缓存、限流熔断降级顺序、依赖隔离" },
+    { "question": "介绍一次你推动的技术债清理：怎么立项、怎么平衡业务排期。", "topic": "技术债治理", "phase": "behavioral", "difficulty": "hard", "answerPoints": "量化债务成本、小步偿还、与业务共享收益" },
+    { "question": "微服务拆分的判断标准是什么？你见过哪些拆坏的例子？", "topic": "架构判断", "phase": "tech", "difficulty": "hard", "answerPoints": "领域边界/团队规模/部署独立性；反面例子说明代价" },
+    { "question": "你怎么保证自己写的代码可测试？讲一个你引以为傲的测试设计。", "topic": "测试设计", "phase": "tech", "difficulty": "medium", "answerPoints": "依赖注入/纯函数接缝/契约测试；例子具体" },
+    { "question": "描述一次你和同事在技术方案上的激烈分歧，最后怎么收敛的。", "topic": "技术分歧协作", "phase": "behavioral", "difficulty": "medium", "answerPoints": "对事不对人、数据或 PoC 定胜负、事后关系" },
+    { "question": "给你一个从 0 到 1 的新服务，你的技术选型流程是什么？", "topic": "选型方法论", "phase": "case-study", "difficulty": "medium", "answerPoints": "需求约束→候选对比→团队熟悉度→逃生通道" },
+    { "question": "API 设计你会遵守哪些原则？举一个你改进过的接口设计。", "topic": "API 设计", "phase": "tech", "difficulty": "medium", "answerPoints": "一致性/版本化/错误语义/向后兼容；改进前后对比" },
+    { "question": "你怎么学习一项新技术？以你最近学的为例讲讲路径。", "topic": "学习能力", "phase": "behavioral", "difficulty": "easy", "answerPoints": "文档/源码/项目实操的比例、验证理解的方式" },
+    { "question": "缓存和数据库的一致性你怎么保证？几种方案的代价分别是什么？", "topic": "一致性设计", "phase": "tech", "difficulty": "hard", "answerPoints": "失效策略/延迟双删/订阅 binlog；说出各自风险" },
+    { "question": "讲一次你 review 时发现重大隐患的经历，隐患是怎么混进来的？", "topic": "风险识别", "phase": "behavioral", "difficulty": "medium", "answerPoints": "隐患类型、流程漏洞、流程改进" },
+    { "question": "如果要求你把一个单体应用容器化并上 CI/CD，你的迁移计划是什么？", "topic": "工程迁移规划", "phase": "case-study", "difficulty": "hard", "answerPoints": "分阶段（容器化→流水线→灰度）、回滚点、团队协作" },
+    { "question": "你离开上一家公司时交接了什么？如果现在的团队少了你会塌吗？", "topic": "知识沉淀与传承", "phase": "reverse", "difficulty": "easy", "answerPoints": "文档/流程/人三个层面，避免单点" }
+  ]
+}

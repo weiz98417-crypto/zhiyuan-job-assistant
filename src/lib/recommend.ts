@@ -78,8 +78,10 @@ export async function getRecommendations(limit = 3): Promise<{
   // Full recommendation: compute scores + LLM reasons
   const prefs = await loadPreferences();
   const scored = availableReports.map((report) => {
-    const score = computeMatchScore(report, profile, prefs);
-    return { report, score };
+    // Spec 29：真实投递反馈替换写死的 prefFit=50（样本 <5 时保持 50 并标注数据不足）
+    const outcome = computeOutcomeSignal(apps, report);
+    const score = computeMatchScore(report, profile, prefs, outcome);
+    return { report, score, outcome };
   });
 
   scored.sort((a, b) => b.score - a.score);
@@ -101,6 +103,7 @@ export async function getRecommendations(limit = 3): Promise<{
       matchScore: s.score,
       reasons: reasons.length > 0 ? reasons : [`整体匹配度 ${s.score} 分`],
       reportId: s.report.reportNum,
+      ...(s.outcome.sampleSize < 5 ? { outcomeNote: `偏好匹配数据不足（${s.outcome.sampleSize} 场面试样本，需 ≥5）` } : {}),
     };
   });
 
@@ -108,10 +111,32 @@ export async function getRecommendations(limit = 3): Promise<{
   return { recommendations: results, cached: false };
 }
 
+/** Spec 29：从投递记录提炼「进入面试」的岗位特征信号（确定性，无 LLM）。 */
+export function computeOutcomeSignal(
+  apps: Array<{ status: string; company: string; role: string }>,
+  report: { company: string; role: string },
+): { sampleSize: number; similarity: number } {
+  const INTERVIEW_PLUS = new Set(["interview", "offer"]);
+  const interviewed = apps.filter((a) => INTERVIEW_PLUS.has(a.status));
+  const sampleSize = interviewed.length;
+  if (sampleSize === 0) return { sampleSize: 0, similarity: 50 };
+  const reportRoleTokens = new Set((report.role || "").toLowerCase().split(/[\s·，,/、]+/).filter((t) => t.length >= 2));
+  let best = 0;
+  for (const app of interviewed) {
+    const appRoleTokens = (app.role || "").toLowerCase().split(/[\s·，,/、]+/).filter((t) => t.length >= 2);
+    const overlap = appRoleTokens.filter((token) => reportRoleTokens.has(token)).length;
+    const roleSim = appRoleTokens.length ? Math.round((overlap / appRoleTokens.length) * 70) : 0;
+    const companySim = app.company && report.company && app.company === report.company ? 30 : 0;
+    best = Math.max(best, Math.min(100, roleSim + companySim));
+  }
+  return { sampleSize, similarity: best };
+}
+
 function computeMatchScore(
   report: EvaluationReport,
   profile: ZhiyuanProfile,
   prefs?: AgentPreferenceModel | null,
+  outcome?: { sampleSize: number; similarity: number },
 ): number {
   // Skill match: check how many report keywords overlap with profile skills
   const profileSkillNames = new Set(profile.skills.map((s) => s.name.toLowerCase()));
@@ -122,13 +147,10 @@ function computeMatchScore(
     ? Math.min(100, Math.round((keywordOverlap / report.keywords.length) * 100))
     : 50;
 
-  // Preference fit
+  // Preference fit（Spec 29）：≥5 场面试样本时用真实反馈信号，否则保持 50
   let prefFit = 50;
-  if (profile.goals) {
-    const { companyPrefs } = profile.goals;
-    if (companyPrefs.size.length > 0 || companyPrefs.industry.length > 0) {
-      prefFit = 50; // Cannot determine from report alone without LLM
-    }
+  if (outcome && outcome.sampleSize >= 5) {
+    prefFit = Math.max(20, Math.min(90, outcome.similarity));
   }
 
   // Competitiveness: based on overallScore

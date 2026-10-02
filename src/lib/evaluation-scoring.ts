@@ -1,12 +1,15 @@
-export type EvaluationBlockKey = "a" | "b" | "c" | "d" | "e" | "f" | "g";
+import { getEvaluationScoreWeights, type EvaluationBlockKey } from "@/lib/agent/knowledge/registry/scoring-weights";
 
-const SCORE_WEIGHTS: Record<Exclude<EvaluationBlockKey, "g">, number> = {
-  a: 10,
-  b: 20,
-  c: 15,
-  d: 15,
-  e: 15,
-  f: 15,
+export type { EvaluationBlockKey };
+
+// A-G 权重单源是 modes/scoring-dimensions.yml（Spec 25）；此处不再维护副本。
+const SCORE_WEIGHTS_PROXY = {
+  get a() { return getEvaluationScoreWeights().a; },
+  get b() { return getEvaluationScoreWeights().b; },
+  get c() { return getEvaluationScoreWeights().c; },
+  get d() { return getEvaluationScoreWeights().d; },
+  get e() { return getEvaluationScoreWeights().e; },
+  get f() { return getEvaluationScoreWeights().f; },
 };
 
 function clampScore(value: number): number {
@@ -94,7 +97,7 @@ export function extractEvaluationBlockScore(text: string, blockKey: EvaluationBl
 export function computeEvaluationOverallScore(blocks: Partial<Record<EvaluationBlockKey, { score: number }>>): number {
   let weighted = 0;
   let totalWeight = 0;
-  for (const [key, weight] of Object.entries(SCORE_WEIGHTS) as Array<[Exclude<EvaluationBlockKey, "g">, number]>) {
+  for (const [key, weight] of Object.entries(SCORE_WEIGHTS_PROXY) as Array<[Exclude<EvaluationBlockKey, "g">, number]>) {
     const score = blocks[key]?.score ?? 0;
     if (score <= 0) continue;
     weighted += score * weight;

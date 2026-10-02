@@ -28,16 +28,10 @@ async function buildResumePrompt(ctx: AgentPromptContext): Promise<string> {
   // Role-specific writing guide
   const roleGuide = injectRoleWritingGuide({ targetRoles: parseTargetRoles(ctx.careerDNA || "") });
 
-  // Query available resources for hints
-  let resourceHint = "read_file(path='我的简历') — 读取你的完整简历";
-  try {
-    const refsRes = await fetch("http://localhost:3000/api/cv/references").catch(() => null);
-    if (refsRes?.ok) {
-      const refsJson = await refsRes.json();
-      const refs = (refsJson.data || []) as Array<{ id: number; name: string; tags: string[] }>;
-      if (refs.length) resourceHint += "\n参考简历: " + refs.map(r => `read_file(path='参考简历/${r.name}') [#${r.id}]`).join(", ");
-    }
-  } catch { /* non-blocking */ }
+  // Resource hints come from the knowledge registry (Spec 25) — the previous
+  // localhost:3000 self-fetch never worked from a server prompt builder.
+  const { loadRegistryText } = await import("@/lib/agent/knowledge/registry/loader");
+  const resourceHint = loadRegistryText("prompt.agent-resource-hints.resume");
 
   const parts = [
     soul.body,

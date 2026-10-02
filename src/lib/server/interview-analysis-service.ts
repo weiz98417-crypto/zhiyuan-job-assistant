@@ -5,16 +5,16 @@ import {
   advance,
   createSession as createInterviewSession,
   getPhasePrompt,
-  nextAction,
   type InterviewPhase,
   type InterviewSession,
 } from "@/lib/agent/interview/engine";
 import { getDataRepositories } from "@/lib/data-repositories";
 import { llmRetry } from "@/lib/llm-retry";
-import { getDatabaseDriver, isPostgresConfigured } from "@/lib/postgres";
-import { admitMemory } from "@/lib/memory/admission";
-
-const PENDING_CANDIDATE_STATUS = { status: "candidate" as const, readBackVerified: true as const };
+import { loadRegistryText } from "@/lib/agent/knowledge/registry/loader";
+import { scoreAnswerWithRubric, type RubricCompletion, type RubricScoredAnswer, type RubricScoringResult } from "@/lib/server/interview-rubric";
+import { recordWeaknessEvent } from "@/lib/server/interview-trend";
+import { composeInterview, familyForRole, type QuestionBankStore } from "@/lib/server/question-bank";
+import { getPostgresPool } from "@/lib/postgres";
 import { COACH_MODES, type AnswerScore, type CoachMode, type InterviewQuestion } from "@/types";
 
 const MODE_WEIGHTS: Record<CoachMode, Record<keyof AnswerScore["dimensions"], number>> = {
@@ -24,6 +24,27 @@ const MODE_WEIGHTS: Record<CoachMode, Record<keyof AnswerScore["dimensions"], nu
   "structured-sme": { structure: 0.30, specificity: 0.35, highlight: 0.20, timing: 0.15 },
   founder: { structure: 0.20, specificity: 0.25, highlight: 0.35, timing: 0.20 },
   stability: { structure: 0.40, specificity: 0.20, highlight: 0.10, timing: 0.30 },
+};
+
+/** Spec 26：评分器/题库的测试注入点（与生产默认实现同形）。 */
+export interface InterviewServiceOverrides {
+  rubricCompletion?: RubricCompletion;
+  questionBankStore?: QuestionBankStore;
+  bankCompletion?: (request: { messages: Array<{ role: string; content: string }>; systemPrompt: string; temperature?: number; maxTokens?: number }) => Promise<{ text: string }>;
+  followUpCompletion?: (request: { messages: Array<{ role: string; content: string }>; systemPrompt: string; temperature?: number; maxTokens?: number }) => Promise<{ text: string }>;
+}
+
+let overrides: InterviewServiceOverrides = {};
+
+/** 测试专用：注入评分/题库/追问的 LLM 客户端与题库 store。传 {} 恢复生产默认。 */
+export function setInterviewServiceOverridesForTests(next: Partial<InterviewServiceOverrides>): void {
+  overrides = { ...overrides, ...next };
+}
+
+const SKIPPED_MEMORY_WRITEBACK = {
+  status: "skipped" as const,
+  readBackVerified: false,
+  note: "Spec 26（ADR-0042）：单场分数不再直写记忆；弱项跨 ≥3 场趋势由 interview-trend 提炼候选事实。",
 };
 
 export interface GenerateInterviewQuestionsInput {
@@ -42,6 +63,10 @@ export interface ScoreInterviewAnswerInput {
   answer: string;
   mode?: CoachMode;
   context?: string;
+  /** 所属面试会话（durable session id）；独立评分缺省时以答案指纹为会话代理。 */
+  sessionId?: number | string;
+  /** 岗位族（趋势入账的 topic 粒度：维度×岗位族，Spec 26）；缺省 general。 */
+  family?: string;
 }
 
 export interface StartInterviewSessionInput {
@@ -123,12 +148,46 @@ export async function generateInterviewQuestionsForAgent(
     semanticTopK: 5,
   });
   const modeInfo = COACH_MODES[mode];
+
+  // Spec 27：题库优先（SQL 过滤 → LLM 改写，带出处标签）；不可用/为空回落 LLM 直出
+  const family = familyForRole(role || undefined);
+  try {
+    const composed = await composeInterview({
+      family,
+      phase: phaseToBankPhase(categories),
+      company,
+      role,
+      jdText,
+      cvText,
+      memorySummary: memoryContext.llmSummary,
+      count,
+      signal: options.signal,
+    }, {
+      store: overrides.questionBankStore,
+      completion: overrides.bankCompletion,
+    });
+    if (composed.questions.length > 0) {
+      const bankQuestions = composed.questions.map((item) => normalizeComposedQuestion(item));
+      return { questions: bankQuestions, company, role, mode, memoryContext };
+    }
+  } catch (error) {
+    if (options.signal?.aborted) throw error;
+    // 题库链路失败回落 LLM 直出（在 llmSummary 中标注）
+    console.log(`[question-bank] fallback to direct LLM: ${error instanceof Error ? error.message : error}`);
+  }
+
+  const systemPrompt = loadRegistryText("prompt.interview-question-generation")
+    .replace("{{MODE_LABEL}}", modeInfo.label)
+    .replace("{{MODE_STRUCTURE}}", modeInfo.structure.join(" → "))
+    .replace("{{COUNT}}", String(count))
+    .replace("{{CATEGORY_RULE}}", categories.length ? `题目类别只使用：${categories.join("、")}。` : "题目均匀覆盖 behavioral、technical、case-study、culture。")
+    .replace("{{BANK_SECTION}}", "题库暂无命中（可出通用题）。");
   const response = await llmRetry("https://api.deepseek.com/chat/completions", apiKey, {
     model: "deepseek-flash",
     messages: [
       {
         role: "system",
-        content: `你是资深面试教练。当前模式：${modeInfo.label}，回答框架：${modeInfo.structure.join(" → ")}。只生成 ${count} 道清晰、口语化的问题。${categories.length ? `题目类别只使用：${categories.join("、")}。` : "题目均匀覆盖 behavioral、technical、case-study、culture。"}严格返回 JSON：{"questions":[{"category":"behavioral|technical|case-study|culture","question":"问题","context":"考察点","storyHint":"准备方向","source":"jd|weakness|general"}]}`,
+        content: systemPrompt,
       },
       {
         role: "user",
@@ -156,6 +215,74 @@ export async function generateInterviewQuestionsForAgent(
   return { questions, company, role, mode, memoryContext };
 }
 
+/** ComposedQuestion → InterviewQuestion（工具卡兼容形状）。 */
+function normalizeComposedQuestion(item: { question: string; source: string; provenance: string }): InterviewQuestion {
+  return {
+    category: "behavioral",
+    question: item.question,
+    context: `出处：${item.provenance}`,
+    storyHint: "",
+    source: item.source === "jd" || item.source === "weakness" || item.source === "general" ? item.source : "general",
+    provenance: item.provenance,
+  } as InterviewQuestion;
+}
+
+/** 面试阶段 → 题库 phase 列取值。 */
+function phaseToBankPhase(categories: InterviewQuestion["category"][]): string | undefined {
+  if (categories.includes("technical")) return "tech";
+  if (categories.includes("behavioral")) return "behavioral";
+  if (categories.includes("culture")) return "reverse";
+  if (categories.includes("case-study")) return "tech";
+  return undefined;
+}
+
+/** 追问内容缺口判定（Spec 27）：LLM 判断回答是否遗漏关键数字/结论/依据；
+ *  无缺口 → 直接评分；LLM 不可用时回落长度规则（<50 字追问）。 */
+export async function decideFollowUp(
+  answer: string,
+  question: string,
+  options: { completion?: InterviewServiceOverrides["followUpCompletion"]; signal?: AbortSignal } = {},
+): Promise<{ followUp: boolean; gap?: string; usedFallback: boolean }> {
+  const trimmed = answer.trim();
+  if (trimmed.length < 20) return { followUp: true, gap: "回答过短", usedFallback: true };
+  const systemPrompt = [
+    "你是面试官，判断候选人的回答是否遗漏了这道题的关键要素。",
+    "关键要素指：具体行为、量化结果、判断依据、结论。已完整覆盖则不需要追问。",
+    '严格返回 JSON：{"needsFollowUp": true|false, "gap": "缺失要素的一句话说明，无缺失则留空"}',
+  ].join("\n");
+  const userContent = `题目：${question}\n回答：${trimmed.slice(0, 2000)}`;
+  try {
+    let text: string;
+    if (options.completion) {
+      text = (await options.completion({ messages: [{ role: "user", content: userContent }], systemPrompt, temperature: 0.1, maxTokens: 300 })).text;
+    } else {
+      const apiKey = process.env.DEEPSEEK_API_KEY?.trim();
+      if (!apiKey) return { followUp: trimmed.length < 50, usedFallback: true };
+      const response = await llmRetry("https://api.deepseek.com/chat/completions", apiKey, {
+        model: "deepseek-flash",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userContent },
+        ],
+        temperature: 0.1,
+        max_tokens: 300,
+        response_format: { type: "json_object" },
+        retries: 1,
+        fallbackModel: "deepseek-flash",
+        signal: options.signal,
+      });
+      const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+      text = payload.choices?.[0]?.message?.content || "{}";
+    }
+    const parsed = parseJsonObject(text);
+    const needs = parsed.needsFollowUp === true;
+    return { followUp: needs, gap: stringValue(parsed.gap) || undefined, usedFallback: false };
+  } catch {
+    // LLM 不可用：长度规则兜底（Spec 27 语义）
+    return { followUp: trimmed.length < 50, usedFallback: true };
+  }
+}
+
 export async function scoreInterviewAnswerForAgent(
   principal: ExecutionPrincipal,
   input: ScoreInterviewAnswerInput,
@@ -163,12 +290,11 @@ export async function scoreInterviewAnswerForAgent(
 ): Promise<{
   score: AnswerScore;
   memoryContext: AgentMemoryContext;
-  memoryWriteback: { status: "persisted" | "skipped" | "failed"; readBackVerified: boolean; id?: number; error?: string };
+  memoryWriteback: { status: "persisted" | "skipped" | "failed"; readBackVerified: boolean; id?: number; error?: string; note?: string };
 }> {
   const question = stringValue(input.question);
   const answer = stringValue(input.answer);
   if (!question || !answer) throw new Error("请提供题目 question 和回答 answer");
-  const apiKey = requireApiKey();
   const mode = normalizeMode(input.mode);
   const memoryContext = await assembleAgentMemoryContext({
     userId: principal.userId,
@@ -178,30 +304,62 @@ export async function scoreInterviewAnswerForAgent(
     budgetChars: 800,
     semanticTopK: 4,
   });
-  const weights = MODE_WEIGHTS[mode];
-  const response = await llmRetry("https://api.deepseek.com/chat/completions", apiKey, {
-    model: "deepseek-flash",
-    messages: [
-      {
-        role: "system",
-        content: `你是资深面试教练。按结构${weights.structure}、具体${weights.specificity}、亮点${weights.highlight}、时间${weights.timing}评分。严格返回 JSON：{"dimensions":{"structure":4,"specificity":4,"highlight":3,"timing":4},"overall":3.75,"suggestions":[],"segmentFeedback":[]}`,
-      },
-      {
-        role: "user",
-        content: `题目：${question}\n回答：${answer}\n上下文：${stringValue(input.context).slice(0, 1000)}\n长期记忆：${memoryContext.llmSummary}`,
-      },
-    ],
-    temperature: 0.3,
-    max_tokens: 1600,
-    response_format: { type: "json_object" },
-    retries: 2,
-    fallbackModel: "deepseek-flash",
+
+  // Spec 26（ADR-0042）：锚定 rubric 评分——0-4 档 + 证据引用 + 三态；
+  // 无引用 veto 重评一次，仍缺引用 = 未评分（不猜分、不入账）。
+  const rubricResult = await scoreAnswerWithRubric({
+    question,
+    answer,
+    mode,
+    context: stringValue(input.context),
+    memorySummary: memoryContext.llmSummary,
     signal: options.signal,
-  });
-  const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
-  const score = normalizeScore(parseJsonObject(payload.choices?.[0]?.message?.content || "{}"));
-  const memoryWriteback = await persistInterviewObservation(principal, question, answer, mode, score);
-  return { score, memoryContext, memoryWriteback };
+  }, overrides.rubricCompletion ? { completion: overrides.rubricCompletion } : {});
+
+  let score: AnswerScore;
+  if ("unscored" in rubricResult) {
+    score = {
+      dimensions: { structure: 0, specificity: 0, highlight: 0, timing: 0 },
+      overall: 0,
+      suggestions: [`本轮未评分：${(rubricResult as { reason: string }).reason}`],
+      segmentFeedback: [],
+    };
+  } else {
+    score = rubricToAnswerScore(rubricResult, mode);
+    // 弱项趋势：档位 ≤1 的维度记录事件（topic=岗位族，维度×岗位族粒度）；
+    // 跨 ≥3 场提炼候选事实（单场不入账本）
+    const sessionSurrogate = stringValue(input.sessionId) || createHash("sha256").update(`${question}\u0000${answer}`).digest("hex").slice(0, 16);
+    const family = stringValue(input.family) || "general";
+    for (const dimension of ["structure", "specificity", "highlight", "timing"] as const) {
+      try {
+        await recordWeaknessEvent({
+          userId: principal.userId,
+          sessionSurrogate,
+          dimension,
+          band: rubricResult.bands[dimension],
+          topic: family,
+        });
+      } catch { /* 趋势记录失败不阻塞评分返回 */ }
+    }
+  }
+
+  return { score, memoryContext, memoryWriteback: { ...SKIPPED_MEMORY_WRITEBACK } };
+}
+
+/** RubricScoredAnswer → 旧 AnswerScore 形状（UI/工具兼容）；bands/evidence/states 附加字段透传。 */
+function rubricToAnswerScore(rubric: RubricScoredAnswer, _mode: CoachMode): AnswerScore & Partial<RubricScoredAnswer> {
+  return {
+    dimensions: rubric.dimensions,
+    overall: rubric.overall,
+    suggestions: rubric.suggestions,
+    segmentFeedback: rubric.segmentFeedback,
+    bands: rubric.bands,
+    overallBand: rubric.overallBand,
+    evidence: rubric.evidence,
+    states: rubric.states,
+    review: rubric.review,
+    scoringVersion: rubric.scoringVersion,
+  };
 }
 
 export async function handleInterviewSessionTurnForAgent(
@@ -284,10 +442,14 @@ export async function handleInterviewSessionTurnForAgent(
     }
   }
 
-  const action = nextAction(session, answer);
-  if (action === "followup") {
+  // Spec 27：追问判定从纯长度规则升级为内容缺口判定（LLM 不可用时长度规则兜底）
+  const gapDecision = await decideFollowUp(answer, session.currentQuestion?.text || "", {
+    completion: overrides.followUpCompletion,
+    signal: options.signal,
+  });
+  if (gapDecision.followUp) {
     if (!session.pendingAnswer) session.pendingAnswer = answer;
-    const question = await generateFollowUpQuestion(principal, session, answer, options.signal);
+    const question = await generateFollowUpQuestion(principal, session, answer, gapDecision.gap, options.signal);
     session.currentFollowups.push(question);
     const result: InterviewSessionTurnResult = {
       action: "followup",
@@ -309,7 +471,7 @@ export async function handleInterviewSessionTurnForAgent(
   const completeAnswer = session.pendingAnswer
     ? `${session.pendingAnswer}\n\n追问回答：${answer}`
     : answer;
-  const scored = await scoreSessionAnswer(principal, session, completeAnswer, options.signal);
+  const scored = await scoreSessionAnswer(principal, session, completeAnswer, options.signal, sessionId);
   session.answers.push({
     questionId: session.currentQuestion?.id || "",
     question: session.currentQuestion?.text || "",
@@ -323,6 +485,17 @@ export async function handleInterviewSessionTurnForAgent(
 
   if (session.phase === "done") {
     const summary = buildInterviewSummary(session);
+    // Spec 29：复盘有效证据 → 经历故事册候选（用户确认后激活；失败不阻塞复盘）。
+    // item.score 是 /10 刻度（overall 1-5 ×2）：band = round(score/2) - 1，即 overall≥4 才算 band≥3。
+    try {
+      const { recordStoryCandidates } = await import("@/lib/server/interview-story-bank");
+      await recordStoryCandidates(principal, session.answers.map((item) => ({
+        question: item.question,
+        answer: item.answer,
+        scoreBand: Math.max(0, Math.round((item.score || 0) / 2) - 1),
+        topic: item.question.slice(0, 120),
+      })));
+    } catch { /* 故事册沉淀失败不阻塞复盘 */ }
     const result: InterviewSessionTurnResult = {
       action: "done",
       sessionId: String(sessionId),
@@ -431,48 +604,6 @@ export async function startInterviewSessionForAgent(
   return { sessionId: String(sessionId), phase: "intro", question, readBackVerified: true };
 }
 
-async function persistInterviewObservation(
-  principal: ExecutionPrincipal,
-  question: string,
-  answer: string,
-  mode: CoachMode,
-  score: AnswerScore,
-): Promise<{ status: "persisted" | "skipped" | "failed"; readBackVerified: boolean; id?: number; error?: string }> {
-  if (getDatabaseDriver() !== "postgres" || !isPostgresConfigured()) {
-    return { status: "skipped", readBackVerified: false };
-  }
-  const fingerprint = createHash("sha256").update(`${question}\u0000${answer}`).digest("hex");
-  const canonicalText = `Interview answer scored ${score.overall}/5 for question: ${question.slice(0, 120)}. [${fingerprint.slice(0, 12)}]`;
-  try {
-    const result = await admitMemory({
-      userId: principal.userId,
-      agentId: "interview",
-      kind: "session_observation",
-      sourceType: "interview",
-      sourceId: fingerprint,
-      fact: {
-        partition: "core",
-        subject: `interview:${fingerprint}`,
-        predicate: "interview_observation",
-        object: { question, mode, score, suggestions: score.suggestions },
-        canonicalText,
-        confidence: 0.6,
-        importance: score.overall < 3 ? 0.75 : 0.55,
-      },
-      evidence: { quote: answer.slice(0, 800) },
-    });
-    return {
-      ...(result.outcome === "candidate" ? PENDING_CANDIDATE_STATUS : {}),
-      status: result.outcome === "candidate" ? "persisted" : result.outcome === "rejected" ? "skipped" : "failed",
-      readBackVerified: result.outcome === "candidate",
-      id: result.candidate?.id,
-      error: result.outcome === "rejected" ? result.reason : undefined,
-    };
-  } catch (error) {
-    return { status: "failed", readBackVerified: false, error: error instanceof Error ? error.message : String(error) };
-  }
-}
-
 async function generateSessionQuestion(
   principal: ExecutionPrincipal,
   session: DurableInterviewSession,
@@ -503,6 +634,7 @@ async function generateFollowUpQuestion(
   principal: ExecutionPrincipal,
   session: DurableInterviewSession,
   answer: string,
+  gap?: string,
   signal?: AbortSignal,
 ): Promise<string> {
   try {
@@ -513,7 +645,7 @@ async function generateFollowUpQuestion(
       cvText: session.sourceBinding?.cvText,
       count: 1,
       categories: categoriesForPhase(session.phase),
-      additionalContext: `原题：${session.currentQuestion?.text || ""}\n候选人回答：${answer}\n只提出一个用于补充事实和结果的追问。`,
+      additionalContext: `原题：${session.currentQuestion?.text || ""}\n候选人回答：${answer}${gap ? `\n内容缺口：${gap}` : ""}\n只提出一个针对该缺口补充事实、数字或结果的追问。`,
     }, { signal });
     return generated.questions[0]?.question || "能否结合一个具体项目，把你的行动和结果再展开一下？";
   } catch (error) {
@@ -526,7 +658,8 @@ async function scoreSessionAnswer(
   principal: ExecutionPrincipal,
   session: DurableInterviewSession,
   answer: string,
-  signal?: AbortSignal,
+  signal: AbortSignal | undefined,
+  sessionId?: number,
 ): Promise<{ score: number | null; feedback: string }> {
   try {
     const result = await scoreInterviewAnswerForAgent(principal, {
@@ -534,10 +667,20 @@ async function scoreSessionAnswer(
       answer,
       mode: session.phase === "behavioral" ? "behavioral" : "structured-sme",
       context: formatSessionBinding(session),
+      sessionId,
+      family: familyForRole(session.role),
     }, { signal });
+    // Spec 26 复盘固定格式：三态判定/主要缺口/更好结构优先于泛泛建议
+    const rubric = result.score as AnswerScore & { review?: RubricScoredAnswer["review"] };
+    const reviewParts = rubric.review
+      ? [rubric.review.stateVerdict, rubric.review.mainGaps, rubric.review.betterStructure].filter(Boolean)
+      : [];
+    const feedback = reviewParts.length
+      ? reviewParts.join("；")
+      : result.score.suggestions.join("；") || "回答已记录，请继续保持结构化表达。";
     return {
       score: Math.round(result.score.overall * 20) / 10,
-      feedback: result.score.suggestions.join("；") || "回答已记录，请继续保持结构化表达。",
+      feedback,
     };
   } catch (error) {
     if (signal?.aborted) throw error;
@@ -695,29 +838,7 @@ function normalizeQuestion(value: unknown): InterviewQuestion[] {
   }];
 }
 
-function normalizeScore(parsed: Record<string, unknown>): AnswerScore {
-  const dimensions = objectValue(parsed.dimensions);
-  if (parsed.overall === undefined) throw new Error("AI 未能生成有效评分");
-  return {
-    dimensions: {
-      structure: boundedScore(dimensions.structure),
-      specificity: boundedScore(dimensions.specificity),
-      highlight: boundedScore(dimensions.highlight),
-      timing: boundedScore(dimensions.timing),
-    },
-    overall: boundedScore(parsed.overall),
-    suggestions: arrayValue(parsed.suggestions).map(String).filter(Boolean),
-    segmentFeedback: arrayValue(parsed.segmentFeedback).flatMap((value) => {
-      const item = objectValue(value);
-      const text = stringValue(item.text);
-      if (!text) return [];
-      const rating = ["good", "expand", "compress"].includes(stringValue(item.rating))
-        ? stringValue(item.rating) as "good" | "expand" | "compress"
-        : "expand";
-      return [{ text, rating }];
-    }),
-  };
-}
+// normalizeScore 已随 Spec 26 锚定评分删除（评分语义移至 interview-rubric.ts）
 
 function requireApiKey(): string {
   const apiKey = process.env.DEEPSEEK_API_KEY?.trim();

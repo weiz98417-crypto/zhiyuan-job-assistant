@@ -9,41 +9,11 @@
 import type { AgentDefinition, AgentPromptContext } from "@/lib/agent/registry/types";
 import { buildInterviewCoachOverlay } from "@/lib/agent/interview-coach-prompt";
 import { INTERVIEW_TOOLS } from "@/lib/agent/tools/interview-tools";
+import { inferCoachMode } from "@/lib/agent/knowledge/registry/company-mode-map";
 import type { CoachMode } from "@/types";
 import { COACH_MODES } from "@/types";
 
-// ── Company-to-mode mapping (same as interview-coach-prompt.ts) ──
-
-const COMPANY_MODE_MAP: Record<string, CoachMode> = {
-  bytedance: "project-review",
-  tencent: "project-review",
-  alibaba: "project-review",
-  baidu: "project-review",
-  meituan: "project-review",
-  xiaomi: "project-review",
-  jd: "project-review",
-  pinduoduo: "project-review",
-  kuaishou: "project-review",
-  xiaohongshu: "project-review",
-  didi: "project-review",
-  bilibili: "project-review",
-  netease: "project-review",
-};
-
-const STATE_OWNED_PATTERNS = /国企|央企|国有|银行|编制|事业单位/;
-const STARTUP_PATTERNS = /初创|天使轮|A轮|Pre-A|创业公司|微型/;
-const FOREIGN_PATTERNS = /外企|外资|consulting|咨询公司|MBB|四大/;
-const SME_PATTERNS = /中小企业|中小型|民营/;
-
-function inferMode(company: string): CoachMode | undefined {
-  const lower = company.toLowerCase();
-  if (COMPANY_MODE_MAP[lower]) return COMPANY_MODE_MAP[lower];
-  if (STATE_OWNED_PATTERNS.test(company)) return "stability";
-  if (STARTUP_PATTERNS.test(company)) return "founder";
-  if (FOREIGN_PATTERNS.test(company)) return "behavioral";
-  if (SME_PATTERNS.test(company)) return "structured-sme";
-  return undefined;
-}
+const inferMode = inferCoachMode;
 
 // ── Build tools description text (only interview tools) ──
 
@@ -121,10 +91,9 @@ export const interviewAgent: AgentDefinition = {
       || allUserText.match(/(.{2,10})(?:岗位|职位|方向)/)?.[1];
     const mode = inferMode(companyMatch || "");
 
-    // Build coach overlay
-    let cvText = "";
-    try { const raw = localStorage.getItem("cvData"); if (raw) { const cv = JSON.parse(raw); cvText = cv.sections?.map((s: { title: string; content: string }) => `## ${s.title}\n${s.content}`).join("\n\n") || ""; } } catch { /* */ }
-    const coachOverlay = buildInterviewCoachOverlay({ jdCompany: companyMatch, jdRole: roleMatch, cvText: cvText || undefined, mode });
+    // Build coach overlay (cvText comes from session binding at tool layer; the
+    // former browser-storage read here was dead server-side code — removed in Spec 25)
+    const coachOverlay = buildInterviewCoachOverlay({ jdCompany: companyMatch, jdRole: roleMatch, mode });
 
     const parts = [soul.body, "", SESSION_STATE_RULES, "", coachOverlay, "", "## 用户画像 (Career DNA)", ctx.careerDNA || "暂无画像数据", ""];
     if (ctx.agentKnowledge) parts.push("## 面试知识", ctx.agentKnowledge, "");

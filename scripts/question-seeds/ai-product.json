@@ -1,0 +1,31 @@
+{
+  "family": "ai_product",
+  "provenance": "generated_seed",
+  "provenanceDetail": "spec-27 starter set (2026-10-03, hand-authored)",
+  "questions": [
+    { "question": "介绍一个你从 0 到 1 推动的 AI 产品功能：背景、你的判断、以及最终可量化的结果。", "topic": "0到1产品能力与结果量化", "phase": "tech", "difficulty": "medium", "answerPoints": "STAR 结构；说清为什么做（需求来源）、关键取舍、上线指标（采用率/留存/收入）" },
+    { "question": "你如何判断一个需求该用大模型解决还是传统规则/检索解决？举一个你实际做过的取舍。", "topic": "LLM 适用性判断", "phase": "tech", "difficulty": "hard", "answerPoints": "成本/延迟/准确率要求/错误代价四维判断；给出具体案例与事后验证" },
+    { "question": "讲一次模型效果不达标时你的处理过程：怎么定位问题、怎么和算法同学协作、最后怎么决策。", "topic": "跨职能协作与决策", "phase": "behavioral", "difficulty": "medium", "answerPoints": "定位手段（badcase 归因/评测集）、协作分工、降级或延期决策依据" },
+    { "question": "如果产品的 AI 输出有 5% 的错误率，你会怎么设计产品方案把风险兜住？", "topic": "不确定性产品设计", "phase": "case-study", "difficulty": "medium", "answerPoints": "置信度分层、人审兜底、用户反馈闭环、免责与预期管理" },
+    { "question": "介绍你做过的最有挑战的优先级取舍：资源不足时你砍掉了什么、依据是什么。", "topic": "优先级与取舍", "phase": "behavioral", "difficulty": "medium", "answerPoints": "价值/成本/风险三轴；说清被砍项的后果与补救" },
+    { "question": "你如何设计 AI 产品的评测集？讲一个你从 0 搭建评测体系的过程。", "topic": "评测体系搭建", "phase": "tech", "difficulty": "hard", "answerPoints": "样本来源/分层标注/指标与阈值/回归机制；与业务指标挂钩" },
+    { "question": "面向企业客户和面向个人用户的 AI 产品，你的需求验证方法有什么不同？", "topic": "用户研究方法差异", "phase": "tech", "difficulty": "medium", "answerPoints": "B端：决策链/POC/续费指标；C端：留存/频次/付费转化" },
+    { "question": "讲一次你和算法团队在目标函数上意见不一致的经历，你是怎么推进的？", "topic": "目标对齐与冲突处理", "phase": "behavioral", "difficulty": "hard", "answerPoints": "用数据说话、拆解短期/长期指标、升级机制" },
+    { "question": "给你一个新 AI 岗位方向（如 Agent 产品），你的前 30 天会怎么规划？", "topic": "岗位理解与规划能力", "phase": "behavioral", "difficulty": "medium", "answerPoints": "摸底（数据/用户/团队）→ 快赢项 → 中期路线；有节奏有交付物" },
+    { "question": "如何为 AI 功能定价？讲一个你参与过的商业化案例或方案。", "topic": "商业化与定价", "phase": "case-study", "difficulty": "hard", "answerPoints": "成本结构（推理成本）/价值锚点/竞品对照/订阅或按量" },
+    { "question": "介绍一次你处理用户对 AI 结果不信任的经历，你怎么重建信任？", "topic": "用户信任管理", "phase": "behavioral", "difficulty": "medium", "answerPoints": "归因、透明化（可解释性）、可控性（修改/反馈通道）" },
+    { "question": "Agent 类产品和对话助手类产品，在产品设计上的本质区别是什么？", "topic": "Agent 产品理解", "phase": "tech", "difficulty": "hard", "answerPoints": "目标导向/多步执行/工具调用/失败恢复/状态管理五个维度" },
+    { "question": "你如何在需求评审时识别「伪 AI 需求」？举一个你拒绝过的例子。", "topic": "需求甄别", "phase": "tech", "difficulty": "medium", "answerPoints": "判断标准（确定性要求/数据可得性/ROI）；拒绝理由与替代方案" },
+    { "question": "讲一次数据不足导致产品判断失误的经历，你后来怎么补的课？", "topic": "复盘与成长", "phase": "behavioral", "difficulty": "medium", "answerPoints": "承认误判、事后补数据的机制化（埋点/AB）、迁移到新场景" },
+    { "question": "如果让你改进我们产品里最常用的一个 AI 功能，你会怎么开始？", "topic": "现场产品分析", "phase": "case-study", "difficulty": "hard", "answerPoints": "先问目标和现状数据、假设树、最小验证方案，忌直接给方案" },
+    { "question": "介绍你对 AI 产品「幻觉问题」的产品级治理思路，不止提示词层面。", "topic": "幻觉治理的产品视角", "phase": "tech", "difficulty": "hard", "answerPoints": "引用溯源/确定性校验/分级展示/用户确认流；举出对应产品机制" },
+    { "question": "你带过最难的跨部门项目是什么？里程碑怎么定的？", "topic": "项目管理", "phase": "behavioral", "difficulty": "medium", "answerPoints": "跨部门利益协调、里程碑可验收、风险前置暴露" },
+    { "question": "描述一个你观察到的 AI 产品交互反模式，以及你会怎么改。", "topic": "交互设计与行业观察", "phase": "tech", "difficulty": "medium", "answerPoints": "具体反模式（如加载无预期/结果不可修改）、改法与依据" },
+    { "question": "你在什么情况下会决定下线一个 AI 功能？讲一次真实经历。", "topic": "产品生命周期决策", "phase": "behavioral", "difficulty": "hard", "answerPoints": "下线标准（成本/留存/战略）、沟通与迁移方案" },
+    { "question": "prompt 工程在产品迭代里应该扮演什么角色？它和产品功能沉淀的边界在哪？", "topic": "Prompt 工程定位理解", "phase": "tech", "difficulty": "medium", "answerPoints": "提示词是配置不是功能；何时该固化为流程/校验/数据" },
+    { "question": "你怎么给非技术同事解释大模型的能力边界？有没有你常用的类比？", "topic": "沟通与翻译能力", "phase": "behavioral", "difficulty": "easy", "answerPoints": "类比准确（如实习生/概率生成）、能落到协作影响" },
+    { "question": "如果一个竞品接入了更强的模型，你的应对框架是什么？", "topic": "竞争分析", "phase": "case-study", "difficulty": "hard", "answerPoints": "模型非唯一壁垒：数据飞轮/工作流/分发/成本；短期长期分开答" },
+    { "question": "介绍一次你把用户负反馈变成产品迭代的过程，闭环怎么验证的？", "topic": "反馈闭环", "phase": "behavioral", "difficulty": "medium", "answerPoints": "反馈归因→优先级→上线→指标回看" },
+    { "question": "你对 AI 产品经理的核心竞争力怎么排序？为什么？", "topic": "岗位自认知", "phase": "reverse", "difficulty": "easy", "answerPoints": "排序有主见、与自身经历呼应" }
+  ]
+}

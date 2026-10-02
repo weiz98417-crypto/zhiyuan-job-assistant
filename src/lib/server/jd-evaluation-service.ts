@@ -21,6 +21,7 @@ export interface JDEvaluationInput {
   matchResume?: boolean;
   userProfile?: JDEvaluationUserProfile;
   targetCompany?: string;
+  targetCity?: string;
   riskContext?: string;
   signal?: AbortSignal;
 }
@@ -48,6 +49,8 @@ export interface JDEvaluationResult {
   levelMatch?: { level: string; match: string; note: string };
   differentiationTips?: Array<{ jdEmphasis: string; resumeWeakness: string; tip: string }>;
   fullMarkdown: string;
+  /** Spec 28：D 板块引用的薪资数据来源标注（静态参考/实时聚合·N 条样本）。 */
+  salaryDataSource?: string;
 }
 
 export interface JDEvaluationCompletionAdapter {
@@ -67,13 +70,40 @@ export async function evaluateJobDescription(
   }
   const language = input.language === "en" ? "en" : "zh";
   const completion = options.completion || createDefaultCompletionAdapter();
+  // Spec 28（ADR-0043）：D 板块薪资对比必须引用带来源标注的市场数据；估算不得当作事实
+  let salaryContext = "";
+  let salaryDataSource = "";
+  try {
+    const { lookupBenchmark } = await import("@/lib/server/salary-benchmarks-store");
+    const city = input.targetCity || guessCityFromJD(input.jdText);
+    const benchmark = await lookupBenchmark(city || undefined);
+    if (benchmark) {
+      salaryDataSource = benchmark.sourceLabel;
+      const band = benchmark.p50 !== null
+        ? `${benchmark.p25 ?? "?"} - ${benchmark.p75 ?? "?"} 元/月（中位 ${benchmark.p50}）`
+        : "无数据";
+      salaryContext = [
+        `市场薪资参考（来源标注：${benchmark.sourceLabel}）：`,
+        `城市 ${benchmark.city}，岗位族 ${benchmark.family}${benchmark.levelBand ? `，层级 ${benchmark.levelBand}` : ""}：${band} ${benchmark.unit}。`,
+        "D 板块薪酬对比必须引用上述来源标注；不得将估算值表述为事实；无匹配数据时明确写「静态参考/数据不足」。",
+      ].join("\n");
+    }
+  } catch { /* 薪资参考不可用不阻塞评估 */ }
   const content = await completion.complete({
-    systemPrompt: buildSystemPrompt(language, input.riskContext, input.matchResume !== false),
+    systemPrompt: buildSystemPrompt(language, input.riskContext, input.matchResume !== false, salaryContext),
     userContent: buildUserContent(input, language),
     signal: input.signal,
   });
   const parsed = parseCompletion(content);
-  return normalizeEvaluation(parsed, input.targetCompany, input.matchResume !== false);
+  const result = normalizeEvaluation(parsed, input.targetCompany, input.matchResume !== false);
+  if (salaryDataSource) result.salaryDataSource = salaryDataSource;
+  return result;
+}
+
+/** 从 JD 文本猜城市（仅用于选择基准条目；猜不出则用全国/北京兜底由 store 处理）。 */
+function guessCityFromJD(jdText: string): string | undefined {
+  const cities = ["北京", "上海", "深圳", "广州", "杭州", "成都", "武汉", "南京", "苏州", "西安", "长沙", "天津", "重庆", "郑州", "东莞", "青岛", "沈阳", "宁波", "昆明"];
+  return cities.find((city) => (jdText || "").includes(city));
 }
 
 function createDefaultCompletionAdapter(): JDEvaluationCompletionAdapter {
@@ -104,8 +134,11 @@ function createDefaultCompletionAdapter(): JDEvaluationCompletionAdapter {
   };
 }
 
-function buildSystemPrompt(language: "zh" | "en", riskContext = "", matchResume = true): string {
+function buildSystemPrompt(language: "zh" | "en", riskContext = "", matchResume = true, salaryContext = ""): string {
   const systemContext = loadModeContext(language);
+  const salarySection = salaryContext.trim()
+    ? `\n\n${salaryContext.trim()}`
+    : "";
   const schema = `{
   "company": "公司名称", "role": "岗位名称", "archetype": "岗位类型",
   "overallScore": 4.2, "legitimacy": "真实/疑似/不确定",
@@ -126,9 +159,9 @@ function buildSystemPrompt(language: "zh" | "en", riskContext = "", matchResume 
       ? "\n\nThe user explicitly forbids comparison with their CV. Evaluate this job description on its own merits. Do not infer candidate fit, personal skill gaps, seniority fit, or resume improvements. Block B must say CV matching was intentionally excluded and score 0; calculate the overall recommendation from JD-only dimensions."
       : "\n\n用户明确禁止对照其简历。本次只评估 JD 本身的职位内容、薪资、风险和面试信息；不得推断候选人匹配度、个人技能缺口、职级匹配或简历改进建议。B 板块明确写“按用户要求未进行简历匹配”，评分为 0；总体建议仅依据 JD 本身。";
   if (language === "en") {
-    return `You are an AI job-search evaluation engine. Follow the project rules below and return JSON only. Evaluate role overview, CV match, seniority, compensation, tailoring, interview preparation, and legitimacy. Scores A-F are numbers from 0 to 5; G is qualitative.\n\n${systemContext}${riskSection}${matchingScope}\n\nReturn exactly this shape:\n${schema}`;
+    return `You are an AI job-search evaluation engine. Follow the project rules below and return JSON only. Evaluate role overview, CV match, seniority, compensation, tailoring, interview preparation, and legitimacy. Scores A-F are numbers from 0 to 5; G is qualitative.${salarySection}\n\n${systemContext}${riskSection}${matchingScope}\n\nReturn exactly this shape:\n${schema}`;
   }
-  return `你是 AI 求职评估引擎。遵循以下项目规则，对职位概览、简历匹配、职级策略、薪资市场、定制方案、面试准备和职位合法性进行完整评估。只返回 JSON。A-F 为 0-5 分，G 为定性结论。\n\n${systemContext}${riskSection}${matchingScope}\n\n严格返回以下结构：\n${schema}`;
+  return `你是 AI 求职评估引擎。遵循以下项目规则，对职位概览、简历匹配、职级策略、薪资市场、定制方案、面试准备和职位合法性进行完整评估。只返回 JSON。A-F 为 0-5 分，G 为定性结论。${salarySection}\n\n${systemContext}${riskSection}${matchingScope}\n\n严格返回以下结构：\n${schema}`;
 }
 
 function loadModeContext(language: "zh" | "en"): string {

@@ -63,7 +63,8 @@ const SCORER_PLANS: Partial<Record<AgentTaskType, ScorerPlan>> = {
   jd_evaluation: { names: ["relevancy", "factuality"], blocking: false },
 };
 
-const BLOCKING_SCORE_THRESHOLD = 0.8;
+/** 阻断任务通过阈值（Spec 24 生产软门复用：低于此值降级「仅供参考」）。 */
+export const BLOCKING_SCORE_THRESHOLD = 0.8;
 const ADVISORY_SCORE_THRESHOLD = 0.75;
 const MAX_MATERIAL_CHARS = 4000;
 

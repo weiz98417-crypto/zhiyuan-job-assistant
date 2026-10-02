@@ -1,4 +1,5 @@
 import type { ExecutionPrincipal } from "@/lib/agent/runtime/durable-agent-run";
+import { loadRegistryText } from "@/lib/agent/knowledge/registry/loader";
 import {
   extractResumeDocument,
   type DocumentExtractionDiagnostics,
@@ -240,7 +241,7 @@ async function parseResumeChunk(text: string, signal?: AbortSignal): Promise<Res
     messages: [
       {
         role: "system",
-        content: `你是精确的简历重新分栏器。逐字保留输入内容，不增不减不改，把内容归入 personal、summary、experience、projects、skills、education。具体项目块必须放入 projects，并保留公司/岗位/时间上下文。严格返回 JSON：{"personal":"","summary":"","experience":"","projects":"","skills":"","education":""}`,
+        content: loadRegistryText("prompt.resume-section-split"),
       },
       { role: "user", content: text },
     ],

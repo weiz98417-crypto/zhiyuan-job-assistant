@@ -1,0 +1,116 @@
+{
+  "$comment": "Spec 25 知识注册表清单。每个条目登记一份提示词或领域数据资产：id 供消费方引用，path 相对仓库根，kind 决定加载方式（prompt=md+frontmatter，剥离元数据后注入；yaml=原样解析；json=结构化数据）。lang=zh 为唯一事实源；en 镜像由 scripts/gen-en-modes.mjs 生成并受 scripts/check-knowledge-drift.mjs 护栏约束；legacy_en_only 是无中文对应的存量英文文件，不参与 drift 检查。",
+  "version": "1.0.0",
+  "entries": [
+    {
+      "id": "prompt.interview-question-generation",
+      "path": "src/lib/agent/knowledge/registry/prompts/interview-question-generation.md",
+      "kind": "prompt",
+      "lang": "zh",
+      "source": "spec-27",
+      "version": "1.0.0",
+      "lastReviewed": "2026-10-03",
+      "consumers": ["src/lib/server/interview-analysis-service.ts", "src/lib/server/question-bank.ts"]
+    },
+    {
+      "id": "prompt.interview-answer-scoring",
+      "path": "src/lib/agent/knowledge/registry/prompts/interview-answer-scoring.md",
+      "kind": "prompt",
+      "lang": "zh",
+      "source": "spec-26 (rubric adapted from LuJie CareerKit, Apache-2.0)",
+      "version": "1.0.0",
+      "lastReviewed": "2026-10-03",
+      "consumers": ["src/lib/server/interview-rubric.ts"]
+    },
+    {
+      "id": "prompt.ats-analysis",
+      "path": "src/lib/agent/knowledge/registry/prompts/ats-analysis.md",
+      "kind": "prompt",
+      "lang": "zh",
+      "source": "spec-24",
+      "version": "1.0.0",
+      "lastReviewed": "2026-10-03",
+      "consumers": ["src/lib/server/ats-analysis-service.ts"]
+    },
+    {
+      "id": "prompt.resume-section-split",
+      "path": "src/lib/agent/knowledge/registry/prompts/resume-section-split.md",
+      "kind": "prompt",
+      "lang": "zh",
+      "source": "spec-25 (migrated verbatim from resume-import-service.ts)",
+      "version": "1.0.0",
+      "lastReviewed": "2026-10-03",
+      "consumers": ["src/lib/server/resume-import-service.ts"]
+    },
+    {
+      "id": "prompt.agent-resource-hints.resume",
+      "path": "src/lib/agent/knowledge/registry/prompts/agent-resource-hints-resume.md",
+      "kind": "prompt",
+      "lang": "zh",
+      "source": "spec-25 (replaces localhost fetch hint)",
+      "version": "1.0.0",
+      "lastReviewed": "2026-10-03",
+      "consumers": ["src/lib/agent/registry/agents/resume-agent.ts"]
+    },
+    {
+      "id": "prompt.agent-resource-hints.evaluate",
+      "path": "src/lib/agent/knowledge/registry/prompts/agent-resource-hints-evaluate.md",
+      "kind": "prompt",
+      "lang": "zh",
+      "source": "spec-25 (replaces localhost fetch hint)",
+      "version": "1.0.0",
+      "lastReviewed": "2026-10-03",
+      "consumers": ["src/lib/agent/registry/agents/evaluate-agent.ts"]
+    },
+    {
+      "id": "data.scoring-dimensions",
+      "path": "modes/scoring-dimensions.yml",
+      "kind": "yaml",
+      "lang": "both",
+      "source": "v1.0.0 (2026-05-09)",
+      "version": "1.0.0",
+      "lastReviewed": "2026-10-03",
+      "consumers": ["src/lib/agent/knowledge/registry/scoring-weights.ts", "src/lib/server/jd-evaluation-service.ts"]
+    },
+    {
+      "id": "data.jd-signals-glossary",
+      "path": "src/lib/agent/knowledge/jd-signals.ts",
+      "kind": "json",
+      "lang": "zh",
+      "source": "spec-25 (glossary only; detectSignals wiring removed)",
+      "version": "1.1.0",
+      "lastReviewed": "2026-10-03",
+      "consumers": ["src/lib/agent/knowledge/index.ts"]
+    },
+    {
+      "id": "data.interview-styles",
+      "path": "src/lib/agent/knowledge/interview-styles.ts",
+      "kind": "json",
+      "lang": "zh",
+      "source": "spec-27",
+      "version": "1.1.0",
+      "lastReviewed": "2026-10-03",
+      "consumers": ["src/lib/agent/knowledge/index.ts"]
+    },
+    {
+      "id": "data.salary-seed",
+      "path": "src/lib/agent/knowledge/registry/data/salary-seed.json",
+      "kind": "json",
+      "lang": "zh",
+      "source": "spec-28 (merged from salary-benchmarks.ts + risk-intel.md 46 rows)",
+      "version": "1.0.0",
+      "lastReviewed": "2026-10-03",
+      "consumers": ["src/lib/server/salary-benchmarks-store.ts", "src/lib/agent/knowledge/salary-benchmarks.ts"]
+    },
+    {
+      "id": "data.story-bank-template",
+      "path": "interview-prep/story-bank.md",
+      "kind": "prompt",
+      "lang": "zh",
+      "source": "spec-29 (registered; activation in spec-29)",
+      "version": "0.1.0",
+      "lastReviewed": "2026-10-03",
+      "consumers": ["src/lib/server/interview-story-bank.ts"]
+    }
+  ]
+}

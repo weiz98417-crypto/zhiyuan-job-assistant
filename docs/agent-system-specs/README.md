@@ -1,10 +1,10 @@
 # Change: agent-architecture-specs
 
-将已确认的纸鸢 Agent 系统架构与记忆治理方案，以及 2026-09/2026-10 两轮升级计划拆为二十三份可独立领取的实施 spec。Spec 01–07 定义运行架构，Spec 08–13 定义分层记忆、用户治理和迁移门禁，Spec 14–19 定义 2026-10 能力引入，Spec 20–23 定义 eng review 后的缺陷修复与登录态路线。各篇遵守所引用的 ADR，以及“代码渐进迁移、生产一次切换、稳定后删除旧路径”的运行架构发布策略。
+将已确认的纸鸢 Agent 系统架构与记忆治理方案，以及 2026-09/2026-10/2026-10B 三轮升级计划拆为二十九份可独立领取的实施 spec。Spec 01–07 定义运行架构，Spec 08–13 定义分层记忆、用户治理和迁移门禁，Spec 14–19 定义 2026-10 能力引入，Spec 20–23 定义 eng review 后的缺陷修复与登录态路线，Spec 24–29 定义 2026-10B 能力层深化。各篇遵守所引用的 ADR，以及“代码渐进迁移、生产一次切换、稳定后删除旧路径”的运行架构发布策略。
 
 ## Status
 
-本目录中的文档是可发布为 GitHub Issue 的本地草案。每份草案的目标标签均为 `ready-for-agent`（Spec 23 为 `proposed` 设计轮候选，除外）。Spec 08–23 尚未在远端创建 Issue，发布状态以本索引为准。Spec 14–19 来自 2026-10 Agent 能力引入计划（`docs/UPGRADE-PLAN-2026-10.md`、ADR-0039、ADR-0040）；Spec 20–23 来自同日 eng review 之后的缺陷修复轮与登录态路线决策。
+本目录中的文档是可发布为 GitHub Issue 的本地草案。每份草案的目标标签均为 `ready-for-agent`（Spec 23 为 `proposed` 设计轮候选，除外）。Spec 08–29 尚未在远端创建 Issue，发布状态以本索引为准。Spec 14–19 来自 2026-10 Agent 能力引入计划（`docs/UPGRADE-PLAN-2026-10.md`、ADR-0039、ADR-0040）；Spec 20–23 来自同日 eng review 之后的缺陷修复轮与登录态路线决策；Spec 24–29 来自 2026-10B 能力层深化计划（`docs/UPGRADE-PLAN-2026-10B.md`、ADR-0041~0044）。
 
 ## Release Boundary
 
@@ -41,6 +41,12 @@ Spec 08–13 属于后续记忆运行时升级，不扩大 `0.10.8` 的既定发
 | 21 | Digest Success Requires Delivered Digest | Spec 19、ADR-0039 |
 | 22 | MCP Server Reconnect On Dead Stdio Child | Spec 16 的 MCPManager 接缝 |
 | 23 | QR Login Session Handoff（proposed，设计轮候选） | Spec 16、ADR-0008/0009/0033 |
+| 24 | Resume Artifact Factuality Gate | ADR-0041、Spec 15 的评分器接缝与 veto 约定；批次 0.15.0（f） |
+| 25 | Knowledge And Prompt Registry | 2026-10B Q6/Q17（无独立 ADR）、verify:tokens 护栏模式；批次 0.15.0（g） |
+| 26 | Interview Scoring Rubric Anchoring | ADR-0042、ADR-0028/0034 候选语义、Spec 15 veto 纪律、Spec 25 挂载点；批次 0.16.0（h） |
+| 27 | Question Bank And Interview Engine | ADR-0044、Spec 25 注册表、Spec 14 嵌入失败教训；批次 0.17.0（i） |
+| 28 | Salary Benchmark Pipeline | ADR-0039 只读边界、ADR-0043、Spec 27 岗位族共用分类；批次 0.18.0（j） |
+| 29 | Outcome Feedback Loop | Spec 26 可信复盘（硬前置）、Spec 08–09 账本与准入、ADR-0034；批次 0.18.0（k） |
 
 ## Shared Seams
 

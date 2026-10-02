@@ -197,16 +197,22 @@ export async function enqueueEvaluatedScanJobForUser(
     if (!updated.rowCount) {
       const dedupKey = makeDedupKey(input.url);
       const manualScanId = `manual:${userId}`;
+      // Spec 28：保存时确定性抽取薪资区间（失败留空不猜，面议单独标记）
+      const { extractSalaryFromJD } = await import("./server/salary-extraction");
+      const extraction = extractSalaryFromJD(input.jdSnippet || "");
       await client.query(`
         INSERT INTO scan_queue (id, user_id, status, companies_total, companies_done, jobs_found, jobs_new, error_log)
         VALUES ($1, $2, 'done', 0, 0, 0, 0, '[]'::jsonb)
         ON CONFLICT (id) DO NOTHING
       `, [manualScanId, userId]);
       await client.query(`
-        INSERT INTO scan_jobs (scan_id, user_id, company, title, url, jd_snippet, status, dedup_key)
-        VALUES ($1, $2, $3, $4, $5, $6, 'evaluated', $7)
+        INSERT INTO scan_jobs (scan_id, user_id, company, title, url, jd_snippet, status, dedup_key,
+          salary_min, salary_max, salary_unit, salary_negotiable, salary_extracted_at)
+        VALUES ($1, $2, $3, $4, $5, $6, 'evaluated', $7, $8, $9, $10, $11, now())
         ON CONFLICT (dedup_key) DO NOTHING
-      `, [manualScanId, userId, input.company || "未知", input.title || "未知职位", input.url, input.jdSnippet || "", dedupKey]);
+      `, [manualScanId, userId, input.company || "未知", input.title || "未知职位", input.url, input.jdSnippet || "", dedupKey,
+        extraction?.minMonthly ?? null, extraction?.maxMonthly ?? null,
+        extraction && extraction.minMonthly !== null ? "CNY/month" : null, extraction?.negotiable ? 1 : 0]);
     }
 
     return { updated: Boolean(updated.rowCount) };
@@ -215,6 +221,11 @@ export async function enqueueEvaluatedScanJobForUser(
 
 export async function getScanStatusForUser(scanId: string, userId: string) {
   if (getDatabaseDriver() !== "postgres") return getScanStatus(getDb(), scanId, userId);
+
+  // Spec 28：读取路径惰性触发薪资抽取+聚合管线（模块级 1 小时节流；失败不影响状态返回）
+  void import("./server/salary-pipeline")
+    .then(({ runSalaryPipeline }) => runSalaryPipeline())
+    .catch(() => undefined);
 
   return withPostgresClient(async (client) => {
     const scanResult = await client.query("SELECT * FROM scan_queue WHERE id = $1 AND user_id = $2 LIMIT 1", [scanId, userId]);

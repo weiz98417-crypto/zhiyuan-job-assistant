@@ -73,19 +73,12 @@ async function buildEvalPrompt(ctx: AgentPromptContext): Promise<string> {
     if (ctx.agentKnowledge) parts.push("## 行业知识", ctx.agentKnowledge, "");
     if (ctx.memoryDigest) parts.push("## 会话记忆", ctx.memoryDigest, "");
 
-    // Inject available resources
+    // Resource hint from the knowledge registry (Spec 25) — the previous
+    // localhost:3000 self-fetch never worked from a server prompt builder.
     try {
-      const reportsRes = await fetch("http://localhost:3000/api/data/reports").catch(() => null);
-      if (reportsRes?.ok) {
-        const reportsJson = await reportsRes.json();
-        if (reportsJson.success && Array.isArray(reportsJson.data)) {
-          const recent = reportsJson.data.slice(0, 5) as Array<{ report_num: number; company: string; role: string; date: string }>;
-          if (recent.length) {
-            parts.push("## 最近报告", `使用 get_report_detail(reportNum=N) 读取。编号列表: ${recent.map(r => `#${r.report_num} ${r.company}-${r.role}`).join(", ")}`, "");
-          }
-        }
-      }
-    } catch { /* non-blocking */ }
+      const { loadRegistryText } = await import("@/lib/agent/knowledge/registry/loader");
+      parts.push("## 报告读取", loadRegistryText("prompt.agent-resource-hints.evaluate"), "");
+    } catch { /* registry text is a build-time constant; this never fires */ }
 
     const { registry } = await import("@/lib/agent/tools");
     const toolDescs = EVAL_TOOL_NAMES

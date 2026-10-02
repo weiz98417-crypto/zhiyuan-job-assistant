@@ -232,6 +232,13 @@ export const ACTION_TOOL_RISK_AUDIT: ActionToolRiskRecord[] = [
     requiresVerifiedWrite: true,
   },
   {
+    toolName: "log_rejection_notice",
+    risk: "low-risk-write",
+    targets: ["memory"],
+    summary: "Parses a pasted rejection notice into a closed label set and writes a candidate memory; activation requires user confirmation.",
+    requiresVerifiedWrite: false,
+  },
+  {
     toolName: "update_application_status",
     risk: "high-risk-write",
     targets: ["application"],

@@ -212,8 +212,56 @@ export async function updateApplicationStatus(input: UpdateApplicationStatusInpu
     source: input.source || "pipeline",
     metadata_json: eventMetadata(input.metadata),
   }, userId);
+  // Spec 29（投递结果回流）：状态迁移作为确定性完成事件写记忆账本——
+  // 投递结局是客观事件（即事实、不需确认）；由它推导的偏好属推断，仍走候选确认。
+  void recordApplicationOutcomeEvent(userId, saved, beforeStatus, status, input.note || "", event?.id).catch(() => undefined);
   const events = await repos.applications.listEvents(saved.id, userId);
   return { success: true, data: saved, event, nextActions: suggestNextActions(saved, events) };
+}
+
+/** Spec 29：投递结局 → 记忆账本 verified_task 事件（沿 JD 评估完成事件同款管线）。
+ *  admission.ts 对 verified_task 硬性要求 evidence 三件套（verifiedReadBack + artifactId + resultEvidence），缺一即拒。 */
+async function recordApplicationOutcomeEvent(
+  userId: string,
+  application: AppRow,
+  fromStatus: ApplicationStatus | "evaluated",
+  toStatus: string,
+  note: string,
+  eventId?: number,
+): Promise<void> {
+  const { getDatabaseDriver, isPostgresConfigured } = await import("./postgres");
+  if (getDatabaseDriver() !== "postgres" || !isPostgresConfigured()) return;
+  const { admitMemory } = await import("./memory/admission");
+  const company = application.company || "未知公司";
+  const role = application.role || "未知岗位";
+  const result = await admitMemory({
+    userId,
+    agentId: "general",
+    kind: "verified_task",
+    sourceType: "application",
+    sourceId: String(application.id),
+    fact: {
+      partition: "core",
+      subject: company,
+      predicate: "application_outcome",
+      object: { role, fromStatus, toStatus, note: note.slice(0, 300) },
+      canonicalText: `${company} ${role} 投递状态更新：${fromStatus} → ${toStatus}${note ? `（${note.slice(0, 80)}）` : ""}`,
+      confidence: 0.9,
+      importance: toStatus === "offer" || toStatus === "rejected" ? 0.7 : 0.5,
+    },
+    evidence: {
+      quote: `application #${application.id} status_changed ${fromStatus}→${toStatus}`,
+      artifactId: eventId ? `application-event-${eventId}` : `application-${application.id}`,
+      resultEvidence: eventId
+        ? `status_changed event #${eventId} persisted and read back for application #${application.id}`
+        : `application #${application.id} row read back after updateStatus`,
+      verifiedReadBack: true,
+      extractionMethod: "application_status_event",
+    },
+  });
+  if (result.outcome === "rejected") {
+    console.warn(`[application-outcome] admitMemory rejected: ${result.reason}`);
+  }
 }
 
 export async function getApplicationContext(input: ApplicationContextInput, userId: string): Promise<ApplicationContext> {

@@ -50,6 +50,7 @@ import { trackApplicationTool } from "./action/track-application";
 import { updateApplicationStatusTool } from "./action/update-application-status";
 import { transferToAgent } from "./action/transfer-to-agent";
 import { delegateResearch } from "./action/delegate-research";
+import { logRejectionNotice } from "./action/log-rejection-notice";
 
 // Interview tools
 import { generateInterviewQuestions, scoreInterviewAnswer } from "./interview-tools";
@@ -114,6 +115,7 @@ registry.register(downloadReportPDF);
 registry.register(updateReportMetadata);
 registry.register(trackApplicationTool);
 registry.register(updateApplicationStatusTool);
+registry.register(logRejectionNotice);
 registry.register(transferToAgent);
 registry.register(delegateResearch);
 
