@@ -67,7 +67,7 @@ export async function POST(request: Request) {
     const { buildCvHtml } = await import("@/lib/server/cv-pdf-html");
     let html: string;
     try {
-      html = buildCvHtml({ sections: body.sections || [], template: body.template, targetCompany, profile });
+      html = buildCvHtml({ sections: body.sections || [], template: body.template, profile });
     } catch (error) {
       return NextResponse.json(
         { success: false, error: error instanceof Error ? error.message : "简历内容不能为空，请先填写简历" },

@@ -167,7 +167,7 @@ export async function generateInterviewQuestionsForAgent(
     }
   } catch (error) {
     if (options.signal?.aborted) throw error;
-    // 题库链路失败回落 LLM 直出（在 llmSummary 中标注）
+    // 题库链路失败回落 LLM 直出（回落事件记 console 日志；uiPayload 级标注随工具卡迭代）
     console.log(`[question-bank] fallback to direct LLM: ${error instanceof Error ? error.message : error}`);
   }
 
@@ -210,7 +210,7 @@ export async function generateInterviewQuestionsForAgent(
   return { questions, company, role, mode, memoryContext };
 }
 
-/** ComposedQuestion → InterviewQuestion（工具卡兼容形状）；category 按请求阶段映射而非硬编码。 */
+/** ComposedQuestion → InterviewQuestion（工具卡兼容形状）；category 按请求阶段映射，source/provenance 保真透传。 */
 function normalizeComposedQuestion(item: { question: string; source: string; provenance: string }, phaseHint?: string): InterviewQuestion {
   const category = phaseHint === "tech" || phaseHint === "reverse"
     ? phaseHint === "tech" ? "technical" : "culture"
@@ -220,9 +220,9 @@ function normalizeComposedQuestion(item: { question: string; source: string; pro
     question: item.question,
     context: `出处：${item.provenance}`,
     storyHint: "",
-    source: item.source === "jd" || item.source === "weakness" || item.source === "general" ? item.source : "general",
+    source: ["jd", "bank", "weakness", "general"].includes(item.source) ? item.source as InterviewQuestion["source"] : "general",
     provenance: item.provenance,
-  } as InterviewQuestion;
+  };
 }
 
 /** 面试阶段 → 题库 phase 列取值。 */
@@ -340,7 +340,7 @@ export async function scoreInterviewAnswerForAgent(
           band: rubricResult.bands[dimension],
           topic: family,
         });
-      } catch { /* 趋势记录失败不阻塞评分返回 */ }
+      } catch (error) { console.warn("[interview-trend] 弱项事件记录失败（不阻塞评分）:", error instanceof Error ? error.message : error); }
     }
   }
 
@@ -498,7 +498,7 @@ export async function handleInterviewSessionTurnForAgent(
         scoreBand: Math.max(0, Math.round((item.score || 0) / 2) - 1),
         topic: item.question.slice(0, 120),
       })));
-    } catch { /* 故事册沉淀失败不阻塞复盘 */ }
+    } catch (error) { console.warn("[interview-story] 故事册沉淀失败（不阻塞复盘）:", error instanceof Error ? error.message : error); }
     const result: InterviewSessionTurnResult = {
       action: "done",
       sessionId: String(sessionId),
@@ -832,7 +832,7 @@ function normalizeQuestion(value: unknown): InterviewQuestion[] {
   const category = ["behavioral", "technical", "case-study", "culture"].includes(stringValue(item.category))
     ? stringValue(item.category) as InterviewQuestion["category"]
     : "behavioral";
-  const source = ["jd", "weakness", "general"].includes(stringValue(item.source))
+  const source = ["jd", "bank", "weakness", "general"].includes(stringValue(item.source))
     ? stringValue(item.source) as InterviewQuestion["source"]
     : "general";
   return [{

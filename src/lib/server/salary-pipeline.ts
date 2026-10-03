@@ -10,6 +10,8 @@ import { extractSalaryFromJD } from "./salary-extraction";
 import { aggregateSalaryBenchmarks } from "./salary-benchmarks-store";
 
 const THROTTLE_MS = 60 * 60 * 1000;
+// 节流是进程级的：多实例部署时每实例各跑一次/小时（写入幂等：UPDATE 同值 + 聚合 ON CONFLICT，
+// 只是浪费不算错）。当前单机部署（PM2 单 worker 跑 API）无碍；扩多实例时改用 DB advisory lock。
 let lastRunAt = 0;
 let running: Promise<{ extracted: number; aggregated: number }> | null = null;
 
@@ -33,21 +35,30 @@ export async function runSalaryPipeline(force = false): Promise<{ extracted: num
            AND discovered_at >= now() - interval '12 months'
          LIMIT 500`,
       );
+      const ids: number[] = [];
+      const mins: Array<number | null> = [];
+      const maxs: Array<number | null> = [];
+      const units: Array<string | null> = [];
+      const negs: number[] = [];
       for (const row of pending.rows as Array<Record<string, unknown>>) {
         const extraction = extractSalaryFromJD(String(row.jd_snippet || ""));
-        await client.query(
-          `UPDATE scan_jobs SET salary_min = $2, salary_max = $3, salary_unit = $4,
-             salary_negotiable = $5, salary_extracted_at = now()
-           WHERE id = $1`,
-          [
-            row.id,
-            extraction?.minMonthly ?? null,
-            extraction?.maxMonthly ?? null,
-            extraction && extraction.minMonthly !== null ? "CNY/month" : null,
-            extraction?.negotiable ? 1 : 0,
-          ],
-        );
+        ids.push(Number(row.id));
+        mins.push(extraction?.minMonthly ?? null);
+        maxs.push(extraction?.maxMonthly ?? null);
+        units.push(extraction && extraction.minMonthly !== null ? "CNY/month" : null);
+        negs.push(extraction?.negotiable ? 1 : 0);
         if (extraction && extraction.minMonthly !== null) extracted += 1;
+      }
+      // 批量写回（unnest 单语句，eng review S4-3：500 行逐行 UPDATE 改为一次往返）
+      if (ids.length > 0) {
+        await client.query(
+          `UPDATE scan_jobs SET salary_min = d.min, salary_max = d.max, salary_unit = d.unit,
+             salary_negotiable = d.negotiable, salary_extracted_at = now()
+           FROM unnest($1::bigint[], $2::real[], $3::real[], $4::text[], $5::int[])
+             AS d(id, min, max, unit, negotiable)
+           WHERE scan_jobs.id = d.id`,
+          [ids, mins, maxs, units, negs],
+        );
       }
     } finally {
       client.release();

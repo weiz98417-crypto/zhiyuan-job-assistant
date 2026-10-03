@@ -26,7 +26,7 @@
 - **迁移不改语义**：出题/评分/ATS/分栏四个服务内嵌字符串迁为注册表条目，服务代码只引用条目 id。这些 prompt 的实际重写分别归 Spec 26/27/24；本 spec 只搬家，对固定输入的 prompt 组装结果与迁移前逐字节相等（frontmatter 由加载器统一剥离；环境混淆清理项除外）。
 - **单源收敛**：COMPANY_MODE_MAP 合一为单源导出；A-G 权重以 scoring-dimensions.yml 为载体，agent.md 与 `evaluation-scoring.ts` 改读它。
 - **jd-signals 处置**：删除从未触发的 `detectSignals` 函数与 `injectKnowledge` 的 jdText 参数链；23 条词表**保留 glossary（速查词汇）语义**迁入注册表，不并入 risk-intel（risk-intel 词条是带 severity 的风险判定，消费语义不同，合并会改变 JD 风险引擎输出、违反本 spec「不改语义」承诺）。
-- **中文唯一源**：`modes/` 顶层的英文文件改为生成物——`scripts/gen-en-modes.mjs`（LLM 翻译 + diff 人工过目后入库），**只对存在中文对应的文件集生成**；英文独有的 batch/oferta/patterns/project/training 保留原样并在注册表标注 `legacy_en_only`（待 Spec 26/27 迭代时评估去留）；zh 独有文件暂无英文属预期，不反向生成。`check-knowledge-drift.mjs` 护栏进 CI：生成的英文镜像与最近生成清单不一致即 fail（护栏模式沿 `scripts/check-design-tokens.mjs`）。
+- **中文唯一源**：`modes/` 顶层的英文文件改为生成物——`scripts/gen-en-modes.mjs`（LLM 翻译 + diff 人工过目后入库），**只对存在中文对应的文件集生成**（oferta.md 映射自 zh/jianzhi.md，属于受 drift 约束的镜像；核查修正：初版清单把 oferta 误列为英文独有）；英文独有的 batch/patterns/project/training 保留原样并在注册表标注 `legacy_en_only`（待 Spec 26/27 迭代时评估去留）；zh 独有文件暂无英文属预期，不反向生成。`check-knowledge-drift.mjs` 护栏进 CI：生成的英文镜像与最近生成清单不一致即 fail（护栏模式沿 `scripts/check-design-tokens.mjs`）。
 - **环境混淆清理**：`resume-agent.ts:34` / `evaluate-agent.ts:78` 的 localhost fetch 改为进程内资源解析（资源列表本进程可查）；`interview-agent.ts:126` 的 localStorage 读取移出 buildSystemPrompt，该值经参数传入。
 - **story-bank.md** 保持空模板登记（启用归 Spec 29）。
 

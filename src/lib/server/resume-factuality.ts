@@ -33,10 +33,17 @@ function normalizeDigits(text: string): string {
 const NUMBER_TOKEN_RE = /\d+(?:\.\d+)?/g;
 /** 产品名/版本号里的数字（GPT-4、GPT-4o、Web3、K8s、A4、v1.5）不是数量，溯源前剥离——否则提到新产品名即整方案被毙。 */
 const PRODUCT_VERSION_RE = /[A-Za-z]+-?\d+(?:\.\d+)?[A-Za-z]*/g;
+/** 中文数量级单位归一：「800万」与「8,000,000」是同一个数（优化链跨表示匹配的关键）。 */
+const CN_UNIT_RE = /(\d+(?:\.\d+)?)(亿|万|千)/g;
 
-/** 提取文本中的数字 token（归一化后）。中文数字与产品名/版本号内嵌数字不参与。 */
+/** 提取文本中的数字 token（归一化后）。中文数字与产品名/版本号内嵌数字不参与；万/亿/千折算为位值数字。 */
 export function extractNumberTokens(text: string): string[] {
-  const cleaned = normalizeDigits(text || "").replace(PRODUCT_VERSION_RE, " ");
+  const cleaned = normalizeDigits(text || "")
+    .replace(PRODUCT_VERSION_RE, " ")
+    .replace(CN_UNIT_RE, (_match, num: string, unit: string) => {
+      const value = parseFloat(num) * (unit === "亿" ? 1e8 : unit === "万" ? 1e4 : 1e3);
+      return ` ${value} `;
+    });
   return cleaned.match(NUMBER_TOKEN_RE) || [];
 }
 

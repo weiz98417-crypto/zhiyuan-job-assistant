@@ -1,1 +1,31 @@
+# 行尾统一（eng review S2-8）：仓库内一律 LF，消除 CRLF/LF 混杂
+# （此前测试文件 CRLF 导致跨行精确替换静默失配，见 2026-09-25 会话记录）。
+* text=auto eol=lf
+
+# Windows 脚本必须 CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# 例外：shell 脚本必须 LF（原有规则保留）
 *.sh text eol=lf
+
+# 二进制
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.eot binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.exe binary
+*.dll binary
+*.node binary
+*.db binary
+*.sqlite binary

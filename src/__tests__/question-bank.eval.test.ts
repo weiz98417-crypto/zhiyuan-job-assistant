@@ -7,6 +7,8 @@ import { composeInterview, createPostgresQuestionBankStore, familyForRole, type 
 import { decideFollowUp } from "@/lib/server/interview-analysis-service";
 import { projectDurableInterviewEngineState } from "@/lib/agent/interview-session-state";
 
+interface BankQueryCapture { family?: string; phase?: string; difficulty?: string; excludeQuestions?: string[]; limit?: number }
+
 function mockStore(rows: BankQuestionRow[], available = true, seenQueries?: BankQueryCapture[]): QuestionBankStore {
   return {
     async isAvailable() { return available; },
@@ -21,7 +23,6 @@ function mockStore(rows: BankQuestionRow[], available = true, seenQueries?: Bank
     },
   };
 }
-interface BankQueryCapture { family?: string; phase?: string; difficulty?: string; excludeQuestions?: string[]; limit?: number }
 
 const bankRows: BankQuestionRow[] = [
   { id: 1, question: "题库原题A：介绍一个RAG优化案例", topic: "RAG优化", family: "ai_algorithm", phase: "tech", difficulty: "medium", provenance: "generated_seed", provenanceDetail: "spec-27", answerPoints: "分层定位+数字" },
@@ -74,7 +75,7 @@ describe("Spec 27: composeInterview 深接口（注入 store + completion）", (
   it("过滤参数正确下推：family×phase + 已出题目去重", async () => {
     const captured: BankQueryCapture[] = [];
     await composeInterview({ family: "ai_product", phase: "behavioral", count: 1, recentQuestions: ["已问题目"] }, {
-      store: mockStore(bankRows, true, captured as never),
+      store: mockStore(bankRows, true, captured),
       completion: async () => ({ text: "{}" }),
     });
     expect(captured[0].family).toBe("ai_product");

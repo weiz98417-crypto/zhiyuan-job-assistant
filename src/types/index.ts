@@ -610,8 +610,10 @@ export interface InterviewQuestion {
   question: string;
   context: string;
   storyHint: string;
-  source: "jd" | "weakness" | "general";
+  /** bank = 题库命中/改编（provenance 字段带原题出处）；provenance 存在于新链路的题目卡上。 */
+  source: "jd" | "bank" | "weakness" | "general";
   weaknessNote?: string;
+  provenance?: string;
 }
 
 /* ── Pipeline: Interview Practice ── */

@@ -3,6 +3,7 @@
  * 一期只做：用户粘贴文本 → LLM 提取封闭原因标签集 + 引用原文 → 用户确认 → 入账。
  * 不做邮箱集成。未经用户确认的解析结果以候选态存在，绝不影响检索与推荐（ADR-0034）。
  */
+import { createHash } from "node:crypto";
 import { parseLlmJsonObject } from "@/lib/llm-json";
 
 export const REJECTION_REASON_LABELS = [
@@ -132,7 +133,8 @@ export async function confirmRejectionToLedger(
     agentId: "general",
     kind: "verified_task",
     sourceType: "application",
-    sourceId: `rejection:${Date.now()}`,
+    // 幂等（eng review S1-7）：sourceId 取解析内容指纹——同一拒信重复确认不产生第二条事实
+    sourceId: `rejection:${createHash("sha256").update(`${parse.company}\u0000${parse.role}\u0000${parse.reasonLabel}\u0000${parse.quote}`).digest("hex").slice(0, 24)}`,
     fact: {
       partition: "core",
       subject: parse.company || "未知公司",
@@ -144,7 +146,7 @@ export async function confirmRejectionToLedger(
     },
     evidence: {
       quote: parse.quote,
-      artifactId: `rejection-confirm-${Date.now()}`,
+      artifactId: `rejection-confirm-${createHash("sha256").update(`${parse.company}\u0000${parse.role}\u0000${parse.reasonLabel}\u0000${parse.quote}`).digest("hex").slice(0, 16)}`,
       resultEvidence: "user confirmed the parsed rejection labels in memory governance (candidate → active promotion)",
       verifiedReadBack: true,
       extractionMethod: "rejection_notice_user_confirmed",

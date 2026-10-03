@@ -18,10 +18,10 @@ describe("Spec 24: 数字溯源（硬门）", () => {
     expect(result.violations).toEqual([]);
   });
 
-  it("编造数字被拦截并给出违规清单", () => {
+  it("编造数字被拦截并给出违规清单（万单位折算后仍拦截）", () => {
     const result = checkNumberProvenance("带领团队实现营收增长300%，覆盖用户500万", [source]);
     expect(result.ok).toBe(false);
-    expect(result.violations.map((v) => v.token)).toEqual(expect.arrayContaining(["300", "500"]));
+    expect(result.violations.map((v) => v.token)).toEqual(expect.arrayContaining(["300", "5000000"]));
   });
 
   it("千分位与全角归一", () => {

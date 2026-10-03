@@ -25,7 +25,6 @@ export interface CvProfile {
 export interface BuildCvHtmlInput {
   sections: CvSection[];
   template?: "clean" | "modern" | "compact";
-  targetCompany?: string;
   profile?: CvProfile;
 }
 

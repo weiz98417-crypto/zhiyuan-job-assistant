@@ -167,8 +167,9 @@ export async function lookupBenchmark(city?: string, family?: string, levelBand?
           sourceLabel: `实时聚合·${Number(row.sample_size)} 条样本（岗位机会池，近 ${AGGREGATION_WINDOW_MONTHS} 个月）`,
         };
       }
-    } catch {
-      // 表未建/查询失败回落静态 seed
+    } catch (error) {
+      // 表未建/查询失败回落静态 seed（不阻塞评估，但要可排查）
+      console.warn("[salary-benchmark] 实时聚合查询失败，回落静态 seed:", error instanceof Error ? error.message : error);
     }
   }
   return findStaticBenchmark(city, family, levelBand);

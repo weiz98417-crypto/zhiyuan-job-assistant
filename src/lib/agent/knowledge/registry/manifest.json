@@ -107,10 +107,10 @@
       "path": "interview-prep/story-bank.md",
       "kind": "prompt",
       "lang": "zh",
-      "source": "spec-29 (registered; activation in spec-29)",
+      "source": "spec-29 (registered template; no code consumer yet — Spec 29 的故事册走记忆账本，此文件为用户可见模板，治理 UI 启用时接入)",
       "version": "0.1.0",
       "lastReviewed": "2026-10-03",
-      "consumers": ["src/lib/server/interview-story-bank.ts"]
+      "consumers": []
     }
   ]
 }
