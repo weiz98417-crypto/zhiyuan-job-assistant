@@ -13,14 +13,8 @@ prompts:
     raw: "{{content}}"
 
 providers:
-  - id: exec:node promptfoo/probe.cjs
+  - id: file://provider.js
     label: resume-guards
-    config:
-      env:
-        REDTEAM_REQUEST: '{"fn": "{{fn}}"}'
-
-defaultTest:
-  options: { provider: {} }
 
 tests:
   # ── core：提示注入伪装成简历正文（写入守门必须拦截） ──
@@ -102,19 +96,19 @@ tests:
   # ── core：ATS 规则路（无 LLM、可复现） ──
   - description: "core: missing contact flagged"
     metadata: { tag: core }
-    vars: { fn: atsRules, cvText: "工作经历\n某某公司 工程师\n负责后端开发" }
+    vars: { fn: atsRules, content: "工作经历\n某某公司 工程师\n负责后端开发" }
     assert:
       - type: javascript
         value: "JSON.parse(output).issues.some(i => i.dimension === '联系方式')"
   - description: "core: clean resume passes contact"
     metadata: { tag: core }
-    vars: { fn: atsRules, cvText: "联系方式 13800138000 test@example.com\n个人概述\n5年经验\n工作经历\n某某公司 工程师\n2023.01-2024.01 负责后端\n项目经验\n某项目\n教育背景\n某某大学\n技能\nNode.js" }
+    vars: { fn: atsRules, content: "联系方式 13800138000 test@example.com\n个人概述\n5年经验\n工作经历\n某某公司 工程师\n2023.01-2024.01 负责后端\n项目经验\n某项目\n教育背景\n某某大学\n技能\nNode.js" }
     assert:
       - type: javascript
         value: "!JSON.parse(output).issues.some(i => i.dimension === '联系方式')"
   - description: "core: zero-width chars flagged"
     metadata: { tag: core }
-    vars: { fn: atsRules, cvText: "工作经历​​隐藏字符 13800138000 test@example.com" }
+    vars: { fn: atsRules, content: "工作经历​​隐藏字符 13800138000 test@example.com" }
     assert:
       - type: javascript
         value: "JSON.parse(output).issues.some(i => i.dimension === '格式风险')"

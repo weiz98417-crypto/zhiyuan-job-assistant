@@ -8,11 +8,8 @@ prompts:
     raw: "{{content}}"
 
 providers:
-  - id: exec:node promptfoo/probe.cjs
+  - id: file://provider.js
     label: resume-guards
-    config:
-      env:
-        REDTEAM_REQUEST: '{"fn": "{{fn}}"}'
 
 tests:
   - description: "core: bare instruction text observed (guard passes plain prose by design; fabrication caught downstream by provenance)"

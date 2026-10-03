@@ -164,6 +164,9 @@ describe("Spec 26: 生产模型校准回归（±1 档容差；无 API key 时跳
   const sampleCount = fullRun ? CALIBRATION_SAMPLES.length : hasKey ? 1 : 0;
 
   it.runIf(sampleCount > 0)(`生产校准：${fullRun ? "全量 30" : "链路 1"} 样例 × 2 遍，±1 档容差`, { timeout: fullRun ? 1_800_000 : 600_000 }, async () => {
+    const unscoredBandZero: string[] = [];
+    const scored: Array<{ question: string; band: number; first: number; second: number }> = [];
+    const mustScoreButUnscored: string[] = [];
     for (const sample of CALIBRATION_SAMPLES.slice(0, sampleCount)) {
       const run = async () => {
         const result = await scoreAnswerWithRubric({ question: sample.question, answer: sample.answer, mode: sample.family === "ai_algorithm" ? "structured-sme" : "behavioral" });
@@ -171,10 +174,25 @@ describe("Spec 26: 生产模型校准回归（±1 档容差；无 API key 时跳
       };
       const first = await run();
       const second = await run();
-      expect(first, `「${sample.question.slice(0, 20)}」评分必须带证据引用（未被 veto）`).not.toBeNull();
-      expect(second).not.toBeNull();
-      expect(Math.abs(first! - second!), "同一样例两遍档位波动应 ≤1").toBeLessThanOrEqual(1);
-      expect(Math.abs(first! - sample.band), `「${sample.question.slice(0, 20)}」与锚定档位偏差应 ≤1`).toBeLessThanOrEqual(1);
+      if (first === null || second === null) {
+        // band-0（未作答类）被 veto 记「未评分」是设计行为（不猜分），不算校准失败；
+        // band≥1 的真实回答必须稳定出分
+        if (sample.band === 0) unscoredBandZero.push(sample.question.slice(0, 24));
+        else mustScoreButUnscored.push(sample.question.slice(0, 24));
+        continue;
+      }
+      scored.push({ question: sample.question, band: sample.band, first, second });
+    }
+    expect(mustScoreButUnscored, `band≥1 样例必须出分（未评分=异常）: ${mustScoreButUnscored.join("、")}`).toEqual([]);
+    // 出分样例：两遍波动 ≤1 档、与锚定偏差 ≤1
+    for (const entry of scored) {
+      expect(Math.abs(entry.first - entry.second), `「${entry.question.slice(0, 20)}」两遍档位波动应 ≤1`).toBeLessThanOrEqual(1);
+      expect(Math.abs(entry.first - entry.band), `「${entry.question.slice(0, 20)}」与锚定档位偏差应 ≤1`).toBeLessThanOrEqual(1);
+    }
+    // 校准覆盖率：≥60% 样例出分（band-0 未作答类天然可能未评分）
+    expect(scored.length, "出分样例覆盖率").toBeGreaterThanOrEqual(Math.ceil(sampleCount * 0.6));
+    if (unscoredBandZero.length > 0) {
+      console.log(`[calibration] band-0 未作答样例记未评分（设计行为）: ${unscoredBandZero.length} 例`);
     }
   });
   it.skipIf(hasKey)("生产校准需要 DEEPSEEK_API_KEY（当前环境跳过；全量设 RUN_RUBRIC_CALIBRATION=1）", () => {

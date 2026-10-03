@@ -112,7 +112,8 @@ describe("bug-hunt: 数字溯源 fuzz（误杀=好方案被毙，漏杀=编造�
     for (let i = 0; i < 50; i += 1) {
       const n = Math.floor(Math.random() * 1000);
       expect(checkNumberProvenance(`团队规模${n}人`, [source, `团队规模${n}人`]).ok).toBe(true);
-      const m = Math.floor(Math.random() * 1000) + 2000;
+      // 范围避开 source 既有数字（2020/10/800/30/3），否则随机碰撞会造成偶发红
+      const m = Math.floor(Math.random() * 1000) + 5000;
       expect(checkNumberProvenance(`团队规模${m}人`, [source]).ok).toBe(false);
     }
   });

@@ -118,7 +118,9 @@ export async function parseRejectionNotice(
 }
 
 /** 用户确认后的入账：以活跃事实写记忆账本（封闭标签 + 原文引用 + 来源=用户确认）。
- *  verified_task 证据三件套沿 admission.ts 硬性要求（P0-1 同款）。 */
+ *  verified_task 证据三件套沿 admission.ts 硬性要求（P0-1 同款）。
+ *  保留理由（eng review S1-7 复核）：当前确认动作走 resolveMemoryCandidate 通用治理路径，
+ *  本函数是「确认 API 显式化」的既定接缝（专用确认端点/批量确认时启用），非死代码。 */
 export async function confirmRejectionToLedger(
   userId: string,
   parse: ParsedRejection,

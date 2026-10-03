@@ -9,6 +9,7 @@
  */
 import seedJson from "@/lib/agent/knowledge/registry/data/salary-seed.json";
 import { getDatabaseDriver, isPostgresConfigured, getPostgresPool } from "@/lib/postgres";
+import { familyForRole } from "@/lib/server/question-bank";
 
 export const AGGREGATION_MIN_SAMPLES = 30;
 export const AGGREGATION_WINDOW_MONTHS = 12;
@@ -175,7 +176,9 @@ export async function lookupBenchmark(city?: string, family?: string, levelBand?
   return findStaticBenchmark(city, family, levelBand);
 }
 
-/** 聚合纯函数（可测）：按 城市||family 分组取中位薪资，双条件（≥30 样本）过滤后产出聚合条目。 */
+/** 聚合纯函数（可测）：按 城市×岗位族（从 title 推断，familyForRole）分组取中位薪资，
+ *  双条件（≥30 样本）过滤后产出聚合条目。单族样本不足时并入该城市的 general 族——
+ *  避免「每个族都只有 5 条样本」时整城数据被双条件卡死。 */
 export function buildAggregateEntries(
   rows: Array<Record<string, unknown>>,
 ): Array<{ city: string; family: string; p25: number; p50: number; p75: number; sampleSize: number }> {
@@ -186,18 +189,35 @@ export function buildAggregateEntries(
     const max = Number(row.salary_max);
     if (!city || !Number.isFinite(min) || !Number.isFinite(max) || min <= 0 || max < min) continue;
     if (min < MIN_PLAUSIBLE_MONTHLY || max > MAX_AGGREGATION_MONTHLY) continue;
-    const key = `${city}||general`;
+    const family = familyForRole(String(row.title || ""));
+    const key = `${city}||${family}`;
     const list = groups.get(key) || [];
     list.push((min + max) / 2);
     groups.set(key, list);
   }
   const entries: Array<{ city: string; family: string; p25: number; p50: number; p75: number; sampleSize: number }> = [];
+  const cityTotals = new Map<string, number[]>();
   for (const [key, values] of groups) {
-    if (values.length < AGGREGATION_MIN_SAMPLES) continue;
+    if (values.length < AGGREGATION_MIN_SAMPLES) {
+      // 单族不足 30：样本先归入城市级 general 池（仍要过双条件）
+      const [city] = key.split("||");
+      const pool = cityTotals.get(city) || [];
+      pool.push(...values);
+      cityTotals.set(city, pool);
+      continue;
+    }
     const [city, family] = key.split("||");
     const sorted = [...values].sort((a, b) => a - b);
     const percentile = (p: number) => Math.round(sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))]);
     entries.push({ city, family, p25: percentile(0.25), p50: percentile(0.5), p75: percentile(0.75), sampleSize: values.length });
+  }
+  for (const [city, values] of cityTotals) {
+    if (values.length < AGGREGATION_MIN_SAMPLES) continue;
+    const general = groups.get(`${city}||general`);
+    if (general && general.length >= AGGREGATION_MIN_SAMPLES) continue; // 已有城市级条目则不重复写
+    const sorted = [...values].sort((a, b) => a - b);
+    const percentile = (p: number) => Math.round(sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))]);
+    entries.push({ city, family: "general", p25: percentile(0.25), p50: percentile(0.5), p75: percentile(0.75), sampleSize: values.length });
   }
   return entries;
 }
@@ -219,7 +239,7 @@ export async function aggregateSalaryBenchmarks(): Promise<{ aggregated: number;
   const client = await pool.connect();
   try {
     const rows = await client.query(
-      `SELECT city, salary_min, salary_max
+      `SELECT city, title, salary_min, salary_max
        FROM scan_jobs
        WHERE salary_min IS NOT NULL AND salary_max IS NOT NULL
          AND discovered_at >= now() - interval '12 months'`,

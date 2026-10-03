@@ -64,7 +64,7 @@ describe("Spec 28: 薪资抽取正则", () => {
 });
 
 describe("Spec 28: 聚合纯函数（双条件与百分位）", () => {
-  const row = (city: string, min: number, max: number) => ({ city, salary_min: min, salary_max: max });
+  const row = (city: string, min: number, max: number, title = "AI产品经理") => ({ city, title, salary_min: min, salary_max: max });
 
   it("29 样本不产出聚合条目；30 样本产出 1 条（spec 28 测试决策）", async () => {
     const { buildAggregateEntries } = await import("@/lib/server/salary-benchmarks-store");
@@ -73,7 +73,19 @@ describe("Spec 28: 聚合纯函数（双条件与百分位）", () => {
     const rows30 = Array.from({ length: 30 }, () => row("北京", 20000, 30000));
     const entries = buildAggregateEntries(rows30);
     expect(entries).toHaveLength(1);
-    expect(entries[0]).toMatchObject({ city: "北京", family: "general", sampleSize: 30, p25: 25000, p50: 25000, p75: 25000 });
+    // title「AI产品经理」→ familyForRole → ai_product（聚合 family 升维，eng review S1-10 收口）
+    expect(entries[0]).toMatchObject({ city: "北京", family: "ai_product", sampleSize: 30, p25: 25000, p50: 25000, p75: 25000 });
+  });
+
+  it("单族样本不足 30 时级联进城市级 general 池（整城数据不被双条件卡死）", async () => {
+    const { buildAggregateEntries } = await import("@/lib/server/salary-benchmarks-store");
+    const rows = [
+      ...Array.from({ length: 20 }, () => row("杭州", 20000, 30000, "AI产品经理")),
+      ...Array.from({ length: 15 }, () => row("杭州", 15000, 25000, "后端开发工程师")),
+    ];
+    const entries = buildAggregateEntries(rows);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ city: "杭州", family: "general", sampleSize: 35 });
   });
 
   it("百分位取有序切片：非均匀分布 P25/P50/P75 单调", async () => {

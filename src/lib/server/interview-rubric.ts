@@ -183,7 +183,7 @@ async function callRubricOnce(
       messages: [{ role: "user", content: userContent }],
       systemPrompt,
       temperature: 0.2,
-      maxTokens: 2000,
+      maxTokens: 4000,
     });
     return parseRubricJson(result.text);
   }
@@ -197,7 +197,7 @@ async function callRubricOnce(
       { role: "user", content: userContent },
     ],
     temperature: 0.2,
-    max_tokens: 2000,
+    max_tokens: 4000,
     response_format: { type: "json_object" },
     retries: 2,
     fallbackModel: "deepseek-flash",
