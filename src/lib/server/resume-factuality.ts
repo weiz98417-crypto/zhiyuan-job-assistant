@@ -31,10 +31,13 @@ function normalizeDigits(text: string): string {
 }
 
 const NUMBER_TOKEN_RE = /\d+(?:\.\d+)?/g;
+/** 产品名/版本号里的数字（GPT-4、GPT-4o、Web3、K8s、A4、v1.5）不是数量，溯源前剥离——否则提到新产品名即整方案被毙。 */
+const PRODUCT_VERSION_RE = /[A-Za-z]+-?\d+(?:\.\d+)?[A-Za-z]*/g;
 
-/** 提取文本中的数字 token（归一化后）。中文数字不参与。 */
+/** 提取文本中的数字 token（归一化后）。中文数字与产品名/版本号内嵌数字不参与。 */
 export function extractNumberTokens(text: string): string[] {
-  return normalizeDigits(text || "").match(NUMBER_TOKEN_RE) || [];
+  const cleaned = normalizeDigits(text || "").replace(PRODUCT_VERSION_RE, " ");
+  return cleaned.match(NUMBER_TOKEN_RE) || [];
 }
 
 /** 产物内容对事实源的数字溯源检查。 */

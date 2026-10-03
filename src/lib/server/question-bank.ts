@@ -8,6 +8,8 @@
  * 出题协议（出题顺序/项目深挖七层等完整问题地图）留待题库有真实使用数据后迭代。
  */
 import { loadRegistryText } from "@/lib/agent/knowledge/registry/loader";
+import { getPostgresPool } from "@/lib/postgres";
+import type { Pool } from "pg";
 
 export interface QuestionCard extends ComposedQuestion {
   category: string;
@@ -82,7 +84,7 @@ export function createPostgresQuestionBankStore(): QuestionBankStore {
       try {
         const { getDatabaseDriver, isPostgresConfigured } = await import("@/lib/postgres");
         if (getDatabaseDriver() !== "postgres" || !isPostgresConfigured()) return false;
-        const pool = getPool();
+        const pool = resolvePool();
         const result = await pool.query("SELECT 1 FROM interview_questions LIMIT 1");
         return result.rowCount !== null;
       } catch {
@@ -90,7 +92,7 @@ export function createPostgresQuestionBankStore(): QuestionBankStore {
       }
     },
     async queryCandidates(query) {
-      const pool = getPool();
+      const pool = resolvePool();
       const params: unknown[] = [];
       const conditions: string[] = [];
       if (query.family) { params.push(query.family); conditions.push(`family = $${params.length}`); }
@@ -124,18 +126,13 @@ export function createPostgresQuestionBankStore(): QuestionBankStore {
   };
 }
 
-import type { Pool } from "pg";
+/** 测试专用：注入 pool（置 null 恢复默认）。 */
 let poolOverride: Pool | null = null;
-function getPool(): Pool {
-  if (poolOverride) return poolOverride;
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const postgres = require("@/lib/postgres") as typeof import("@/lib/postgres");
-  return postgres.getPostgresPool();
-}
-
-/** 测试专用：注入 pool。 */
 export function setQuestionBankPoolForTests(pool: Pool | null): void {
   poolOverride = pool;
+}
+function resolvePool(): Pool {
+  return poolOverride ?? getPostgresPool();
 }
 
 function buildBankSection(candidates: BankQuestionRow[]): string {

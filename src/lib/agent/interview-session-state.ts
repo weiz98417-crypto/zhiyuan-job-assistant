@@ -536,7 +536,8 @@ export function projectDurableInterviewEngineState(value: unknown): InterviewSes
 export function rebuildInterviewStateFromMessages(
   state: InterviewSessionState | undefined,
   messages: AgentMessage[],
-): InterviewSessionState | undefined {  let next: InterviewSessionState | undefined = state?.planSnapshot
+): InterviewSessionState | undefined {
+  let next: InterviewSessionState | undefined = state?.planSnapshot
     ? {
         ...state,
         currentQuestionId: undefined,

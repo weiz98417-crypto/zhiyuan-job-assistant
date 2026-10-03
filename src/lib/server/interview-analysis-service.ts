@@ -17,15 +17,6 @@ import { composeInterview, familyForRole, type QuestionBankStore } from "@/lib/s
 import { getPostgresPool } from "@/lib/postgres";
 import { COACH_MODES, type AnswerScore, type CoachMode, type InterviewQuestion } from "@/types";
 
-const MODE_WEIGHTS: Record<CoachMode, Record<keyof AnswerScore["dimensions"], number>> = {
-  "project-review": { structure: 0.30, specificity: 0.30, highlight: 0.25, timing: 0.15 },
-  behavioral: { structure: 0.30, specificity: 0.30, highlight: 0.25, timing: 0.15 },
-  scenario: { structure: 0.25, specificity: 0.25, highlight: 0.30, timing: 0.20 },
-  "structured-sme": { structure: 0.30, specificity: 0.35, highlight: 0.20, timing: 0.15 },
-  founder: { structure: 0.20, specificity: 0.25, highlight: 0.35, timing: 0.20 },
-  stability: { structure: 0.40, specificity: 0.20, highlight: 0.10, timing: 0.30 },
-};
-
 /** Spec 26：评分器/题库的测试注入点（与生产默认实现同形）。 */
 export interface InterviewServiceOverrides {
   rubricCompletion?: RubricCompletion;
@@ -167,7 +158,7 @@ export async function generateInterviewQuestionsForAgent(
       completion: overrides.bankCompletion,
     });
     if (composed.questions.length > 0) {
-      const bankQuestions = composed.questions.map((item) => normalizeComposedQuestion(item));
+      const bankQuestions = composed.questions.map((item) => normalizeComposedQuestion(item, phaseToBankPhase(categories)));
       return { questions: bankQuestions, company, role, mode, memoryContext };
     }
   } catch (error) {
@@ -215,10 +206,13 @@ export async function generateInterviewQuestionsForAgent(
   return { questions, company, role, mode, memoryContext };
 }
 
-/** ComposedQuestion → InterviewQuestion（工具卡兼容形状）。 */
-function normalizeComposedQuestion(item: { question: string; source: string; provenance: string }): InterviewQuestion {
+/** ComposedQuestion → InterviewQuestion（工具卡兼容形状）；category 按请求阶段映射而非硬编码。 */
+function normalizeComposedQuestion(item: { question: string; source: string; provenance: string }, phaseHint?: string): InterviewQuestion {
+  const category = phaseHint === "tech" || phaseHint === "reverse"
+    ? phaseHint === "tech" ? "technical" : "culture"
+    : "behavioral";
   return {
-    category: "behavioral",
+    category,
     question: item.question,
     context: `出处：${item.provenance}`,
     storyHint: "",
@@ -884,7 +878,3 @@ function numericValue(value: unknown): number | undefined {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
-function boundedScore(value: unknown): number {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? Math.max(1, Math.min(5, parsed)) : 3;
-}
