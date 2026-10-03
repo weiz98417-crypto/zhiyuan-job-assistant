@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { readFileSync, existsSync } from "fs";
-import { resolve } from "path";
+import { loadModeDocument } from "@/lib/agent/knowledge/registry/loader";
 
 export async function GET(
   _request: Request,
@@ -13,15 +12,10 @@ export async function GET(
     return NextResponse.json({ success: false, error: "模式文件不存在" }, { status: 404 });
   }
 
-  const path = resolve(process.cwd(), "modes", "zh", `${mode}.md`);
-  if (!existsSync(path)) {
+  // Spec 25：modes 统一经注册表加载器读取（null=文件缺失，语义同旧 404）
+  const content = loadModeDocument("zh", mode);
+  if (content === null) {
     return NextResponse.json({ success: false, error: "模式文件不存在" }, { status: 404 });
   }
-
-  try {
-    const content = readFileSync(path, "utf-8");
-    return NextResponse.json({ success: true, data: { content } });
-  } catch {
-    return NextResponse.json({ success: false, error: "读取模式文件失败" }, { status: 500 });
-  }
+  return NextResponse.json({ success: true, data: { content } });
 }

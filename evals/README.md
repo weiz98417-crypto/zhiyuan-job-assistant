@@ -28,7 +28,7 @@ npm run gen:en-modes:translate       # 中文源变更后重生成英文镜像�
 
 前置：生产库跑 `src/lib/postgres-schema.sql` 尾部新增段（四张新表 + scan_jobs 加列，全部 IF NOT EXISTS/ADD COLUMN IF NOT EXISTS，可重复执行）；`DEEPSEEK_API_KEY` 已配置。
 
-1. **题库冷启动**：`npm run seed:question-bank` → 预期导入 76 题（4 岗位族）。想扩量：`npm run seed:question-bank -- --generate 20`（每族再生成 20 题，幂等）。
+1. **题库冷启动**：`npm run seed:question-bank` → 导入手写 76 题 + LLM 生成种子（gen-*.json，2026-10-03 扩量后一级族 160+、二级 70+）。本地无 Postgres 时先在有 DATABASE_URL 的机器跑一次无参导入（幂等）。补量：`node --env-file=.env scripts/seed-question-bank.mjs --out`（无 DB 生成）或 `-- --generate N`（直写 DB）。
 2. **面试教练全链路**：对面试教练发起模拟面试 → 验证①题目卡带出处标签②追问针对内容缺口（完整回答不再被强制追问）③评分卡有 0-4 档位+每维原文引用+三态判定④单场分数不再出现在记忆候选里。
 3. **趋势入账**：同一弱项跨 3 场模拟面试后 → `interview_weakness_events` 出现记录 → 记忆治理页出现「面试趋势（≥3 场）」候选 → 确认后激活、可纠正可清除。
 4. **改简历防编造**：让简历 agent 优化一段经历并诱导它写原文没有的数字 → 预期「数字溯源未通过（重试 1 次后仍失败），XX 保持原文未改动」或重试后通过；faithfulness 低分的方案标题带「仅供参考：」前缀。
@@ -52,7 +52,7 @@ npm run gen:en-modes:translate       # 中文源变更后重生成英文镜像�
 1. **生成链事实门**（P1-2）：`resume-generation-service` 尚未挂数字溯源（Spec 24「覆盖两条链」只完成了优化链）；生成链的产物以「从画像生成全新简历」为主、数字多来自画像本身，延后到 0.15.x 补丁。
 2. **聚合岗位族/年限段维度**（P1-10/11）：薪资聚合暂按城市×通用族（family='general'）；`familyForRole` 已备好、聚合升维是纯 SQL 改动；正则 plausibility gate（2k-200k 之外丢弃、「10K QPS」误报）延后；risk-intel.md 的 46 条年薪限段数据仍在经 mode context 注入（与 seed 并存、语义不同层），合一待 modes 收口列车。
 3. **旧投影路径删除**（P1-12）：`inferQuestionKind` 正则仍服务 legacy 会话（见上「已知边界」末条）。
-4. **种子量与大厂差异化**（P1-14）：种子 76 题（spec 目标一级 150-200/族）——用 `npm run seed:question-bank -- --generate N` 扩量；13 家大厂差异化与 JD 评估 B 板块接 composeInterview 延后；10% 人工抽检记录待首批线上数据。
+4. **种子量与大厂差异化**（P1-14，2026-10-03 已闭）：种子扩至一级族 160+/二级 70+（LLM 生成种子在 gen-*.json，10% 人工抽检仍待首批线上数据前做一次）；13 家大厂差异化已落（美团/京东/拼多多→structured-sme，网易→stability，其余 project-review）；JD 评估接 composeInterview 已落（评估完成取 3 道带出处题附 F 板块）。
 5. **D 板块估算的结构性强制**（P1-15）：来源标注已注入 prompt 但「估算不计入总分」暂无确定性校验用例——总分本就是 LLM 自报（既有架构），等 Spec 28 评估器收口时一起治。
 6. **modes/ 全量迁注册表**（P2）：loadModeContext/agent-mode-service 等仍直读 modes 文件（行为等价）；注册表当前收口的是服务内嵌 prompt 与单源收敛，modes 全量搬家用「迁移不改语义」流程单独走。
 7. ** coach overlay 的 cvText**（P2）：移除 localStorage 后 overlay 不再携带简历摘要（此前在服务端恒为空、行为等价）；如需注入走 session binding 参数，随面试 UI 迭代。

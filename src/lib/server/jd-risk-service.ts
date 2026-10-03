@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import yaml from "js-yaml";
+import { loadModeDocument } from "@/lib/agent/knowledge/registry/loader";
 
 export type JDRiskSeverity = "critical" | "high" | "medium" | "low";
 
@@ -70,10 +71,10 @@ function loadTriggers(): Trigger[] {
 }
 
 function loadRiskIntelligence(): { terms: RiskTerm[]; patterns: RiskPattern[] } {
-  const filePath = join(process.cwd(), "modes", "zh", "risk-intel.md");
-  if (!existsSync(filePath)) return { terms: [], patterns: [] };
+  // Spec 25：modes 统一经注册表加载器读取
+  const markdown = loadModeDocument("zh", "risk-intel");
+  if (markdown === null) return { terms: [], patterns: [] };
   try {
-    const markdown = readFileSync(filePath, "utf8");
     const block = markdown.match(/```yaml\s*([\s\S]*?)```/i)?.[1];
     if (!block) return { terms: [], patterns: [] };
     const parsed = yaml.load(block) as { terms?: unknown; patterns?: unknown } | undefined;

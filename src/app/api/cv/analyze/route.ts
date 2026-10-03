@@ -41,12 +41,12 @@ export async function POST(request: Request) {
       );
     }
 
-    // Load Block B (CV Match) context from modes
-    const jianzhiPath = path.join(process.cwd(), "modes", "zh", "jianzhi.md");
+    // Load Block B (CV Match) context from modes（Spec 25 统一加载器）
+    const { loadModeDocument } = await import("@/lib/agent/knowledge/registry/loader");
+    const jianzhiContent = loadModeDocument("zh", "jianzhi");
     let cvMatchContext = "";
-    if (fs.existsSync(jianzhiPath)) {
-      const content = fs.readFileSync(jianzhiPath, "utf-8");
-      const blockBMatch = content.match(/## B[.\s]+简历匹配([\s\S]*?)(?=## C|$)/);
+    if (jianzhiContent !== null) {
+      const blockBMatch = jianzhiContent.match(/## B[.\s]+简历匹配([\s\S]*?)(?=## C|$)/);
       if (blockBMatch) cvMatchContext = blockBMatch[1].trim().slice(0, 2000);
     }
 

@@ -13,7 +13,7 @@ import manifestRaw from "./manifest.json";
 export interface RegistryEntry {
   id: string;
   path: string;
-  kind: "prompt" | "yaml" | "json";
+  kind: "prompt" | "yaml" | "json" | "modes_dir";
   lang: "zh" | "en" | "both";
   source: string;
   version: string;
@@ -76,10 +76,32 @@ export function loadRegistryYaml<T>(id: string): T {
   return yaml.load(readEntryRaw(entry)) as T;
 }
 
+/**
+ * modes 文档统一读取（Spec 25 全量登记的收口点）。
+ * zh 文件在 modes/zh/<name>.md；en 镜像在 modes/ 顶层（文件名映射见 scripts/gen-en-modes.mjs 的 FILE_MAP）。
+ * 返回 null = 文件不存在（调用方按各自既有语义处理 404/跳过）；内容原样返回，不做 frontmatter 剥离
+ * （modes 文件未登记 frontmatter 纪律，逐字节等价于旧 fs.readFileSync 路径）。
+ */
+export function loadModeDocument(language: "zh" | "en", name: string): string | null {
+  const safeName = `${path.basename(name, ".md")}.md`; // 防路径穿越，沿用旧路由的白名单语义
+  const absolute = language === "zh"
+    ? path.join(repoRoot(), "modes", "zh", safeName)
+    : path.join(repoRoot(), "modes", safeName);
+  if (!fs.existsSync(absolute)) return null;
+  return fs.readFileSync(absolute, "utf8");
+}
+
 /** 注册表完整性自检：文件存在 + frontmatter 含 id/version。供护栏与测试调用。 */
 export function verifyRegistryIntegrity(): Array<{ id: string; ok: boolean; problem?: string }> {
   return REGISTRY_MANIFEST.map((entry) => {
     try {
+      if (entry.kind === "modes_dir") {
+        // 目录条目：存在性检查即可（内含文件由 drift 护栏按文件粒度覆盖）
+        if (!fs.existsSync(path.join(repoRoot(), entry.path))) {
+          return { id: entry.id, ok: false, problem: `目录缺失: ${entry.path}` };
+        }
+        return { id: entry.id, ok: true };
+      }
       const raw = readEntryRaw(entry);
       if (entry.kind === "prompt") {
         const { frontmatter } = stripFrontmatter(raw);
@@ -90,6 +112,5 @@ export function verifyRegistryIntegrity(): Array<{ id: string; ok: boolean; prob
       return { id: entry.id, ok: true };
     } catch (error) {
       return { id: entry.id, ok: false, problem: error instanceof Error ? error.message : String(error) };
-    }
-  });
+    }  });
 }

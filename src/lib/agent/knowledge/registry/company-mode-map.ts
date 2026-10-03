@@ -1,7 +1,12 @@
 /**
- * 公司 → 面试教练模式映射（Spec 25 单源）。
- * 此前在 interview-agent.ts 与 interview-coach-prompt.ts 各有一份逐字重复的表；
- * 现在两处都从这里导入。新增公司 = 改这一处。
+ * 公司 → 面试教练模式映射（Spec 25 单源；eng review 遗留项：13 家大厂差异化）。
+ *
+ * 差异依据是各公司公开可查的面试风格共识（而非精确 内幕——面试形式随团队/年份变化，
+ * 这里取的是「主流声音的众数」）：
+ * - project-review（项目复盘深挖+数据追问）：字节/腾讯/阿里/百度/小米/快手/小红书/滴滴/B站——主流大厂技术/产品面的共性形态；
+ * - structured-sme（结构化、标准流程、细节与即战力）：美团（结构化面试著称）、京东（流程化体系化）、拼多多（快节奏标准化高强度）；
+ * - stability（稳重应答、稳定性与长期规划）：网易（文化稳重、节奏平缓的重 Screening 风格）。
+ * 新公司/新认知 = 改这一处数据；模式定义见 COACH_MODES。
  */
 import type { CoachMode } from "@/types";
 
@@ -10,15 +15,15 @@ export const COMPANY_MODE_MAP: Record<string, CoachMode> = {
   tencent: "project-review",
   alibaba: "project-review",
   baidu: "project-review",
-  meituan: "project-review",
   xiaomi: "project-review",
-  jd: "project-review",
-  pinduoduo: "project-review",
   kuaishou: "project-review",
   xiaohongshu: "project-review",
   didi: "project-review",
   bilibili: "project-review",
-  netease: "project-review",
+  meituan: "structured-sme",
+  jd: "structured-sme",
+  pinduoduo: "structured-sme",
+  netease: "stability",
 };
 
 export const STATE_OWNED_PATTERNS = /国企|央企|国有|银行|编制|事业单位/;

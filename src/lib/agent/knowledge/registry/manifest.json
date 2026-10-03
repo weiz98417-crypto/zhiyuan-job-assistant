@@ -111,6 +111,35 @@
       "version": "0.1.0",
       "lastReviewed": "2026-10-03",
       "consumers": []
+    },
+    {
+      "id": "data.modes-zh",
+      "path": "modes/zh",
+      "kind": "modes_dir",
+      "lang": "zh",
+      "source": "spec-25 (full inventory registration; loading via loadModeDocument)",
+      "version": "1.0.0",
+      "lastReviewed": "2026-10-03",
+      "consumers": [
+        "src/lib/server/jd-evaluation-service.ts",
+        "src/lib/server/jd-risk-service.ts",
+        "src/lib/server/agent-mode-service.ts",
+        "src/app/api/evaluate/stream/route.ts",
+        "src/app/api/cv/analyze/route.ts",
+        "src/app/api/agent/decode-terms/route.ts",
+        "src/app/api/agent/mode/[mode]/route.ts",
+        "scripts/scan-risks.mjs (应用外脚本，直读不动)"
+      ]
+    },
+    {
+      "id": "data.modes-en-mirror",
+      "path": "modes",
+      "kind": "modes_dir",
+      "lang": "en",
+      "source": "spec-25 (generated mirror; per-file hashes in scripts/.gen-en-modes.manifest.json; drift-guarded)",
+      "version": "1.0.0",
+      "lastReviewed": "2026-10-03",
+      "consumers": ["src/lib/server/jd-evaluation-service.ts", "src/app/api/evaluate/stream/route.ts"]
     }
   ]
 }

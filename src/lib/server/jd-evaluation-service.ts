@@ -1,6 +1,5 @@
-import fs from "node:fs";
-import path from "node:path";
 import { llmRetry } from "@/lib/llm-retry";
+import { loadModeDocument } from "@/lib/agent/knowledge/registry/loader";
 import { computeEvaluationOverallScore } from "@/lib/evaluation-scoring";
 import { isFivePointScore } from "@/lib/score-scale";
 
@@ -51,6 +50,8 @@ export interface JDEvaluationResult {
   fullMarkdown: string;
   /** Spec 28：D 板块引用的薪资数据来源标注（静态参考/实时聚合·N 条样本）。 */
   salaryDataSource?: string;
+  /** Spec 27：题库命中的针对性练习题（带出处标签），已同时附进 F 板块正文。 */
+  interviewQuestions?: Array<{ question: string; provenance: string }>;
 }
 
 export interface JDEvaluationCompletionAdapter {
@@ -104,6 +105,30 @@ export async function evaluateJobDescription(
     // 落库：来源标注写进 D 板块正文尾注（持久化的是 blocks 文本，单独字段会丢）
     result.blocks.d = `${result.blocks.d || ""}\n\n*市场薪资数据来源：${salaryDataSource}*`.trim();
   }
+  // Spec 27：JD 评估接题库——评估完成后从 composeInterview 取 3 道贴合 JD/岗位族的题
+  // 附进 F 板块（面试准备），带出处标签。Postgres-only 且非阻塞（题库不可用时 F 板块原样）。
+  try {
+    const { composeInterview, familyForRole } = await import("@/lib/server/question-bank");
+    const composed = await composeInterview({
+      family: familyForRole(input.userProfile?.targetRoles?.[0]?.name || result.role),
+      phase: "tech",
+      role: result.role,
+      company: result.company,
+      jdText: input.jdText,
+      cvText: input.cvText,
+      count: 3,
+      signal: input.signal,
+    });
+    if (composed.questions.length > 0) {
+      const questionLines = composed.questions.map((question, index) =>
+        `${index + 1}. ${question.question}（出处：${question.provenance}）`);
+      result.interviewQuestions = composed.questions.map((question) => ({
+        question: question.question,
+        provenance: question.provenance,
+      }));
+      result.blocks.f = `${result.blocks.f || ""}\n\n### 题库命中的针对性练习题\n${questionLines.join("\n")}`.trim();
+    }
+  } catch { /* 题库不可用不阻塞评估（F 板块保持 LLM 原文） */ }
   return result;
 }
 
@@ -172,18 +197,13 @@ function buildSystemPrompt(language: "zh" | "en", riskContext = "", matchResume 
 }
 
 function loadModeContext(language: "zh" | "en"): string {
-  const modesDir = language === "en"
-    ? path.join(process.cwd(), "modes")
-    : path.join(process.cwd(), "modes", "zh");
-  const files = [
-    path.join(modesDir, "_shared.md"),
-    path.join(modesDir, language === "en" ? "oferta.md" : "jianzhi.md"),
-    path.join(modesDir, "_profile.md"),
-  ];
-  return files
-    .filter((file) => fs.existsSync(file))
-    .map((file) => fs.readFileSync(file, "utf8"))
-    .join("\n\n");
+  // Spec 25：modes 统一经注册表加载器读取（内容与旧 fs 路径逐字节等价；en 无 _profile 属既有事实）
+  const read = (name: string) => loadModeDocument(language, name) ?? "";
+  return [
+    read("_shared"),
+    read(language === "en" ? "oferta" : "jianzhi"),
+    language === "zh" ? read("_profile") : "",
+  ].filter(Boolean).join("\n\n");
 }
 
 function buildUserContent(input: JDEvaluationInput, language: "zh" | "en"): string {

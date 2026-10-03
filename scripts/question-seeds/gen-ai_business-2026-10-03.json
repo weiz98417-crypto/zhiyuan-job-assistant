@@ -1,0 +1,427 @@
+{
+  "family": "ai_business",
+  "provenance": "generated_seed",
+  "provenanceDetail": "llm-batch 2026-10-03 (--out mode)",
+  "questions": [
+    {
+      "question": "在AI项目售前阶段，你如何评估客户现有数据是否满足模型训练要求？需要关注哪些维度？",
+      "topic": "数据 readiness 评估",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "数据量、质量、标注、覆盖度、合规性等。"
+    },
+    {
+      "question": "客户担心AI模型会泄露商业机密，你如何从技术和流程上打消其顾虑？",
+      "topic": "数据安全与隐私保护",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "本地部署、加密、脱敏、权限控制、合规认证。"
+    },
+    {
+      "question": "解释一下你理解的AI模型可解释性，以及在售前如何向客户传递可解释性的价值？",
+      "topic": "可解释性",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "黑盒问题、业务信任、监管要求、可视化解释。"
+    },
+    {
+      "question": "讲一次你不得不拒绝客户某个AI功能需求，因为技术不可行或成本过高。你是怎么沟通的？",
+      "topic": "管理客户期望与拒绝技巧",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "共情、替代方案、数据支撑、维护关系。"
+    },
+    {
+      "question": "当多个客户同时提出紧急需求，而你资源有限，你如何排列优先级？",
+      "topic": "多任务优先级管理",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "影响面、紧急度、ROI、沟通预期。"
+    },
+    {
+      "question": "描述一次你快速学习一项新AI技术（如大模型、RAG）并应用到客户方案中的经历。",
+      "topic": "快速学习与应用",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "学习路径、实践验证、客户价值、分享。"
+    },
+    {
+      "question": "客户想用AI做智能质检，但只有少量标注数据。你会如何设计一个可行的启动方案？",
+      "topic": "小样本启动策略",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "预训练模型、迁移学习、主动学习、人工审核。"
+    },
+    {
+      "question": "为一家零售客户设计AI会员复购预测方案，你会怎么估算ROI并说服客户投资？",
+      "topic": "ROI估算与价值证明",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "成本节省、收入提升、转化率、周期、对比基线。"
+    },
+    {
+      "question": "你如何看待AI伦理问题（如偏见、隐私）？在售前/运营中如何体现责任感？",
+      "topic": "AI伦理与责任感",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "公平性、透明度、合规、客户沟通。"
+    },
+    {
+      "question": "你平时通过哪些渠道跟进AI最新动态？最近关注的一个AI趋势是什么？",
+      "topic": "行业跟进与学习热情",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "论文、社区、产品更新、实践应用。"
+    },
+    {
+      "question": "如果你要对我们公司的AI产品提出一个改进建议，基于公开信息，你会提什么？",
+      "topic": "产品批判性思维",
+      "phase": "reverse",
+      "difficulty": "medium",
+      "answerPoints": "用户痛点、竞品对比、可落地、表达建设性。"
+    },
+    {
+      "question": "你会问我们哪些问题来判断这个岗位是否适合你？",
+      "topic": "反向面试与岗位匹配",
+      "phase": "reverse",
+      "difficulty": "medium",
+      "answerPoints": "团队、资源、考核、成长、文化。"
+    },
+    {
+      "question": "讲一次你与产品/研发团队就客户需求优先级发生分歧，最终如何达成一致的？",
+      "topic": "跨部门冲突解决与优先级共识",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "先对齐客户业务价值，用数据量化影响；再拉齐技术可行性，寻找折中方案；最终由共同目标驱动决策，并复盘流程。"
+    },
+    {
+      "question": "解释一下 RAG 的基本原理，以及它相比微调在售前方案中的适用场景和局限。",
+      "topic": "RAG 与微调的技术选型",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "RAG 检索外部知识增强生成，适合知识频繁更新、数据敏感场景；微调适合固定风格/任务。RAG 依赖检索质量，微调成本高、更新难。"
+    },
+    {
+      "question": "客户想用大模型做智能合同审查，但担心幻觉。你会如何设计一个包含人工审核的混合流程？",
+      "topic": "大模型幻觉风险与人工兜底流程",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "先做条款抽取与风险分级，大模型只给建议；高风险必须人工复核，低风险抽样；记录置信度与来源，持续反馈优化。"
+    },
+    {
+      "question": "你如何看待售前/运营在工作中需要不断“承诺”客户，但又不能过度承诺？你的原则是什么？",
+      "topic": "诚信与客户期望管理",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "承诺可验证的阶段性目标，明确边界与假设；对不确定项给方案而非保证；用书面记录对齐，避免口头过度承诺。"
+    },
+    {
+      "question": "在 AI 项目中，如何设计 A/B 测试来验证一个智能推荐功能对转化率的提升？",
+      "topic": "A/B 测试设计与因果推断",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "明确假设与主指标（转化率），随机分流，控制变量；计算样本量与显著性，观察周期；排除新奇效应，分析分层结果。"
+    },
+    {
+      "question": "一个制造业客户想用 AI 做设备预测性维护，但数据只有半年且故障样本极少。你会如何制定分阶段落地路线？",
+      "topic": "小样本与冷启动落地策略",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "先做异常检测与规则兜底，积累数据；再引入迁移学习/半监督；最后逐步过渡到预测模型。同步部署传感器与标注流程。"
+    },
+    {
+      "question": "讲一次你主动发现客户未说出口的痛点，并把它转化为商机的经历。",
+      "topic": "需求挖掘与商机转化",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "通过现场观察和一线访谈发现效率瓶颈；用数据验证影响；提出小范围 POC 证明价值，再扩展为正式方案与预算。"
+    },
+    {
+      "question": "关于我们公司 AI 产品的市场定位，你会问哪三个问题来评估这个岗位的成长空间？",
+      "topic": "反向提问与岗位判断",
+      "phase": "reverse",
+      "difficulty": "medium",
+      "answerPoints": "问目标客户与差异化、产品路线图、售前/运营在其中的角色；问成功衡量标准；问团队当前最大挑战与资源投入。"
+    },
+    {
+      "question": "解释一下你如何用 prompt engineering 提升大模型在客服场景的回复质量，并举一个具体技巧。",
+      "topic": "提示词工程与客服效果优化",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "设定角色与语气，提供少样本示例，分步思考；限制输出格式。例如用“先判断意图，再按模板回复”降低幻觉。"
+    },
+    {
+      "question": "金融客户想用 AI 做反欺诈，但监管要求模型决策可追溯。你会如何设计模型监控与文档体系？",
+      "topic": "合规可追溯与模型监控",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "记录特征、版本、阈值与决策日志；建立模型卡与变更审批；定期公平性/稳定性审计；提供可解释报告供监管检查。"
+    },
+    {
+      "question": "你更喜欢在快速试错、流程不完善的环境中工作，还是在流程成熟、分工明确的环境中工作？为什么？",
+      "topic": "工作环境适应性与主动性",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "倾向快速试错环境，能主动定义流程、快速验证；也尊重成熟流程的效率。关键看岗位阶段，愿意补位并推动标准化。"
+    },
+    {
+      "question": "讲一次你为了达成客户目标，主动协调内部资源（如研发、法务）的经历，结果如何？",
+      "topic": "内部资源协调与推进力",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "先明确客户 deadline 与价值，再找关键决策人；用一页纸说明需求与风险；定期同步进度，最终按时交付并复盘。"
+    },
+    {
+      "question": "解释大模型 Agent 与固定工作流编排的区别，在售前方案中如何选择？",
+      "topic": "考查对大模型 Agent 与工作流编排的理解及方案选型能力。",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "Agent 自主规划工具调用，适合开放复杂任务；工作流确定性强、成本低、易调试，适合流程固定场景。选型看任务确定性、容错率和合规要求。"
+    },
+    {
+      "question": "如何向客户解释大模型的上下文窗口限制及其对长文档处理方案的影响？",
+      "topic": "考查对 LLM 上下文限制的认知及方案设计沟通能力。",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "说明 token 上限、注意力衰减和成本影响；长文档可用分块+检索（RAG）、摘要链或微调。向客户强调按需检索而非全量输入，平衡效果与成本。"
+    },
+    {
+      "question": "如何评估一个 RAG 系统的检索质量？在售前如何向客户展示检索效果？",
+      "topic": "考查 RAG 检索评估指标及售前演示设计能力。",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "指标：召回率、精确率、MRR、命中率。售前用客户真实文档做 demo，展示 top-k 结果、引用来源和回答准确性，对比无 RAG 的差异。"
+    },
+    {
+      "question": "如何设计 AI 产品的灰度发布与回滚机制，并在售前向客户介绍以降低风险？",
+      "topic": "考查 AI 产品上线风险控制及售前风险沟通能力。",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "灰度：按用户/流量分批，监控关键指标，设阈值自动暂停。回滚：版本快照、一键切换。售前强调可控制、可观测、可回退，降低客户决策顾虑。"
+    },
+    {
+      "question": "讲一次你通过数据分析发现 AI 产品使用中的异常模式（如某功能被滥用或误用），并推动改进的经历。",
+      "topic": "考查数据敏感度、问题定位及推动产品改进的能力。",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "描述发现过程（看哪些指标）、异常表现、根因分析（用户引导/模型偏差/流程漏洞）、推动改进动作（产品优化/运营策略）及量化结果。"
+    },
+    {
+      "question": "讲一次你被客户当场挑战技术细节，而你事先没准备，你怎么应对？",
+      "topic": "考查临场应变、技术诚信及客户沟通能力。",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "先承认不确定，承诺会后确认，避免瞎编；记录问题，快速找研发核实，24 小时内给准确答复。强调诚信和跟进闭环，反而增强信任。"
+    },
+    {
+      "question": "作为售前/运营，你如何把客户需求反馈给产品团队并影响路线图？",
+      "topic": "考查需求管理、跨部门沟通及产品影响力。",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "按频次、价值、战略契合度分类需求；用客户原话+数据+ROI 说服产品；参与需求评审，争取试点客户。定期同步进展，形成闭环。"
+    },
+    {
+      "question": "讲一次你在跨部门协作中，因信息不同步导致客户体验受损，你如何补救并建立机制。",
+      "topic": "考查跨部门协作、危机补救及流程优化能力。",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "先向客户致歉并快速补救；复盘信息断点，建立共享文档、定期同步会、明确责任人。结果：客户满意度恢复，类似问题不再发生。"
+    },
+    {
+      "question": "教育行业客户想用 AI 做个性化学习路径推荐，但缺乏学生行为数据，你会如何冷启动？",
+      "topic": "考查冷启动方案设计、数据策略及教育场景理解。",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "先用专家规则+少量问卷调查做冷启动；设计轻量互动埋点，快速积累数据；用知识图谱构建内容关联。分阶段：规则→协同过滤→深度学习，向客户展示迭代路径。"
+    },
+    {
+      "question": "银行客户想用 AI 做财富管理产品推荐，但合规要求不能基于敏感个人信息。你会如何设计特征和方案？",
+      "topic": "考查合规约束下的 AI 方案设计能力及金融风控意识。",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "排除敏感特征，用行为脱敏数据、产品属性、市场数据；采用联邦学习或差分隐私；推荐结果做可解释性报告，人工复核。强调合规前置，与法务共创。"
+    },
+    {
+      "question": "医疗客户想用 AI 做病历质控，但医生抵触。你会如何设计试点和推广策略？",
+      "topic": "考查医疗场景落地、变革管理及用户推广能力。",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "先选年轻医生或试点科室，AI 只做辅助提示不扣分；用数据展示节省时间、减少返工；邀请医生参与规则设计，建立反馈通道。逐步扩大。"
+    },
+    {
+      "question": "你会问我们哪些问题来评估公司对 AI 产品的投入决心和资源支持？",
+      "topic": "考查候选人反向评估公司投入及岗位资源匹配度。",
+      "phase": "reverse",
+      "difficulty": "medium",
+      "answerPoints": "问研发团队规模与占比、产品路线图更新频率、售前/运营预算、客户成功案例投入、高层对 AI 的考核指标。从答案判断是战略投入还是试水。"
+    },
+    {
+      "question": "解释模型漂移（model drift）的概念，以及在 AI 售前/运营中如何向客户说明监控和缓解策略。",
+      "topic": "模型漂移监控与缓解",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "说明漂移类型（数据/概念），监控指标如准确率下降，缓解包括定期重训、在线学习、设置警报。向客户强调持续运维价值。"
+    },
+    {
+      "question": "对比批处理推理和实时推理，在向客户推荐方案时你会考虑哪些因素？",
+      "topic": "推理模式选择",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "考虑延迟要求、吞吐量、成本、数据实时性。批处理适合离线分析，实时适合交互场景。向客户说明架构差异与成本权衡。"
+    },
+    {
+      "question": "如何评估一个 AI 用例的技术可行性？你会从哪些维度打分？",
+      "topic": "技术可行性评估",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "从数据量、质量、标注、算法成熟度、算力、集成难度、合规风险打分。输出可行性矩阵，明确高风险点与验证步骤。"
+    },
+    {
+      "question": "解释什么是向量数据库，以及在售前如何向客户解释它的价值。",
+      "topic": "向量数据库价值",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "解释其存储嵌入向量、支持语义搜索。价值：提升检索准确率、处理非结构化数据。向客户类比为“智能索引”，强调与RAG结合。"
+    },
+    {
+      "question": "讲一次你向客户演示 AI 产品时出现故障或效果不佳，你如何救场并维护信任？",
+      "topic": "演示故障救场",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "保持冷静，承认问题，切换备用方案或录屏。事后分析原因，主动沟通补偿。强调透明与信任，把危机变展示专业的机会。"
+    },
+    {
+      "question": "描述一次你为了推进 AI 项目，不得不与一位难沟通的客户方关键人合作，你是怎么做的？",
+      "topic": "难沟通干系人管理",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "先倾听其核心顾虑，用数据与试点小范围证明价值。找到共同目标，定期同步进展，借助其上级或盟友推动。保持尊重与耐心。"
+    },
+    {
+      "question": "讲一次你快速学习一个陌生行业的知识，并成功应用到 AI 方案中的经历。",
+      "topic": "快速学习行业知识",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "通过行业报告、竞品、客户访谈快速建立认知。将AI能力映射到行业痛点，用类比沟通。举具体应用案例，并请教专家验证。"
+    },
+    {
+      "question": "讲一次你主动承担了职责范围外的工作，帮助 AI 项目成功。",
+      "topic": "主动担当",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "描述背景、主动发现缺口、采取行动、协调资源、结果。强调不推诿，以项目成功为目标，并从中学习到跨职能协作。"
+    },
+    {
+      "question": "一家物流公司想用 AI 做路径优化，但只有近期少量 GPS 数据，你会如何设计一个可行的冷启动方案？",
+      "topic": "物流路径优化冷启动",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "先用规则引擎或开源路网数据生成基线，结合少量GPS做仿真。分阶段：先静态优化，再引入实时数据。设定小范围试点，逐步积累数据。"
+    },
+    {
+      "question": "零售客户想用 AI 做库存管理，但各门店数据孤岛严重，你会如何制定分阶段整合与建模计划？",
+      "topic": "数据孤岛下库存优化",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "先做数据盘点与标准化，建立统一数据湖。分阶段：先单店模型，再联邦学习或迁移学习。强调数据治理与业务协同，设定阶段目标。"
+    },
+    {
+      "question": "你如何看待 AI 售前/运营岗位的业绩压力？你如何应对？",
+      "topic": "业绩压力应对",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "将压力转化为目标拆解，聚焦可控因素如客户价值、过程指标。保持学习与团队支持，避免过度承诺。定期复盘调整策略。"
+    },
+    {
+      "question": "为了判断我们团队的合作文化和决策方式，你会问哪些问题？",
+      "topic": "团队文化评估",
+      "phase": "reverse",
+      "difficulty": "medium",
+      "answerPoints": "问决策方式（自上而下还是共识）、跨部门协作、失败复盘文化、对AI创新的支持度。通过具体例子了解真实氛围。"
+    },
+    {
+      "question": "如何为AI客服设计对话状态追踪和意图识别兜底策略，以降低答非所问？",
+      "topic": "对话系统兜底设计",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "明确状态机与槽位；置信度阈值触发转人工；多意图时澄清追问；兜底话术不编造；记录未识别query迭代模型。"
+    },
+    {
+      "question": "一家餐饮连锁想用AI做动态定价，但担心顾客反感。你会如何设计试点和沟通策略？",
+      "topic": "动态定价接受度管理",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "选低峰时段/非核心单品试点；设置价格上限与透明度；A/B测试敏感度；提前告知会员权益；监测舆情与复购。"
+    },
+    {
+      "question": "如何评估一个大模型在特定行业任务上的表现？你会设计哪些评测集和指标？",
+      "topic": "大模型评测体系",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "构建行业黄金测试集；指标含准确率、召回、幻觉率、拒答率；人工评分与自动指标结合；分场景分层评估；定期回归。"
+    },
+    {
+      "question": "讲一次你主动承认产品/方案的某个局限性，从而赢得客户信任的经历。",
+      "topic": "诚信与信任建立",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "先说明局限与风险；给出替代方案或分阶段计划；用数据说明影响；承诺跟进；客户因坦诚而增强信任。"
+    },
+    {
+      "question": "客户想用AI做会议纪要自动生成，但涉及多语言和口音。你会如何设计方案并管理预期？",
+      "topic": "语音AI落地难点",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "先做语音转写评测；分语言分口音覆盖；低置信度标记人工校对；提供摘要与待办抽取；明确准确率范围和迭代计划。"
+    },
+    {
+      "question": "你会问我们哪些问题来了解团队当前面临的最大AI落地挑战？",
+      "topic": "团队挑战反问",
+      "phase": "reverse",
+      "difficulty": "medium",
+      "answerPoints": "问当前客户落地最大障碍；问团队最缺的资源；问失败案例复盘；问产品与交付协作痛点；问未来半年优先级。"
+    },
+    {
+      "question": "讲一次你在项目中遇到客户需求频繁变更，你如何管理范围和预期。",
+      "topic": "需求变更管理",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "建立变更登记与影响评估；区分必须与期望；设定冻结期；书面确认范围与排期；定期同步进展与风险。"
+    },
+    {
+      "question": "如何设计AI产品的用户反馈收集机制，并将反馈转化为产品迭代？",
+      "topic": "反馈闭环设计",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "多触点收集（应用内、客服、问卷）；自动打标分类；按频次与影响排优先级；双周评审会；闭环通知用户已改进。"
+    },
+    {
+      "question": "保险公司想用AI做理赔自动化，但担心欺诈。你会如何设计风险控制方案？",
+      "topic": "理赔自动化风控",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "分层审批：低风险自动、中风险人工、高风险调查；规则+模型双引擎；可解释特征；实时监控异常；保留审计日志。"
+    },
+    {
+      "question": "你更倾向于在成熟产品上做优化，还是参与从0到1的新产品？为什么？",
+      "topic": "工作偏好与适应",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "结合岗位说明偏好；成熟产品重数据与迭代，0到1重快速验证；举例适应不同阶段；强调目标导向而非个人偏好。"
+    },
+    {
+      "question": "如何向客户解释大模型的安全风险（如提示注入）及防护措施？",
+      "topic": "大模型安全防护",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "用比喻解释提示注入；输入输出过滤；权限隔离与沙箱；敏感操作二次确认；红队测试与日志审计。"
+    },
+    {
+      "question": "你如何看待AI技术可能带来的失业问题？在售前/运营中如何引导客户？",
+      "topic": "AI社会影响与沟通",
+      "phase": "behavioral",
+      "difficulty": "hard",
+      "answerPoints": "承认结构性影响；强调人机协同与岗位转型；用客户案例说明增效不裁员；提供培训与分阶段上线；避免过度承诺。"
+    }
+  ]
+}
