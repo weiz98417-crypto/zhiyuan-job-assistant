@@ -8,6 +8,7 @@
  * rubric 文本：知识注册表 prompt.interview-answer-scoring（LuJie CareerKit 改编，Apache-2.0）。
  */
 import { llmRetry } from "@/lib/llm-retry";
+import { parseLlmJsonObject } from "@/lib/llm-json";
 import { loadRegistryText } from "@/lib/agent/knowledge/registry/loader";
 import { COACH_MODES, type AnswerScore, type CoachMode } from "@/types";
 
@@ -76,7 +77,8 @@ export function bandToFiveScale(band: RubricBand): number {
   return 1 + band;
 }
 
-/** 判定一个评分响应是否每档都带了原文引用；缺档位或缺引用都算 missing（P1-6：缺档位不得静默猜 2 档）。 */
+/** 判定一个评分响应是否每档都带了原文引用；缺档位、非数值档位或短引用都算 missing
+ *  （eng review S2-2：「high」这类字符串档位不得静默归 2 档）。 */
 export function findMissingEvidence(parsed: {
   bands?: unknown;
   evidence?: unknown;
@@ -84,7 +86,8 @@ export function findMissingEvidence(parsed: {
   const bands = (parsed.bands && typeof parsed.bands === "object" ? parsed.bands : {}) as Record<string, unknown>;
   const evidence = (parsed.evidence && typeof parsed.evidence === "object" ? parsed.evidence : {}) as Record<string, string>;
   return DIMENSIONS.filter((dimension) => {
-    if (bands[dimension] === undefined || bands[dimension] === null) return true; // 缺档位视同缺证据，走 veto
+    const band = bands[dimension];
+    if (typeof band !== "number" || !Number.isFinite(band)) return true; // 缺档或非数值 → veto
     const quote = evidence[dimension];
     return typeof quote !== "string" || quote.trim().length < 2;
   });
@@ -101,20 +104,7 @@ function normalizeState(value: unknown): RubricState {
 }
 
 function parseRubricJson(text: string): Record<string, unknown> | null {
-  const normalized = text.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "").trim();
-  try {
-    const parsed = JSON.parse(normalized) as unknown;
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
-  } catch {
-    const match = normalized.match(/\{[\s\S]*\}/);
-    if (!match) return null;
-    try {
-      const parsed = JSON.parse(match[0]) as unknown;
-      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
-    } catch {
-      return null;
-    }
-  }
+  return parseLlmJsonObject(text);
 }
 
 function buildScored(parsed: Record<string, unknown>, mode: CoachMode): RubricScoredAnswer {

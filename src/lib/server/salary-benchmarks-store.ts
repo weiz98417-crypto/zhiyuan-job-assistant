@@ -84,11 +84,49 @@ export function staticSeedEntries(): SalaryBenchmarkEntry[] {
 }
 
 export function findStaticBenchmark(city?: string, family?: string, levelBand?: string): SalaryBenchmarkEntry | null {
-  const entries = staticSeedEntries().filter((entry) =>
-    (!city || entry.city === city) &&
-    (!family || entry.family === family) &&
-    (!levelBand || entry.levelBand === levelBand));
-  return entries[0] || null;
+  const byCity = staticSeedEntries().filter((entry) => !city || entry.city === city);
+  const synonymHit = (entry: SalaryBenchmarkEntry) =>
+    !family || familySynonyms(family).includes(entry.family);
+  // 回落链：city+family+levelBand 精确 → city+family（取中间档位）→ city 任意 family 同档位 → city 任意
+  const withFamily = byCity.filter(synonymHit);
+  if (levelBand) {
+    const exact = withFamily.find((entry) => entry.levelBand === levelBand);
+    if (exact) return exact;
+    const crossFamily = byCity.find((entry) => entry.levelBand === levelBand);
+    if (crossFamily) return crossFamily;
+  }
+  // 未给档位时取家族内的中间档位（P 级序列取 P6；年限段取 3-5年），而非排序首条 P5
+  const pickMedian = (rows: SalaryBenchmarkEntry[]): SalaryBenchmarkEntry | null => {
+    if (rows.length === 0) return null;
+    const bands = rows.map((entry) => entry.levelBand);
+    const medianBand = bands.includes("P6") ? "P6" : bands.includes("3-5年") ? "3-5年" : bands[Math.floor(bands.length / 2)];
+    return rows.find((entry) => entry.levelBand === medianBand) || rows[0];
+  };
+  const familyRows = withFamily.length > 0 ? withFamily : byCity;
+  return pickMedian(familyRows);
+}
+
+/** 岗位族（题库枚举）→ seed 行业词（pLevelBase 用「AI/大模型」，tenureBandRows 用「AI」）。 */
+const FAMILY_SYNONYMS: Record<string, string[]> = {
+  ai_product: ["AI/大模型", "AI"],
+  ai_algorithm: ["AI/大模型", "AI"],
+  ai_business: ["AI/大模型", "AI"],
+  tech_general: ["互联网/电商", "互联网"],
+};
+
+function familySynonyms(family: string): string[] {
+  return FAMILY_SYNONYMS[family] || [family];
+}
+
+/** 从 JD 文本推断层级档位：P5-P8 显式职级优先，其次年限段关键词。 */
+export function detectLevelBand(jdText: string): string | undefined {
+  const text = jdText || "";
+  const pLevel = text.match(/\bP([5-8])\b/);
+  if (pLevel) return `P${pLevel[1]}`;
+  if (/(5|五)\s*[-~至到]\s*(10|十)\s*年|十年以上|资深|专家|架构师/.test(text)) return "5-10年";
+  if (/(3|三)\s*[-~至到]\s*(5|五)\s*年|高级|senior/i.test(text)) return "3-5年";
+  if (/(1|一)\s*[-~至到]\s*(3|三)\s*年|初级|应届|校招/.test(text)) return "1-3年";
+  return undefined;
 }
 
 /**
@@ -98,13 +136,14 @@ export function findStaticBenchmark(city?: string, family?: string, levelBand?: 
 export async function lookupBenchmark(city?: string, family?: string, levelBand?: string): Promise<SalaryBenchmarkEntry | null> {
   if (getDatabaseDriver() === "postgres" && isPostgresConfigured()) {
     try {
+      const synonyms = family ? familySynonyms(family) : [];
       const pool = getPostgresPool();
       const params: unknown[] = [];
       const conditions: string[] = ["source = 'opportunity_pool'", "sample_size >= $1"];
       params.push(AGGREGATION_MIN_SAMPLES);
       if (city) { params.push(city); conditions.push(`city = $${params.length}`); }
-      if (family) { params.push(family); conditions.push(`family = $${params.length}`); }
-      if (levelBand) { params.push(levelBand); conditions.push(`level_band = $${params.length}`); }
+      if (synonyms.length > 0) { params.push(synonyms); conditions.push(`family = ANY($${params.length})`); }
+      if (levelBand) { params.push(levelBand); conditions.push(`(level_band = $${params.length} OR level_band = '')`); }
       const result = await pool.query(
         `SELECT city, family, level_band, p25, p50, p75, unit, sample_size, window_start, window_end
          FROM salary_benchmarks WHERE ${conditions.join(" AND ")}
@@ -135,6 +174,37 @@ export async function lookupBenchmark(city?: string, family?: string, levelBand?
   return findStaticBenchmark(city, family, levelBand);
 }
 
+/** 聚合纯函数（可测）：按 城市||family 分组取中位薪资，双条件（≥30 样本）过滤后产出聚合条目。 */
+export function buildAggregateEntries(
+  rows: Array<Record<string, unknown>>,
+): Array<{ city: string; family: string; p25: number; p50: number; p75: number; sampleSize: number }> {
+  const groups = new Map<string, number[]>();
+  for (const row of rows) {
+    const city = String(row.city || "").trim();
+    const min = Number(row.salary_min);
+    const max = Number(row.salary_max);
+    if (!city || !Number.isFinite(min) || !Number.isFinite(max) || min <= 0 || max < min) continue;
+    if (min < MIN_PLAUSIBLE_MONTHLY || max > MAX_AGGREGATION_MONTHLY) continue;
+    const key = `${city}||general`;
+    const list = groups.get(key) || [];
+    list.push((min + max) / 2);
+    groups.set(key, list);
+  }
+  const entries: Array<{ city: string; family: string; p25: number; p50: number; p75: number; sampleSize: number }> = [];
+  for (const [key, values] of groups) {
+    if (values.length < AGGREGATION_MIN_SAMPLES) continue;
+    const [city, family] = key.split("||");
+    const sorted = [...values].sort((a, b) => a - b);
+    const percentile = (p: number) => Math.round(sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))]);
+    entries.push({ city, family, p25: percentile(0.25), p50: percentile(0.5), p75: percentile(0.75), sampleSize: values.length });
+  }
+  return entries;
+}
+
+const MAX_AGGREGATION_MONTHLY = 300000;
+/** 与 salary-extraction 的 plausibility gate 同一带下限（垃圾样本不入聚合池） */
+const MIN_PLAUSIBLE_MONTHLY = 2000;
+
 /**
  * 从 scan_jobs 增量聚合薪资基准（Spec 28：应用侧重算，不碰 scan-worker）。
  * 只统计有薪资且发布/发现时间在窗口内的岗位；≥30 样本时 UPSERT 聚合条目。
@@ -153,23 +223,8 @@ export async function aggregateSalaryBenchmarks(): Promise<{ aggregated: number;
        WHERE salary_min IS NOT NULL AND salary_max IS NOT NULL
          AND discovered_at >= now() - interval '12 months'`,
     );
-    const groups = new Map<string, number[]>();
-    for (const row of rows.rows as Array<Record<string, unknown>>) {
-      const city = String(row.city || "").trim();
-      const min = Number(row.salary_min);
-      const max = Number(row.salary_max);
-      if (!city || !Number.isFinite(min) || !Number.isFinite(max) || min <= 0 || max < min) continue;
-      const key = `${city}||general`;
-      const list = groups.get(key) || [];
-      list.push((min + max) / 2);
-      groups.set(key, list);
-    }
-    let aggregated = 0;
-    for (const [key, values] of groups) {
-      if (values.length < AGGREGATION_MIN_SAMPLES) continue;
-      const [city, family] = key.split("||");
-      const sorted = [...values].sort((a, b) => a - b);
-      const percentile = (p: number) => Math.round(sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))]);
+    const entries = buildAggregateEntries(rows.rows as Array<Record<string, unknown>>);
+    for (const entry of entries) {
       await client.query(
         `INSERT INTO salary_benchmarks (city, family, level_band, p25, p50, p75, unit, source, sample_size, window_start, window_end, updated_at)
          VALUES ($1,$2,'',$3,$4,$5,'CNY/month','opportunity_pool',$6, now() - interval '12 months', now(), now())
@@ -177,11 +232,10 @@ export async function aggregateSalaryBenchmarks(): Promise<{ aggregated: number;
          SET p25 = EXCLUDED.p25, p50 = EXCLUDED.p50, p75 = EXCLUDED.p75,
              sample_size = EXCLUDED.sample_size, window_start = EXCLUDED.window_start,
              window_end = EXCLUDED.window_end, updated_at = now()`,
-        [city, family, percentile(0.25), percentile(0.5), percentile(0.75), values.length],
+        [entry.city, entry.family, entry.p25, entry.p50, entry.p75, entry.sampleSize],
       );
-      aggregated += 1;
     }
-    return { aggregated, inspected: rows.rowCount || 0 };
+    return { aggregated: entries.length, inspected: rows.rowCount || 0 };
   } finally {
     client.release();
   }

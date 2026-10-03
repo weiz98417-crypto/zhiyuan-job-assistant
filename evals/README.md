@@ -19,7 +19,7 @@ npm run gen:en-modes:translate       # 中文源变更后重生成英文镜像�
 | --- | --- | --- | --- |
 | 24 事实校验 | 数字溯源硬门 + faithfulness 软门 + ATS 规则化 + PDF 反测 | `resume-factuality.eval.test.ts` | `promptfoo/`（注入/编造/PII 扫描）；线上=改简历流程看「数字溯源未通过」反馈与「仅供参考」降级提案 |
 | 25 知识注册表 | 注册表/单源/死接线清理/环境混淆 | `knowledge-registry.test.ts` + 两个护栏脚本 | 线上=各 agent 提示词行为与迁移前一致 |
-| 26 评分锚定 | 0-4 锚点+证据引用+veto+趋势延迟入账 | `interview-rubric-calibration.eval.test.ts`（30 样例±1 档，有 key 自动跑生产校准） | 线上=评分卡应显示「原文引用+三态」；无引用评分显示「本轮未评分」 |
+| 26 评分锚定 | 0-4 锚点+证据引用+veto+趋势延迟入账 | `interview-rubric-calibration.eval.test.ts`（30 样例；有 key 时跑 1 个链路样例，全量 30×2 遍需 `npm run eval:rubric-calibration:full`） | 线上=评分卡应显示「原文引用+三态」；无引用评分显示「本轮未评分」 |
 | 27 题库引擎 | composeInterview 深接口+追问内容缺口+状态机单写者 | `question-bank.eval.test.ts` | 线上=`npm run seed:question-bank` 后出题应带出处标签；题目卡标注 `bank/jd/weakness/general` |
 | 28 薪资基准 | 抽取正则+基准表+双条件聚合+D 板块溯源 | `outcome-salary.eval.test.ts` | 线上=JD 评估 D 板块应出现「静态参考（…）」或「实时聚合·N 条样本」来源标注 |
 | 29 回流闭环 | 投递事件入账+拒信解析+故事册+prefFit | `outcome-salary.eval.test.ts` + `rejection-parsing.eval.test.ts` | 线上=对面试教练说「帮你拒信解析一下」→ 标签+引用+候选记忆；记忆管理里确认后激活 |

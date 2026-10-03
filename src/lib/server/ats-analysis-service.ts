@@ -6,6 +6,7 @@
  * （100 − 规则扣分，再叠 LLM 两维均分的折算），消费方接口（ATSIssue/ATSAnalysisResult）不变。
  */
 import { llmRetry } from "@/lib/llm-retry";
+import { parseLlmJsonObject } from "@/lib/llm-json";
 import { loadRegistryText } from "@/lib/agent/knowledge/registry/loader";
 import { atsRulesPenalty, runDeterministicAtsRules, type ATSIssue } from "./ats-rules";
 
@@ -43,8 +44,7 @@ export async function analyzeATSResumeWithBreakdown(
 
   const ruleScore = Math.max(0, 100 - atsRulesPenalty(ruleIssues));
   const llmAvg = llmIssues.length
-    ? Math.max(0, 100 - llmIssues.reduce((penalty, issue) =>
-        penalty + (issue.severity === "critical" ? 18 : issue.severity === "warning" ? 8 : 3), 0))
+    ? Math.max(0, 100 - atsRulesPenalty(llmIssues))
     : 85; // LLM 路不可用/无发现时给中性基线，不让规则路被静默拉低为 0
   const score = Math.max(0, Math.min(100, Math.round(ruleScore * 0.6 + llmAvg * 0.4)));
   return { issues, score, ruleIssues, llmIssues };
@@ -90,12 +90,7 @@ async function analyzeSemanticDimensions(cvText: string, signal?: AbortSignal): 
 }
 
 function parseJson(value: string): Record<string, unknown> {
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
-  } catch {
-    return {};
-  }
+  return parseLlmJsonObject(value) ?? {};
 }
 
 function stringValue(value: unknown): string {

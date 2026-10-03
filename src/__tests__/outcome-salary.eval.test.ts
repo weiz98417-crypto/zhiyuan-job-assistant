@@ -63,6 +63,45 @@ describe("Spec 28: 薪资抽取正则", () => {
   });
 });
 
+describe("Spec 28: 聚合纯函数（双条件与百分位）", () => {
+  const row = (city: string, min: number, max: number) => ({ city, salary_min: min, salary_max: max });
+
+  it("29 样本不产出聚合条目；30 样本产出 1 条（spec 28 测试决策）", async () => {
+    const { buildAggregateEntries } = await import("@/lib/server/salary-benchmarks-store");
+    const rows29 = Array.from({ length: 29 }, () => row("北京", 20000, 30000));
+    expect(buildAggregateEntries(rows29)).toEqual([]);
+    const rows30 = Array.from({ length: 30 }, () => row("北京", 20000, 30000));
+    const entries = buildAggregateEntries(rows30);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ city: "北京", family: "general", sampleSize: 30, p25: 25000, p50: 25000, p75: 25000 });
+  });
+
+  it("百分位取有序切片：非均匀分布 P25/P50/P75 单调", async () => {
+    const { buildAggregateEntries } = await import("@/lib/server/salary-benchmarks-store");
+    const rows = Array.from({ length: 40 }, (_, i) => row("上海", 10000 + i * 1000, 10000 + i * 1000));
+    const [entry] = buildAggregateEntries(rows);
+    expect(entry.p25).toBeLessThan(entry.p50);
+    expect(entry.p50).toBeLessThan(entry.p75);
+    expect(entry.p25).toBeGreaterThanOrEqual(10000);
+    expect(entry.p75).toBeLessThanOrEqual(49000);
+  });
+
+  it("脏数据跳过：负数/乱序/超界值不入组", async () => {
+    const { buildAggregateEntries } = await import("@/lib/server/salary-benchmarks-store");
+    const rows = [
+      ...Array.from({ length: 30 }, () => row("杭州", 15000, 25000)),
+      row("杭州", -100, 20000),      // 负数
+      row("杭州", 30000, 20000),     // max < min
+      row("杭州", 500, 800),         // 低于合理下限
+      row("杭州", 500000, 600000),   // 超出合理上限
+      row("", 15000, 25000),         // 空 city
+      row("杭州", "abc", 20000),     // 非数值
+    ];
+    const [entry] = buildAggregateEntries(rows);
+    expect(entry.sampleSize).toBe(30);
+  });
+});
+
 describe("Spec 28: 静态 seed 合一与标注", () => {
   it("seed 合并完整：P 职级 16 行 × 6 行业 + 年限段 46 行", () => {
     expect(seedJson.pLevelBase).toHaveLength(16);

@@ -96,4 +96,3 @@ export const logRejectionNotice: ToolDefinition = {
   },
 };
 
-export const REJECTION_TOOL = logRejectionNotice;

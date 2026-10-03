@@ -36,8 +36,11 @@ const NEGOTIABLE_RE = /薪资面议|面议|薪资open|待遇面谈/;
 
 function hasSalaryContext(text: string, index: number, length: number): boolean {
   const windowStart = Math.max(0, index - 12);
-  const windowEnd = Math.min(text.length, index + length + 6);
-  return SALARY_CONTEXT_RE.test(text.slice(windowStart, windowEnd));
+  const windowEnd = Math.min(text.length, index + length + 4);
+  const window = text.slice(windowStart, windowEnd);
+  // 右侧紧邻性能/规模单位（QPS/TPS/star…）= 技术数字，即使左侧有薪资词也拒绝
+  if (/\b(QPS|TPS|RPS|FPS|QPS|star|并发|吞吐)\b/i.test(window)) return false;
+  return SALARY_CONTEXT_RE.test(window);
 }
 
 function plausible(minMonthly: number, maxMonthly: number): boolean {
@@ -83,7 +86,9 @@ export function extractSalaryFromJD(jdText: string): SalaryExtraction | null {
       const minMonthly = Math.round(min);
       const maxMonthly = Math.round(max);
       if (!plausible(minMonthly, maxMonthly)) continue;
-      const bonus = text.match(BONUS_RE);
+      // 奖金月数在命中点附近找（±window），不全文抓——福利段的「法定13薪」不属于本区间
+      const bonusWindow = text.slice(Math.max(0, (m.index ?? 0) - 4), Math.min(text.length, (m.index ?? 0) + m[0].length + 4));
+      const bonus = bonusWindow.match(BONUS_RE);
       return {
         minMonthly,
         maxMonthly,

@@ -47,6 +47,8 @@ export interface GenerateInterviewQuestionsInput {
   count?: number;
   categories?: InterviewQuestion["category"][];
   additionalContext?: string;
+  /** Spec 27 同场去重：本场已问过的题干（主问题+追问），题库召回时排除。 */
+  recentQuestions?: string[];
 }
 
 export interface ScoreInterviewAnswerInput {
@@ -152,6 +154,8 @@ export async function generateInterviewQuestionsForAgent(
       cvText,
       memorySummary: memoryContext.llmSummary,
       count,
+      recentQuestions: arrayValue(input.recentQuestions).map(String).filter(Boolean),
+      // Spec 27 同场去重：本场已问的主问题与进行中追问不重复出题
       signal: options.signal,
     }, {
       store: overrides.questionBankStore,
@@ -321,8 +325,11 @@ export async function scoreInterviewAnswerForAgent(
   } else {
     score = rubricToAnswerScore(rubricResult, mode);
     // 弱项趋势：档位 ≤1 的维度记录事件（topic=岗位族，维度×岗位族粒度）；
-    // 跨 ≥3 场提炼候选事实（单场不入账本）
-    const sessionSurrogate = stringValue(input.sessionId) || createHash("sha256").update(`${question}\u0000${answer}`).digest("hex").slice(0, 16);
+    // 跨 ≥3 场提炼候选事实（单场不入账本）。surrogate 前缀区分真实会话（sess:）与
+    // 独立评分指纹（fp:）——ADR-0042 的「≥3 场」只数真实会话（eng review S1-5）。
+    const sessionSurrogate = stringValue(input.sessionId)
+      ? `sess:${stringValue(input.sessionId)}`
+      : `fp:${createHash("sha256").update(`${question}\u0000${answer}`).digest("hex").slice(0, 16)}`;
     const family = stringValue(input.family) || "general";
     for (const dimension of ["structure", "specificity", "highlight", "timing"] as const) {
       try {
@@ -436,12 +443,14 @@ export async function handleInterviewSessionTurnForAgent(
     }
   }
 
-  // Spec 27：追问判定从纯长度规则升级为内容缺口判定（LLM 不可用时长度规则兜底）
+  // Spec 27：追问判定从纯长度规则升级为内容缺口判定（LLM 不可用时长度规则兜底）。
+  // 硬上限（eng review S1-4）：每主问题 ≤2 次追问，reverse 阶段不追问——防无限横链。
+  const followUpAllowed = session.phase !== "reverse" && session.currentFollowups.length < 2;
   const gapDecision = await decideFollowUp(answer, session.currentQuestion?.text || "", {
     completion: overrides.followUpCompletion,
     signal: options.signal,
   });
-  if (gapDecision.followUp) {
+  if (gapDecision.followUp && followUpAllowed) {
     if (!session.pendingAnswer) session.pendingAnswer = answer;
     const question = await generateFollowUpQuestion(principal, session, answer, gapDecision.gap, options.signal);
     session.currentFollowups.push(question);
@@ -611,6 +620,10 @@ async function generateSessionQuestion(
       cvText: session.sourceBinding?.cvText,
       count: 1,
       categories: categoriesForPhase(session.phase),
+      recentQuestions: [
+        ...session.answers.map((item) => item.question),
+        ...session.currentFollowups,
+      ],
       additionalContext: [
         getPhasePrompt(session),
         session.sourceBinding?.memoryContext ? `长期记忆：${session.sourceBinding.memoryContext}` : "",

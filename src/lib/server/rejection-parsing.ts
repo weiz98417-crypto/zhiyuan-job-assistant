@@ -3,6 +3,7 @@
  * 一期只做：用户粘贴文本 → LLM 提取封闭原因标签集 + 引用原文 → 用户确认 → 入账。
  * 不做邮箱集成。未经用户确认的解析结果以候选态存在，绝不影响检索与推荐（ADR-0034）。
  */
+import { parseLlmJsonObject } from "@/lib/llm-json";
 
 export const REJECTION_REASON_LABELS = [
   "resume_mismatch",

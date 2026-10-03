@@ -1601,3 +1601,9 @@ ALTER TABLE scan_jobs ADD COLUMN IF NOT EXISTS salary_extracted_at TIMESTAMPTZ;
 -- Spec 26 review fix: 同一会话同一维度同一岗位族只记一次弱项事件（幂等）
 CREATE UNIQUE INDEX IF NOT EXISTS idx_interview_weakness_unique
   ON interview_weakness_events (user_id, session_surrogate, dimension, topic);
+
+-- Eng review S4-2: 薪资管线/聚合的窗口查询索引（部分索引兼做增量队列）
+CREATE INDEX IF NOT EXISTS idx_scan_jobs_salary_pending
+  ON scan_jobs (discovered_at) WHERE salary_extracted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_scan_jobs_salary_window
+  ON scan_jobs (discovered_at, salary_min) WHERE salary_min IS NOT NULL;

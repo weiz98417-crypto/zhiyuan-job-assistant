@@ -1,0 +1,27 @@
+# Spec 24 门禁（eng review S3-3）：红队核心集（确定性、无 LLM 成本）+ 能力层确定性 eval。
+# 全量红队集与生产校准（需 DEEPSEEK_API_KEY）留给发布前手动跑，不进 CI。
+name: capability-evals
+
+on:
+  push:
+    branches: [dev, master]
+  pull_request:
+
+jobs:
+  evals:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Build red-team probe bundle
+        run: npm run eval:redteam:build
+      - name: Promptfoo red team (core, deterministic)
+        run: npm run eval:redteam:core
+      - name: Capability deterministic evals + guards
+        run: npm run verify:capability-2026-10b

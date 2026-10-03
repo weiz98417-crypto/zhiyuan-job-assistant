@@ -25,7 +25,11 @@ describe("bug-hunt: 薪资抽取对抗语料（误报会永久污染基准池）
 
   it("「102薪」不拆出「02薪」", () => {
     const result = extractSalaryFromJD("年底发102薪？不存在的。薪资15-25K");
-    expect(result?.bonusMonths ?? null).not.toBe(2);
+    expect(result?.bonusMonths ?? null).toBeNull();
+  });
+
+  it("右侧紧邻性能单位（QPS）即使左窗有薪资词也拒绝", () => {
+    expect(extractSalaryFromJD("薪资对标大厂，需支撑50-80K QPS")).toBeNull();
   });
 
   it("合理区间外的数字不判为薪资（plausibility gate）", () => {
@@ -70,9 +74,10 @@ describe("bug-hunt: 薪资抽取对抗语料（误报会永久污染基准池）
       const text = `薪资${a}-${b}K`;
       const result = extractSalaryFromJD(text);
       if (result && result.minMonthly !== null && result.maxMonthly !== null) {
-        // 若命中，规范化值必须在合理月薪带内（plausibility gate 的属性断言）
+        // 若命中，规范化值必须落在 plausibility gate 的合理月薪带内
+        expect(result.minMonthly).toBeGreaterThanOrEqual(2000);
         expect(result.minMonthly).toBeLessThanOrEqual(300000);
-        expect(result.maxMonthly).toBeGreaterThanOrEqual(0);
+        expect(result.maxMonthly).toBeLessThanOrEqual(300000);
         expect(result.maxMonthly).toBeGreaterThanOrEqual(result.minMonthly);
       }
     }

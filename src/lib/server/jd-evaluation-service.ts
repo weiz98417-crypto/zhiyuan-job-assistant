@@ -74,9 +74,12 @@ export async function evaluateJobDescription(
   let salaryContext = "";
   let salaryDataSource = "";
   try {
-    const { lookupBenchmark } = await import("@/lib/server/salary-benchmarks-store");
+    const { lookupBenchmark, detectLevelBand } = await import("@/lib/server/salary-benchmarks-store");
+    const { familyForRole } = await import("@/lib/server/question-bank");
     const city = input.targetCity || guessCityFromJD(input.jdText);
-    const benchmark = await lookupBenchmark(city || undefined);
+    const family = familyForRole(input.userProfile?.targetRoles?.[0]?.name || input.targetCompany || "");
+    const levelBand = detectLevelBand(input.jdText);
+    const benchmark = await lookupBenchmark(city || undefined, family, levelBand);
     if (benchmark) {
       salaryDataSource = benchmark.sourceLabel;
       const band = benchmark.p50 !== null
@@ -96,7 +99,11 @@ export async function evaluateJobDescription(
   });
   const parsed = parseCompletion(content);
   const result = normalizeEvaluation(parsed, input.targetCompany, input.matchResume !== false);
-  if (salaryDataSource) result.salaryDataSource = salaryDataSource;
+  if (salaryDataSource) {
+    result.salaryDataSource = salaryDataSource;
+    // 落库：来源标注写进 D 板块正文尾注（持久化的是 blocks 文本，单独字段会丢）
+    result.blocks.d = `${result.blocks.d || ""}\n\n*市场薪资数据来源：${salaryDataSource}*`.trim();
+  }
   return result;
 }
 

@@ -47,7 +47,8 @@ export async function recordWeaknessEvent(
     );
     const distinct = await client.query(
       `SELECT COUNT(DISTINCT session_surrogate)::int AS sessions FROM interview_weakness_events
-       WHERE user_id = $1 AND dimension = $2 AND topic = $3 AND band <= $4`,
+       WHERE user_id = $1 AND dimension = $2 AND topic = $3 AND band <= $4
+         AND session_surrogate LIKE 'sess:%'`,
       [input.userId, input.dimension, topic, WEAK_BAND],
     );
     const sessions = distinct.rows[0]?.sessions || 0;
@@ -82,25 +83,4 @@ export async function recordWeaknessEvent(
   }
 }
 
-/** 读取用户当前弱项趋势（已确认的活跃事实由统一检索负责；这里只读事件统计）。 */
-export async function listWeakTrendStats(userId: string): Promise<Array<{ dimension: string; topic: string; sessions: number }>> {
-  if (getDatabaseDriver() !== "postgres" || !isPostgresConfigured()) return [];
-  const pool = getPostgresPool();
-  const client = await pool.connect();
-  try {
-    const rows = await client.query(
-      `SELECT dimension, topic, COUNT(DISTINCT session_surrogate)::int AS sessions
-       FROM interview_weakness_events WHERE user_id = $1 AND band <= $2
-       GROUP BY dimension, topic HAVING COUNT(DISTINCT session_surrogate) >= $3
-       ORDER BY sessions DESC LIMIT 20`,
-      [userId, WEAK_BAND, TREND_SESSION_THRESHOLD],
-    );
-    return rows.rows.map((row: Record<string, unknown>) => ({
-      dimension: String(row.dimension),
-      topic: String(row.topic),
-      sessions: Number(row.sessions),
-    }));
-  } finally {
-    client.release();
-  }
-}
+// listWeakTrendStats 已删（eng review S2-7：零消费方；趋势读取走统一记忆检索）

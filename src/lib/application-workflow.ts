@@ -200,6 +200,10 @@ export async function updateApplicationStatus(input: UpdateApplicationStatusInpu
   }
   const repos = getDataRepositories();
   const beforeStatus = normalizeApplicationStatus(match.application.status);
+  // Spec 29 幂等守卫（eng review S3-2）：同状态重复迁移不重复写事件、不重复入账本
+  if (beforeStatus === status) {
+    return { success: true, data: match.application, nextActions: suggestNextActions(match.application, await repos.applications.listEvents(match.application.id, userId)) };
+  }
   const saved = await repos.applications.updateStatus(match.application.id, status, userId, input.note);
   if (!saved?.id) return { success: false, error: "状态更新后没有读回记录。", errorCategory: "permanent" };
 

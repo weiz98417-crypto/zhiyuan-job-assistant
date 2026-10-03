@@ -8,6 +8,7 @@
  * 出题协议（出题顺序/项目深挖七层等完整问题地图）留待题库有真实使用数据后迭代。
  */
 import { loadRegistryText } from "@/lib/agent/knowledge/registry/loader";
+import { parseLlmJsonObject } from "@/lib/llm-json";
 import { getPostgresPool } from "@/lib/postgres";
 import type { Pool } from "pg";
 
