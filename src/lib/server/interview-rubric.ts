@@ -218,7 +218,12 @@ export async function scoreAnswerWithRubric(
 
   let parsed = await callRubricOnce(input, mode, options.completion);
   if (!parsed) {
-    return { unscored: true, reason: "评分返回无法解析为 JSON", scoringVersion: INTERVIEW_SCORING_VERSION };
+    // 解析失败与缺引用同属可重试暂态（间歇性 ~15%，eng review 校准实测）：重试一次
+    parsed = await callRubricOnce(input, mode, options.completion,
+      "上一轮返回无法解析为合法 JSON。严格输出单个 JSON 对象：不要 markdown 围栏外的任何文本，字符串值内的双引号必须转义，不要在被截断处停止。");
+    if (!parsed) {
+      return { unscored: true, reason: "重试后仍无法解析为 JSON", scoringVersion: INTERVIEW_SCORING_VERSION };
+    }
   }
   let missing = findMissingEvidence(parsed);
   if (missing.length > 0) {
