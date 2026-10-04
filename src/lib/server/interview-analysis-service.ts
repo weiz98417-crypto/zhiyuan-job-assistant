@@ -12,7 +12,7 @@ import { getDataRepositories } from "@/lib/data-repositories";
 import { llmRetry } from "@/lib/llm-retry";
 import { loadRegistryText } from "@/lib/agent/knowledge/registry/loader";
 import { scoreAnswerWithRubric, type RubricCompletion, type RubricScoredAnswer, type RubricScoringResult } from "@/lib/server/interview-rubric";
-import { recordWeaknessEvent } from "@/lib/server/interview-trend";
+import { recordWeaknessEvent, sessionSurrogateFor } from "@/lib/server/interview-trend";
 import { composeInterview, familyForRole, type QuestionBankStore } from "@/lib/server/question-bank";
 import { getPostgresPool } from "@/lib/postgres";
 import { COACH_MODES, type AnswerScore, type CoachMode, type InterviewQuestion } from "@/types";
@@ -316,10 +316,12 @@ export async function scoreInterviewAnswerForAgent(
 
   let score: AnswerScore;
   if ("unscored" in rubricResult) {
+    // 工程原因内部留痕即可，用户看到的是可行动的话术（CEO 审查：文案外泄=事故）
+    console.warn(`[interview-score] unscored: ${(rubricResult as { reason: string }).reason}`);
     score = {
       dimensions: { structure: 0, specificity: 0, highlight: 0, timing: 0 },
       overall: 0,
-      suggestions: [`本轮未评分：${(rubricResult as { reason: string }).reason}`],
+      suggestions: ["这一题这轮没有打分。别灰心——按你的回答风格，我建议先补一个具体的数字结果，我们下一题继续。"],
       segmentFeedback: [],
     };
   } else {
@@ -327,9 +329,7 @@ export async function scoreInterviewAnswerForAgent(
     // 弱项趋势：档位 ≤1 的维度记录事件（topic=岗位族，维度×岗位族粒度）；
     // 跨 ≥3 场提炼候选事实（单场不入账本）。surrogate 前缀区分真实会话（sess:）与
     // 独立评分指纹（fp:）——ADR-0042 的「≥3 场」只数真实会话（eng review S1-5）。
-    const sessionSurrogate = stringValue(input.sessionId)
-      ? `sess:${stringValue(input.sessionId)}`
-      : `fp:${createHash("sha256").update(`${question}\u0000${answer}`).digest("hex").slice(0, 16)}`;
+    const sessionSurrogate = sessionSurrogateFor(stringValue(input.sessionId), question, answer);
     const family = stringValue(input.family) || "general";
     for (const dimension of ["structure", "specificity", "highlight", "timing"] as const) {
       try {

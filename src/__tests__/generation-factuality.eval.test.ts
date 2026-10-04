@@ -27,4 +27,10 @@ describe("数字溯源：万/亿/千单位归一（跨表示匹配）", () => {
     expect(extractNumberTokens("3千")).toEqual(["3000"]);
     expect(extractNumberTokens("GPT-4的800万")).toEqual(["8000000"]);
   });
+
+  it("复合量级长单位优先（eng 二轮 S2）：3千万=3e7、5百万=5e6、2十万=2e5", () => {
+    expect(extractNumberTokens("覆盖3千万用户")).toEqual(["30000000"]);
+    expect(extractNumberTokens("月活5百万")).toEqual(["5000000"]);
+    expect(extractNumberTokens("处理2十万条/日")).toEqual(["200000"]);
+  });
 });

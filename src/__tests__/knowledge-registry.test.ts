@@ -66,7 +66,7 @@ describe("Spec 25: A-G 权重单源（modes/scoring-dimensions.yml 为载体）"
 
 describe("Spec 25: COMPANY_MODE_MAP 单源", () => {
   it("13 家大厂映射存在（review 核查：实为 13 家）", () => {
-    expect(Object.keys(COMPANY_MODE_MAP)).toHaveLength(13);
+    expect(Object.keys(COMPANY_MODE_MAP)).toHaveLength(28); // 16 中文键 + 12 拉丁键（二轮 S1 中文化）
     expect(COMPANY_MODE_MAP.bytedance).toBe("project-review");
   });
 

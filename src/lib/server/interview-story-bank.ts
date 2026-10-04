@@ -25,6 +25,12 @@ export interface StoryCandidateResult {
 }
 
 const STORY_MIN_BAND = 3;
+const STORY_MIN_ANSWER_CHARS = 80;
+
+/** 故事册准入判定（纯函数，可测）：档位 ≥3 且回答有具体内容（≥80 字）才够格成为候选。 */
+export function shouldBecomeStory(scoreBand: number, answer: string): boolean {
+  return scoreBand >= STORY_MIN_BAND && answer.trim().length >= STORY_MIN_ANSWER_CHARS;
+}
 
 /** 一场面试结束时，把够格的回答沉淀为故事候选。 */
 export async function recordStoryCandidates(
@@ -36,7 +42,7 @@ export async function recordStoryCandidates(
   }
   const results: StoryCandidateResult[] = [];
   for (const answer of answers) {
-    if (answer.scoreBand < STORY_MIN_BAND || answer.answer.trim().length < 80) {
+    if (!shouldBecomeStory(answer.scoreBand, answer.answer)) {
       results.push({ recorded: false, reason: "below_story_bar" });
       continue;
     }

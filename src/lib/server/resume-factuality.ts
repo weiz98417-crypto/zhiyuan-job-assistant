@@ -33,15 +33,17 @@ function normalizeDigits(text: string): string {
 const NUMBER_TOKEN_RE = /\d+(?:\.\d+)?/g;
 /** 产品名/版本号里的数字（GPT-4、GPT-4o、Web3、K8s、A4、v1.5）不是数量，溯源前剥离——否则提到新产品名即整方案被毙。 */
 const PRODUCT_VERSION_RE = /[A-Za-z]+-?\d+(?:\.\d+)?[A-Za-z]*/g;
-/** 中文数量级单位归一：「800万」与「8,000,000」是同一个数（优化链跨表示匹配的关键）。 */
-const CN_UNIT_RE = /(\d+(?:\.\d+)?)(亿|万|千)/g;
+/** 中文数量级单位归一：「800万」与「8,000,000」是同一个数（优化链跨表示匹配的关键）。
+ *  交替分支长单位优先（eng 二轮 S2）——「3千万」先匹配「千万」（3e7），不能被「千」截胡成 3000。 */
+const CN_UNIT_RE = /(\d+(?:\.\d+)?)(千万|百万|十万|亿|万|千)/g;
 
 /** 提取文本中的数字 token（归一化后）。中文数字与产品名/版本号内嵌数字不参与；万/亿/千折算为位值数字。 */
 export function extractNumberTokens(text: string): string[] {
   const cleaned = normalizeDigits(text || "")
     .replace(PRODUCT_VERSION_RE, " ")
     .replace(CN_UNIT_RE, (_match, num: string, unit: string) => {
-      const value = parseFloat(num) * (unit === "亿" ? 1e8 : unit === "万" ? 1e4 : 1e3);
+      const multiplier = unit === "亿" ? 1e8 : unit === "千万" ? 1e7 : unit === "百万" ? 1e6 : unit === "十万" ? 1e5 : unit === "万" ? 1e4 : 1e3;
+      const value = parseFloat(num) * multiplier;
       return ` ${value} `;
     });
   return cleaned.match(NUMBER_TOKEN_RE) || [];
@@ -74,6 +76,21 @@ export function formatProvenanceFeedback(result: NumberProvenanceResult): string
     ...lines,
     "请重新生成：只能使用事实源中出现过的数字；确需表达量级时用原文数字，禁止推算新数字。",
   ].join("\n");
+}
+
+/** 生成/优化共用的 section 级过滤（纯函数，可测）：通过溯源的 section 保留，违规清单聚合供重试反馈。 */
+export function filterSectionsByProvenance<S extends { content: string }>(
+  sections: S[],
+  sources: Array<string | undefined | null>,
+): { passing: S[]; violations: NumberProvenanceViolation[] } {
+  const passing: S[] = [];
+  const violations: NumberProvenanceViolation[] = [];
+  for (const section of sections) {
+    const result = checkNumberProvenance(section.content, sources);
+    if (result.ok) passing.push(section);
+    else violations.push(...result.violations);
+  }
+  return { passing, violations };
 }
 
 /** 单元测试注入点类型：与 model-gateway 的 complete 同形。 */

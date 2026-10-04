@@ -165,7 +165,7 @@ describe("Spec 26: 生产模型校准回归（±1 档容差；无 API key 时跳
 
   it.runIf(sampleCount > 0)(`生产校准：${fullRun ? "全量 30" : "链路 1"} 样例 × 2 遍，±1 档容差`, { timeout: fullRun ? 1_800_000 : 600_000 }, async () => {
     const results = await (async () => {
-      const rows: Array<{ question: string; band: number; first: number; second: number }> = [];
+      const rows: Array<{ question: string; band: number; first: number; second: number; recovered?: boolean }> = [];
       const unscored: Array<{ question: string; reason: string; band: number }> = [];
       for (const sample of CALIBRATION_SAMPLES.slice(0, sampleCount)) {
         const run = async () => {
@@ -181,7 +181,7 @@ describe("Spec 26: 生产模型校准回归（±1 档容差；无 API key 时跳
           if (thirdScore === null) {
             unscored.push({ question: sample.question.slice(0, 24), reason: ("unscored" in third ? third.reason : "").slice(0, 100), band: sample.band });
           } else {
-            rows.push({ question: sample.question, band: sample.band, first: thirdScore, second: thirdScore });
+            rows.push({ question: sample.question, band: sample.band, first: thirdScore, second: thirdScore, recovered: true });
           }
           continue;
         }
@@ -198,7 +198,7 @@ describe("Spec 26: 生产模型校准回归（±1 档容差；无 API key 时跳
       expect(Math.abs(entry.first - entry.band), `「${entry.question.slice(0, 20)}」与锚定档位偏差应 ≤1`).toBeLessThanOrEqual(1);
     }
     // 两遍稳定性：概率性 LLM 允许至多 1 例波动 >1（模糊样例的已知边缘）；≥2 例即系统性漂移
-    const unstable = results.rows.filter((entry) => Math.abs(entry.first - entry.second) > 1);
+    const unstable = results.rows.filter((entry) => !entry.recovered && Math.abs(entry.first - entry.second) > 1);
     expect(unstable.length, `两遍波动 >1 档的样例数: ${unstable.map((entry) => entry.question.slice(0, 16)).join("、")}`).toBeLessThanOrEqual(1);
     expect(results.rows.length, "出分样例覆盖率").toBeGreaterThanOrEqual(Math.ceil(sampleCount * 0.6));
   });

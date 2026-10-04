@@ -6,7 +6,7 @@ import { validateResumeSectionContent, type ResumeSectionId } from "@/lib/agent/
 import { getDataRepositories } from "@/lib/data-repositories";
 import { parseLlmJsonObject } from "@/lib/llm-json";
 import { llmRetry } from "@/lib/llm-retry";
-import { checkNumberProvenance, formatProvenanceFeedback } from "@/lib/server/resume-factuality";
+import { checkNumberProvenance, filterSectionsByProvenance, formatProvenanceFeedback } from "@/lib/server/resume-factuality";
 import { stableResumeHash, type ResumeDraftRecord } from "@/lib/resume/document";
 
 const SECTION_IDS: ResumeSectionId[] = ["summary", "experience", "projects", "education", "skills"];
@@ -82,8 +82,6 @@ export async function generateResumeDraftForAgent(
     jdText,
     memory.llmSummary,
   ].filter(Boolean);
-  const provenanceOf = (sections: Array<{ id: ResumeSectionId; label: string; content: string }>) =>
-    sections.filter((section) => checkNumberProvenance(section.content, provenanceSources).ok);
   const violationsOf = (sections: Array<{ id: ResumeSectionId; label: string; content: string }>) =>
     sections.flatMap((section) => checkNumberProvenance(section.content, provenanceSources).violations);
 
@@ -123,11 +121,11 @@ export async function generateResumeDraftForAgent(
 
   let generated = await callGeneration();
   // 硬门第一遍：全部 section 都带编造嫌疑数字 → 带违规清单重试一次（仅一次，ADR-0041）
-  let passing = provenanceOf(generated);
+  let passing = filterSectionsByProvenance(generated, provenanceSources).passing;
   if (passing.length === 0 && generated.length > 0) {
     const feedback = formatProvenanceFeedback({ ok: false, checked: 0, violations: violationsOf(generated) });
     generated = await callGeneration(feedback);
-    passing = provenanceOf(generated);
+    passing = filterSectionsByProvenance(generated, provenanceSources).passing;
     if (passing.length === 0) {
       throw new ResumeGenerationInputError(
         `数字溯源未通过（重试 1 次后仍失败），生成草稿已放弃、原简历未改动。编造嫌疑数字：${[...new Set(violationsOf(generated).map((violation) => violation.token))].slice(0, 12).join("、")}`,

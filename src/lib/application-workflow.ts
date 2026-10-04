@@ -236,10 +236,44 @@ async function recordApplicationOutcomeEvent(
   const { getDatabaseDriver, isPostgresConfigured } = await import("./postgres");
   if (getDatabaseDriver() !== "postgres" || !isPostgresConfigured()) return;
   const { admitMemory } = await import("./memory/admission");
+  const result = await admitMemory({ userId, ...buildApplicationOutcomeAdmission(application, fromStatus, toStatus, note, eventId) });
+  if (result.outcome === "rejected") {
+    console.warn(`[application-outcome] admitMemory rejected: ${result.reason}`);
+  }
+}
+
+/** 构造投递结局事件的 admitMemory 入参（纯函数，可测——evidence 三件套是 admission 硬门槛）。 */
+export function buildApplicationOutcomeAdmission(
+  application: Pick<AppRow, "id" | "company" | "role">,
+  fromStatus: ApplicationStatus | "evaluated",
+  toStatus: string,
+  note: string,
+  eventId?: number,
+): {
+  agentId: string;
+  kind: "verified_task";
+  sourceType: "application";
+  sourceId: string;
+  fact: {
+    partition: "core";
+    subject: string;
+    predicate: "application_outcome";
+    object: Record<string, unknown>;
+    canonicalText: string;
+    confidence: number;
+    importance: number;
+  };
+  evidence: {
+    quote: string;
+    artifactId: string;
+    resultEvidence: string;
+    verifiedReadBack: true;
+    extractionMethod: string;
+  };
+} {
   const company = application.company || "未知公司";
   const role = application.role || "未知岗位";
-  const result = await admitMemory({
-    userId,
+  return {
     agentId: "general",
     kind: "verified_task",
     sourceType: "application",
@@ -262,10 +296,7 @@ async function recordApplicationOutcomeEvent(
       verifiedReadBack: true,
       extractionMethod: "application_status_event",
     },
-  });
-  if (result.outcome === "rejected") {
-    console.warn(`[application-outcome] admitMemory rejected: ${result.reason}`);
-  }
+  };
 }
 
 export async function getApplicationContext(input: ApplicationContextInput, userId: string): Promise<ApplicationContext> {

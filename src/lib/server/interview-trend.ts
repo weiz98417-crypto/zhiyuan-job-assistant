@@ -13,9 +13,17 @@ import { admitMemory } from "@/lib/memory/admission";
 export const TREND_SESSION_THRESHOLD = 3;
 export const WEAK_BAND: 0 | 1 = 1;
 
+/** 会话代理键（eng review S1-5）：真实会话加 sess: 前缀参与「≥3 场」计数；
+ *  独立评分（无会话）以答案指纹 fp: 标记，不计入跨场统计。 */
+export function sessionSurrogateFor(sessionId: string, question: string, answer: string): string {
+  const id = sessionId.trim();
+  if (id) return `sess:${id}`;
+  return `fp:${createHash("sha256").update(`${question}\u0000${answer}`).digest("hex").slice(0, 16)}`;
+}
+
 export interface WeaknessEventInput {
   userId: string;
-  /** 面试会话 id（durable session）；独立评分以答案指纹为会话代理。 */
+  /** 会话代理键（sessionSurrogateFor 产出）。 */
   sessionSurrogate: string;
   dimension: string;
   band: number;

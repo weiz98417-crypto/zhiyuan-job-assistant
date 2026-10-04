@@ -15,6 +15,33 @@ const THROTTLE_MS = 60 * 60 * 1000;
 let lastRunAt = 0;
 let running: Promise<{ extracted: number; aggregated: number }> | null = null;
 
+/** 批写参数构建（纯函数，可测）：一行一抽取，值返回 unnest 列数组。 */
+export function buildSalaryUpdates(rows: Array<Record<string, unknown>>): {
+  ids: number[];
+  mins: Array<number | null>;
+  maxs: Array<number | null>;
+  units: Array<string | null>;
+  negs: number[];
+  extracted: number;
+} {
+  const ids: number[] = [];
+  const mins: Array<number | null> = [];
+  const maxs: Array<number | null> = [];
+  const units: Array<string | null> = [];
+  const negs: number[] = [];
+  let extracted = 0;
+  for (const row of rows) {
+    const extraction = extractSalaryFromJD(String(row.jd_snippet || ""));
+    ids.push(Number(row.id));
+    mins.push(extraction?.minMonthly ?? null);
+    maxs.push(extraction?.maxMonthly ?? null);
+    units.push(extraction && extraction.minMonthly !== null ? "CNY/month" : null);
+    negs.push(extraction?.negotiable ? 1 : 0);
+    if (extraction && extraction.minMonthly !== null) extracted += 1;
+  }
+  return { ids, mins, maxs, units, negs, extracted };
+}
+
 export async function runSalaryPipeline(force = false): Promise<{ extracted: number; aggregated: number }> {
   if (getDatabaseDriver() !== "postgres" || !isPostgresConfigured()) {
     return { extracted: 0, aggregated: 0 };
@@ -35,20 +62,8 @@ export async function runSalaryPipeline(force = false): Promise<{ extracted: num
            AND discovered_at >= now() - interval '12 months'
          LIMIT 500`,
       );
-      const ids: number[] = [];
-      const mins: Array<number | null> = [];
-      const maxs: Array<number | null> = [];
-      const units: Array<string | null> = [];
-      const negs: number[] = [];
-      for (const row of pending.rows as Array<Record<string, unknown>>) {
-        const extraction = extractSalaryFromJD(String(row.jd_snippet || ""));
-        ids.push(Number(row.id));
-        mins.push(extraction?.minMonthly ?? null);
-        maxs.push(extraction?.maxMonthly ?? null);
-        units.push(extraction && extraction.minMonthly !== null ? "CNY/month" : null);
-        negs.push(extraction?.negotiable ? 1 : 0);
-        if (extraction && extraction.minMonthly !== null) extracted += 1;
-      }
+      const { ids, mins, maxs, units, negs, extracted: count } = buildSalaryUpdates(pending.rows as Array<Record<string, unknown>>);
+      extracted = count;
       // 批量写回（unnest 单语句，eng review S4-3：500 行逐行 UPDATE 改为一次往返）
       if (ids.length > 0) {
         await client.query(
