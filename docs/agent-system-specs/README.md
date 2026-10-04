@@ -47,6 +47,7 @@ Spec 08–13 属于后续记忆运行时升级，不扩大 `0.10.8` 的既定发
 | 27 | Question Bank And Interview Engine | ADR-0044、Spec 25 注册表、Spec 14 嵌入失败教训；批次 0.17.0（i） |
 | 28 | Salary Benchmark Pipeline | ADR-0039 只读边界、ADR-0043、Spec 27 岗位族共用分类；批次 0.18.0（j） |
 | 29 | Outcome Feedback Loop | Spec 26 可信复盘（硬前置）、Spec 08–09 账本与准入、ADR-0034；批次 0.18.0（k） |
+| 30 | Trust Cards, Data Freshness, And Perception Metrics | Spec 26/28/29 的既有字段、CEO 审查 2026-10-04、`/api/memory/candidates` PATCH 既有端点；批次 0.19.0（i-trust-cards，方案 a 含投影扩展） |
 
 ## Shared Seams
 
