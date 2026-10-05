@@ -15,8 +15,12 @@ const ROOT = process.cwd();
 const MANIFEST_PATH = path.join(ROOT, "scripts", ".gen-en-modes.manifest.json");
 const REGISTRY_PATH = path.join(ROOT, "src", "lib", "agent", "knowledge", "registry", "manifest.json");
 
+// 哈希前归一化(去 BOM + CRLF→LF):仓库对象恒为 LF(.gitattributes eol=lf),CI 检出即 LF,
+// 而 Windows 工作树可能仍是 CRLF——按原始字节比对会让 CI 全量误报「已变更/被手改」。
 function sha256(text) {
-  return crypto.createHash("sha256").update(text, "utf8").digest("hex");
+  return crypto.createHash("sha256")
+    .update(text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n"), "utf8")
+    .digest("hex");
 }
 
 const failures = [];

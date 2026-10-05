@@ -42,8 +42,11 @@ const LEGACY_EN_ONLY = ["batch.md", "patterns.md", "project.md", "training.md"];
 
 const DEEPSEEK_URL = "https://api.deepseek.com/chat/completions";
 
+// 与 check-knowledge-drift.mjs 同规则:哈希前去 BOM + CRLF→LF,登记跨平台稳定的基线。
 function sha256(text) {
-  return crypto.createHash("sha256").update(text, "utf8").digest("hex");
+  return crypto.createHash("sha256")
+    .update(text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n"), "utf8")
+    .digest("hex");
 }
 
 function readManifest() {
