@@ -1,6 +1,6 @@
 # Change: agent-architecture-specs
 
-将已确认的纸鸢 Agent 系统架构与记忆治理方案，以及 2026-09/2026-10/2026-10B 三轮升级计划拆为二十九份可独立领取的实施 spec。Spec 01–07 定义运行架构，Spec 08–13 定义分层记忆、用户治理和迁移门禁，Spec 14–19 定义 2026-10 能力引入，Spec 20–23 定义 eng review 后的缺陷修复与登录态路线，Spec 24–29 定义 2026-10B 能力层深化。各篇遵守所引用的 ADR，以及“代码渐进迁移、生产一次切换、稳定后删除旧路径”的运行架构发布策略。
+将已确认的纸鸢 Agent 系统架构与记忆治理方案，以及 2026-09/2026-10/2026-10B/2026-10C 四轮升级计划拆为三十八份可独立领取的实施 spec。Spec 01–07 定义运行架构，Spec 08–13 定义分层记忆、用户治理和迁移门禁，Spec 14–19 定义 2026-10 能力引入，Spec 20–23 定义 eng review 后的缺陷修复与登录态路线，Spec 24–29 定义 2026-10B 能力层深化，Spec 30 为 0.19.0 信任卡（已交付），Spec 31–38 定义 2026-10C 信任补丁/前端信任周/导出与视觉三班车。各篇遵守所引用的 ADR，以及“代码渐进迁移、生产一次切换、稳定后删除旧路径”的运行架构发布策略。
 
 ## Status
 
@@ -48,6 +48,14 @@ Spec 08–13 属于后续记忆运行时升级，不扩大 `0.10.8` 的既定发
 | 28 | Salary Benchmark Pipeline | ADR-0039 只读边界、ADR-0043、Spec 27 岗位族共用分类；批次 0.18.0（j） |
 | 29 | Outcome Feedback Loop | Spec 26 可信复盘（硬前置）、Spec 08–09 账本与准入、ADR-0034；批次 0.18.0（k） |
 | 30 | Trust Cards, Data Freshness, And Perception Metrics | Spec 26/28/29 的既有字段、CEO 审查 2026-10-04、`/api/memory/candidates` PATCH 既有端点；批次 0.19.0（i-trust-cards，方案 a 含投影扩展） |
+| 31 | Generation Chain Factuality Gate | ADR-0041、Spec 24 的门实现与失败语义；批次 0.20.0 |
+| 32 | LLM JSON Consolidation | `src/lib/llm-json.ts` 既有两级修复；批次 0.20.0 |
+| 33 | Trust Card Kit And Perception Completion | Spec 30 既有实现与字段、surface-projection 三处同步纪律；批次 0.21.0（先于 33 做 35） |
+| 34 | Workbench Primitives And Overlay Migration | 2026-09 C3/C4 交付的浮层/工作台 kit；批次 0.21.0 |
+| 35 | Agent Conversation Hook Split | 2026-09 C2 交付、纯 hook 决策；批次 0.21.0（先于 33 施工） |
+| 36 | Dependency Diet | 无硬依赖（先于 37 动 package.json）；批次 0.21.0 |
+| 37 | Export Pipeline Consolidation | 无；批次 0.22.0（先于 38） |
+| 38 | Resume Visual Review Loop | Spec 37 的单一渲染出口、`cv-pdf-html.ts` 接缝；批次 0.22.0 |
 
 ## Shared Seams
 
