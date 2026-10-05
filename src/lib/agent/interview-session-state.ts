@@ -456,6 +456,10 @@ export function projectDurableInterviewEngineState(value: unknown): InterviewSes
           questionNodeId: nodeId,
           overall: Number(answer.score),
           feedback: String(answer.feedback || ""),
+          // Spec 30 / WP1：rubric 细节投影（复盘页档位/证据/三态渲染源）
+          ...(answer.rubric && typeof answer.rubric === "object"
+            ? { rubric: answer.rubric as Record<string, unknown> }
+            : {}),
           createdAt: node.createdAt,
         } as unknown as NonNullable<InterviewSessionState["scoreArtifacts"]>[number]);
       }

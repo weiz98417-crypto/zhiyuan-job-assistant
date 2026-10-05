@@ -28,6 +28,8 @@ export interface SalaryBenchmarkEntry {
   windowEnd: string | null;
   /** 面向用户的来源标注（D 板块必带） */
   sourceLabel: string;
+  /** Spec 30 / WP4：seed 超过 9 个月 → true（机器可读降级信号） */
+  isStale: boolean;
 }
 
 interface SalarySeed {
@@ -42,6 +44,25 @@ interface SalarySeed {
 const seed = seedJson as SalarySeed;
 
 /** 从 seed 生成静态基准条目（与旧 knowledge/salary-benchmarks.ts 输出等价，industryMultiplier 语义保留）。 */
+export const SALARY_STALE_MONTHS = 9;
+const SEED_AS_OF = (seedJson as { asOf?: string }).asOf || '';
+
+/** 静态 seed 时效标注（Spec 30 / WP4）：9 个月内=静态参考；超期=方向参考（CEO 审查：过期权威数据比模糊措辞更危险）。 */
+export function staticSeedLabel(): string {
+  if (seedAsOfStale()) {
+    return `方向参考（数据截至 ${SEED_AS_OF}，仅看量级）`;
+  }
+  return `静态参考（${seedJson.sources.join("、")}；数据截至 ${SEED_AS_OF}）`;
+}
+
+export function seedAsOfStale(now = new Date()): boolean {
+  if (!SEED_AS_OF) return false;
+  const asOfDate = new Date(SEED_AS_OF + '-01T00:00:00Z');
+  if (Number.isNaN(asOfDate.getTime())) return false;
+  const monthsOld = (now.getTime() - asOfDate.getTime()) / (1000 * 60 * 60 * 24 * 30.44);
+  return monthsOld > SALARY_STALE_MONTHS;
+}
+
 export function staticSeedEntries(): SalaryBenchmarkEntry[] {
   const entries: SalaryBenchmarkEntry[] = [];
   const industries = Object.keys(seed.industryMultipliers);
@@ -61,7 +82,8 @@ export function staticSeedEntries(): SalaryBenchmarkEntry[] {
         sampleSize: 0,
         windowStart: null,
         windowEnd: null,
-        sourceLabel: `静态参考（${seed.sources.join("、")}；v${seed.version} reviewed ${seed.lastReviewed}）`,
+        sourceLabel: staticSeedLabel(),
+        isStale: seedAsOfStale(),
       });
     }
   }
@@ -78,7 +100,8 @@ export function staticSeedEntries(): SalaryBenchmarkEntry[] {
       sampleSize: 0,
       windowStart: null,
       windowEnd: null,
-      sourceLabel: `静态参考（risk-intel v1.0.0：智联2025AI人才报告/脉脉/Boss直聘）`,
+      sourceLabel: staticSeedLabel(),
+      isStale: seedAsOfStale(),
     });
   }
   return entries;
@@ -166,6 +189,7 @@ export async function lookupBenchmark(city?: string, family?: string, levelBand?
           windowStart: row.window_start ? new Date(row.window_start as string).toISOString() : null,
           windowEnd: row.window_end ? new Date(row.window_end as string).toISOString() : null,
           sourceLabel: `实时聚合·${Number(row.sample_size)} 条样本（岗位机会池，近 ${AGGREGATION_WINDOW_MONTHS} 个月）`,
+          isStale: false,
         };
       }
     } catch (error) {

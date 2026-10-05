@@ -57,6 +57,7 @@ const TOOL_LABELS: Record<string, string> = {
   recognize_document_image: "已完成图片识别",
   export_file: "已生成导出文件",
   download_report_pdf: "已生成报告文件",
+  log_rejection_notice: "拒信解析",
 };
 
 const SAFE_PAYLOAD_TYPES = new Set([
@@ -93,6 +94,7 @@ const SAFE_PAYLOAD_TYPES = new Set([
   "resume_edit_proposal_applied",
   "resume_edit_proposal_discarded",
   "resume_edit_proposal_rolled_back",
+  "rejection_parse",
   "run_gate",
   "role_preference",
   "export_artifact",
@@ -113,7 +115,8 @@ const SAFE_PAYLOAD_FIELDS: Record<string, readonly string[]> = {
   image_intake: ["status", "route", "reason", "confidence", "clarificationQuestion", "retryHint", "imagesCount", "perImage"],
   interview_questions: ["questions", "company", "role", "mode", "sessionId", "readBackVerified"],
   interview_session: ["sessionId", "company", "role", "mode", "status", "currentQuestion", "answered", "readBackVerified"],
-  interview_score: ["sessionId", "score", "feedback", "dimensions", "readBackVerified"],
+  interview_score: ["sessionId", "score", "feedback", "dimensions", "readBackVerified", "bands", "overallBand", "evidence", "states", "review", "scoringVersion"],
+  rejection_parse: ["parse", "candidateId", "ledgerStatus"],
   job_discovery_batch: ["jobs", "offset", "nextOffset", "source", "hasMore"],
   job_discovery_confirmation: ["criteria", "profileDerived", "primaryAction"],
   job_discovery_detail: ["jobs", "offset", "nextOffset", "source", "hasMore"],
@@ -162,6 +165,10 @@ const SAFE_NESTED_FIELDS = new Set([
   "cvSections", "goals", "refResumes", "dnaSummary", "memoryContext", "structuredCount", "semanticCount", "recoveredExistingScan",
   "readBackEvidence", "index", "imagesCount", "perImage", "extractedTextLength", "returned", "open", "matchConfidence", "verificationStatus",
   "request", "userVisibleName", "args", "proposalId", "gateId", "runId", "toolName", "risk", "scopeHash", "decision", "resolvedAt",
+  // Spec 30：评分锚定（bands/evidence/states/review）与拒信解析（parse 子对象）的嵌套键
+  "bands", "overallBand", "evidence", "states", "review", "scoringVersion",
+  "effectiveEvidence", "mainGaps", "stateVerdict", "betterStructure",
+  "quote", "reasonLabel", "freeText", "candidateId", "ledgerStatus", "parse",
 ]);
 
 const HIDDEN_KEY = /^(raw|data|result|params?|arguments?|prompt|system|stack|trace|llm|internal|toolContext|sourceText)$/i;

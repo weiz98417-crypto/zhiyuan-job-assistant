@@ -240,6 +240,28 @@ async function recordApplicationOutcomeEvent(
   if (result.outcome === "rejected") {
     console.warn(`[application-outcome] admitMemory rejected: ${result.reason}`);
   }
+  // Spec 30 / WP5：sourced_jd_follow_through——带薪资来源标注的评估完成后同 report 投递
+  void recordSourcedFollowThrough(userId, application.num).catch(() => undefined);
+}
+
+/** 查关联 report 是否带薪资来源标注；是则记 follow-through 事件（无窗口扫描，payload 带时间可事后算）。 */
+async function recordSourcedFollowThrough(userId: string, reportNum?: number): Promise<void> {
+  if (!reportNum) return;
+  const { getDatabaseDriver, isPostgresConfigured, getPostgresPool } = await import("./postgres");
+  if (getDatabaseDriver() !== "postgres" || !isPostgresConfigured()) return;
+  const pool = getPostgresPool();
+  const client = await pool.connect();
+  try {
+    const sourced = await client.query(
+      `SELECT 1 FROM reports WHERE report_num = $1 AND user_id = $2 AND salary_data_source IS NOT NULL LIMIT 1`,
+      [reportNum, userId],
+    );
+    if ((sourced.rowCount ?? 0) === 0) return;
+    const { recordPerceptionEvent } = await import("./server/perception-events");
+    await recordPerceptionEvent(userId, "sourced_jd_follow_through", { reportNum });
+  } finally {
+    client.release();
+  }
 }
 
 /** 构造投递结局事件的 admitMemory 入参（纯函数，可测——evidence 三件套是 admission 硬门槛）。 */

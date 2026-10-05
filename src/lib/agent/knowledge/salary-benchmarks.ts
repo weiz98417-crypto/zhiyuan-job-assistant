@@ -7,6 +7,7 @@
  * salary-benchmarks-store.lookupBenchmark（异步路径，JD 评估 D 板块）。
  */
 import seedJson from "@/lib/agent/knowledge/registry/data/salary-seed.json";
+import { seedAsOfStale } from "@/lib/server/salary-benchmarks-store";
 
 export interface SalaryBenchmark {
   city: string;
@@ -59,7 +60,11 @@ export function formatBenchmarkForLLM(city?: string, level?: string): string {
     byCity.set(b.city, list);
   }
 
-  const lines: string[] = ["## 薪资基准参考（静态参考数据，精确对比以评估报告 D 板块带来源标注的数据为准）\n"];
+  // Spec 30 / WP4：asOf 降级联动（同步视图与 store 同一判 stale 函数）
+  const freshnessLabel = seedAsOfStale()
+    ? `方向参考（数据截至 ${(seedJson as { asOf?: string }).asOf}，仅看量级）`
+    : `静态参考（数据截至 ${(seedJson as { asOf?: string }).asOf}）`;
+  const lines: string[] = [`## 薪资基准参考（${freshnessLabel}）\n`];
   for (const [c, list] of byCity) {
     const summary = list
       .map((b) => `  ${b.level}: ${b.minMonthlyK}K-${b.maxMonthlyK}K（中位${b.medianMonthlyK}K）${b.typicalBonusMonths}`)

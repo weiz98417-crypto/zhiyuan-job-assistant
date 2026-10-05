@@ -171,10 +171,13 @@ export async function optimizeResumeSectionForAgent(
   const provenanceOf = (content: string) => checkNumberProvenance(content, factualitySources);
 
   // 硬门第一遍：任一方案有编造数字嫌疑 → 带违规清单重试一次（仅一次，ADR-0041）
+  // Spec 30 / WP5：provenanceRetried 标志随 draft 持久化（fact_gate_repair 感知指标数据源）
+  let provenanceRetried = false;
   const firstPassFailures = candidateVariants
     .map((variant) => ({ variant, result: provenanceOf(stringValue(variant.content)) }))
     .filter((entry) => !entry.result.ok);
   if (firstPassFailures.length > 0) {
+    provenanceRetried = true;
     const allViolations = firstPassFailures.flatMap((entry) => entry.result.violations);
     const retryResponse = await requestResumeOptimizationModel({
       fast: false,
@@ -279,6 +282,7 @@ export async function optimizeResumeSectionForAgent(
         content,
         approach: stringValue(variant.approach),
         advisory,
+        provenanceRetried,
         factuality: {
           provenanceChecked: provenance.checked,
           provenanceOk: provenance.ok,

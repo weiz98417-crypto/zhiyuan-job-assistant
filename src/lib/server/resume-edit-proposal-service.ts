@@ -11,6 +11,7 @@ import {
   type ResumeSectionId,
 } from "@/lib/agent/resume-save-guard";
 import { stableContentHash } from "@/lib/agent/verified-action";
+import { recordPerceptionEvent } from "@/lib/server/perception-events";
 
 const SECTION_IDS = new Set<ResumeSectionId>(["summary", "experience", "projects", "education", "skills"]);
 
@@ -118,7 +119,12 @@ export async function createResumeEditProposalForUser(
     originalContent: section.content || "",
     proposedContent,
     reason: (input.reason || (draft ? `selected_resume_draft:${draft.id}` : "")).slice(0, 1200),
-    riskFlags: [...(input.riskFlags || []), ...(draft ? ["persistent_draft"] : [])],
+    riskFlags: [
+      ...(input.riskFlags || []),
+      ...(draft ? ["persistent_draft"] : []),
+      // Spec 30 / WP5：fact_gate_repair 感知指标数据源（复用 riskFlags，免加列）
+      ...(draftContent?.provenanceRetried === true ? ["provenance_retried"] : []),
+    ],
   }, principal.userId);
   if (draft) await repositories.resumeDrafts.updateStatus(draft.id, "selected", principal.userId);
   const readBack = await repositories.resumeEditProposals.get(row.id, principal.userId);
@@ -167,6 +173,13 @@ export async function applyResumeEditProposalForUser(
   const readBackContent = findSectionContent(parseCvDataJson(cvRow?.data_json), applied.sectionId);
   if (readBackContent !== applied.appliedContent) {
     throw new ResumeProposalServiceError("verification_failed", "CV read-back did not match applied proposal content.");
+  }
+  // Spec 30 / WP5：fact_gate_repair——事实门拦截过的提案被用户应用（CEO 的「拦截→修复率」指标）
+  const appliedFlags = (() => {
+    try { return JSON.parse(applied.proposal.risk_flags_json || "[]") as string[]; } catch { return []; }
+  })();
+  if (appliedFlags.includes("provenance_retried")) {
+    void recordPerceptionEvent(principal.userId, "fact_gate_repair", { proposalId, retried: true }).catch(() => undefined);
   }
   return {
     proposal: resumeEditProposalToDTO(applied.proposal),
@@ -303,11 +316,15 @@ function findSectionContent(cvData: Record<string, unknown>, sectionId: string):
   return active?.version.sections?.find((item) => item.id === sectionId)?.content || "";
 }
 
-function parseDraftContent(contentJson: string, patchesJson: string): { sectionId: string; content: string } | null {
+function parseDraftContent(contentJson: string, patchesJson: string): { sectionId: string; content: string; provenanceRetried?: boolean } | null {
   try {
     const content = JSON.parse(contentJson || "{}") as Record<string, unknown>;
     if (typeof content.sectionId === "string" && typeof content.content === "string") {
-      return { sectionId: content.sectionId, content: content.content };
+      return {
+        sectionId: content.sectionId,
+        content: content.content,
+        ...(content.provenanceRetried === true ? { provenanceRetried: true } : {}),
+      };
     }
   } catch {
   }

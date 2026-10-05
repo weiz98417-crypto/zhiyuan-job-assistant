@@ -162,6 +162,13 @@ export async function generateInterviewQuestionsForAgent(
       completion: overrides.bankCompletion,
     });
     if (composed.questions.length > 0) {
+      // Spec 30 / WP5：question_source_followup——题库命中占比埋点（vs 直出题的追问率对比数据源）
+      void import("@/lib/server/perception-events").then(({ recordPerceptionEvent }) =>
+        recordPerceptionEvent(principal.userId, "question_source_followup", {
+          bankCount: composed.questions.filter((q) => q.source === "bank").length,
+          total: composed.questions.length,
+        }),
+      ).catch(() => undefined);
       const bankQuestions = composed.questions.map((item) => normalizeComposedQuestion(item, phaseToBankPhase(categories)));
       return { questions: bankQuestions, company, role, mode, memoryContext };
     }
@@ -318,10 +325,12 @@ export async function scoreInterviewAnswerForAgent(
   if ("unscored" in rubricResult) {
     // 工程原因内部留痕即可，用户看到的是可行动的话术（CEO 审查：文案外泄=事故）
     console.warn(`[interview-score] unscored: ${(rubricResult as { reason: string }).reason}`);
+    const observations = buildUnscoredObservations(answer);
+    observations.push("这一题的评分没跑出来，但不影响继续——下一题正常作答即可");
     score = {
       dimensions: { structure: 0, specificity: 0, highlight: 0, timing: 0 },
       overall: 0,
-      suggestions: ["这一题这轮没有打分。别灰心——按你的回答风格，我建议先补一个具体的数字结果，我们下一题继续。"],
+      suggestions: observations,
       segmentFeedback: [],
     };
   } else {
@@ -347,8 +356,18 @@ export async function scoreInterviewAnswerForAgent(
   return { score, memoryContext, memoryWriteback: { ...SKIPPED_MEMORY_WRITEBACK } };
 }
 
-/** RubricScoredAnswer → 旧 AnswerScore 形状（UI/工具兼容）；bands/evidence/states 附加字段透传。 */
-function rubricToAnswerScore(rubric: RubricScoredAnswer, _mode: CoachMode): AnswerScore & Partial<RubricScoredAnswer> {
+/** Spec 30 / WP6：未评分兜底观察（纯规则，不算评分不入趋势）——把「没打分」变成可行动反馈。 */
+export function buildUnscoredObservations(answer: string): string[] {
+  const text = answer.trim();
+  const observations: string[] = [];
+  if (text.length < 50) observations.push("回答偏短——试着按「背景 → 你的动作 → 量化结果」展开到一分钟以上");
+  if (!/\d/.test(text)) observations.push("回答里没有任何数字结果——一个具体的数字（百分比/规模/时长）比形容词有说服力");
+  const sentences = text.split(/[。！？!?]/).filter((s) => s.trim().length > 0).length;
+  if (sentences <= 1 && text.length >= 50) observations.push("整段只有一句话——把动作和结果拆开讲");
+  return observations.slice(0, 1); // 至多 1 条可行动观察；鼓励句由调用方固定追加
+}
+
+/** RubricScoredAnswer → 旧 AnswerScore 形状（UI/工具兼容）；bands/evidence/states 附加字段透传。 */function rubricToAnswerScore(rubric: RubricScoredAnswer, _mode: CoachMode): AnswerScore & Partial<RubricScoredAnswer> {
   return {
     dimensions: rubric.dimensions,
     overall: rubric.overall,
@@ -481,6 +500,7 @@ export async function handleInterviewSessionTurnForAgent(
     answer: completeAnswer,
     score: scored.score ?? undefined,
     feedback: scored.feedback,
+    ...(scored.rubric ? { rubric: scored.rubric } : {}),
     followups: session.currentFollowups.map((question) => ({ question, answer })),
   });
   session.pendingAnswer = undefined;
@@ -667,7 +687,11 @@ async function scoreSessionAnswer(
   answer: string,
   signal: AbortSignal | undefined,
   sessionId?: number,
-): Promise<{ score: number | null; feedback: string }> {
+): Promise<{
+  score: number | null;
+  feedback: string;
+  rubric?: { bands: Record<string, number>; overallBand: number; evidence: Record<string, string>; states: Record<string, string>; review: { effectiveEvidence: string; mainGaps: string; stateVerdict: string; betterStructure: string } };
+}> {
   try {
     const result = await scoreInterviewAnswerForAgent(principal, {
       question: session.currentQuestion?.text || "模拟面试回答",
@@ -685,9 +709,21 @@ async function scoreSessionAnswer(
     const feedback = reviewParts.length
       ? reviewParts.join("；")
       : result.score.suggestions.join("；") || "回答已记录，请继续保持结构化表达。";
+    // Spec 30 / WP1：rubric 细节随 score 透传，调用方持久化进 session.answers[].rubric
+    const extended = rubric as unknown as { bands?: Record<string, number>; overallBand?: number; evidence?: Record<string, string>; states?: Record<string, string>; review?: RubricScoredAnswer["review"] };
+    const rubricData = extended.bands
+      ? {
+          bands: extended.bands,
+          overallBand: extended.overallBand ?? 0,
+          evidence: extended.evidence ?? {},
+          states: extended.states ?? {},
+          review: extended.review ?? { effectiveEvidence: "", mainGaps: "", stateVerdict: "", betterStructure: "" },
+        }
+      : undefined;
     return {
       score: Math.round(result.score.overall * 20) / 10,
       feedback,
+      rubric: rubricData,
     };
   } catch (error) {
     if (signal?.aborted) throw error;

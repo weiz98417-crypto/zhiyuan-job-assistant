@@ -5,6 +5,14 @@ import { BookOpenText, Clock, ExternalLink, FileText, MessageSquare, Star } from
 import { PaperCard } from "@/components/design";
 import type { ChatSession, InterviewPlanSnapshot, InterviewRecap, InterviewSessionState, InterviewTurn } from "@/types";
 import { isInterviewSession } from "@/lib/agent/interview-session-state";
+import { bandLabel } from "@/lib/agent/knowledge/registry/band-labels";
+
+/** Spec 30 / WP2：统一档位徽标——/10 刻度（durable）÷2 回 1-5 再映档位词；legacy /5 直映。 */
+function scoreBadge(score: number): string {
+  const fiveScale = score > 5 ? Math.round(score / 2) : score;
+  const band = Math.max(0, Math.min(4, Math.round(fiveScale) - 1));
+  return `${bandLabel(band)} · ${band}/4`;
+}
 
 interface InterviewRecapReviewProps {
   sessions: ChatSession[];
@@ -181,7 +189,7 @@ function StructuredRecap({ recap, state }: { recap: InterviewRecap; state?: Inte
               <div key={item.questionNodeId || index} className="text-xs text-[var(--color-text-soft)] leading-relaxed">
                 <p className="font-medium text-[var(--color-text)]">
                   {index + 1}. {item.question}
-                  {typeof item.score === "number" ? ` · ${item.score}/5` : ""}
+                  {typeof item.score === "number" ? ` · ${scoreBadge(item.score)}` : ""}
                 </p>
                 {item.answerExcerpt ? <p>答题证据：{item.answerExcerpt}</p> : null}
                 {item.feedback ? <p>反馈：{item.feedback}</p> : null}
@@ -278,7 +286,7 @@ export default function InterviewRecapReview({
                     {score != null && (
                       <span className="inline-flex items-center gap-1 text-[var(--color-primary)]">
                         <Star size={11} />
-                        {score}/5
+                        {scoreBadge(score)}
                       </span>
                     )}
                   </div>

@@ -37,6 +37,7 @@ import {
 } from "../AgentDomainCards";
 
 import { FileText as FileTextIconRaw } from "lucide-react";
+import { InterviewScoreCard, RejectionParseCard } from "./InterviewTrustCards";
 
 function FileTextIcon() {
   return <FileTextIconRaw size={14} className="text-[var(--color-primary)]" />;
@@ -147,6 +148,8 @@ export function AgentToolCardOverride({ toolName, result }: ToolCallMessagePartP
     );
   }
   if (payload?.type === "interview_questions") return <InterviewQuestionCard payload={payload} />;
+  if (payload?.type === "interview_score") return <InterviewScoreCard payload={payload} />;
+  if (payload?.type === "rejection_parse") return <RejectionParseCard payload={payload} />;
   if (
     payload?.type === "resume_edit_proposal"
     || payload?.type === "resume_edit_proposal_applied"

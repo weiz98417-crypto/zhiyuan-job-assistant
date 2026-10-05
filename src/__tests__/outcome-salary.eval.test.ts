@@ -132,11 +132,15 @@ describe("Spec 28: 静态 seed 合一与标注", () => {
     expect(hardware!.p50).toBe(Math.round(38 * 1.1));
   });
 
-  it("每条静态条目带「静态参考」来源标注（D 板块纪律）", () => {
+  it("每条静态条目带来源标注；asOf 超 9 个月 → 自动降级「方向参考」（WP4）", () => {
     for (const entry of staticSeedEntries().slice(0, 5)) {
-      expect(entry.sourceLabel).toContain("静态参考");
+      expect(entry.sourceLabel).toMatch(/静态参考|方向参考/);
       expect(entry.source).toBe("static_seed");
     }
+    // 2026-10 距 seed asOf 2025-06 已 16 个月 > 9 → 降级生效
+    const beijing = findStaticBenchmark("北京", "AI/大模型", "P6");
+    expect(beijing!.sourceLabel).toContain("方向参考");
+    expect(beijing!.sourceLabel).toContain("2025-06");
   });
 
   it("聚合双条件常量：≥30 样本 + 12 个月窗", () => {
@@ -144,9 +148,9 @@ describe("Spec 28: 静态 seed 合一与标注", () => {
     expect(AGGREGATION_WINDOW_MONTHS).toBe(12);
   });
 
-  it("injectKnowledge 的同步薪资视图来自 seed（旧的硬编码文件已改为投影）", () => {
+  it("injectKnowledge 的同步薪资视图来自 seed（旧的硬编码文件已改为投影）且带时效标注", () => {
     const text = formatBenchmarkForLLM("北京", "P6");
-    expect(text).toContain("静态参考");
+    expect(text).toContain("数据截至 2025-06");
     expect(text).toContain("28K-48K");
   });
 });
