@@ -15,7 +15,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # promptfoo@0.123.1 硬检查 node>=22.22,undici/whatwg-url 等依赖亦要求 >=22.19;
+          # 与本地开发环境一致用 24(低于此版本 promptfoo 直接 exit 1)。
+          node-version: 24
           cache: npm
       - name: Install dependencies
         run: npm ci
