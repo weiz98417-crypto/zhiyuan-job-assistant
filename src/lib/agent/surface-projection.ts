@@ -167,6 +167,7 @@ const SAFE_NESTED_FIELDS = new Set([
   "request", "userVisibleName", "args", "proposalId", "gateId", "runId", "toolName", "risk", "scopeHash", "decision", "resolvedAt",
   // Spec 30：评分锚定（bands/evidence/states/review）与拒信解析（parse 子对象）的嵌套键
   "bands", "overallBand", "evidence", "states", "review", "scoringVersion",
+  "structure", "specificity", "highlight", "timing",
   "effectiveEvidence", "mainGaps", "stateVerdict", "betterStructure",
   "quote", "reasonLabel", "freeText", "candidateId", "ledgerStatus", "parse",
 ]);

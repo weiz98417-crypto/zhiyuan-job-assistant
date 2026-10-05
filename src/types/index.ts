@@ -603,6 +603,18 @@ export interface AnswerScore {
     text: string;
     rating: "good" | "expand" | "compress";
   }[];
+  /** Spec 30 / WP1：rubric 细节（scoreAnswerWithRubric 透传，工具卡/复盘页渲染源）。 */
+  bands?: Record<string, number>;
+  overallBand?: number;
+  evidence?: Record<string, string>;
+  states?: Record<string, string>;
+  review?: {
+    effectiveEvidence: string;
+    mainGaps: string;
+    stateVerdict: string;
+    betterStructure: string;
+  };
+  scoringVersion?: string;
 }
 
 export interface InterviewQuestion {
@@ -962,6 +974,18 @@ export interface InterviewScore {
   overall: number;
   dimensions?: Record<string, number>;
   feedback?: string;
+  /** Spec 30 / WP1：rubric 细节（durable 会话持久化，工具卡/复盘页档位+证据+三态渲染源）。 */
+  bands?: Record<string, number>;
+  overallBand?: number;
+  evidence?: Record<string, string>;
+  states?: Record<string, string>;
+  review?: {
+    effectiveEvidence: string;
+    mainGaps: string;
+    stateVerdict: string;
+    betterStructure: string;
+  };
+  scoringVersion?: string;
 }
 
 export interface InterviewScoreArtifact {
@@ -990,6 +1014,8 @@ export interface InterviewRecap {
     answerExcerpt?: string;
     sourceTurnIds?: string[];
     score?: number;
+    /** Spec 30 / WP1：rubric 档位（复盘页档位徽标渲染源）。 */
+    rubricOverallBand?: number;
     feedback?: string;
   }[];
   sourceTurnIds?: string[];

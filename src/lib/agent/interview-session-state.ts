@@ -13,6 +13,7 @@ import type {
   InterviewTurn,
   JDRecord,
 } from "@/types";
+import { bandLabel } from "@/lib/agent/knowledge/registry/band-labels";
 
 function makeId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -454,12 +455,15 @@ export function projectDurableInterviewEngineState(value: unknown): InterviewSes
       if (answer.score !== undefined && answer.score !== null) {
         scoreArtifacts.push({
           questionNodeId: nodeId,
-          overall: Number(answer.score),
+          // Spec 30 / E4：统一 .score 包装层（与工具路径 artifact 形状一致——复盘页消费单一形状）
+          score: {
+            overall: Number(answer.score),
+            // Spec 30 / WP1：rubric 细节投影（复盘页档位/证据/三态渲染源）
+            ...(answer.rubric && typeof answer.rubric === "object"
+              ? { rubric: answer.rubric as Record<string, unknown> }
+              : {}),
+          },
           feedback: String(answer.feedback || ""),
-          // Spec 30 / WP1：rubric 细节投影（复盘页档位/证据/三态渲染源）
-          ...(answer.rubric && typeof answer.rubric === "object"
-            ? { rubric: answer.rubric as Record<string, unknown> }
-            : {}),
           createdAt: node.createdAt,
         } as unknown as NonNullable<InterviewSessionState["scoreArtifacts"]>[number]);
       }
@@ -732,6 +736,7 @@ export function buildInterviewRecapFromState(
       answerExcerpt: compactText(answers.map((turn) => turn.content).join("\n"), 160),
       sourceTurnIds: answers.map((turn) => turn.id),
       score: score?.overall,
+      rubricOverallBand: score?.overallBand,
       feedback: summarizeScore(score),
     };
   });
@@ -743,7 +748,7 @@ export function buildInterviewRecapFromState(
   return {
     generatedAt: new Date().toISOString(),
     overallVerdict: averageScore
-      ? `${company} ${role} 模拟面试已完成 ${answeredQuestions.length} 道已回答问题（主问题 ${mainAnswered}，追问/探针 ${followUpAnswered}），平均评分 ${averageScore}/5。`
+      ? `${company} ${role} 模拟面试已完成 ${answeredQuestions.length} 道已回答问题（主问题 ${mainAnswered}，追问/探针 ${followUpAnswered}），平均档位 ${bandLabel(Math.max(0, Math.min(4, Math.round(averageScore) - 1)))} · ${Math.round(averageScore)}/5（五分刻度）。`
       : `${company} ${role} 模拟面试已记录 ${answeredQuestions.length} 道已回答问题，尚未生成结构化评分。`,
     strengths,
     weaknesses,

@@ -289,7 +289,7 @@ describe("Interview session state", () => {
     expect(recapped?.recap?.evidenceFromAnswers?.[0]).toContain("指标体系");
     expect(recapped?.recap?.followUpPerformance?.[0]).toContain("追问");
     expect(recapped?.recap?.nextPracticePlan.length).toBeGreaterThan(0);
-    expect(recapped?.recap?.overallVerdict).toContain("平均评分 4/5");
+    expect(recapped?.recap?.overallVerdict).toContain("平均档位"); // Spec 30：档位制口径
     expect(recapped?.recap?.overallVerdict).not.toContain("整体不错");
   });
 

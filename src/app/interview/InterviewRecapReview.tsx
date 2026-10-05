@@ -7,10 +7,12 @@ import type { ChatSession, InterviewPlanSnapshot, InterviewRecap, InterviewSessi
 import { isInterviewSession } from "@/lib/agent/interview-session-state";
 import { bandLabel } from "@/lib/agent/knowledge/registry/band-labels";
 
-/** Spec 30 / WP2：统一档位徽标——/10 刻度（durable）÷2 回 1-5 再映档位词；legacy /5 直映。 */
-function scoreBadge(score: number): string {
-  const fiveScale = score > 5 ? Math.round(score / 2) : score;
-  const band = Math.max(0, Math.min(4, Math.round(fiveScale) - 1));
+/** Spec 30 / WP2：统一档位徽标。rubric.overallBand 优先（根治双刻度歧义）；无 rubric 时
+ *  legacy /5 直映，durable /10（值域 2-10）÷2 回 1-5 再映。裸值 2-4 双刻度歧义接受（S1 已知）。 */
+function scoreBadge(score: number, rubricBand?: number): string {
+  const band = typeof rubricBand === "number"
+    ? rubricBand
+    : Math.max(0, Math.min(4, Math.round(score > 5 ? score / 2 : score) - 1));
   return `${bandLabel(band)} · ${band}/4`;
 }
 
@@ -24,10 +26,13 @@ function sessionDate(session: ChatSession): Date {
 }
 
 function averageScore(state?: InterviewSessionState): number | null {
+  // Spec 30 / S2：未评分哨兵（0）不入均值；durable /10 归一为 /5 刻度后再平均（跨刻度不混算）
   const scores = [
-    ...(state?.scoreArtifacts || []).map((item) => item.score.overall),
+    ...(state?.scoreArtifacts || []).map((item) => item.score?.overall),
     ...(state?.questionGraph || []).map((item) => item.score?.overall),
-  ].filter((score): score is number => typeof score === "number" && Number.isFinite(score));
+  ]
+    .filter((score): score is number => typeof score === "number" && Number.isFinite(score) && score > 0)
+    .map((score) => (score > 5 ? Math.round(score / 2) : score));
   if (!scores.length) return null;
   return Math.round((scores.reduce((sum, score) => sum + score, 0) / scores.length) * 10) / 10;
 }
@@ -189,7 +194,7 @@ function StructuredRecap({ recap, state }: { recap: InterviewRecap; state?: Inte
               <div key={item.questionNodeId || index} className="text-xs text-[var(--color-text-soft)] leading-relaxed">
                 <p className="font-medium text-[var(--color-text)]">
                   {index + 1}. {item.question}
-                  {typeof item.score === "number" ? ` · ${scoreBadge(item.score)}` : ""}
+                  {typeof item.score === "number" ? ` · ${scoreBadge(item.score, item.rubricOverallBand)}` : ""}
                 </p>
                 {item.answerExcerpt ? <p>答题证据：{item.answerExcerpt}</p> : null}
                 {item.feedback ? <p>反馈：{item.feedback}</p> : null}

@@ -38,13 +38,15 @@ export function InterviewScoreCard({ payload }: { payload: Record<string, unknow
   const [expanded, setExpanded] = useState(false);
   const rubric = (payload?.bands ? payload : null) as (RubricShape & Record<string, unknown>) | null;
 
-  // 未评分态（WP6/Spec 26：无 bands = 未评分，不与 band 0 混淆）
+  // 未评分态（WP6/Spec 26：无 bands = 未评分，不与 band 0 混淆）；观察文案在 suggestions
   if (!rubric || !rubric.bands) {
-    const feedback = typeof payload?.feedback === "string" ? payload.feedback : "";
+    const suggestions = Array.isArray(payload?.suggestions) ? payload.suggestions.map(String) : [];
     return (
       <div className={COMPACT_CARD_CLASS}>
         <p className="text-[var(--color-text)] font-medium">这一题这轮没有打分</p>
-        {feedback ? <p className="text-[var(--color-muted)]">{feedback}</p> : null}
+        {suggestions.map((s, i) => (
+          <p key={i} className="text-[var(--color-muted)]">{s}</p>
+        ))}
       </div>
     );
   }
@@ -172,7 +174,11 @@ export function RejectionParseCard({ payload }: { payload: Record<string, unknow
       {parse.freeText ? <p className="text-[var(--color-muted)]">{parse.freeText}</p> : null}
 
       {candidateId == null ? (
-        <p className="text-[var(--color-muted)]">本地模式不入账。</p>
+        <p className="text-[var(--color-muted)]">
+          {payload?.ledgerStatus === "skipped_postgres_only"
+            ? "本地模式不入账。"
+            : "该解析未产生新候选（可能已存在或被策略拦截），无需确认。"}
+        </p>
       ) : confirmed ? (
         <p className="inline-flex items-center gap-1 text-[var(--color-primary)]">
           <Check size={12} /> 已确认入账

@@ -1,4 +1,5 @@
 import type { ToolDefinition, ToolExecutionContext, ToolResult } from "./types";
+import { bandLabel } from "@/lib/agent/knowledge/registry/band-labels";
 import type { InterviewQuestion, AnswerScore, CoachMode } from "@/types";
 import { COACH_MODES } from "@/types";
 import { fetchAgentMemoryContext } from "./memory-helpers";
@@ -253,6 +254,20 @@ function scoreFormat(result: ToolResult): string {
     highlight: "亮点突出",
     timing: "时间控制",
   };
+
+  // Spec 30：rubric 档位为主显口径（模型可见文本与信任卡一致）；legacy /5 数据回退旧口径
+  if (d.bands && d.overallBand !== undefined) {
+    let bandOut = `综合评分: ${bandLabel(d.overallBand)} · ${d.overallBand}/4\n\n`;
+    bandOut += Object.entries(d.bands).map(([k, band]) => `  ${dimLabels[k] || k}: ${bandLabel(band)} ${band}/4`).join("\n");
+    if (d.states) {
+      const stateLabels: Record<string, string> = { does_not_know: "不会", did_not_articulate: "没说清", not_on_resume: "简历没写" };
+      const stateRows = Object.entries(d.states)
+        .filter(([, s]) => s && s !== "none")
+        .map(([k, s]) => `  ${dimLabels[k] || k}: ${stateLabels[s] || s}`);
+      if (stateRows.length) bandOut += `\n三态判定:\n${stateRows.join("\n")}`;
+    }
+    return bandOut;
+  }
 
   let out = `综合评分: ${d.overall?.toFixed(2) || "N/A"}/5\n\n`;
   out += Object.entries(dims).map(([k, v]) => `  ${dimLabels[k] || k}: ${v}/5`).join("\n");

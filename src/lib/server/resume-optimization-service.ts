@@ -172,6 +172,7 @@ export async function optimizeResumeSectionForAgent(
 
   // 硬门第一遍：任一方案有编造数字嫌疑 → 带违规清单重试一次（仅一次，ADR-0041）
   // Spec 30 / WP5：provenanceRetried 标志随 draft 持久化（fact_gate_repair 感知指标数据源）
+  const retriedHashes = new Set<string>();
   let provenanceRetried = false;
   const firstPassFailures = candidateVariants
     .map((variant) => ({ variant, result: provenanceOf(stringValue(variant.content)) }))
@@ -196,6 +197,7 @@ export async function optimizeResumeSectionForAgent(
     const firstPassPassing = candidateVariants.filter((variant) => provenanceOf(stringValue(variant.content)).ok);
     // 重试只此一次：通过者取两遍并集（按内容去重），仍不通过者淘汰并放弃
     const seenContents = new Set(firstPassPassing.map((variant) => stableResumeHash(stringValue(variant.content))));
+    for (const variant of retryPassing) retriedHashes.add(stableResumeHash(stringValue(variant.content)));
     candidateVariants = [...firstPassPassing, ...retryPassing.filter((variant) => !seenContents.has(stableResumeHash(stringValue(variant.content))))];
     if (candidateVariants.length === 0) {
       throw new ResumeOptimizationInputError(
@@ -260,6 +262,7 @@ export async function optimizeResumeSectionForAgent(
     const provenance = provenanceOf(content);
     const factuality = factualityByContent.get(stableResumeHash(content));
     const advisory = factuality?.advisory === true;
+    const retriedHere = retriedHashes.has(stableResumeHash(content));
     const label = (stringValue(variant.label) || `方案 ${index + 1}`).slice(0, 140);
     return [{
       id: deterministicId(`draft_${index + 1}`, principal.userId, input.requestKey),

@@ -86,13 +86,14 @@ export async function evaluateJobDescription(
       const band = benchmark.p50 !== null
         ? `${benchmark.p25 ?? "?"} - ${benchmark.p75 ?? "?"} 元/月（中位 ${benchmark.p50}）`
         : "无数据";
-      // Spec 30 / WP4：seed 超 9 个月 → isStale → 只谈量级不谈具体谈判数字
+      // Spec 30 / WP4：seed 超 9 个月 → isStale → 只谈量级；引用纪律句保留（拼接非替换，S4）
       const staleInstruction = benchmark.isStale
         ? "⚠ 此数据已过时效，仅作方向参考：不得给出具体谈判数字，只讨论量级区间。"
         : "D 板块薪酬对比必须引用上述来源标注；不得将估算值表述为事实；无匹配数据时明确写「静态参考/数据不足」。";
       salaryContext = [
         `市场薪资参考（来源标注：${benchmark.sourceLabel}）：`,
         `城市 ${benchmark.city}，岗位族 ${benchmark.family}${benchmark.levelBand ? `，层级 ${benchmark.levelBand}` : ""}：${band} ${benchmark.unit}。`,
+        "D 板块薪酬对比必须引用上述来源标注；不得将估算值表述为事实；无匹配数据时明确写「静态参考/数据不足」。",
         staleInstruction,
       ].join("\n");
     }
