@@ -71,7 +71,6 @@
     "verify:capability-2026-10b": "npm run check:knowledge-drift && npm run check:prompt-hygiene && npm run eval:capability-2026-10b"
   },
   "dependencies": {
-    "@ant-design/icons": "^6.3.2",
     "@assistant-ui/react": "^0.15.22",
     "@libsql/client": "^0.17.3",
     "@mastra/core": "^1.69.0",
@@ -85,8 +84,6 @@
     "@radix-ui/react-popover": "^1.1.23",
     "@radix-ui/react-slot": "^1.3.3",
     "@radix-ui/react-tooltip": "^1.2.16",
-    "@types/better-sqlite3": "^7.6.13",
-    "antd": "^6.6.1",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^12.9.0",
     "cheerio": "^1.2.0",
@@ -102,7 +99,6 @@
     "marked": "^18.0.4",
     "next": "16.2.4",
     "pdf-parse": "^2.4.5",
-    "pdf2json": "^4.0.3",
     "pg": "^8.21.0",
     "playwright": "^1.59.1",
     "puppeteer": "^24.43.0",
@@ -133,6 +129,7 @@
     "tailwindcss": "^4",
     "typescript": "^5",
     "vite": "^7.2.7",
-    "vitest": "^4.1.6"
+    "vitest": "^4.1.6",
+    "@types/better-sqlite3": "^7.6.13"
   }
 }

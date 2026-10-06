@@ -1,43 +1,22 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
-import { Progress, Timeline, ConfigProvider, theme as antdTheme } from "antd";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import { CheckCircle2, ChevronRight, CircleDashed, PauseCircle, ShieldCheck } from "lucide-react";
 import { ThinkingOrb, type OrbState } from "thinking-orbs";
 import { sanitizeSafeReasoningSummary } from "@/lib/agent/surface-projection";
 import type { AgentArtifactRef } from "@/lib/agent/task-journey";
-import { useTheme } from "@/components/providers/ThemeProvider";
 
 /**
- * antd 活动轨道组件吃纸鸢令牌(0.11.0-D 主题对齐)。
- * 色值与 globals.css 的纸鸢令牌镜像;明暗两套由 useTheme 切换,
- * 避免暗色模式下 antd 默认亮面反白。
+ * Agent 活动轨道(spec 36:脱离 antd,进度条/时间线用纸鸢令牌自绘;
+ * 明暗由 CSS 变量随 useTheme 自动生效,不再需要 ConfigProvider 种子)。
  */
-const PAPER_SEED = {
-  colorPrimary: "var(--color-primary)",
-  colorInfo: "var(--color-primary)",
-  borderRadius: 8,
-  fontFamily: '"Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif',
-};
 
-const LIGHT_SEED = {
-  ...PAPER_SEED,
-  colorBorder: "var(--color-border)",
-  colorBorderSecondary: "var(--color-border)",
-  colorBgContainer: "var(--color-surface)",
-  colorText: "var(--color-text)",
-  colorTextDescription: "var(--color-muted)",
-};
-
-const DARK_SEED = {
-  ...PAPER_SEED,
-  colorBorder: "var(--color-border)",
-  colorBorderSecondary: "var(--color-border)",
-  colorBgContainer: "var(--color-surface)",
-  colorText: "var(--color-text)",
-  colorTextDescription: "var(--color-muted)",
-};
+interface TimelineRow {
+  color: string;
+  dot: ReactNode;
+  children: ReactNode;
+}
 
 interface AgentActivityTrackProps {
   streaming: boolean;
@@ -73,11 +52,6 @@ export default function AgentActivityTrack({
   resultQuality,
 }: AgentActivityTrackProps) {
   const reducedMotion = useReducedMotion();
-  const { theme } = useTheme();
-  const paperTheme = {
-    token: theme === "dark" ? DARK_SEED : LIGHT_SEED,
-    algorithm: theme === "dark" ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
-  } as const;
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const detailsId = useId();
@@ -92,7 +66,7 @@ export default function AgentActivityTrack({
   const safeSummary = sanitizeSafeReasoningSummary(thinkingContent || label, label);
   const completedBlocks = evalProgress.filter((item) => item.status === "done").length;
   const progress = evalProgress.length > 0 ? Math.round((completedBlocks / evalProgress.length) * 100) : undefined;
-  const timelineItems = [
+  const timelineItems: TimelineRow[] = [
     ...(thinkingContent ? [{
       color: isPaused ? "var(--color-warn)" : isWaiting ? "var(--color-warn)" : "var(--color-primary)",
       dot: isPaused ? <PauseCircle size={15} /> : isWaiting ? <CircleDashed size={15} /> : <ShieldCheck size={15} />,
@@ -123,14 +97,13 @@ export default function AgentActivityTrack({
   }, [startTime]);
 
   return (
-    <ConfigProvider theme={paperTheme}>
-      <motion.section
-        initial={reducedMotion ? false : { opacity: 0, y: 6 }}
-        animate={reducedMotion ? undefined : { opacity: 1, y: 0 }}
-        className="w-fit max-w-[min(560px,78%)] text-[var(--color-text-soft)]"
-        aria-live="polite"
-        aria-label="Agent 活动进度"
-      >
+    <motion.section
+      initial={reducedMotion ? false : { opacity: 0, y: 6 }}
+      animate={reducedMotion ? undefined : { opacity: 1, y: 0 }}
+      className="w-fit max-w-[min(560px,78%)] text-[var(--color-text-soft)]"
+      aria-live="polite"
+      aria-label="Agent 活动进度"
+    >
       <div className="flex min-h-7 max-w-full items-center gap-2 px-1 py-1">
         <ThinkingOrb
           state={orbState}
@@ -160,15 +133,27 @@ export default function AgentActivityTrack({
         )}
       </div>
       {progress !== undefined && (
-        <Progress percent={progress} size="small" showInfo={false} strokeColor="var(--color-primary)" trailColor="var(--color-primary-muted)" className="ml-7 max-w-52" />
+        <div className="ml-7 mt-1 max-w-52" role="progressbar" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100}>
+          <div className="h-1 w-full overflow-hidden rounded-full bg-[var(--color-primary-muted)]">
+            <div className="h-1 rounded-full bg-[var(--color-primary)] transition-[width] duration-500" style={{ width: `${progress}%` }} />
+          </div>
+        </div>
       )}
       {detailsOpen && hasDetails && (
         <div id={detailsId} className="ml-7 mt-1 max-w-lg pt-1">
-          <Timeline className="mb-0" items={timelineItems} />
+          <ol className="relative mb-0 space-y-2 border-l border-[var(--color-border)] pl-4">
+            {timelineItems.map((item, index) => (
+              <li key={index} className="relative">
+                <span className="absolute -left-[1.4rem] top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-[var(--color-surface)] ring-2" style={{ color: item.color, boxShadow: `inset 0 0 0 2px ${item.color}` }}>
+                  {item.dot}
+                </span>
+                {item.children}
+              </li>
+            ))}
+          </ol>
         </div>
       )}
-      </motion.section>
-    </ConfigProvider>
+    </motion.section>
   );
 }
 
