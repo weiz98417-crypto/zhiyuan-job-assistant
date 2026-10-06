@@ -8,6 +8,7 @@
  * - token 成本经 ChatResult.usage 累计，运行时打印成本摘要供发版回填。
  */
 import { complete, type ChatCompletionRequest, type ChatResult } from "@/lib/ai/model-gateway";
+import { parseLlmJsonObject } from "@/lib/llm-json";
 import type { AgentTaskType } from "@/lib/agent/task-contract";
 import { hardVetoPasses, type StagingJudgeResult } from "@/lib/agent/staging-judge";
 
@@ -113,15 +114,10 @@ function buildUserMessage(input: QualityScorerInput): string {
 }
 
 function parseScorerJson(text: string): Record<string, unknown> {
-  const match = text.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error(`Quality scorer returned non-JSON output: ${text.slice(0, 200)}`);
-  try {
-    const parsed = JSON.parse(match[0]) as unknown;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not an object");
-    return parsed as Record<string, unknown>;
-  } catch (error) {
-    throw new Error(`Quality scorer JSON parse failed: ${error instanceof Error ? error.message : error}`);
-  }
+  // spec 32：判官解析统一走 llm-json 收口入口（含截断修复——本评分器自 spec 31 起进生产链路）。
+  const parsed = parseLlmJsonObject(text);
+  if (!parsed) throw new Error(`Quality scorer returned non-JSON output: ${text.slice(0, 200)}`);
+  return parsed;
 }
 
 function vetoFor(name: QualityScorerName, parsed: Record<string, unknown>): QualityVetoCode | undefined {
@@ -147,7 +143,8 @@ async function runScorer(
     messages: [{ role: "user", content: buildUserMessage(input) }],
     systemPrompt: SCORER_INSTRUCTIONS[name],
     temperature: 0,
-    maxTokens: 600,
+    // 4000：2026-10 校准实测 2000 会截断判官 JSON（ llm-json 修复可兜底，但给足避免无谓重试）
+    maxTokens: 4000,
     stream: false,
     timeoutMs: 30_000,
   };

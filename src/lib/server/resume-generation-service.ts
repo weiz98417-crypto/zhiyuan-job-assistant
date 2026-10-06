@@ -136,7 +136,7 @@ export async function generateResumeDraftForAgent(
   // 软门：faithfulness/hallucination（spec 31，与优化链 resume-optimization-service.ts 软门同语义）。
   // veto（编造数组非空）→ 淘汰该 section；低分无 veto → 降级「仅供参考」；判官不可用 → 未评分放行（不阻塞）。
   // 生成链 section ≤5 且内容互异（非同题变体），故逐一评分、不设优化链的 3 个变体评分上限。
-  const factualityByContent = new Map<string, { advisory: boolean; faithfulnessScore?: number; advisoryReason?: string }>();
+  const factualityByContent = new Map<string, { vetoed: boolean; advisory: boolean; faithfulnessScore?: number; advisoryReason?: string }>();
   for (const section of passing) {
     try {
       const quality = await scoreAgentOutput({
@@ -148,6 +148,7 @@ export async function generateResumeDraftForAgent(
       const vetoed = quality.hardVetoes.length > 0;
       const lowScore = !vetoed && quality.score < BLOCKING_SCORE_THRESHOLD;
       factualityByContent.set(stableResumeHash(section.content), {
+        vetoed,
         advisory: lowScore,
         faithfulnessScore: quality.score,
         advisoryReason: vetoed
@@ -160,9 +161,9 @@ export async function generateResumeDraftForAgent(
       // 判官不可用不阻塞主链路（软门语义）；无记录 = 未评分
     }
   }
+  // 淘汰判定用结构化 vetoed 标志，不用 advisoryReason 文案前缀（文案是展示层，不当控制流）
   const survivingSections = passing.filter((section) => {
-    const factuality = factualityByContent.get(stableResumeHash(section.content));
-    return !factuality || !factuality.advisoryReason?.startsWith("编造判定");
+    return !factualityByContent.get(stableResumeHash(section.content))?.vetoed;
   });
   if (survivingSections.length === 0 && passing.length > 0) {
     const reasons = [...factualityByContent.values()].map((entry) => entry.advisoryReason).filter(Boolean).join("；");

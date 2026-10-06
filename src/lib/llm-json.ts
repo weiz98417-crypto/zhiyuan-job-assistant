@@ -1,6 +1,7 @@
 /**
  * LLM JSON 解析收口（eng review S2-3）：全仓「剥 ```json 围栏 → JSON.parse →
- * 兜底正则取 {}」样板合一（2026-10C spec 32 起为唯一合法解析入口）。
+ * 兜底正则取 {}」样板的唯一合法解析入口（spec 32：8 处 route 样板 + 判官/生成链等
+ * 服务内调用统一走此，禁止调用点再自造 parse+正则兜底）。
  * 返回 null 表示解析失败，由调用方决定抛错还是降级。
  */
 export function extractLlmJsonText(text: string): string | null {
@@ -15,56 +16,29 @@ export function extractLlmJsonText(text: string): string | null {
 }
 
 /** 内部：从 LLM 文本中取出一份「能成功 JSON.parse」的 JSON 文本，含截断修复：
- *  LLM max_tokens 截断的 JSON（尾部被切、连闭合 `}` 都没有）从首个 `{`
- *  起取候选，按「回退到最后完整成员」与「深度推断补闭合符」两级修复；修不了才 null。
+ *  LLM max_tokens 截断的 JSON（尾部被切、连闭合符都没有）取候选后按
+ *  「回退到最后完整成员」与「字符串感知深度补闭合符」两级修复；修不了才 null。
  *  对象路径失败后走数组路径（spec 32：标签内截断数组的等价修复）。 */
 function repairedJsonText(text: string): string | null {
-  const objectText = repairedObjectJsonText(text);
-  if (objectText !== null) return objectText;
-  return repairedArrayJsonText(text);
+  return repairedObjectJsonText(text) ?? repairedArrayJsonText(text);
 }
 
 function repairedObjectJsonText(text: string): string | null {
   const direct = extractLlmJsonText(text);
-  if (direct !== null) {
-    try {
-      JSON.parse(direct);
-      return direct;
-    } catch {
-      // fall through to repair
-    }
-  }
+  if (direct !== null && parses(direct)) return direct;
   const start = text.indexOf("{");
   if (start === -1) return null;
   const candidate = text.slice(start).replace(/\r\n/g, "\n").trimEnd();
-  try {
-    JSON.parse(candidate);
-    return candidate;
-  } catch {
-    // fall through to repair
-  }
+  if (parses(candidate)) return candidate;
   // 修复 A：尾部可能是被切断的新成员——回退到最后一个完整 `}`
   const lastBrace = candidate.lastIndexOf("}");
   if (lastBrace > 0) {
     const repaired = candidate.slice(0, lastBrace + 1);
-    try {
-      JSON.parse(repaired);
-      return repaired;
-    } catch {
-      // fall through to repair B
-    }
+    if (parses(repaired)) return repaired;
   }
   // 修复 B：按字符串感知的括号深度推断缺失的闭合序列（inString 先补 `"`，再 LIFO 补 `}`/`]`）
   const closing = closingFor(candidate);
-  if (closing) {
-    const repaired = candidate + closing;
-    try {
-      JSON.parse(repaired);
-      return repaired;
-    } catch {
-      // give up
-    }
-  }
+  if (closing && parses(candidate + closing)) return candidate + closing;
   return null;
 }
 
@@ -102,18 +76,14 @@ function parses(jsonText: string): boolean {
 
 /** 宽松解析：成功返回对象，失败返回 null（不抛）。 */
 export function parseLlmJsonObject(text: string): Record<string, unknown> | null {
-  const jsonText = repairedJsonText(text);
-  if (jsonText === null) return null;
-  try {
-    const parsed = JSON.parse(jsonText) as unknown;
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
-  } catch {
-    return null;
-  }
+  const value = parseLlmJsonValue(text);
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
 }
 
 /** 同 parseLlmJsonObject，但容忍任意顶层 JSON 值（数组等，如 <<FOLLOWUPS>> 标签包裹的
- *  列表、无视 response_format 返回的顶层数组）；失败 null（spec 32 前置增量，既有签名不变）。 */
+ *  列表、无视 response_format 返回的顶层数组）；失败 null（spec 32 增量）。 */
 export function parseLlmJsonValue(text: string): unknown | null {
   const jsonText = repairedJsonText(text);
   if (jsonText === null) return null;
