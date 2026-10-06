@@ -33,6 +33,7 @@ import {
   WarmButton,
   PaperCard,
 } from "@/components/design";
+import { AlertDialog, AlertDialogContent, AlertDialogTitle, AlertDialogDescription } from "@/components/ui/overlay";
 import db from "@/lib/db";
 import {
   loadCVData,
@@ -1228,49 +1229,38 @@ export default function CVPage() {
           )}
         </div>
 
-        {/* Clear confirmation modal */}
-        <AnimatePresence>
-          {clearConfirmId && (
-            <>
-              <motion.div
-                className="fixed inset-0 bg-black/20 z-40"
-                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                onClick={() => setClearConfirmId(null)}
-              />
-              <motion.div
-                className="fixed inset-0 z-50 flex items-center justify-center p-4"
-                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              >
-                <motion.div
-                  className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-[var(--radius-xl)] p-6 w-full max-w-sm shadow-[var(--shadow-lg)]"
-                  initial={{ scale: 0.95, y: 16 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 16 }}
+        {/* Clear confirmation modal(浮层 kit) */}
+        {clearConfirmId && (
+          <AlertDialog open onOpenChange={(open) => { if (!open) setClearConfirmId(null); }}>
+            <AlertDialogContent className="w-[calc(100%-2rem)]! rounded-[var(--radius-xl)]!">
+              <AlertDialogTitle asChild>
+                <p className="text-[var(--color-text)] font-medium mb-2">确认清除</p>
+              </AlertDialogTitle>
+              <AlertDialogDescription asChild>
+                <p className="text-sm text-[var(--color-muted)] mb-4">
+                  确定要清除「{sections.find(s => s.id === clearConfirmId)?.title}」的全部内容吗？此操作不可撤销。
+                </p>
+              </AlertDialogDescription>
+              <div className="flex gap-2 justify-end">
+                <button
+                  onClick={() => setClearConfirmId(null)}
+                  className="px-3 py-1.5 text-sm rounded-[var(--radius-sm)] text-[var(--color-muted)] hover:bg-[var(--color-bg)] transition-colors"
                 >
-                  <p className="text-[var(--color-text)] font-medium mb-2">确认清除</p>
-                  <p className="text-sm text-[var(--color-muted)] mb-4">
-                    确定要清除「{sections.find(s => s.id === clearConfirmId)?.title}」的全部内容吗？此操作不可撤销。
-                  </p>
-                  <div className="flex gap-2 justify-end">
-                    <button
-                      onClick={() => setClearConfirmId(null)}
-                      className="px-3 py-1.5 text-sm rounded-[var(--radius-sm)] text-[var(--color-muted)] hover:bg-[var(--color-bg)] transition-colors"
-                    >
-                      取消
-                    </button>
-                    <button
-                      onClick={() => {
-                        updateSection(clearConfirmId, "");
-                        setClearConfirmId(null);
-                      }}
-                      className="px-3 py-1.5 text-sm rounded-[var(--radius-sm)] bg-red-500 text-white hover:bg-red-600 transition-colors"
-                    >
-                      确认清除
-                    </button>
-                  </div>
-                </motion.div>
-              </motion.div>
-            </>
-          )}
-        </AnimatePresence>
+                  取消
+                </button>
+                <button
+                  onClick={() => {
+                    updateSection(clearConfirmId, "");
+                    setClearConfirmId(null);
+                  }}
+                  className="px-3 py-1.5 text-sm rounded-[var(--radius-sm)] bg-red-500 text-white hover:bg-red-600 transition-colors"
+                >
+                  确认清除
+                </button>
+              </div>
+            </AlertDialogContent>
+          </AlertDialog>
+        )}
 
         {/* Right: JD Context + References + Match Details */}
         <div className="space-y-4 xl:sticky xl:top-24 xl:self-start">
@@ -1782,54 +1772,44 @@ export default function CVPage() {
       </div>
       )}
 
-      {/* Unsaved changes dialog */}
-      <AnimatePresence>
-        {showUnsavedDialog && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/20"
-            onClick={() => setShowUnsavedDialog(false)}
-          >
-            <motion.div
-              initial={{ scale: 0.95 }}
-              animate={{ scale: 1 }}
-              exit={{ scale: 0.95 }}
-              className="bg-[var(--color-surface-raised)] rounded-[var(--radius-lg)] shadow-xl p-6 max-w-sm mx-4"
-              onClick={(e) => e.stopPropagation()}
-            >
+      {/* Unsaved changes dialog(浮层 kit) */}
+      {showUnsavedDialog && (
+        <AlertDialog open onOpenChange={(open) => { if (!open) setShowUnsavedDialog(false); }}>
+          <AlertDialogContent className="w-[calc(100%-2rem)]! bg-[var(--color-surface-raised)]! shadow-xl!">
+            <AlertDialogTitle asChild>
               <p className="text-[var(--color-text)] font-medium mb-2">当前版本有未保存的更改</p>
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
               <p className="text-sm text-[var(--color-muted)] mb-4">是否放弃未保存的更改并切换版本？</p>
-              <div className="flex gap-2 justify-end">
-                <WarmButton
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setShowUnsavedDialog(false);
+            </AlertDialogDescription>
+            <div className="flex gap-2 justify-end">
+              <WarmButton
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setShowUnsavedDialog(false);
+                  setPendingAction(null);
+                }}
+              >
+                取消
+              </WarmButton>
+              <WarmButton
+                variant="primary"
+                size="sm"
+                onClick={() => {
+                  setShowUnsavedDialog(false);
+                  if (pendingAction) {
+                    pendingAction();
                     setPendingAction(null);
-                  }}
-                >
-                  取消
-                </WarmButton>
-                <WarmButton
-                  variant="primary"
-                  size="sm"
-                  onClick={() => {
-                    setShowUnsavedDialog(false);
-                    if (pendingAction) {
-                      pendingAction();
-                      setPendingAction(null);
-                    }
-                  }}
-                >
-                  放弃更改
-                </WarmButton>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+                  }
+                }}
+              >
+                放弃更改
+              </WarmButton>
+            </div>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
 
       {/* Reference Viewer Modal */}
       {viewingRefDetail && (

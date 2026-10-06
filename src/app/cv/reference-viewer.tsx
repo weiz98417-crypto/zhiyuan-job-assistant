@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
 import { X, Pencil, Check, BookOpen, Tag, Calendar, FileText, Gauge, Share2, RotateCcw, Ban } from "lucide-react";
 import { WarmButton, PaperCard } from "@/components/design";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/overlay";
 
 interface CVSection {
   id: string;
@@ -138,53 +138,37 @@ export default function ReferenceViewer({
   };
 
   return (
-    <AnimatePresence>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4"
-        onClick={onClose}
-      >
-        <motion.div
-          initial={{ scale: 0.95, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          exit={{ scale: 0.95, opacity: 0 }}
-          transition={{ duration: 0.2, ease: [0.19, 1, 0.22, 1] }}
-          className="bg-[var(--color-surface)] rounded-[var(--radius-xl)] shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {/* Header */}
-          <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--color-divider)] shrink-0">
-            <div className="flex items-center gap-3 flex-1 min-w-0">
-              <BookOpen size={20} className="text-[var(--color-primary)] shrink-0" />
-              {isEditingName ? (
-                <div className="flex items-center gap-2 flex-1">
-                  <input
-                    autoFocus
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") handleSaveName(); if (e.key === "Escape") setIsEditingName(false); }}
-                    className="flex-1 bg-[var(--color-bg)] border border-[var(--color-border)] rounded-[var(--radius-sm)] px-2 py-1 text-sm font-[family-name:var(--font-display)]"
-                  />
-                  <WarmButton size="sm" onClick={handleSaveName} disabled={saving}>
-                    <Check size={14} />
-                  </WarmButton>
-                </div>
-              ) : (
-                <h2
-                  className={`font-[family-name:var(--font-display)] text-lg font-bold text-[var(--color-text)] truncate ${canEdit ? "cursor-pointer hover:text-[var(--color-primary)]" : ""}`}
-                  onClick={() => { if (canEdit) setIsEditingName(true); }}
-                  title={canEdit ? "点击编辑名称" : undefined}
-                >
-                  {resume.name}
-                </h2>
-              )}
-            </div>
-            <button onClick={onClose} className="p-1.5 text-[var(--color-muted)] hover:text-[var(--color-text)] rounded">
-              <X size={18} />
-            </button>
+    <Dialog open onOpenChange={(next) => { if (!next) onClose(); }}>
+      <DialogContent className="w-[calc(100%-2rem)]! max-w-2xl! rounded-[var(--radius-xl)]! shadow-2xl! p-0! max-h-[85vh] overflow-hidden flex flex-col">
+        <DialogTitle className="sr-only">简历详情:{resume.name}</DialogTitle>
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--color-divider)] shrink-0">
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            <BookOpen size={20} className="text-[var(--color-primary)] shrink-0" />
+            {isEditingName ? (
+              <div className="flex items-center gap-2 flex-1">
+                <input
+                  autoFocus
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") handleSaveName(); if (e.key === "Escape") setIsEditingName(false); }}
+                  className="flex-1 bg-[var(--color-bg)] border border-[var(--color-border)] rounded-[var(--radius-sm)] px-2 py-1 text-sm font-[family-name:var(--font-display)]"
+                />
+                <WarmButton size="sm" onClick={handleSaveName} disabled={saving}>
+                  <Check size={14} />
+                </WarmButton>
+              </div>
+            ) : (
+              <h2
+                className={`font-[family-name:var(--font-display)] text-lg font-bold text-[var(--color-text)] truncate ${canEdit ? "cursor-pointer hover:text-[var(--color-primary)]" : ""}`}
+                onClick={() => { if (canEdit) setIsEditingName(true); }}
+                title={canEdit ? "点击编辑名称" : undefined}
+              >
+                {resume.name}
+              </h2>
+            )}
           </div>
+        </div>
 
           {/* Meta bar */}
           <div className="flex flex-wrap items-center gap-2 px-6 py-2 text-xs text-[var(--color-muted)] border-b border-[var(--color-divider)] shrink-0">
@@ -407,9 +391,8 @@ export default function ReferenceViewer({
                 </div>
               </div>
             )}
-          </div>
-        </motion.div>
-      </motion.div>
-    </AnimatePresence>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

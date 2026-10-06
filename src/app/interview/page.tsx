@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
 import {
   Target,
   Sparkles,
@@ -15,6 +14,7 @@ import {
 } from "lucide-react";
 import { HandwritingTitle, WarmButton, PaperCard } from "@/components/design";
 import { PageHeading } from "@/components/ui/workbench-primitives";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/overlay";
 import db from "@/lib/db";
 import InterviewLaunchPanel from "./InterviewLaunchPanel";
 import PracticeRecords from "./PracticeRecords";
@@ -492,32 +492,14 @@ export default function InterviewPage() {
         </PaperCard>
       )}
 
-      {/* ── Story editor modal ── */}
-      <AnimatePresence>
-        {showStoryEditor && (
-          <>
-            <motion.div
-              className="fixed inset-0 bg-black/20 z-40"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowStoryEditor(false)}
-            />
-            <motion.div
-              className="fixed inset-0 z-50 flex items-center justify-center p-4"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-            >
-              <motion.div
-                className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-[var(--radius-xl)] p-6 w-full max-w-lg max-h-[85vh] overflow-y-auto shadow-[var(--shadow-lg)]"
-                initial={{ scale: 0.95, y: 16 }}
-                animate={{ scale: 1, y: 0 }}
-                exit={{ scale: 0.95, y: 16 }}
-              >
-                <HandwritingTitle as="h2" className="mb-4">
-                  {editStory.id ? "编辑故事" : "添加故事"}
-                </HandwritingTitle>
+      {/* ── Story editor modal(浮层 kit)── */}
+      {showStoryEditor && (
+        <Dialog open onOpenChange={(open) => { if (!open) setShowStoryEditor(false); }}>
+          <DialogContent className="w-[calc(100%-2rem)]! rounded-[var(--radius-xl)]! max-h-[85vh] overflow-y-auto">
+            <DialogTitle className="sr-only">{editStory.id ? "编辑故事" : "添加故事"}</DialogTitle>
+            <HandwritingTitle as="h2" className="mb-4">
+              {editStory.id ? "编辑故事" : "添加故事"}
+            </HandwritingTitle>
 
                 <div className="space-y-3">
                   <div>
@@ -568,11 +550,9 @@ export default function InterviewPage() {
                   </WarmButton>
                   <WarmButton onClick={() => setShowStoryEditor(false)}>取消</WarmButton>
                 </div>
-              </motion.div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+          </DialogContent>
+        </Dialog>
+      )}
 
       {/* Add story FAB */}
       {!showStoryEditor && (

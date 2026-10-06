@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Check, Copy, KeyRound, ShieldCheck, Trash2, X } from 'lucide-react';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/overlay';
 import { useToast } from '@/lib/use-toast';
 
 type UserRole = 'member' | 'admin' | 'superadmin';
@@ -543,11 +544,12 @@ function formatDate(value: string) {
 
 function Modal({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
-      <div className="w-full max-w-md rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-xl" onClick={(event) => event.stopPropagation()}>
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="w-[calc(100%-2rem)]! max-w-md! z-[100]! rounded-[var(--radius-md)]! p-5! shadow-xl!">
+        <DialogTitle className="sr-only">管理操作确认</DialogTitle>
         {children}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

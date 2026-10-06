@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { X, RotateCcw, AlertTriangle } from "lucide-react";
+import { RotateCcw, AlertTriangle } from "lucide-react";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/overlay";
 import type { ProfileHistoryEntry } from "@/types";
 
 interface Props {
@@ -32,14 +33,10 @@ export default function HistoryDetailDialog({ open, entry, entryIndex, onClose, 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
-      <div
-        className="bg-[var(--color-bg)] rounded-xl shadow-2xl w-full max-w-md mx-4 max-h-[80vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
+    <Dialog open onOpenChange={(next) => { if (!next) onClose(); }}>
+      <DialogContent className="w-[calc(100%-2rem)]! max-w-md! rounded-xl! bg-[var(--color-bg)]! shadow-2xl! p-0! max-h-[80vh] overflow-y-auto">
         <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--color-divider)]">
-          <h2 className="text-lg font-display text-[var(--color-text)]">变更详情</h2>
-          <button onClick={onClose} className="p-1 rounded hover:bg-[var(--color-bg-alt)]"><X size={18} /></button>
+          <DialogTitle className="text-lg font-display text-[var(--color-text)]">变更详情</DialogTitle>
         </div>
 
         <div className="px-6 py-4 space-y-4">
@@ -99,7 +96,7 @@ export default function HistoryDetailDialog({ open, entry, entryIndex, onClose, 
             </button>
           )}
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

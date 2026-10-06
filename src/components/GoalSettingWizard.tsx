@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { X, ChevronLeft, ChevronRight, Check, Target } from "lucide-react";
 import { WarmButton } from "@/components/design";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/overlay";
 import { loadProfile, saveProfile } from "@/lib/profile-storage";
 import { createEmptyProfile } from "@/lib/profile-storage";
 import type { ZhiyuanProfileGoals } from "@/types";
@@ -80,16 +81,13 @@ export default function GoalSettingWizard({ onClose, onComplete, existingGoals }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-sm">
-      <div className="bg-[var(--color-surface)] rounded-[var(--radius-lg)] shadow-lg w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
+    <Dialog open onOpenChange={(next) => { if (!next) onClose(); }}>
+      <DialogContent className="w-[calc(100%-2rem)]! max-w-lg! p-0! max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--color-border)]">
-          <h2 className="text-lg font-display text-[var(--color-text)]">
+          <DialogTitle className="text-lg font-display text-[var(--color-text)]">
             {existingGoals ? "调整求职目标" : "设定求职目标"}
-          </h2>
-          <button onClick={onClose} className="text-[var(--color-muted)] hover:text-[var(--color-text)]">
-            <X size={18} />
-          </button>
+          </DialogTitle>
         </div>
 
         {/* Progress */}
@@ -381,7 +379,7 @@ export default function GoalSettingWizard({ onClose, onComplete, existingGoals }
             </WarmButton>
           )}
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -11,6 +11,7 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { ArrowLeftRight, BookOpen, Ban, Check, CheckCircle, Download, ExternalLink, Image as ImageIcon, X, ChevronDown, ChevronUp, FileText, Loader2, MapPin, Maximize2, RefreshCw, ShieldCheck, Sparkles, Target, Briefcase, Trash2, User } from "lucide-react";
 import { WarmButton, ScoreBadge } from "@/components/design";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/overlay";
 import MarkdownRenderer from "@/components/MarkdownRenderer";
 import { getToolDisplay } from "@/lib/agent/tool-display-names";
 import { getAgentDisplayName } from "@/lib/agent/client-metadata";
@@ -136,33 +137,23 @@ export function ImagePreviewModal({
   onClose: () => void;
 }) {
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-    >
-      <button
-        type="button"
-        onClick={onClose}
-        className="absolute right-4 top-4 rounded-full bg-white/15 p-2 text-white transition-colors hover:bg-white/25"
-        aria-label="关闭原图预览"
-      >
-        <X size={18} />
-      </button>
-      <div className="flex max-h-full max-w-full flex-col items-center gap-3" onClick={(e) => e.stopPropagation()}>
-        <img
-          src={src}
-          alt={name || "上传图片原图"}
-          className="max-h-[82vh] max-w-[92vw] rounded-[var(--radius-md)] bg-white object-contain shadow-2xl"
-        />
-        {(name || formatImageMeta(meta)) && (
-          <div className="rounded-full bg-black/65 px-3 py-1 text-xs text-white">
-            {[name, formatImageMeta(meta)].filter(Boolean).join(" · ")}
-          </div>
-        )}
-      </div>
-    </div>
+    <Dialog open onOpenChange={(next) => { if (!next) onClose(); }}>
+      <DialogContent className="w-fit! max-w-none! rounded-none! border-0! bg-transparent! p-0! shadow-none!">
+        <DialogTitle className="sr-only">图片预览：{name || "上传图片"}</DialogTitle>
+        <div className="flex max-h-full max-w-full flex-col items-center gap-3">
+          <img
+            src={src}
+            alt={name || "上传图片原图"}
+            className="max-h-[82vh] max-w-[92vw] rounded-[var(--radius-md)] bg-white object-contain shadow-2xl"
+          />
+          {(name || formatImageMeta(meta)) && (
+            <div className="rounded-full bg-black/65 px-3 py-1 text-xs text-white">
+              {[name, formatImageMeta(meta)].filter(Boolean).join(" · ")}
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
