@@ -10,7 +10,10 @@
       "source": "spec-27",
       "version": "1.0.0",
       "lastReviewed": "2026-10-03",
-      "consumers": ["src/lib/server/interview-analysis-service.ts", "src/lib/server/question-bank.ts"]
+      "consumers": [
+        "src/lib/server/interview-analysis-service.ts",
+        "src/lib/server/question-bank.ts"
+      ]
     },
     {
       "id": "prompt.interview-answer-scoring",
@@ -20,7 +23,9 @@
       "source": "spec-26 (rubric adapted from LuJie CareerKit, Apache-2.0)",
       "version": "1.0.0",
       "lastReviewed": "2026-10-03",
-      "consumers": ["src/lib/server/interview-rubric.ts"]
+      "consumers": [
+        "src/lib/server/interview-rubric.ts"
+      ]
     },
     {
       "id": "prompt.ats-analysis",
@@ -30,7 +35,9 @@
       "source": "spec-24",
       "version": "1.0.0",
       "lastReviewed": "2026-10-03",
-      "consumers": ["src/lib/server/ats-analysis-service.ts"]
+      "consumers": [
+        "src/lib/server/ats-analysis-service.ts"
+      ]
     },
     {
       "id": "prompt.resume-section-split",
@@ -40,7 +47,9 @@
       "source": "spec-25 (migrated verbatim from resume-import-service.ts)",
       "version": "1.0.0",
       "lastReviewed": "2026-10-03",
-      "consumers": ["src/lib/server/resume-import-service.ts"]
+      "consumers": [
+        "src/lib/server/resume-import-service.ts"
+      ]
     },
     {
       "id": "prompt.agent-resource-hints.resume",
@@ -50,7 +59,9 @@
       "source": "spec-25 (replaces localhost fetch hint)",
       "version": "1.0.0",
       "lastReviewed": "2026-10-03",
-      "consumers": ["src/lib/agent/registry/agents/resume-agent.ts"]
+      "consumers": [
+        "src/lib/agent/registry/agents/resume-agent.ts"
+      ]
     },
     {
       "id": "prompt.agent-resource-hints.evaluate",
@@ -60,7 +71,9 @@
       "source": "spec-25 (replaces localhost fetch hint)",
       "version": "1.0.0",
       "lastReviewed": "2026-10-03",
-      "consumers": ["src/lib/agent/registry/agents/evaluate-agent.ts"]
+      "consumers": [
+        "src/lib/agent/registry/agents/evaluate-agent.ts"
+      ]
     },
     {
       "id": "data.scoring-dimensions",
@@ -70,7 +83,10 @@
       "source": "v1.0.0 (2026-05-09)",
       "version": "1.0.0",
       "lastReviewed": "2026-10-03",
-      "consumers": ["src/lib/agent/knowledge/registry/scoring-weights.ts", "src/lib/server/jd-evaluation-service.ts"]
+      "consumers": [
+        "src/lib/agent/knowledge/registry/scoring-weights.ts",
+        "src/lib/server/jd-evaluation-service.ts"
+      ]
     },
     {
       "id": "data.jd-signals-glossary",
@@ -80,7 +96,9 @@
       "source": "spec-25 (glossary only; detectSignals wiring removed)",
       "version": "1.1.0",
       "lastReviewed": "2026-10-03",
-      "consumers": ["src/lib/agent/knowledge/index.ts"]
+      "consumers": [
+        "src/lib/agent/knowledge/index.ts"
+      ]
     },
     {
       "id": "data.interview-styles",
@@ -90,7 +108,9 @@
       "source": "spec-27",
       "version": "1.1.0",
       "lastReviewed": "2026-10-03",
-      "consumers": ["src/lib/agent/knowledge/index.ts"]
+      "consumers": [
+        "src/lib/agent/knowledge/index.ts"
+      ]
     },
     {
       "id": "data.salary-seed",
@@ -100,7 +120,10 @@
       "source": "spec-28 (merged from salary-benchmarks.ts + risk-intel.md 46 rows)",
       "version": "1.0.0",
       "lastReviewed": "2026-10-03",
-      "consumers": ["src/lib/server/salary-benchmarks-store.ts", "src/lib/agent/knowledge/salary-benchmarks.ts"]
+      "consumers": [
+        "src/lib/server/salary-benchmarks-store.ts",
+        "src/lib/agent/knowledge/salary-benchmarks.ts"
+      ]
     },
     {
       "id": "data.story-bank-template",
@@ -139,7 +162,22 @@
       "source": "spec-25 (generated mirror; per-file hashes in scripts/.gen-en-modes.manifest.json; drift-guarded)",
       "version": "1.0.0",
       "lastReviewed": "2026-10-03",
-      "consumers": ["src/lib/server/jd-evaluation-service.ts", "src/app/api/evaluate/stream/route.ts"]
+      "consumers": [
+        "src/lib/server/jd-evaluation-service.ts",
+        "src/app/api/evaluate/stream/route.ts"
+      ]
+    },
+    {
+      "id": "prompt.resume-visual-review",
+      "path": "src/lib/agent/knowledge/registry/prompts/resume-visual-review.md",
+      "kind": "prompt",
+      "lang": "zh",
+      "source": "spec-38",
+      "version": "1.0.0",
+      "lastReviewed": "2026-10-06",
+      "consumers": [
+        "scripts/verify-resume-visual.mjs"
+      ]
     }
   ]
 }

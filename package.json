@@ -67,7 +67,8 @@
     "eval:redteam:core": "npx -y promptfoo@0.123.1 eval --config promptfoo/promptfooconfig.core.yaml",
     "eval:capability-2026-10b": "vitest run src/__tests__/resume-factuality.eval.test.ts src/__tests__/interview-rubric-calibration.eval.test.ts src/__tests__/question-bank.eval.test.ts src/__tests__/outcome-salary.eval.test.ts src/__tests__/rejection-parsing.eval.test.ts src/__tests__/knowledge-registry.test.ts",
     "eval:rubric-calibration:full": "node scripts/run-rubric-calibration.mjs",
-    "verify:capability-2026-10b": "npm run check:knowledge-drift && npm run check:prompt-hygiene && npm run eval:capability-2026-10b"
+    "verify:capability-2026-10b": "npm run check:knowledge-drift && npm run check:prompt-hygiene && npm run eval:capability-2026-10b",
+    "verify:resume-visual": "node scripts/verify-resume-visual.mjs"
   },
   "dependencies": {
     "@assistant-ui/react": "^0.15.22",

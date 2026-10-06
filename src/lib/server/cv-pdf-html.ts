@@ -133,10 +133,27 @@ export function buildCvHtml(input: BuildCvHtmlInput): string {
     .replace(/{{EDUCATION}}/g, educationText
       ? educationText.split("\n").filter(Boolean).map((l) => `<p>${l}</p>`).join("\n")
       : " ")
-    .replace(/{{SECTION_CERTIFICATIONS}}/g, "Certifications")
+  // 视觉反测(spec 38)抓出的两个渲染缺陷修复:
+  // ① 恒空板块(Certifications/Languages & Tools)整块删除——只清标题文字会留下带下边框的空标题条;
+  html = html
+    .replace(/<!-- CERTIFICATIONS -->[\s\S]*?<div class="section-title">\{\{SECTION_CERTIFICATIONS\}\}<\/div>\s*\{\{CERTIFICATIONS\}\}\s*<\/div>/, "")
+    .replace(/<!-- SKILLS -->[\s\S]*?<div class="section-title">\{\{SECTION_SKILLS\}\}<\/div>\s*\{\{SKILLS\}\}\s*<\/div>/, "");
+
+  const replaced = html
+    .replace(/{{SECTION_CERTIFICATIONS}}/g, "")
     .replace(/{{CERTIFICATIONS}}/g, " ")
-    .replace(/{{SECTION_SKILLS}}/g, "Languages & Tools")
+    .replace(/{{SECTION_SKILLS}}/g, "")
     .replace(/{{SKILLS}}/g, " ");
+
+  html = replaced;
+  // ② 联系方式行空字段渲染悬空「|」——按分隔符切段,剔空后重组;
+  html = html.replace(/<div class="contact-row">([\s\S]*?)<\/div>/, (_row, inner: string) => {
+    const separator = '<span class="separator">|</span>';
+    const segments = inner.split(separator).map((segment) => segment.trim());
+    const kept = segments.filter((segment) => segment.replace(/<[^>]+>/g, "").trim().length > 0);
+    const rebuilt = kept.join(`\n      ${separator}`);
+    return `<div class="contact-row">\n      ${rebuilt}\n    </div>`;
+  });
 
   const fontsDir = path.join(process.cwd(), "fonts");
   html = html.replace(/url\(['"]?\.\/fonts\//g, `url('file://${fontsDir.replace(/\\/g, "/")}/`);
