@@ -4,7 +4,6 @@
  * 不做邮箱集成。未经用户确认的解析结果以候选态存在，绝不影响检索与推荐（ADR-0034）。
  */
 import { createHash } from "node:crypto";
-import { parseLlmJsonObject } from "@/lib/llm-json";
 
 export const REJECTION_REASON_LABELS = [
   "resume_mismatch",

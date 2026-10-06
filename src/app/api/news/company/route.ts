@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { parseLlmJsonValue } from "@/lib/llm-json";
 import { getCurrentUser } from "@/lib/auth";
 import { getDataRepositories } from "@/lib/data-repositories";
 import type { NewsCacheRow } from "@/lib/server-db";
@@ -32,19 +33,17 @@ async function generateCompanyNews(companies: string[]): Promise<{ title: string
 
   const data = await res.json();
   const content = data.choices?.[0]?.message?.content || "";
-  try {
-    const parsed = JSON.parse(content);
-    const items = Array.isArray(parsed) ? parsed : (parsed.items || parsed.summaries || parsed.news || []);
-    return (items as Record<string, string>[])
-      .map((item) => ({
-        title: item.title || "",
-        summary: item.summary || "",
-        source_name: item.company || item.source_name || "",
-      }))
-      .filter((item) => item.title && item.source_name);
-  } catch {
-    return [];
-  }
+  const parsed = parseLlmJsonValue(content) as Record<string, unknown> | Record<string, unknown>[] | null;
+  if (!parsed) return [];
+
+  const items = Array.isArray(parsed) ? parsed : (parsed.items || parsed.summaries || parsed.news || []);
+  return (items as Record<string, string>[])
+    .map((item) => ({
+      title: item.title || "",
+      summary: item.summary || "",
+      source_name: item.company || item.source_name || "",
+    }))
+    .filter((item) => item.title && item.source_name);
 }
 
 export async function GET(request: Request) {

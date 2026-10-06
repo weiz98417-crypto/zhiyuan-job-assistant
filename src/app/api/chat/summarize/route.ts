@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { parseLlmJsonObject } from "@/lib/llm-json";
 
 const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
 const MODEL = "deepseek-flash";
@@ -113,28 +114,17 @@ export async function POST(request: Request) {
       );
     }
 
-    let parsed;
-    try {
-      parsed = JSON.parse(content);
-    } catch {
-      const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-      if (jsonMatch) {
-        try {
-          parsed = JSON.parse(jsonMatch[1]);
-        } catch {
-          return NextResponse.json(
-            { success: false, error: "AI 返回格式解析失败" },
-            { status: 500 },
-          );
-        }
-      } else {
-        return NextResponse.json(
-          { success: false, error: "AI 返回格式解析失败" },
-          { status: 500 },
-        );
-      }
+    const parsed = parseLlmJsonObject(content);
+    if (!parsed) {
+      return NextResponse.json(
+        { success: false, error: "AI 返回格式解析失败" },
+        { status: 500 },
+      );
     }
 
+    const constraints = parsed.constraints && typeof parsed.constraints === "object" && !Array.isArray(parsed.constraints)
+      ? parsed.constraints as Record<string, unknown>
+      : {};
     return NextResponse.json({
       success: true,
       data: {
@@ -142,9 +132,9 @@ export async function POST(request: Request) {
         skills: parsed.skills || { core: [], secondary: [], advantage: "未提及" },
         preferences: parsed.preferences || {},
         constraints: {
-          ...(parsed.constraints || {}),
-          other: Array.isArray(parsed.constraints?.other)
-            ? parsed.constraints.other
+          ...constraints,
+          other: Array.isArray(constraints.other)
+            ? constraints.other
             : [],
         },
         narrative: parsed.narrative || "未提及",

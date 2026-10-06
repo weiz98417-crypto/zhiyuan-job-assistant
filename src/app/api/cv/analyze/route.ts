@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { parseLlmJsonObject } from "@/lib/llm-json";
 import fs from "fs";
 import path from "path";
 
@@ -111,15 +112,9 @@ matchPercent 是 0-100 的整数。每个建议必须具体可操作。只用中
       return NextResponse.json({ success: false, error: "AI 返回为空" }, { status: 500 });
     }
 
-    let parsed;
-    try {
-      parsed = JSON.parse(content);
-    } catch {
-      const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-      if (jsonMatch) parsed = JSON.parse(jsonMatch[1]);
-      else {
-        return NextResponse.json({ success: false, error: "AI 返回格式解析失败" }, { status: 500 });
-      }
+    const parsed = parseLlmJsonObject(content);
+    if (!parsed) {
+      return NextResponse.json({ success: false, error: "AI 返回格式解析失败" }, { status: 500 });
     }
 
     return NextResponse.json({

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { parseLlmJsonObject } from "@/lib/llm-json";
 import { getCurrentUser } from "@/lib/auth";
 import { getDataRepositories } from "@/lib/data-repositories";
 import {
@@ -69,34 +70,8 @@ title 字段使用中文：个人概述、工作经历、项目经历、技能�
   const content = data.choices?.[0]?.message?.content;
   if (!content) throw new Error("AI 返回为空");
 
-  let parsed: { sections?: CVSection[] } | undefined;
-  const strategies = [
-    () => JSON.parse(content),
-    () => {
-      const match = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-      return match ? JSON.parse(match[1]) : null;
-    },
-    () => {
-      const match = content.match(/\{[\s\S]*"sections"[\s\S]*\}/);
-      return match ? JSON.parse(match[0]) : null;
-    },
-    () => {
-      const match = content.match(/\{[\s\S]*\}/);
-      return match ? JSON.parse(match[0]) : null;
-    },
-  ];
-
-  for (const strategy of strategies) {
-    try {
-      const result = strategy();
-      if (result && result.sections) {
-        parsed = result;
-        break;
-      }
-    } catch {
-      // Try the next extraction strategy.
-    }
-  }
+  const parsedRaw = parseLlmJsonObject(content);
+  const parsed = parsedRaw as { sections?: CVSection[] } | null;
 
   if (!parsed) throw new Error(`AI 返回格式解析失败。原始返回: ${content.slice(0, 300)}`);
   if (!parsed.sections || !Array.isArray(parsed.sections)) {

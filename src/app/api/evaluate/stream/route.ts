@@ -3,6 +3,7 @@
 import fs from "fs";
 import path from "path";
 import { getCurrentUser } from "@/lib/auth";
+import { parseLlmJsonObject } from "@/lib/llm-json";
 import { loadModeDocument } from "@/lib/agent/knowledge/registry/loader";
 import { getDataRepositories } from "@/lib/data-repositories";
 import { computeEvaluationOverallScore, extractEvaluationBlockScore } from "@/lib/evaluation-scoring";
@@ -474,11 +475,9 @@ export async function POST(request: Request) {
 
         try {
           const archetypeText = await quickLLM(archetypeSystem, `请分析以下JD的archetype:\n\n${state.jdText.slice(0, 3000)}`, signal);
-          const archMatch = archetypeText.match(/\{[\s\S]*\}/);
-          if (archMatch) {
-            const arch = JSON.parse(archMatch[0]);
-            state.archetype = arch.archetype || "未检测";
-          }
+          const arch = parseLlmJsonObject(archetypeText);
+          if (!arch) throw new Error("archetype 解析失败");
+          state.archetype = typeof arch.archetype === "string" && arch.archetype ? arch.archetype : "未检测";
         } catch (err) {
           console.error("Archetype detection failed:", err instanceof Error ? err.message : String(err));
           emit(controller, { type: "error", message: "Archetype 检测失败，使用默认分类" });
