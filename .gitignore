@@ -134,3 +134,4 @@ openspec/changes/*
 
 # promptfoo red-team build artifacts (rebuilt via npm run eval:redteam:build)
 promptfoo/.build/
+screenshots/

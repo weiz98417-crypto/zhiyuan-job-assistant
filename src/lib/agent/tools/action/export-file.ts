@@ -1,4 +1,5 @@
 import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
+import { markdownToSafeHtml } from "@/lib/server-markdown";
 
 const MIME: Record<string, string> = {
   md: "text/markdown",
@@ -18,86 +19,12 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return hex(digest);
 }
 
-/* ── Markdown → HTML (browser-side, lightweight) ── */
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-
-function inlineMd(s: string): string {
-  return s
-    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-    .replace(/\*(.+?)\*/g, "<em>$1</em>")
-    .replace(/`(.+?)`/g, "<code>$1</code>")
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
-}
-
-function mdToHtml(md: string): string {
-  const lines = md.split("\n");
-  const result: string[] = [];
-  let pending: string[] = [];
-  let inTable = false;
-  let tableRows: string[][] = [];
-  let inCodeBlock = false;
-  let codeLines: string[] = [];
-
-  function flushPending() {
-    if (pending.length > 0) { result.push(`<p>${pending.join("<br>")}</p>`); pending = []; }
-  }
-  function flushTable() {
-    if (tableRows.length === 0) return;
-    const clean: string[][] = [];
-    let hasSep = false;
-    for (const r of tableRows) {
-      if (r.every(c => /^:?-{3,}:?$/.test(c))) { hasSep = true; continue; }
-      clean.push(r);
-    }
-    if (clean.length === 0) { tableRows = []; return; }
-    if (!hasSep && clean.length > 1) clean.splice(1, 0, clean[0].map(() => "---"));
-    result.push("<table>");
-    for (let ri = 0; ri < clean.length; ri++) {
-      const tag = ri === 0 ? "th" : "td";
-      result.push(`<tr>${clean[ri].map(c => `<${tag}>${inlineMd(c)}</${tag}>`).join("")}</tr>`);
-    }
-    result.push("</table>");
-    tableRows = [];
-  }
-
-  for (const raw of lines) {
-    const line = raw.trimEnd();
-    if (line.startsWith("```")) {
-      if (inCodeBlock) {
-        result.push(`<pre><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
-        codeLines = []; inCodeBlock = false; continue;
-      }
-      flushTable(); flushPending(); inCodeBlock = true; continue;
-    }
-    if (inCodeBlock) { codeLines.push(raw); continue; }
-    if (line.startsWith("|") && line.endsWith("|")) {
-      flushPending(); inTable = true;
-      tableRows.push(line.slice(1, -1).split("|").map(c => c.trim()));
-      continue;
-    }
-    if (inTable) { flushTable(); inTable = false; }
-    const hm = line.match(/^(#{1,3})\s+(.+)/);
-    if (hm) { flushPending(); result.push(`<h${hm[1].length}>${inlineMd(hm[2])}</h${hm[1].length}>`); continue; }
-    if (/^(\s*[-*]\s*){3,}$/.test(line)) { flushPending(); result.push("<hr>"); continue; }
-    if (line.startsWith("> ")) { pending.push(inlineMd(line.slice(2))); continue; }
-    if (/^[-*]\s/.test(line)) { flushPending(); result.push(`<li>${inlineMd(line.replace(/^[-*]\s+/, ""))}</li>`); continue; }
-    if (/^\d+\.\s/.test(line)) { flushPending(); result.push(`<li>${inlineMd(line.replace(/^\d+\.\s+/, ""))}</li>`); continue; }
-    if (line.trim() === "") { flushTable(); flushPending(); continue; }
-    pending.push(inlineMd(line));
-  }
-  flushTable(); flushPending();
-  return result.join("\n");
-}
-
 function wrapHtmlDoc(title: string, body: string): string {
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>${escapeHtml(title)}</title>
+<title>${title.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</title>
 <style>
   body { font-family: "Microsoft YaHei","PingFang SC",sans-serif; max-width:840px; margin:40px auto; padding:24px; color:#333; line-height:1.7; }
   h1 { font-size:1.5em; border-bottom:2px solid #2563eb; padding-bottom:8px; }
@@ -165,7 +92,7 @@ async function handler(params: Record<string, unknown>, context?: ToolExecutionC
   const isAlreadyHtml = /^\s*<(!DOCTYPE|html|head|body)/i.test(rawContent.trim());
 
   // If format is html, convert markdown to proper HTML (unless already HTML)
-  const bodyContent = ext === "html" && !isAlreadyHtml ? mdToHtml(rawContent) : rawContent;
+  const bodyContent = ext === "html" && !isAlreadyHtml ? markdownToSafeHtml(rawContent) : rawContent;
 
   // Browser context: Blob download
   if (typeof window !== "undefined" && typeof document !== "undefined") {

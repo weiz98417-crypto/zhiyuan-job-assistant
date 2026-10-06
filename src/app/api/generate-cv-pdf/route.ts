@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
 import { chromium } from "playwright";
-import fs from "fs";
-import os from "os";
-import path from "path";
+import { findChromiumExecutable } from "@/lib/server/chromium";
+
+/**
+ * 简历 PDF 的唯一渲染出口(spec 37 收口后:原 /api/cv/generate-pdf Puppeteer 死路由与
+ * generate-pdf.mjs 脚本已删)。HTML 构建走 cv-pdf-html.ts 纯函数接缝。
+ */
 
 interface CvSection {
   id: string;
@@ -23,38 +26,6 @@ interface GenerateCvPdfRequest {
     github?: string;
     portfolioUrl?: string;
   };
-}
-
-const PROJECT_ROOT = path.join(process.cwd());
-
-function findChromiumExecutable(): string {
-  const bundled = chromium.executablePath();
-  if (bundled && fs.existsSync(bundled)) return bundled;
-
-  const platform = os.platform();
-  const exeName = platform === "win32" ? "chrome.exe" : "chrome";
-  const subdir =
-    platform === "win32" ? "chrome-win64" :
-    platform === "darwin" ? "chrome-mac" : "chrome-linux64";
-
-  const playwrightDir = path.join(os.homedir(), "AppData", "Local", "ms-playwright");
-  if (!fs.existsSync(playwrightDir)) {
-    throw new Error("Playwright browsers not installed. Run: npx playwright install chromium");
-  }
-
-  const dir = fs.readdirSync(playwrightDir)
-    .find((e) => e.startsWith("chromium-") && !e.includes("headless_shell"));
-
-  if (!dir) {
-    throw new Error("Chromium browser not found in Playwright directory. Run: npx playwright install chromium");
-  }
-
-  const exe = path.join(playwrightDir, dir, subdir, exeName);
-  if (!fs.existsSync(exe)) {
-    throw new Error(`Chromium executable not found at ${exe}`);
-  }
-
-  return exe;
 }
 
 export async function POST(request: Request) {
@@ -78,7 +49,7 @@ export async function POST(request: Request) {
     // Generate PDF via Playwright
     const browser = await chromium.launch({
       headless: true,
-      executablePath: findChromiumExecutable(),
+      executablePath: findChromiumExecutable(true),
       args: ["--no-sandbox", "--disable-gpu", "--disable-setuid-sandbox"],
     });
     let pdfBuffer: Buffer;

@@ -1,7 +1,5 @@
-import fs from "fs";
-import os from "os";
-import path from "path";
 import { chromium } from "playwright";
+import { findChromiumExecutable } from "@/lib/server/chromium";
 import type { ExecutionPrincipal } from "@/lib/agent/runtime/durable-agent-run";
 import { getDataRepositories } from "@/lib/data-repositories";
 import {
@@ -37,7 +35,7 @@ export async function createReportPdfArtifact(
 
   const browser = await chromium.launch({
     headless: true,
-    ...(findChromiumExecutable() ? { executablePath: findChromiumExecutable() } : {}),
+    ...(findChromiumExecutable(false) ? { executablePath: findChromiumExecutable(false) } : {}),
     args: ["--no-sandbox", "--disable-gpu", "--disable-setuid-sandbox"],
   });
   let pdf: Buffer;
@@ -73,18 +71,6 @@ export async function createReportPdfArtifact(
     company: report.company,
     role: report.role,
   };
-}
-
-function findChromiumExecutable(): string | undefined {
-  const bundled = chromium.executablePath();
-  if (bundled && fs.existsSync(bundled)) return bundled;
-  if (os.platform() !== "win32") return undefined;
-  const playwrightDir = path.join(os.homedir(), "AppData", "Local", "ms-playwright");
-  if (!fs.existsSync(playwrightDir)) return undefined;
-  return fs.readdirSync(playwrightDir)
-    .filter((entry) => entry.startsWith("chromium-") && !entry.includes("headless_shell"))
-    .map((entry) => path.join(playwrightDir, entry, "chrome-win64", "chrome.exe"))
-    .find((candidate) => fs.existsSync(candidate));
 }
 
 function buildReportHtml(report: ReportRow): string {

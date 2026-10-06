@@ -1,8 +1,10 @@
 import { chromium } from 'playwright';
+import path from 'node:path';
 
 const BASE_URL = 'http://localhost:3000';
 const VIEWPORT = { width: 1920, height: 1080 };
-const SCREENSHOT_DIR = 'E:/求职项目/求职助手/frontend/screenshots';
+// spec 37:仓库内相对目录(原硬编码仓库外盘符,换机即失效);screenshots/ 已入 .gitignore
+const SCREENSHOT_DIR = path.join(process.cwd(), 'screenshots');
 
 // Pages to verify with their expected layout features
 const PAGES = [
