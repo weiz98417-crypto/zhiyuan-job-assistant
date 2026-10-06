@@ -60,7 +60,6 @@ await esbuild.build({
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { buildCvHtml, parseLlmJsonObject } = require(BUNDLE_PATH);
 
-const sha256 = normalizeHash;
 
 function loadBaseline() {
   try { return JSON.parse(fs.readFileSync(BASELINE_PATH, "utf8")); } catch { return {}; }
@@ -113,16 +112,20 @@ async function judgeScreenshot(pngPath, prompt, signal) {
     }
     return String(message.content || "");
   };
-  // 解析失败重试一次(视觉模型偶发格式漂移);网络/HTTP 错误直接抛(基建类)
-  let lastParseError = null;
+  // 失败重试一次(spec 38):解析失败与网络/HTTP 错误都重试,两次仍败才抛(基建类 exit 2)
+  let lastError = null;
   for (let attempt = 0; attempt < 2; attempt++) {
-    const text = await call();
-    const parsed = parseLlmJsonObject(text);
-    if (validateCritique(parsed)) return parsed;
-    lastParseError = new Error(`视觉评审输出不可解析: ${text.slice(0, 200)}`);
-    try { fs.writeFileSync(path.join(OUT_DIR, "last-unparsed.txt"), text); } catch { /* 诊断辅助,失败不阻塞 */ }
+    try {
+      const text = await call();
+      const parsed = parseLlmJsonObject(text);
+      if (validateCritique(parsed)) return parsed;
+      lastError = new Error(`视觉评审输出不可解析: ${text.slice(0, 200)}`);
+      try { fs.writeFileSync(path.join(OUT_DIR, "last-unparsed.txt"), text); } catch { /* 诊断辅助 */ }
+    } catch (error) {
+      lastError = error;
+    }
   }
-  throw lastParseError;
+  throw lastError;
 }
 
 /* ── 主流程 ── */
@@ -139,7 +142,7 @@ const infraFailure = (error) => {
 try {
   for (const sample of SAMPLE_RESUMES) {
     const html = buildCvHtml({ sections: sample.sections, template: sample.template, profile: sample.profile });
-    const htmlHash = sha256(html);
+    const htmlHash = normalizeHash(html);
     const pngPath = path.join(OUT_DIR, `${sample.name}.png`);
     process.stdout.write(`[visual-review] ${sample.name}(${sample.note}) 截图中…\n`);
     await screenshot(html, pngPath);
@@ -151,7 +154,6 @@ try {
       sampleName: sample.name,
       scores,
       baselineEntry: baseline.samples?.[sample.name],
-      htmlHash,
     });
     process.stdout.write(`  得分: ${dims.map((d) => `${d}=${scores[d]}`).join(" / ")}(总 ${total}/40)\n`);
     for (const dim of dims) {
@@ -166,7 +168,8 @@ try {
   infraFailure(error);
 }
 
-saveBaseline({ samples: nextBaseline });
+if (failures.length === 0) saveBaseline({ samples: nextBaseline });
+else console.error("[visual-review] 门禁红,基线不更新(保留上次通过值,防棘轮下滚)。");
 
 if (failures.length > 0) {
   console.error(`\n[visual-review] 门禁红(${failures.length} 条):`);

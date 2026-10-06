@@ -28,7 +28,7 @@ describe("validateCritique(spec 38)", () => {
 });
 
 describe("evaluateGates(spec 38)", () => {
-  it("全 7 分 → 绿(总 28 ≥ 24)", () => {
+  it("全 7 分、无基线 → 绿(总 28 ≥ 24)", () => {
     const scores = Object.fromEntries(REQUIRED_DIMS.map((d) => [d, 7]));
     expect(evaluateGates({ sampleName: "s", scores }).failures).toEqual([]);
   });
@@ -41,13 +41,11 @@ describe("evaluateGates(spec 38)", () => {
     void THRESHOLD;
   });
 
-  it("同内容回归:基线同哈希且跌超 2 → 红;哈希不同不比", () => {
+  it("基线回归:有基线即比(无论内容是否变),跌超 2 → 红", () => {
     const scores = { layout_hierarchy: 7, density: 7, alignment: 7, color: 7 };
     const baselineEntry = { htmlHash: "aaa", scores: { layout_hierarchy: 10, density: 7, alignment: 7, color: 7 } };
-    const regressed = evaluateGates({ sampleName: "s", scores, baselineEntry, htmlHash: "aaa" });
+    const regressed = evaluateGates({ sampleName: "s", scores, baselineEntry });
     expect(regressed.failures).toEqual(["s.layout_hierarchy 回归:10 → 7(跌超 2)"]);
-    const newContent = evaluateGates({ sampleName: "s", scores, baselineEntry, htmlHash: "bbb" });
-    expect(newContent.failures).toEqual([]);
   });
 });
 

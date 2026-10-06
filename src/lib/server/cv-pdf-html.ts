@@ -139,13 +139,6 @@ export function buildCvHtml(input: BuildCvHtmlInput): string {
     .replace(/<!-- CERTIFICATIONS -->[\s\S]*?<div class="section-title">\{\{SECTION_CERTIFICATIONS\}\}<\/div>\s*\{\{CERTIFICATIONS\}\}\s*<\/div>/, "")
     .replace(/<!-- SKILLS -->[\s\S]*?<div class="section-title">\{\{SECTION_SKILLS\}\}<\/div>\s*\{\{SKILLS\}\}\s*<\/div>/, "");
 
-  const replaced = html
-    .replace(/{{SECTION_CERTIFICATIONS}}/g, "")
-    .replace(/{{CERTIFICATIONS}}/g, " ")
-    .replace(/{{SECTION_SKILLS}}/g, "")
-    .replace(/{{SKILLS}}/g, " ");
-
-  html = replaced;
   // ② 联系方式行空字段渲染悬空「|」——按分隔符切段,剔空后重组;
   html = html.replace(/<div class="contact-row">([\s\S]*?)<\/div>/, (_row, inner: string) => {
     const separator = '<span class="separator">|</span>';

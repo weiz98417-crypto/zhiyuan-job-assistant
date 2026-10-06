@@ -1,5 +1,5 @@
 import { chromium } from "playwright";
-import { findChromiumExecutable } from "@/lib/server/chromium";
+import { findChromiumOptional } from "@/lib/server/chromium";
 import type { ExecutionPrincipal } from "@/lib/agent/runtime/durable-agent-run";
 import { getDataRepositories } from "@/lib/data-repositories";
 import {
@@ -35,7 +35,7 @@ export async function createReportPdfArtifact(
 
   const browser = await chromium.launch({
     headless: true,
-    ...(findChromiumExecutable(false) ? { executablePath: findChromiumExecutable(false) } : {}),
+    ...(findChromiumOptional() ? { executablePath: findChromiumOptional() } : {}),
     args: ["--no-sandbox", "--disable-gpu", "--disable-setuid-sandbox"],
   });
   let pdf: Buffer;

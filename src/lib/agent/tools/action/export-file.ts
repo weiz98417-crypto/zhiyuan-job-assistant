@@ -1,5 +1,5 @@
 import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
-import { markdownToSafeHtml } from "@/lib/server-markdown";
+import { markdownToSafeHtml, escapeHtmlText } from "@/lib/server-markdown";
 
 const MIME: Record<string, string> = {
   md: "text/markdown",
@@ -24,7 +24,7 @@ function wrapHtmlDoc(title: string, body: string): string {
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>${title.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</title>
+<title>${escapeHtmlText(title)}</title>
 <style>
   body { font-family: "Microsoft YaHei","PingFang SC",sans-serif; max-width:840px; margin:40px auto; padding:24px; color:#333; line-height:1.7; }
   h1 { font-size:1.5em; border-bottom:2px solid #2563eb; padding-bottom:8px; }

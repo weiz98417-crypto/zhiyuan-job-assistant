@@ -16,3 +16,12 @@ export function markdownToSafeHtml(markdown: string): string {
     },
   });
 }
+
+/** HTML 文本转义(四实体;spec 37 收口:export-file 两处标题/属性转义共用)。 */
+export function escapeHtmlText(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}

@@ -43,3 +43,10 @@ CEO 判断:中国求职的真实闸门是 Boss 直聘在线简历 + HR 三秒扫
 - 预估 1-2 天。回访提纲(10 题)已备:`docs/user-callback-script-2026-10.md`。
 - 许可证红线持续有效:OpenResume/Vivliostyle(AGPL)、OrangeX4(无证)、NorthSecond(NC)——美化立项时只可借鉴 Reactive Resume(MIT)与 LapisCV(MIT)版式。
 - 若 DeepSeek 视觉对中文简历截图的批评质量差(冒烟发现),升级路径:注册智谱换 GLM-4.6V-Flash(免费)——届时是第二个真实 adapter,再抽接缝。
+
+## 实施记录(2026-10-06,0.22.0)
+
+- 全链路真实冒烟通过(三样本出结构化批评,质量高——每条带具体位置)。门禁**交付时即为红**(10 条):模板未达 HR 三秒线,Q7c 约定美化另立车,尺子保持红;基线已冻结首跑分数作 before 档案。校准记录:`docs/visual-review-calibration-2026-10-06.md`。
+- **首跑抓出两个渲染缺陷,当日修复**(内容正确性 bug,非美化):恒空板块(Certifications/Languages & Tools)整块删除(此前只渲标题);联系方式行空字段悬空 `|` 剔除。改的是 cv-pdf-html.ts,PDF 外观有变——是缺陷修复,记录在案。
+- **评审修订(实 Quality gate 语义)**:基线「冻结」初版实现是滚动覆盖(红了也写+换模板跳过比对=「显著劣化即红」永不触发)——已改为**红不落基线 + 有基线即比(无论内容变否)**;网络/HTTP 错误也重试一次(与解析失败同)。模型 `deepseek-flash` vision 实测可用(spec Q8 型号名 deepseek-v4.1-flash 为调研名,以实测可用为准,env 可切)。
+- prompt 资产:`prompt.resume-visual-review`(manifest 14 条);样本夹具 `scripts/visual-review-fixtures.mjs`(三密度);纯函数核心 `scripts/visual-review-core.mjs` + 6 单测。

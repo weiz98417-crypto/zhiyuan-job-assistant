@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { chromium } from "playwright";
-import { findChromiumExecutable } from "@/lib/server/chromium";
+import { findChromiumRequired } from "@/lib/server/chromium";
 
 /**
  * 简历 PDF 的唯一渲染出口(spec 37 收口后:原 /api/cv/generate-pdf Puppeteer 死路由与
@@ -49,7 +49,7 @@ export async function POST(request: Request) {
     // Generate PDF via Playwright
     const browser = await chromium.launch({
       headless: true,
-      executablePath: findChromiumExecutable(true),
+      executablePath: findChromiumRequired(),
       args: ["--no-sandbox", "--disable-gpu", "--disable-setuid-sandbox"],
     });
     let pdfBuffer: Buffer;

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { writeFileSync, mkdirSync, existsSync, readFileSync, statSync } from "fs";
 import { resolve } from "path";
 import { createHash } from "crypto";
-import { markdownToSafeHtml } from '@/lib/server-markdown';
+import { markdownToSafeHtml, escapeHtmlText } from '@/lib/server-markdown';
 
 function sha256(buffer: Buffer): string {
   return createHash("sha256").update(buffer).digest("hex");
@@ -54,7 +54,7 @@ export async function POST(request: Request) {
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>${safeBaseName.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</title>
+<title>${escapeHtmlText(safeBaseName)}</title>
 <style>
   body { font-family: "Microsoft YaHei","PingFang SC",sans-serif; max-width:840px; margin:40px auto; padding:24px; color:#333; line-height:1.7; }
   h1 { font-size:1.5em; border-bottom:2px solid #2563eb; padding-bottom:8px; }
