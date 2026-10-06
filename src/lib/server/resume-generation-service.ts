@@ -6,6 +6,7 @@ import { validateResumeSectionContent, type ResumeSectionId } from "@/lib/agent/
 import { getDataRepositories } from "@/lib/data-repositories";
 import { parseLlmJsonObject } from "@/lib/llm-json";
 import { llmRetry } from "@/lib/llm-retry";
+import { scoreAgentOutput, BLOCKING_SCORE_THRESHOLD } from "@/lib/agent/llm-scorers";
 import { checkNumberProvenance, filterSectionsByProvenance, formatProvenanceFeedback } from "@/lib/server/resume-factuality";
 import { stableResumeHash, type ResumeDraftRecord } from "@/lib/resume/document";
 
@@ -132,17 +133,56 @@ export async function generateResumeDraftForAgent(
       );
     }
   }
+  // 软门：faithfulness/hallucination（spec 31，与优化链 resume-optimization-service.ts 软门同语义）。
+  // veto（编造数组非空）→ 淘汰该 section；低分无 veto → 降级「仅供参考」；判官不可用 → 未评分放行（不阻塞）。
+  // 生成链 section ≤5 且内容互异（非同题变体），故逐一评分、不设优化链的 3 个变体评分上限。
+  const factualityByContent = new Map<string, { advisory: boolean; faithfulnessScore?: number; advisoryReason?: string }>();
+  for (const section of passing) {
+    try {
+      const quality = await scoreAgentOutput({
+        taskType: "resume_edit",
+        output: section.content,
+        sourceMaterials: provenanceSources,
+        request: input.targetRole || undefined,
+      });
+      const vetoed = quality.hardVetoes.length > 0;
+      const lowScore = !vetoed && quality.score < BLOCKING_SCORE_THRESHOLD;
+      factualityByContent.set(stableResumeHash(section.content), {
+        advisory: lowScore,
+        faithfulnessScore: quality.score,
+        advisoryReason: vetoed
+          ? `编造判定：${quality.hardVetoes.join(",")}`
+          : lowScore
+            ? `忠实度评分 ${quality.score} 低于阈值`
+            : undefined,
+      });
+    } catch {
+      // 判官不可用不阻塞主链路（软门语义）；无记录 = 未评分
+    }
+  }
+  const survivingSections = passing.filter((section) => {
+    const factuality = factualityByContent.get(stableResumeHash(section.content));
+    return !factuality || !factuality.advisoryReason?.startsWith("编造判定");
+  });
+  if (survivingSections.length === 0 && passing.length > 0) {
+    const reasons = [...factualityByContent.values()].map((entry) => entry.advisoryReason).filter(Boolean).join("；");
+    throw new ResumeGenerationInputError(`产物未通过忠实度校验（重试后仍失败），生成草稿已放弃、原简历未改动。${reasons}`);
+  }
+
   const activeDocument = await repositories.resumeDocuments.getActive(principal.userId);
-  const drafts: ResumeDraftRecord[] = passing.flatMap((section, index) => {
+  const drafts: ResumeDraftRecord[] = survivingSections.flatMap((section, index) => {
     const validation = validateResumeSectionContent(section.id, section.content);
     if (!validation.valid) return [];
+    const factuality = factualityByContent.get(stableResumeHash(section.content));
+    const advisory = factuality?.advisory === true;
+    const label = advisory ? `仅供参考：${section.label}` : section.label;
     const originalContent = currentSections.find((current) => current.id === section.id)?.content || "";
     return [{
       id: deterministicId(`draft_cv_${section.id}`, principal.userId, input.requestKey || String(index)),
       document_id: activeDocument?.id || null,
       artifact_id: artifactId,
       variant_id: `targeted_${section.id}`,
-      title: section.label,
+      title: label,
       status: "draft",
       base_version: baseVersion,
       base_hash: baseHash,
@@ -154,9 +194,14 @@ export async function generateResumeDraftForAgent(
       }]),
       content_json: JSON.stringify({
         sectionId: section.id,
-        label: section.label,
+        label,
         content: section.content,
         approach: "jd_targeted",
+        advisory,
+        factuality: {
+          faithfulnessScore: factuality?.faithfulnessScore,
+          advisoryReason: factuality?.advisoryReason,
+        },
       }),
       integrity_json: JSON.stringify({ contentHash: stableResumeHash(section.content), valid: true }),
     }];

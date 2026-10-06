@@ -49,7 +49,7 @@ npm run gen:en-modes:translate       # 中文源变更后重生成英文镜像�
 
 以下问题在 2026-10-03 第一轮 review 中识别；P0 全部修复，下列 P1 **有意延后**到后续列车，实施前勿当缺陷重报：
 
-1. **生成链事实门**（P1-2）：`resume-generation-service` 尚未挂数字溯源（Spec 24「覆盖两条链」只完成了优化链）；生成链的产物以「从画像生成全新简历」为主、数字多来自画像本身，延后到 0.15.x 补丁。
+1. **生成链事实门**（P1-2，**已闭环**）：硬门（数字溯源+反馈重试+失败不出稿）已于 0e782cd 接线（本条当时未同步更新，曾误导 2026-10-06 评审——教训：引旧延后项立 spec 前先查代码现状）；软门（faithfulness→「仅供参考」降级+advisory 字段持久化）由 spec 31 / 0.20.0 补齐，直接单测（resume-generation-service.test.ts）与 promptfoo 生成链探针（generationProvenance，core+full）同车落地。
 2. **聚合岗位族/年限段维度**（P1-10/11）：薪资聚合暂按城市×通用族（family='general'）；`familyForRole` 已备好、聚合升维是纯 SQL 改动；正则 plausibility gate（2k-200k 之外丢弃、「10K QPS」误报）延后；risk-intel.md 的 46 条年薪限段数据仍在经 mode context 注入（与 seed 并存、语义不同层），合一待 modes 收口列车。
 3. **旧投影路径删除**（P1-12）：`inferQuestionKind` 正则仍服务 legacy 会话（见上「已知边界」末条）。
 4. **种子量与大厂差异化**（P1-14，2026-10-03 已闭）：种子扩至一级族 160+/二级 70+（LLM 生成种子在 gen-*.json，10% 人工抽检仍待首批线上数据前做一次）；13 家大厂差异化已落（美团/京东/拼多多→structured-sme，网易→stability，其余 project-review）；JD 评估接 composeInterview 已落（评估完成取 3 道带出处题附 F 板块）。

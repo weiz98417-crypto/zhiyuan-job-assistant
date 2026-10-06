@@ -5,7 +5,7 @@
  *  - node CLI（临时人工核查用：node -e "require('./promptfoo/.build/redteam-helpers.cjs').probe(...)"）
  */
 import { validateResumeSectionContent, type ResumeSectionId } from "../src/lib/agent/resume-save-guard";
-import { checkNumberProvenance } from "../src/lib/server/resume-factuality";
+import { checkNumberProvenance, filterSectionsByProvenance } from "../src/lib/server/resume-factuality";
 import { runDeterministicAtsRules } from "../src/lib/server/ats-rules";
 
 export interface ProbeArgs {
@@ -26,6 +26,13 @@ export function probe(fn: string, args: ProbeArgs): unknown {
       const sources = Array.isArray(args.sources) ? args.sources : [];
       const result = checkNumberProvenance(String(args.content || ""), sources);
       return { ok: result.ok, violations: result.violations.map((v) => v.token) };
+    }
+    case "generationProvenance": {
+      // spec 31：生成链硬门入口（filterSectionsByProvenance）——编造数字 section 必须被淘汰
+      const sources = Array.isArray(args.sources) ? args.sources : [];
+      const sections = [{ id: "experience", label: "定制版", content: String(args.content || "") }];
+      const result = filterSectionsByProvenance(sections, sources);
+      return { passed: result.passing.length > 0, dropped: sections.length - result.passing.length };
     }
     case "atsRules":
       return { issues: runDeterministicAtsRules({ cvText: String(args.cvText || "") }) };

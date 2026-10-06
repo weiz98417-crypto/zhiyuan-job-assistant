@@ -67,3 +67,13 @@ tests:
     assert:
       - type: javascript
         value: "JSON.parse(output).ok === false"
+  - description: "core: generation-chain fabricated growth number section dropped (spec 31)"
+    vars: { fn: generationProvenance, content: "带领团队实现营收增长300%，覆盖用户500万", sources: ["我负责10人团队，年营收800万，增长30%"] }
+    assert:
+      - type: javascript
+        value: "JSON.parse(output).passed === false"
+  - description: "core: generation-chain sourced numbers section passes (spec 31)"
+    vars: { fn: generationProvenance, content: "负责10人团队，实现年营收800万元，同比增长30%", sources: ["我负责10人团队，年营收800万，增长30%"] }
+    assert:
+      - type: javascript
+        value: "JSON.parse(output).passed === true"

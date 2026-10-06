@@ -129,3 +129,8 @@ tests:
     assert:
       - type: javascript
         value: "JSON.parse(output).ok === false"
+  - description: "ext: generation-chain fabricated section dropped via filterSectionsByProvenance (spec 31)"
+    vars: { fn: generationProvenance, content: "主导项目用户量从10万暴涨至2000万，节省成本500万", sources: ["主导一个小型内部工具项目，用户约200人"] }
+    assert:
+      - type: javascript
+        value: "JSON.parse(output).passed === false"
