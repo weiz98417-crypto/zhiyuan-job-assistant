@@ -106,8 +106,8 @@ export default function AgentChat({
   const [sendErrors, setSendErrors] = useState<Record<string, string>>({});
   const draft = draftsBySession[draftKey] || EMPTY_CHAT_DRAFT;
   const hasRealChat = messages.some((m) => m.role === "user");
-  // 语音教练(spec 39)只在面试会话出现;最新教练消息 useMemo 免每渲染全量倒扫
-  const isInterviewSessionChat = Boolean(interviewState);
+  // 语音教练(spec 39)在所有 agent 会话出现(2026-10-06 用户决策:对话无处不在);
+  // 最新教练消息 useMemo 免每渲染全量倒扫
   const lastAssistantText = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       const message = messages[i];
@@ -243,9 +243,7 @@ export default function AgentChat({
           <div className="mt-auto">
             <VoiceCoachBar
               streaming={streaming}
-              lastAssistantText={
-                [...messages].reverse().find((m) => m.role === "assistant" && typeof m.content === "string")?.content as string | undefined ?? ""
-              }
+              lastAssistantText={lastAssistantText}
               onSendTranscript={(text) => { void onSend(text); }}
             />
             {suggestions && !hasRealChat && !streaming && (
