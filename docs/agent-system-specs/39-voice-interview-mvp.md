@@ -46,7 +46,7 @@ Depends on: Spec 27(面试题库 composeInterview)、Spec 26(评分锚定复盘)
 
 - 路由契约测试(mock fetch):TTS 路由的 SSE 透传与错误降级(MiMo 不可用→明确错误事件不静默)、ASR 路由的载荷构造(base64/format/language)与转写提取。
 - 按句切分与缓存:纯函数测试(切句规则、LRU 命中)。
-- 真实冒烟脚本 `scripts/smoke-voice-mimo.mjs`(无 key 跳过,沿用 eval 测试 `skipIf(!live)` 模式):合成→回灌→转写相似断言;已人工跑通,脚本固化。
+- 真实冒烟脚本 `scripts/smoke-voice-mimo.mjs`(无 key 跳过,沿用 eval 测试 `skipIf(!live)` 模式):合成→回灌→转写相似断言。**冒烟内容已于 2026-10-06 人工跑通三项**(TTS 白桦 wav、ASR 回灌逐字、SSE 流式),脚本固化是本 spec 的交付物之一(当前仓库中尚无此脚本,勿当作已存在)。
 - 全量测试零回归;语音模式关闭时(无 key)UI 完全不出现语音入口(功能门禁按 env 探测)。
 
 ## Out of Scope

@@ -7,18 +7,18 @@ Depends on: 无;先于 spec 38(视觉反测需要单一可信渲染出口);批�
 
 简历到 PDF 的链路上同时养着**三套实现、两个浏览器引擎**:
 
-- 在用:`src/app/api/generate-cv-pdf/route.ts`(Playwright chromium,`:44-73` findChromiumExecutable、`:70-100` 渲染),命名反而是旧的;
-- 死路由:`src/app/api/cv/generate-pdf/route.ts:1-11`(Puppeteer + `templates/cv-template.html`,前端已不调用),命名反而是新的;
-- 脚本:根 `generate-pdf.mjs:14`(文件头注释说 Playwright,实际 import puppeteer);
-- md→HTML 三套:`server-markdown.ts`(marked+sanitize)、`api/cv/generate-pdf/route.ts:9-23` 手写正则、`api/export-file/route.ts` 另一份;
-- `findChromiumExecutable` 复制两份(`api/generate-cv-pdf/route.ts:44-73` 与 `src/lib/server/report-pdf-service.ts:79-88`);
+- 在用:`src/app/api/generate-cv-pdf/route.ts`(Playwright chromium,`:30-58` findChromiumExecutable、`:79` launch、`:94` page.pdf),命名反而是旧的;
+- 死路由:`src/app/api/cv/generate-pdf/route.ts`(全文件 94 行,Puppeteer(:2)+ `templates/cv-template.html`(:7),前端已不调用),命名反而是新的;
+- 脚本:根 `generate-pdf.mjs:14`(文件头注释说 Playwright,实际 import puppeteer),且 **package.json:22 挂着 `"pdf": "node generate-pdf.mjs"` 的 npm script**;
+- md→HTML 三套:`server-markdown.ts`(marked+sanitize)、`api/cv/generate-pdf/route.ts:9-24` 手写正则、`api/export-file/route.ts` 另一份(:51 调用、:153-161 定义);
+- `findChromiumExecutable` 复制两份(`api/generate-cv-pdf/route.ts:30-58` 与 `src/lib/server/report-pdf-service.ts:77-87`);
 - `verify-desktop-layout.mjs:5` 截图目录硬编码仓库外盘符(`E:/求职项目/...`),换机即失效。
 
 新同事或下一个 agent 接手必然踩错(命名互相反着)。spec 38 要在渲染出口上做机器反测,出口必须先收敛成一条。
 
 ## Solution
 
-1. 删死路由 `api/cv/generate-pdf` 与 **puppeteer 依赖**;删根 `generate-pdf.mjs`(或改为薄包装调 Playwright 路径——以实际用途定,默认删)。
+1. 删死路由 `api/cv/generate-pdf` 与 **puppeteer 依赖**;删根 `generate-pdf.mjs` **连同 package.json:22 的 `pdf` npm script**。
 2. md→HTML 收口到 `server-markdown.ts` 单一实现;`export-file` 与 PDF 链路改调它。
 3. `findChromiumExecutable` 收成一份(`src/lib/server/`),两处改引用。
 4. `verify-desktop-layout.mjs` 截图目录改仓库内相对路径(进 `.gitignore`),删除硬编码盘符。
@@ -31,7 +31,7 @@ Depends on: 无;先于 spec 38(视觉反测需要单一可信渲染出口);批�
 ## Implementation Decisions
 
 - 全部是删和收口,零新逻辑(deletion test:删完复杂度消失而不是转移,才做)。
-- 卸载 puppeteer 前确认 `generate-pdf.mjs` 无 npm script/文档引用(`SCRIPTS.md`、`docs/` 提及处一并清理)。
+- 卸载 puppeteer 前先删干净引用:`package.json:22` 的 `pdf` script、`generate-pdf.mjs` 本体、`docs/` 内提及处(注:根目录无 SCRIPTS.md,已核实)。
 
 ## Testing Decisions
 

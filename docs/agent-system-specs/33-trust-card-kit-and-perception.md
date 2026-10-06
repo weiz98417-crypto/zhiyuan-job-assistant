@@ -5,17 +5,17 @@ Depends on: Spec 30(0.19.0 信任卡既有实现)、Spec 26/28/29 既有字段�
 
 ## Problem
 
-CEO 定性「80% 价值锁在服务端,前端零渲染」。0.19.0 交付了两张卡,但:①样式全是组件内局部常量(`InterviewTrustCards.tsx:34` 的 `COMPACT_CARD_CLASS`、徽章 :75、确认按钮 :192),不可复用;②复盘页 319 行里塞 5 个本地小组件,档位换算与信任卡重复维护(`InterviewRecapReview.tsx:12-17` scoreBadge、:28-38 averageScore);③优化链软门的 `advisory`/`advisoryReason`/`faithfulnessScore` 已持久化并透传(`resume-optimization-service.ts:287-294`、`:360-363`)但前端 `OptimizeVariant` 类型(`src/types/index.ts:392-397`)无 advisory 字段、`optimize-panel.tsx:551` 只渲染 label 前缀——降级素材在、渲染缺;④感知四指标仅 `score_evidence_expand` 走统一上报通道(`perception-client.ts`),其余三路落点(riskFlags/reports 列/service 层)无统一查询视图;⑤辅助 UI 大量复制(页头 ×12、搜索 ×6、空态 ×10+,归 spec 34)。
+CEO 定性「80% 价值锁在服务端,前端零渲染」。0.19.0 交付了两张卡,但:①样式全是组件内局部常量(`InterviewTrustCards.tsx:34` 的 `COMPACT_CARD_CLASS`、徽章 :75、确认按钮 :192),不可复用;②复盘页 319 行里塞 4 个本地组件+7 个辅助函数,档位换算与信任卡重复维护(`InterviewRecapReview.tsx:12-17` scoreBadge、:28-38 averageScore);③优化链软门的 `advisory`/`advisoryReason`/`faithfulnessScore` 已持久化并透传(`resume-optimization-service.ts:287-294`、`:360-363`)但前端 `OptimizeVariant` 类型(`src/types/index.ts:392-397`)无 advisory 字段、`optimize-panel.tsx:551` 只渲染 label 前缀——降级素材在、渲染缺;④**D 板块薪资来源**(`salaryDataSource` 已持久化进 D 板块正文链路)没有独立来源卡组件;⑤感知四指标的服务端上报**已全部接通**(`perception-events.ts` 白名单含全部 4 指标:score_evidence_expand 走前端直报,fact_gate_repair 走 proposal riskFlags `provenance_retried`,sourced_jd_follow_through 走 reports.salary_data_source 列+application-workflow 上报,question_source_followup 走 service 层)——缺的是**统一查询视图**,无任何 dashboard 可看;⑥辅助 UI 大量复制(页头/搜索/空态/浮层,归 spec 34)。
 
 ## Solution
 
-**自建信任卡原语套件**(grilling Q4:assistant-ui 0.15.22 实测无 citation/confidence/recommendation 原语,不升级不赌路线图):
+**自建信任卡原语套件**(grilling Q4:assistant-ui 0.15.22 实测无 citation/confidence/recommendation 原语,不升级不赌路线图;动效用 **framer-motion** ^12.38.0,已在树):
 
-1. **TrustCard kit**(新目录 `src/components/agent/trust/`):档位徽章、证据展开(动效用 motion,已在树)、降级卡、「仅供参考」标注、确认按钮五原语;档位换算逻辑(band-labels 映射、/10 与 /5 归一、三态词)收进 kit 单一模块,TrustCards 与 RecapReview 共用,消灭双维护。
+1. **TrustCard kit**(新目录 `src/components/agent/trust/`):档位徽章、证据展开(动效)、降级卡、「仅供参考」标注、确认按钮、**来源卡**六原语;档位换算逻辑(band-labels 映射、/10 与 /5 归一、三态词)收进 kit 单一模块,TrustCards 与 RecapReview 共用,消灭双维护。
 2. **优化方案降级卡**:`OptimizeVariant` 类型补 advisory 字段,面板渲染 advisory 产物的降级卡(视觉:「仅供参考」徽章 + advisoryReason 提示行),替换现在的纯文本前缀。
-3. **既有卡片换装**:InterviewScoreCard/RejectionParseCard/复盘页改用 kit 原语;卡片视觉遵循现有 design kit 令牌,不新造样式体系。
-4. **感知补齐**(grilling Q6:做最小仪表盘):实现时先核实三路落点现状(fact_gate_repair 走 proposal riskFlags `provenance_retried`;sourced_jd_follow_through 走 reports.salary_data_source;question_source_followup 在 service 层按 compose 记 {bankCount,total})——缺上报的补上报,缺查询的补查询;新增 `/api/perception-events/summary`(或复用既有报表读路径)供仪表盘。
-5. **最小仪表盘**:单页一图(四指标近期趋势/分组条),shadcn chart 抄入(`chart.tsx` 等 2-3 个文件,copy-in 不锁抽象)+ recharts 3.10.1(已在树);放 analytics 页新增区块,不新增路由。
+3. **D 板块来源卡**:`salaryDataSource`(含「方向参考」时效降级态)组件化为独立来源卡,替换正文中拼接的来源句——渲染既有字段,含 spec 30 的 isStale 降级态。
+4. **既有卡片换装**:InterviewScoreCard/RejectionParseCard/复盘页改用 kit 原语;卡片视觉遵循现有 design kit 令牌,不新造样式体系。
+5. **感知查询视图+最小仪表盘**(grilling Q6):四指标上报已通,新增 `/api/perception-events/summary`(或复用既有报表读路径)聚合查询;**最小仪表盘**单页一图(四指标近期趋势/分组条),shadcn chart 抄入 2-3 个文件 + recharts 3.10.1(已在树);放 analytics 页新增区块,不新增路由。
 
 ## User Stories
 
@@ -27,15 +27,15 @@ CEO 定性「80% 价值锁在服务端,前端零渲染」。0.19.0 交付了两�
 ## Implementation Decisions
 
 - kit 只渲染既有字段与既定语义,不在卡内新增计算或话术(信任卡领域词约束);服务端零改动(投影白名单已放行的字段够用;若实现中发现缺字段,按 surface-projection 三处同步纪律扩,不绕闸门)。
-- 动效仅用 motion 的 layout/opacity,不上重 Springs;遵循 `prefers-reduced-motion`。
-- 埋点上报复用 `/api/perception-events`(metric 白名单+1KB 限)或既有持久化路径,不新开通道。
+- 动效仅用 framer-motion 的 layout/opacity,不上重 Springs;遵循 `prefers-reduced-motion`。
+- 感知上报已全部接通,本 spec **只加查询**(summary 聚合)与展示,不开新上报通道、不动既有四路落点。
 - 组件命名用 CONTEXT.md 领域词(信任卡/评分锚点/方向参考),不造新黑话。
 
 ## Testing Decisions
 
-- kit 原语渲染测试:档位→颜色/文案映射、降级卡 advisory 字段渲染、确认按钮状态流转。
+- kit 原语渲染测试:档位→颜色/文案映射、降级卡 advisory 字段渲染、来源卡 isStale 降级态、确认按钮状态流转。
 - 换装回归:TrustCards/RecapReview 现有测试迁移到 kit 后全绿;投影白名单契约测试不放松。
-- 埋点:三路落点核实记录写进 PR 描述;summary 接口补确定性测试(metric 白名单、无个人内容)。
+- summary 聚合接口补确定性测试(metric 白名单、无个人内容、只读)。
 
 ## Out of Scope
 

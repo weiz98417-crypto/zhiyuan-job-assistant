@@ -1,7 +1,7 @@
 # Spec 38: Resume Visual Review Loop(简历视觉反测回路,A2)
 
 Target label: `ready-for-agent`
-Depends on: Spec 37(单一渲染出口)、`src/lib/server/cv-pdf-html.ts` 纯函数接缝(Spec 24 埋的);批次 0.22.0;10 人用户回访(`docs/user-callback-script-2026-10.md`)**并行进行,不阻塞回路建设**(grilling Q7)
+Depends on: Spec 37(单一渲染出口)、`src/lib/server/cv-pdf-html.ts` 渲染接缝(Spec 24 埋的;注意**并非严格纯函数**,见下);批次 0.22.0;10 人用户回访(`docs/user-callback-script-2026-10.md`)**并行进行,不阻塞回路建设**(grilling Q7)
 
 ## Problem
 
@@ -11,7 +11,7 @@ CEO 判断:中国求职的真实闸门是 Boss 直聘在线简历 + HR 三秒扫
 
 **开发侧门禁脚本**(不做用户可见功能):`scripts/verify-resume-visual.mjs`
 
-1. 渲染:用 `cv-pdf-html.ts` 对 3-5 份固定样本简历(不同密度/长度/岗位族)产 HTML → Playwright 截图(先例:`verify-desktop-layout.mjs`、`scripts/verify-dual-canvas.mjs:15`);截图落仓库内 `.gitignore` 目录。
+1. 渲染:用 `cv-pdf-html.ts`(157 行,导出 normalizeTextForATS/getTemplateCSS/buildCvHtml/stripHtmlTags)对 3-5 份固定样本简历(不同密度/长度/岗位族)产 HTML → Playwright 截图(先例:`verify-desktop-layout.mjs`、`scripts/verify-dual-canvas.mjs:15`);截图落仓库内 `.gitignore` 目录。注:该文件并非严格纯函数(getTemplateCSS 内 `fs.readFileSync` :107-108 读模板 CSS)——本 spec 不要求改造;若截图断言需要,可把 CSS 读盘提为模块初始化一次性加载(顺手纯化,半天内)。
 2. 评审:调 **DeepSeek 视觉**(deepseek-v4.1-flash,grilling Q8:只接这一家,不做 provider 抽象),输出**结构化四维批评**:排版层级/密度/对齐/颜色,每维 0-10 分 + 具体问题描述(含问题区域描述);JSON 走 llm-json.ts 收口入口。
 3. 门禁:任一维 < 阈值(初始 6,校准后定)或总分 < 阈值 → exit 1 并打印批评全文;模板 diff 的 PR 必跑。
 4. 基线冻结:首次运行把各样本各维分数存 `scripts/.visual-review-baseline.json`(哈希比对手法沿用 knowledge-drift 的归一化教训:BOM/CRLF 归一后再哈希);后续模板改动对比基线,显著劣化即红。

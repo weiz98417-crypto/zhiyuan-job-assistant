@@ -6,7 +6,7 @@
 
 | 批次 | 名称 | 内容 | spec | 预估 |
 | --- | --- | --- | --- | --- |
-| 0.20.0 | 信任补丁 | B1 生成链事实门 + B2 LLM JSON 收口 | 31、32 | 1-2 天 |
+| 0.20.0 | 信任补丁 | B1 生成链事实门补齐(硬门已接线,补软门)+ B2 LLM JSON 收口 | 31、32 | 1-2 天 |
 | 0.21.0 | 前端信任周 | A1 信任卡套件 + B5 感知埋点补齐+轻仪表盘 + B4 工作台原语与浮层全迁 + B6 会话 hook 拆分 + B7 依赖瘦身 | 33、34、35、36 | ~1 周 |
 | 0.22.0 | 导出与视觉 | B3 导出链路收敛 + A2 简历视觉反测回路 | 37、38 | 2-4 天 |
 | 0.23.0 | 语音面试 MVP | A3 语音面试(2026-10-06 用户转正,MiMo TTS 白桦 + MiMo ASR 回合制) | 39 | 3-5 天 |
@@ -15,12 +15,22 @@
 
 每班车走完整流程:spec → 实现 → code-review/eng-review → 三护栏+全测试绿 → CI 绿 → 下一班。B8(data-repositories.ts 3413 行)不专列:哪张表因产品需求被改,顺手把那张表的仓库抽成独立文件。
 
+## 小账本(挂账事项,评审盘点后仍未被任何 spec 承接)
+
+- 种子生成器两条反馈写回(scripts/question-seeds 生成器:反模板题、reverse 错位)——`docs/question-seed-spot-check-2026-10-03.md` 有记录。
+- 题库 10% 人工抽检(首批线上数据前欠一次,同上文档)。
+- 投影节点 ID 稳定化。
+- D 板块估算结构性强制(等评估器收口)。
+- coach overlay 不再带 cvText。
+- confirmRejectionToLedger 备用接缝接线(rejection-parsing.ts:124 代码在,未接;spec 33 只做确认按钮态,不含此)。
+- 已显式挂账的:Spec 23 扫码登录(NOT in scope 节)、旧会话信任卡回填(spec 33 Out of Scope)。
+
 ## Q1-Q10 决策表(2026-10-06 grilling 定稿)
 
 | # | 决策 | 结论 |
 | --- | --- | --- |
 | Q1 | 切车 | 三班车如上;顺序即优先级;A3 后置,B8 机会主义 |
-| Q2 | B1 失败语义 | 与优化链完全同款:硬门 veto=带溯源提示重试 1 次→仍失败报错**不出稿**(400+嫌疑数字清单);软门低分=出稿但强制「仅供参考」前缀+advisory 字段持久化。ADR-0041 已覆盖,不立新 ADR |
+| Q2 | B1 失败语义 | 与优化链完全同款。**2026-10-06 核查修订**:硬门(数字溯源+重试+报错不出稿)已在生成链接线(0e782cd),Q2 的硬门语义=确认现状并补测试;spec 31 实际范围=补软门(faithfulness→「仅供参考」降级+字段持久化)+直接单测+红队探针+修正过时的 evals/README 延后项 |
 | Q3 | B2 是否引 zod | **不引**。纯收口到 llm-json.ts,各调用点既有校验逻辑不动;instructor-js 不引入(半休眠+模型已原生 JSON 模式) |
 | Q4 | A1 原语策略 | **自建信任卡套件**(自家 design kit + motion)。实测 assistant-ui 0.15.22 无 citation/confidence/recommendation 原语(最新仅 0.15.23 补丁),不赌其路线图,维持 0.15.22 不升级;需要引用角标时单抄 Vercel AI Elements Inline Citation(Apache-2.0 已核实) |
 | Q5 | B4 浮层范围 | **13 处全迁**,C3/C4 彻底收尾,kit 采用从 2 页变全覆盖 |
@@ -47,13 +57,13 @@ OpenResume(AGPL,停更)· Vivliostyle(AGPL)· OrangeX4 中文 Typst 模板(无�
 
 - antd 仅 `src/components/agent/AgentActivityTrack.tsx:4` 一处导入(Progress/Timeline/ConfigProvider,theme 切换 :79);`@ant-design/icons` 零导入 → 可整体卸载。
 - `pdf2json` 零导入,纯声明(package.json:105)→ 直接删;`pdf-parse` 独占简历文本提取链(document-extraction)。
-- 优化链事实门失败 UX:硬门 throw(`resume-optimization-service.ts:202-205`、faithfulness 全灭 :253)→ `api/cv/optimize-section/route.ts:82-83` 400 → `optimize-panel.tsx:214-215` error 文案;软门 :225-233 出稿带「仅供参考」前缀(:272、:284),advisory/faithfulnessScore 持久化 :287-294、API 透传 :360-363,但前端 `OptimizeVariant` 类型(`src/types/index.ts:392-397`)无 advisory 字段、`:551` 只渲染 label——spec 33 的降级卡素材。
+- 优化链事实门失败 UX:硬门 throw(`resume-optimization-service.ts:202-205`、faithfulness 全灭 :253)→ `api/cv/optimize-section/route.ts:82-83` 400 → `optimize-panel.tsx:214-215` error 文案;软门 :225-233 出稿带「仅供参考」前缀(:272、:284),advisory/faithfulnessScore 持久化 :287-294、API 透传 :360-363,但前端 `OptimizeVariant` 类型(`src/types/index.ts:392-397`)无 advisory 字段、`src/app/cv/optimize-panel.tsx:551` 只渲染 label——spec 33 的降级卡素材。**生成链硬门已接线**(resume-generation-service.ts:9,80-86,123-134,0e782cd 闭掉原延后项;`evals/README.md` 延后项第 1 条描述已过时),软门未接;阈值在 `llm-scorers.ts:67`。
 
 ## Specs 索引
 
 | spec | 内容 | 批次 |
 | --- | --- | --- |
-| 31 | Generation Chain Factuality Gate(B1) | 0.20.0 |
+| 31 | Generation Chain Soft-Gate Completion(B1,硬门已接补软门) | 0.20.0 |
 | 32 | LLM JSON Consolidation(B2) | 0.20.0 |
 | 33 | Trust Card Kit And Perception Completion(A1+B5) | 0.21.0 |
 | 34 | Workbench Primitives And Overlay Migration(B4) | 0.21.0 |

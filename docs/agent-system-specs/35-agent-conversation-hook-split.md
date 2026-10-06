@@ -9,13 +9,13 @@ Depends on: 2026-09 C2(useAgentConversation 从 page.tsx 下沉)既有交付与�
 
 ## Solution
 
-**先补源码契约测试锁行为,再按三个关注面拆**(grilling Q9):
+**先补源码契约测试锁行为,再拆**(grilling Q9)。注意:服务端投影纯函数(`parseServerSession`/`projectDurableInterviewEngineState`/scoreArtifacts 包装)**不在 hook 内**,早已模块化于 `src/lib/agent/interview-session-state.ts`、`sessions.ts`、`runtime/execution-session-service.ts`——本 spec 不动它们。拆分对象是 hook 内部的 24 个 useState 与副作用,施工第一步是**盘点归属**,再按实际关注面切成三片(预期切法,以盘点为准):
 
-1. **服务端投影解析**:`parseServerSession`/`projectDurableInterviewEngineState` 调用与 scoreArtifacts 包装层——纯函数化,输入 durable 形状输出视图模型。
-2. **会话生命周期**:发送、续跑、Gate/批准、Run 状态推进——保留为 hook 主干。
+1. **数据编排**:投影调用编排、scoreArtifacts 包装层的消费、消息列表与持久化数据的接线。
+2. **会话生命周期**:发送、续跑、Gate/批准、Run 状态推进。
 3. **界面状态**:折叠、rail、滚动、选中态等纯 UI state——拆成独立小 hook 或下放组件。
 
-拆完后 `use-agent-conversation.tsx` 保留为**组合门面**(导出签名不变,页面零改动),内部三个模块各自 ≤800 行。不引入状态库(0.09 已定:纯 hook 不用 zustand)。
+拆完后 `use-agent-conversation.tsx` 保留为**组合门面**(导出签名不变,`export function useAgentConversation()` 仍在 :527 附近,页面零改动),内部模块各自 ≤800 行。不引入状态库(0.09 已定:纯 hook 不用 zustand)。
 
 ## User Stories
 

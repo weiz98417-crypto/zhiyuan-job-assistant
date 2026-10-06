@@ -12,7 +12,7 @@ Depends on: `src/lib/llm-json.ts` 既有两级修复(截断容错重写,2026-10 
 3. `src/app/api/cv/optimize-section/ask/route.ts:87-92` — 同型
 4. `src/app/api/cv/import-reference/route.ts:73-86` — **四级自造解析器**(直接 parse→围栏→sections 正则→`{[\s\S]*}` 裸括号)
 5. `src/app/api/news/company/route.ts:36-47` — parse→catch 内联降级
-6. `src/app/api/news/industry/route.ts:172-185、334` — `summaries||items` 多形态兜底,两处重复
+6. `src/app/api/news/industry/route.ts:172-185、335-336` — `summaries||items`(:173、:182 两处)与 `news||items`(:335-336)多形态兜底
 7. `src/app/api/interview/coach/stream/route.ts:203-222` — `<<FOLLOWUPS>>` 自定义标签 + JSON.parse 各自 try/catch
 8. `src/app/api/evaluate/stream/route.ts:479-481` — archetype 裸 `match(/\{[\s\S]*\}/)` 后直接 parse,无围栏剥离
 
@@ -31,9 +31,9 @@ Depends on: `src/lib/llm-json.ts` 既有两级修复(截断容错重写,2026-10 
 
 ## Implementation Decisions
 
-- llm-json.ts 接口不动(已有调用方 7 处在用);若 8 处中有需要的新形态(如自定义标签剥离),以可选参数/前置步骤实现,不动既有签名。
+- llm-json.ts 接口不动。现状实测:5 个文件 import、**真实调用点仅 3 处**(ats-analysis:93、interview-rubric:107、resume-generation:119);`question-bank.ts:11` 与 `rejection-parsing.ts:7` 是**未使用的死 import**——收口时顺手清掉。
+- 8 处替换保持响应契约逐字节等价(成功形态与失败文案不变);若其中有需要的新形态(如自定义标签剥离),以可选参数/前置步骤实现,不动既有签名。
 - 不引入新依赖(instructor-js 判半休眠不用;智谱/百炼/DeepSeek 均已原生 JSON 模式,不需要)。
-- 每处替换保持响应契约逐字节等价(成功形态与失败文案不变)。
 
 ## Testing Decisions
 
@@ -46,5 +46,5 @@ Depends on: `src/lib/llm-json.ts` 既有两级修复(截断容错重写,2026-10 
 
 ## Further Notes
 
-- 与 Spec 31 同班车,**先做本 spec**:31 的生成链新接线直接走收口后入口。
-- 收口完成后,llm-json.ts 文件头「7 份合一」注释应更新为全量数字,并成为唯一合法解析入口(hygiene 检查可考虑后续加一条「route 内禁止裸 JSON.parse LLM 输出」——本轮不加,避免护栏误报流式拼接场景)。
+- 与 Spec 31 同班车,**先做本 spec**:31 的软门新接线直接走收口后入口。
+- 收口完成后,`llm-json.ts` 文件头「全仓 7 份样板合一」注释(:2-3)更新为全量数字,并成为唯一合法解析入口(hygiene 检查可考虑后续加一条「route 内禁止裸 JSON.parse LLM 输出」——本轮不加,避免护栏误报流式拼接场景)。
