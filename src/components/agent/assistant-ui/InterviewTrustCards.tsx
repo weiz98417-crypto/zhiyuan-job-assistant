@@ -3,20 +3,23 @@
 /**
  * Spec 30 / WP2+WP3：评分锚定信任卡（bands/锚定词/三态/证据展开）与拒信确认卡。
  * 数据来源：interview_score 与 rejection_parse 的 uiPayload（经 WP0 投影白名单放行）。
+ * spec 33 换装：容器/徽章/展开/确认按钮改用 trust kit 原语；档位词换算收口 band-scale。
  */
 
 import { useState } from "react";
-import { motion } from "framer-motion";
-import { ChevronDown, ChevronUp, Check, X } from "lucide-react";
-import { bandLabel, stateLabel } from "@/lib/agent/knowledge/registry/band-labels";
 import { recordPerceptionEvent } from "@/lib/server/perception-client";
-
-const DIMENSION_LABELS: Record<string, string> = {
-  structure: "结构完整度",
-  specificity: "具体程度",
-  highlight: "亮点突出",
-  timing: "时间控制",
-};
+import {
+  bandLabel,
+  stateLabel,
+  DIMENSION_LABELS,
+  REJECTION_REASON_LABELS,
+  TrustCardFrame,
+  BandBadge,
+  StateChip,
+  ExpandableEvidence,
+  ConfirmButton,
+  DismissHint,
+} from "@/components/agent/trust";
 
 interface RubricShape {
   bands?: Record<string, number>;
@@ -31,8 +34,6 @@ interface RubricShape {
   };
 }
 
-const COMPACT_CARD_CLASS = "rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] p-3 text-xs space-y-2";
-
 /** 评分锚定信任卡：主显锚定词·N/4 + 逐维档位/三态 + 可展开证据（展开触发感知埋点）。 */
 export function InterviewScoreCard({ payload }: { payload: Record<string, unknown> }) {
   const [expanded, setExpanded] = useState(false);
@@ -42,12 +43,12 @@ export function InterviewScoreCard({ payload }: { payload: Record<string, unknow
   if (!rubric || !rubric.bands) {
     const suggestions = Array.isArray(payload?.suggestions) ? payload.suggestions.map(String) : [];
     return (
-      <div className={COMPACT_CARD_CLASS}>
+      <TrustCardFrame>
         <p className="text-[var(--color-text)] font-medium">这一题这轮没有打分</p>
         {suggestions.map((s, i) => (
           <p key={i} className="text-[var(--color-muted)]">{s}</p>
         ))}
-      </div>
+      </TrustCardFrame>
     );
   }
 
@@ -56,61 +57,44 @@ export function InterviewScoreCard({ payload }: { payload: Record<string, unknow
   const review = rubric.review || {};
 
   return (
-    <div className={COMPACT_CARD_CLASS}>
+    <TrustCardFrame>
       <div className="flex items-baseline gap-2">
-        <span className="text-sm font-medium text-[var(--color-text)]">
-          {bandLabel(overallBand)} · {overallBand}/4
-        </span>
+        <BandBadge label={bandLabel(overallBand)} band={overallBand} />
         <span className="text-[10px] text-[var(--color-muted)]">评分锚定</span>
       </div>
 
       <div className="space-y-1">
-        {dims.map(([dim, band]) => {
-          const state = stateLabel(rubric.states?.[dim] || "");
-          return (
-            <div key={dim} className="flex items-center gap-2 flex-wrap">
-              <span className="text-[var(--color-muted)] w-16 shrink-0">{DIMENSION_LABELS[dim] || dim}</span>
-              <span className="text-[var(--color-text)]">{bandLabel(band)} {band}/4</span>
-              {state ? (
-                <span className="px-1.5 py-px rounded-full text-[10px] bg-[var(--surface-soft)] text-[var(--color-muted)]">
-                  {state}
-                </span>
-              ) : null}
-            </div>
-          );
-        })}
+        {dims.map(([dim, band]) => (
+          <div key={dim} className="flex items-center gap-2 flex-wrap">
+            <span className="text-[var(--color-muted)] w-16 shrink-0">{DIMENSION_LABELS[dim] || dim}</span>
+            <BandBadge label={bandLabel(band)} band={band} muted />
+            <StateChip state={stateLabel(rubric.states?.[dim] || "")} />
+          </div>
+        ))}
       </div>
 
-      <button
-        type="button"
-        onClick={() => {
+      <ExpandableEvidence
+        expanded={expanded}
+        onToggle={() => {
           setExpanded((prev) => !prev);
           if (!expanded) void recordPerceptionEvent("score_evidence_expand", { dimensionCount: dims.length });
         }}
-        className="inline-flex items-center gap-1 text-[var(--color-primary)] hover:underline"
       >
-        {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-        查看评分依据
-      </button>
-
-      {expanded ? (
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-1.5 border-t border-[var(--color-border)] pt-2">
-          {dims.map(([dim]) => {
-            const quote = rubric.evidence?.[dim] || "";
-            if (!quote) return null;
-            return (
-              <p key={dim} className="text-[var(--color-muted)]">
-                <span className="text-[var(--color-text)]">{DIMENSION_LABELS[dim] || dim}：</span>「{quote}」
-              </p>
-            );
-          })}
-          {review.effectiveEvidence ? <p><span className="text-[var(--color-text)]">有效证据：</span>{review.effectiveEvidence}</p> : null}
-          {review.mainGaps ? <p><span className="text-[var(--color-text)]">主要缺口：</span>{review.mainGaps}</p> : null}
-          {review.stateVerdict ? <p><span className="text-[var(--color-text)]">三态判定：</span>{review.stateVerdict}</p> : null}
-          {review.betterStructure ? <p><span className="text-[var(--color-text)]">更好的回答结构：</span>{review.betterStructure}</p> : null}
-        </motion.div>
-      ) : null}
-    </div>
+        {dims.map(([dim]) => {
+          const quote = rubric.evidence?.[dim] || "";
+          if (!quote) return null;
+          return (
+            <p key={dim} className="text-[var(--color-muted)]">
+              <span className="text-[var(--color-text)]">{DIMENSION_LABELS[dim] || dim}：</span>「{quote}」
+            </p>
+          );
+        })}
+        {review.effectiveEvidence ? <p><span className="text-[var(--color-text)]">有效证据：</span>{review.effectiveEvidence}</p> : null}
+        {review.mainGaps ? <p><span className="text-[var(--color-text)]">主要缺口：</span>{review.mainGaps}</p> : null}
+        {review.stateVerdict ? <p><span className="text-[var(--color-text)]">三态判定：</span>{review.stateVerdict}</p> : null}
+        {review.betterStructure ? <p><span className="text-[var(--color-text)]">更好的回答结构：</span>{review.betterStructure}</p> : null}
+      </ExpandableEvidence>
+    </TrustCardFrame>
   );
 }
 
@@ -127,13 +111,6 @@ export function RejectionParseCard({ payload }: { payload: Record<string, unknow
     reasonLabel?: string;
     quote?: string;
     freeText?: string;
-  };
-  const reasonLabels: Record<string, string> = {
-    resume_mismatch: "简历不匹配",
-    position_filled: "已招满",
-    salary_mismatch: "薪资不匹配",
-    no_response: "流程无回应",
-    other: "其他",
   };
 
   const onConfirm = async () => {
@@ -160,13 +137,13 @@ export function RejectionParseCard({ payload }: { payload: Record<string, unknow
   };
 
   return (
-    <div className={COMPACT_CARD_CLASS}>
+    <TrustCardFrame>
       <p className="text-[var(--color-text)] font-medium">
         {parse.company || "某公司"}{parse.role ? ` · ${parse.role}` : ""} 的拒绝原因
       </p>
       <p>
         <span className="text-[var(--color-muted)]">原因：</span>
-        <span className="text-[var(--color-text)]">{reasonLabels[parse.reasonLabel || "other"] || "其他"}</span>
+        <span className="text-[var(--color-text)]">{REJECTION_REASON_LABELS[parse.reasonLabel || "other"] || "其他"}</span>
       </p>
       {parse.quote ? (
         <p className="text-[var(--color-muted)]">原文：「{parse.quote}」</p>
@@ -179,26 +156,13 @@ export function RejectionParseCard({ payload }: { payload: Record<string, unknow
             ? "本地模式不入账。"
             : "该解析未产生新候选（可能已存在或被策略拦截），无需确认。"}
         </p>
-      ) : confirmed ? (
-        <p className="inline-flex items-center gap-1 text-[var(--color-primary)]">
-          <Check size={12} /> 已确认入账
-        </p>
       ) : (
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={onConfirm}
-            disabled={confirming}
-            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] bg-[var(--color-primary)] text-white disabled:opacity-50"
-          >
-            <Check size={11} /> {confirming ? "确认中…" : "确认入账"}
-          </button>
-          <span className="inline-flex items-center gap-1 text-[var(--color-muted)]">
-            <X size={11} /> 忽略则 30 天后自动过期
-          </span>
+          <ConfirmButton confirmed={confirmed} confirming={confirming} onConfirm={() => void onConfirm()} />
+          {!confirmed ? <DismissHint>忽略则 30 天后自动过期</DismissHint> : null}
         </div>
       )}
       {error ? <p className="text-red-600">{error}</p> : null}
-    </div>
+    </TrustCardFrame>
   );
 }

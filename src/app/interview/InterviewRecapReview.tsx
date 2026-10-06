@@ -5,16 +5,7 @@ import { BookOpenText, Clock, ExternalLink, FileText, MessageSquare, Star } from
 import { PaperCard } from "@/components/design";
 import type { ChatSession, InterviewPlanSnapshot, InterviewRecap, InterviewSessionState, InterviewTurn } from "@/types";
 import { isInterviewSession } from "@/lib/agent/interview-session-state";
-import { bandLabel } from "@/lib/agent/knowledge/registry/band-labels";
-
-/** Spec 30 / WP2：统一档位徽标。rubric.overallBand 优先（根治双刻度歧义）；无 rubric 时
- *  legacy /5 直映，durable /10（值域 2-10）÷2 回 1-5 再映。裸值 2-4 双刻度歧义接受（S1 已知）。 */
-function scoreBadge(score: number, rubricBand?: number): string {
-  const band = typeof rubricBand === "number"
-    ? rubricBand
-    : Math.max(0, Math.min(4, Math.round(score > 5 ? score / 2 : score) - 1));
-  return `${bandLabel(band)} · ${band}/4`;
-}
+import { scoreBadge, averageScore } from "@/components/agent/trust";
 
 interface InterviewRecapReviewProps {
   sessions: ChatSession[];
@@ -23,18 +14,6 @@ interface InterviewRecapReviewProps {
 
 function sessionDate(session: ChatSession): Date {
   return new Date(session.updatedAt || session.createdAt || Date.now());
-}
-
-function averageScore(state?: InterviewSessionState): number | null {
-  // Spec 30 / S2：未评分哨兵（0）不入均值；durable /10 归一为 /5 刻度后再平均（跨刻度不混算）
-  const scores = [
-    ...(state?.scoreArtifacts || []).map((item) => item.score?.overall),
-    ...(state?.questionGraph || []).map((item) => item.score?.overall),
-  ]
-    .filter((score): score is number => typeof score === "number" && Number.isFinite(score) && score > 0)
-    .map((score) => (score > 5 ? Math.round(score / 2) : score));
-  if (!scores.length) return null;
-  return Math.round((scores.reduce((sum, score) => sum + score, 0) / scores.length) * 10) / 10;
 }
 
 function lastTranscriptText(session: ChatSession): string {
@@ -253,7 +232,10 @@ export default function InterviewRecapReview({
               if (id == null) return null;
               const state = session.interviewState;
               const plan = state?.planSnapshot;
-              const score = averageScore(state);
+              const score = averageScore([
+                ...(state?.scoreArtifacts || []).map((item) => item.score?.overall),
+                ...(state?.questionGraph || []).map((item) => item.score?.overall),
+              ]);
               const recap = state?.recap;
               const date = sessionDate(session);
               return (

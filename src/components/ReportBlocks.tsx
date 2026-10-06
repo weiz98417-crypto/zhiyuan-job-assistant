@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { PaperCard, ScoreBadge } from "@/components/design";
 import MarkdownRenderer from "@/components/MarkdownRenderer";
+import { SourceCard } from "@/components/agent/trust";
 import type { EvaluationReport } from "@/types";
 
 const BLOCK_LABELS: Record<string, string> = {
@@ -82,6 +83,15 @@ export default function ReportBlocks({ report, expandedByDefault = true }: Repor
                 >
                   <div className="mt-3 pt-3 border-t border-[var(--color-divider)] text-sm text-[var(--color-text-soft)] leading-relaxed">
                     <MarkdownRenderer content={block} />
+                    {key === "d" && report.salaryDataSource ? (
+                      <div className="mt-2">
+                        <SourceCard
+                          label="薪资数据来源"
+                          value={report.salaryDataSource}
+                          stale={report.salaryDataSource.startsWith("方向参考")}
+                        />
+                      </div>
+                    ) : null}
                   </div>
                 </motion.div>
               )}

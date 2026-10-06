@@ -82,6 +82,7 @@ export default function ReportsPage() {
             legitimacy: r.legitimacy,
             blocks: normalizeReportBlocks(storedBlocks),
             keywords: parseJsonValue(r.keywords_json, []),
+            salaryDataSource: typeof r.salary_data_source === "string" ? r.salary_data_source : undefined,
             scores: normalizeReportScores(storedBlocks),
             createdAt: r.created_at ? new Date(r.created_at as string) : new Date(),
           };

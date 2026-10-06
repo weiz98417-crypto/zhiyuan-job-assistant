@@ -124,6 +124,8 @@ export interface EvaluationReport {
   differentiationTips?: DifferentiationTip[];
   applicationId?: number;
   createdAt: Date;
+  /** D 板块薪资数据来源标注(Spec 30 WP5 reports 列;spec 33 来源卡渲染既有字段) */
+  salaryDataSource?: string;
 }
 
 /* ── Offers ── */
@@ -394,6 +396,13 @@ export interface OptimizeVariant {
   content: string;
   approach: string;
   placeholderCount?: number;
+  /** 软门降级(spec 33):advisory 产物由服务端标注,前端渲染「仅供参考」降级卡 */
+  advisory?: boolean;
+  factuality?: {
+    provenanceChecked?: number;
+    faithfulnessScore?: number;
+    advisoryReason?: string;
+  };
 }
 
 export interface AskQuestion {

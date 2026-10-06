@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Sparkles, Loader2, Check, X, RefreshCw, Target, BookOpen, Zap, GitBranch, Hash, Key } from "lucide-react";
 import { WarmButton } from "@/components/design";
+import { AdvisoryBadge } from "@/components/agent/trust";
 import type { OptimizeVariant, Operation, AskQuestion } from "@/types";
 import { OPERATION_LABELS, EFFORT_LABELS } from "@/types";
 
@@ -535,6 +536,8 @@ export default function OptimizePanel({
               {variants.map((v) => {
                 const isDirected = v.label === "定向" || v.label.includes("定向");
                 const colorClass = isDirected ? VARIANT_COLORS["定向"] : VARIANT_COLORS["通用"];
+                // spec 33:软门 advisory 产物——前缀由服务端 label 带来,面板换成降级徽章渲染
+                const displayLabel = v.advisory === true ? v.label.replace(/^仅供参考：/, "") : v.label;
                 return (
                   <motion.div
                     key={v.label}
@@ -542,14 +545,15 @@ export default function OptimizePanel({
                     animate={{ opacity: 1, x: 0 }}
                     className={`p-3 rounded-[var(--radius-sm)] border-l-2 ${colorClass}`}
                   >
-                    <div className="flex items-center gap-2 mb-1.5">
+                    <div className="flex items-center gap-2 mb-1.5 flex-wrap">
                       <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
                         isDirected
                           ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
                           : "bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400"
                       }`}>
-                        方案 · {v.label}{isDirected && hasJD ? `（针对${targetJD!.role}）` : ""}
+                        方案 · {displayLabel}{isDirected && hasJD ? `（针对${targetJD!.role}）` : ""}
                       </span>
+                      {v.advisory === true && <AdvisoryBadge reason={v.factuality?.advisoryReason} />}
                       <span className="text-xs text-[var(--color-muted)]">{v.approach}</span>
                       {(v.placeholderCount ?? 0) > 0 && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
