@@ -15,7 +15,7 @@ import { POST as ttsRoute } from "@/app/api/interview/voice/tts/route";
 import { POST as asrRoute } from "@/app/api/interview/voice/asr/route";
 import { GET as configRoute } from "@/app/api/interview/voice/config/route";
 import { encodeWavBuffer, encodeWav16k } from "@/lib/voice/wav-encode";
-import { splitIntoSentences } from "@/lib/server/mimo-voice";
+import { splitIntoSentences } from "@/lib/voice/sentence-split";
 
 function jsonRequest(body: unknown): Request {
   return new Request("http://localhost:3000/api/x", { method: "POST", body: JSON.stringify(body) });

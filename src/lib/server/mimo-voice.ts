@@ -121,39 +121,5 @@ export async function mimoAsr(audioBase64: string, format: "wav" | "mp3" = "wav"
   return (payload.choices?.[0]?.message?.content || "").trim();
 }
 
-/** 按句切分(TTS 逐句播放;中英标点,问叹号保留在句尾;上限 500 字/句——超长按逗号二次切)。 */
-export function splitIntoSentences(text: string): string[] {
-  const cleaned = text.replace(/\s+/g, " ").trim();
-  if (!cleaned) return [];
-  const raw: string[] = [];
-  let buffer = "";
-  for (const char of cleaned) {
-    buffer += char;
-    if ("。!?;:;:!?\n".includes(char)) {
-      raw.push(buffer.trim());
-      buffer = "";
-    }
-  }
-  if (buffer.trim()) raw.push(buffer.trim());
-
-  const result: string[] = [];
-  for (const part of raw.filter(Boolean)) {
-    if (part.length <= TTS_MAX_CHARS) {
-      result.push(part);
-      continue;
-    }
-    let longBuffer = "";
-    for (const char of part) {
-      longBuffer += char;
-      if (longBuffer.length >= TTS_MAX_CHARS) {
-        result.push(longBuffer.trim());
-        longBuffer = "";
-      } else if ("、,,,".includes(char) && longBuffer.length >= TTS_MAX_CHARS / 2) {
-        result.push(longBuffer.trim());
-        longBuffer = "";
-      }
-    }
-    if (longBuffer.trim()) result.push(longBuffer.trim());
-  }
-  return result;
-}
+/** 按句切分:实现在 src/lib/voice/sentence-split.ts(客户端共用)。 */
+export { splitIntoSentences } from "@/lib/voice/sentence-split";

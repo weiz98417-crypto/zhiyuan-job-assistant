@@ -25,6 +25,7 @@ import type { SuggestionChip } from "./SuggestionChips";
 import { AgentShellActionsContext } from "./assistant-ui/AgentToolCards";
 import { AgentThreadMessages } from "./assistant-ui/AgentThreadMessages";
 import { AgentComposer, type ComposerAttachment } from "./assistant-ui/AgentComposer";
+import { VoiceCoachBar } from "./assistant-ui/VoiceCoachBar";
 
 export type { CompletionInfo, EvalBlockProgress } from "./AgentDomainCards";
 export type { AgentPhase } from "./assistant-chat";
@@ -231,6 +232,13 @@ export default function AgentChat({
 
           {/* Input area */}
           <div className="mt-auto">
+            <VoiceCoachBar
+              streaming={streaming}
+              lastAssistantText={
+                [...messages].reverse().find((m) => m.role === "assistant" && typeof m.content === "string")?.content as string | undefined ?? ""
+              }
+              onSendTranscript={(text) => { void onSend(text); }}
+            />
             {suggestions && !hasRealChat && !streaming && (
               <div className="mb-3">
                 <SuggestionChips
