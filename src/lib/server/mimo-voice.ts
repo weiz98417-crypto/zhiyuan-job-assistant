@@ -7,7 +7,7 @@
  */
 import crypto from "node:crypto";
 
-const TTS_MAX_CHARS = 500;
+import { TTS_MAX_CHARS } from "@/lib/voice/sentence-split";
 const ASR_MAX_BASE64_CHARS = 8_000_000; // ≈ 单次回答 120s 上限的量级护栏
 const CACHE_MAX = 50;
 
@@ -39,6 +39,19 @@ function ttsVoice(): string {
   return process.env.MIMO_TTS_VOICE || "白桦";
 }
 
+/** 语音路由共享错误映射(spec 39 评审:503 未配置/400 上游文案/500 兜底)。 */
+export function mapVoiceRouteError(error: unknown): import("next/server").NextResponse {
+  const { NextResponse } = require("next/server") as typeof import("next/server");
+  if (error instanceof MimoVoiceUnavailableError) {
+    return NextResponse.json({ success: false, error: error.message }, { status: 503 });
+  }
+  if (error instanceof MimoVoiceUpstreamError) {
+    return NextResponse.json({ success: false, error: error.message }, { status: 400 });
+  }
+  console.error("voice route error:", error instanceof Error ? error.message : error);
+  return NextResponse.json({ success: false, error: "语音服务失败" }, { status: 500 });
+}
+
 export function isVoiceConfigured(): boolean {
   return Boolean(process.env.MIMO_API_KEY?.trim());
 }
@@ -61,10 +74,6 @@ function cacheSet(key: string, value: { audioBase64: string; format: string }): 
   }
 }
 
-export function ttsCacheSize(): number {
-  return ttsCache.size;
-}
-
 /** 按句合成(非流式;整段 TTS SSE 流式留给打断升级,见 spec 39 评审记录)。 */
 export async function mimoTts(text: string): Promise<{ audioBase64: string; format: string; cached: boolean }> {
   const trimmed = text.trim();
@@ -83,6 +92,7 @@ export async function mimoTts(text: string): Promise<{ audioBase64: string; form
       messages: [{ role: "assistant", content: trimmed }],
       audio: { format: "mp3", voice: ttsVoice() },
       stream: false,
+      max_tokens: 4000,
     }),
   });
   if (!response.ok) {
@@ -121,5 +131,3 @@ export async function mimoAsr(audioBase64: string, format: "wav" | "mp3" = "wav"
   return (payload.choices?.[0]?.message?.content || "").trim();
 }
 
-/** 按句切分:实现在 src/lib/voice/sentence-split.ts(客户端共用)。 */
-export { splitIntoSentences } from "@/lib/voice/sentence-split";

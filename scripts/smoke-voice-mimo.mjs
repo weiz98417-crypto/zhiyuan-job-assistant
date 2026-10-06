@@ -12,7 +12,7 @@ if (!process.env.MIMO_API_KEY) {
   if (fs.existsSync(envPath)) {
     for (const line of fs.readFileSync(envPath, "utf8").split(/\r?\n/)) {
       const match = line.match(/^([A-Z_]+)=(.*)$/);
-      if (match && !process.env[match[1]]) process.env[match[1]] = match[2];
+      if (match && !process.env[match[1]]) process.env[match[1]] = match[2].replace(/^['"]|['"]$/g, "");
     }
   }
 }
