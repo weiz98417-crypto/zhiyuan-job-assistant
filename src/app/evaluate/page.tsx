@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { FileText, BookOpen, ArrowRight, Bot, Sparkles } from "lucide-react";
 import { HandwritingTitle, WarmButton, PaperCard } from "@/components/design";
+import { PageHeading, EmptyState } from "@/components/ui/workbench-primitives";
 import { StaggerList, StaggerItem } from "@/components/design/PageTransition";
 import { isFivePointScore } from "@/lib/score-scale";
 
@@ -66,9 +67,8 @@ export default function EvaluatePage() {
 
   return (
     <div className="space-y-8">
-      <div className="page-heading">
-        <p className="text-[var(--color-muted)] text-sm mb-2">管理评估产物</p>
-        <HandwritingTitle as="h1">JD 管理</HandwritingTitle>
+      <div>
+        <PageHeading meta="管理评估产物" title="JD 管理" />
         <p className="text-[var(--color-text-soft)] text-sm mt-2">
           浏览和管理已评估的 JD 和生成报告。新的评估请在 Agent 对话中进行。
         </p>
@@ -128,18 +128,18 @@ export default function EvaluatePage() {
           </StaggerItem>
         </StaggerList>
       ) : (
-        <div className="text-center py-12 space-y-4">
-          <Sparkles size={28} className="text-[var(--color-muted)] mx-auto" />
-          <p className="text-[var(--color-muted)] text-sm">
-            还没有评估记录。前往 Agent Chat 开始第一次评估 →
-          </p>
-          <Link href="/agent">
-            <WarmButton variant="soft" size="sm">
-              去评估
-              <ArrowRight size={14} className="ml-1.5" />
-            </WarmButton>
-          </Link>
-        </div>
+        <EmptyState
+          icon={<Sparkles size={28} className="text-[var(--color-muted)] mx-auto" />}
+          title="还没有评估记录。前往 Agent Chat 开始第一次评估 →"
+          action={
+            <Link href="/agent">
+              <WarmButton variant="soft" size="sm">
+                去评估
+                <ArrowRight size={14} className="ml-1.5" />
+              </WarmButton>
+            </Link>
+          }
+        />
       )}
     </div>
   );

@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { BookOpenText, Clock, ExternalLink, FileText, MessageSquare, Star } from "lucide-react";
 import { PaperCard } from "@/components/design";
+import { EmptyState } from "@/components/ui/workbench-primitives";
 import type { ChatSession, InterviewPlanSnapshot, InterviewRecap, InterviewSessionState, InterviewTurn } from "@/types";
 import { isInterviewSession } from "@/lib/agent/interview-session-state";
 import { scoreBadge, averageScore } from "@/components/agent/trust";
@@ -219,12 +220,10 @@ export default function InterviewRecapReview({
         </div>
 
         {reviewSessions.length === 0 ? (
-          <div className="text-center py-10">
-            <FileText size={28} className="mx-auto text-[var(--color-muted)] mb-3" />
-            <p className="text-sm text-[var(--color-muted)]">
-              完成一次 Agent 模拟面试并请求复盘后，这里会展示结构化总结和转录入口。
-            </p>
-          </div>
+          <EmptyState
+            icon={<FileText size={28} className="mx-auto text-[var(--color-muted)]" />}
+            title="完成一次 Agent 模拟面试并请求复盘后，这里会展示结构化总结和转录入口。"
+          />
         ) : (
           <div className="grid gap-3 md:grid-cols-2">
             {reviewSessions.map((session) => {

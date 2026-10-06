@@ -14,6 +14,7 @@ import {
   MessageCircle,
 } from "lucide-react";
 import { HandwritingTitle, WarmButton, PaperCard } from "@/components/design";
+import { PageHeading } from "@/components/ui/workbench-primitives";
 import db from "@/lib/db";
 import InterviewLaunchPanel from "./InterviewLaunchPanel";
 import PracticeRecords from "./PracticeRecords";
@@ -256,26 +257,26 @@ export default function InterviewPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div className="page-heading">
-          <p className="text-[var(--color-muted)] text-sm mb-1">面试准备</p>
-          <div className="flex items-center gap-3">
-            <HandwritingTitle as="h1">面试看板</HandwritingTitle>
+      <PageHeading
+        meta="面试准备"
+        title="面试看板"
+        actions={
+          <>
             {stats.totalCount > 0 && (
-              <span className="text-sm text-[var(--color-muted)]">
+              <span className="self-center text-sm text-[var(--color-muted)]">
                 {stats.totalCount} 次练习 · {stories.length} 个故事
                 {upcomingInterviews.length > 0 && ` · ${upcomingInterviews.length} 场即将面试`}
               </span>
             )}
-          </div>
-        </div>
-        <a href="/agent">
-          <WarmButton>
-            <MessageCircle size={16} className="mr-1.5" />
-            去 Agent 练习
-          </WarmButton>
-        </a>
-      </div>
+            <a href="/agent">
+              <WarmButton>
+                <MessageCircle size={16} className="mr-1.5" />
+                去 Agent 练习
+              </WarmButton>
+            </a>
+          </>
+        }
+      />
 
       {/* Empty state */}
       {!hasData && (

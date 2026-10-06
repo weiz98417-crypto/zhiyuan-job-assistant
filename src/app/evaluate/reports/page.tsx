@@ -15,6 +15,7 @@ import {
   CheckCircle,
 } from "lucide-react";
 import { ScoreBadge } from "@/components/design";
+import { PageHeading, SearchInput } from "@/components/ui/workbench-primitives";
 import { Button, Card, CardContent } from "@/components/ui";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { AlertDialog, AlertDialogContent, AlertDialogTitle, AlertDialogDescription, AlertDialogAction, AlertDialogCancel } from "@/components/ui/overlay";
@@ -244,27 +245,13 @@ export default function ReportsPage() {
   return (
     <div className="">
       {/* Header */}
-      <div className="page-heading mb-6">
-        <h2 className="font-[family-name:var(--font-display)] text-2xl font-bold text-[var(--color-text)]">
-          评估报告
-        </h2>
-        <p className="text-sm text-[var(--color-muted)] mt-1">
-          浏览和管理所有评估历史
-        </p>
+      <div className="mb-6">
+        <PageHeading as="h2" meta="浏览和管理所有评估历史" title="评估报告" />
       </div>
 
       {/* Search */}
       <div className="flex items-center gap-3 mb-4">
-        <div className="relative flex-1">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-muted)]" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="搜索公司、职位、关键词..."
-            className="w-full pl-9 pr-3 py-2 bg-[var(--color-bg)] border border-[var(--color-border)] rounded-[var(--radius-sm)] text-sm text-[var(--color-text)] placeholder:text-[var(--color-muted)] focus:outline-none focus:border-[var(--color-primary)]"
-          />
-        </div>
+        <SearchInput value={search} onChange={setSearch} placeholder="搜索公司、职位、关键词..." />
       </div>
 
       {/* Filter + Sort row */}

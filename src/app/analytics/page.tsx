@@ -41,6 +41,7 @@ import {
   PaperCard,
   StatusTag,
 } from "@/components/design";
+import { PageHeading } from "@/components/ui/workbench-primitives";
 import type { Application, ApplicationStatus } from "@/types";
 import { STATUS_ORDER } from "@/types";
 import { computeFunnel, analyzeFollowUps, type Urgency } from "@/lib/analytics";
@@ -270,29 +271,27 @@ export default function AnalyticsPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div className="page-heading">
-          <p className="text-[var(--color-muted)] text-sm mb-1">
-            {applications.length} 条投递数据
-          </p>
-          <HandwritingTitle as="h1">数据分析</HandwritingTitle>
-        </div>
-        <div className="flex gap-2">
-          {(["4w", "8w", "all"] as const).map((r) => (
-            <button
-              key={r}
-              onClick={() => setTimeRange(r)}
-              className={`text-xs px-3 py-1.5 rounded-[var(--radius-sm)] transition-colors ${
-                timeRange === r
-                  ? "bg-[var(--color-primary)] text-[var(--color-surface-raised)]"
-                  : "bg-[var(--color-divider)] text-[var(--color-text-soft)]"
-              }`}
-            >
-              {r === "4w" ? "4周" : r === "8w" ? "8周" : "全部"}
-            </button>
-          ))}
-        </div>
-      </div>
+      <PageHeading
+        meta={`${applications.length} 条投递数据`}
+        title="数据分析"
+        actions={
+          <>
+            {(["4w", "8w", "all"] as const).map((r) => (
+              <button
+                key={r}
+                onClick={() => setTimeRange(r)}
+                className={`text-xs px-3 py-1.5 rounded-[var(--radius-sm)] transition-colors ${
+                  timeRange === r
+                    ? "bg-[var(--color-primary)] text-[var(--color-surface-raised)]"
+                    : "bg-[var(--color-divider)] text-[var(--color-text-soft)]"
+                }`}
+              >
+                {r === "4w" ? "4周" : r === "8w" ? "8周" : "全部"}
+              </button>
+            ))}
+          </>
+        }
+      />
 
       <div className="grid gap-6 lg:grid-cols-2">
         {/* ── Funnel Chart ── */}

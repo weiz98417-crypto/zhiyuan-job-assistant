@@ -324,10 +324,12 @@ describe("job discovery agent evals - regression", () => {
 
   it("R9 JD card evaluation handoff loads saved JD and forces the evaluate agent", () => {
     const page = source("src/components/agent/use-agent-conversation.tsx");
+    // spec 35 拆分:SendMessageOptions 类型声明移入 use-agent-conversation-helpers
+    const helpers = source("src/components/agent/use-agent-conversation-helpers.ts");
 
     expect(page).toContain("buildSavedJDEvaluationPrompt");
     expect(page).toContain("/api/data/jds?id=");
-    expect(page).toContain("forcedAgentId?: string");
+    expect(helpers).toContain("forcedAgentId?: string");
     expect(page).toContain('forcedAgentId: "evaluate"');
     expect(page).toContain("shouldBypassConversationLocks");
     expect(page).toContain("activeGuidedSessionForRun = shouldBypassConversationLocks ? null : activeGuidedSession");

@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Search, ArrowRight } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { HandwritingTitle, PaperCard, ScoreBadge } from "@/components/design";
+import { PageHeading, SearchInput } from "@/components/ui/workbench-primitives";
 import { StaggerList, StaggerItem } from "@/components/design/PageTransition";
 import { normalizeReportBlocks, normalizeReportScores, parseJsonValue } from "@/lib/report-normalize";
 import type { EvaluationReport } from "@/types";
@@ -83,19 +84,10 @@ export default function EvaluateHistoryPage() {
 
   return (
     <div className="space-y-6">
-      <div className="page-heading">
-        <HandwritingTitle as="h1">评估历史</HandwritingTitle>
-      </div>
+      <PageHeading meta="" title="评估历史" />
 
       <div className="flex items-center gap-2 px-4 py-2 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-[var(--radius-md)]">
-        <Search size={16} className="text-[var(--color-muted)]" />
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="搜索公司、岗位或 archetype..."
-          className="flex-1 bg-transparent text-sm text-[var(--color-text)] placeholder:text-[var(--color-muted)] focus:outline-none"
-        />
+        <SearchInput value={search} onChange={setSearch} placeholder="搜索公司、岗位或 archetype..." />
       </div>
 
       <StaggerList className="space-y-2">

@@ -13,6 +13,7 @@ import {
   HandwritingTitle, WarmButton, PaperCard,
   StaggerList, StaggerItem,
 } from "@/components/design";
+import { PageHeading, EmptyState } from "@/components/ui/workbench-primitives";
 import {
   DISCOVERY_VISIBLE_STATUSES,
   fetchDiscoveryJobDetail,
@@ -379,28 +380,28 @@ export default function DiscoverPage() {
   return (
     <div className="space-y-6">
       {/* ── Header ─────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div className="page-heading">
-          <p className="text-[var(--color-muted)] text-sm mb-1">
-            {loading ? "加载中..."
-              : visibleJobs.length > 0 ? `${visibleJobs.length} 个新机会`
-              : "企业招聘官网 · 自动发现"}
-          </p>
-          <HandwritingTitle as="h1">岗位发现</HandwritingTitle>
-        </div>
-        <div className="flex items-center gap-2">
-          <WarmButton variant="ghost" size="sm" onClick={() => setShowScanIntro(!showScanIntro)}>
-            <Settings size={14} className="mr-1" />
-            说明
-          </WarmButton>
-          {scanning && (
-            <WarmButton variant="ghost" size="sm" onClick={cancelScan}>
-              <X size={14} className="mr-1" />
-              取消扫描
+      <PageHeading
+        meta={
+          loading ? "加载中..."
+            : visibleJobs.length > 0 ? `${visibleJobs.length} 个新机会`
+            : "企业招聘官网 · 自动发现"
+        }
+        title="岗位发现"
+        actions={
+          <>
+            <WarmButton variant="ghost" size="sm" onClick={() => setShowScanIntro(!showScanIntro)}>
+              <Settings size={14} className="mr-1" />
+              说明
             </WarmButton>
-          )}
-        </div>
-      </div>
+            {scanning && (
+              <WarmButton variant="ghost" size="sm" onClick={cancelScan}>
+                <X size={14} className="mr-1" />
+                取消扫描
+              </WarmButton>
+            )}
+          </>
+        }
+      />
 
       <PaperCard padding="sm">
         <div className="grid gap-3 md:grid-cols-[1.2fr_1fr_0.8fr_0.7fr_auto] items-end">
@@ -807,7 +808,7 @@ export default function DiscoverPage() {
       {activeTab === "history" && (
         <div className="space-y-3">
           {history.length === 0 ? (
-            <p className="text-center text-[var(--color-muted)] text-sm py-8">暂无扫描历史</p>
+            <EmptyState title="暂无扫描历史" />
           ) : (
             <>
               {history.map(entry => (

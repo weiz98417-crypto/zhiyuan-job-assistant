@@ -2,8 +2,9 @@
 
 import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { BadgeCheck, ChevronDown, ChevronUp, Clock, ExternalLink, FileText, MessageSquare, Search, Star, Trash2 } from "lucide-react";
+import { BadgeCheck, ChevronDown, ChevronUp, Clock, ExternalLink, FileText, MessageSquare, Star, Trash2 } from "lucide-react";
 import { PaperCard } from "@/components/design";
+import { SearchInput, EmptyState } from "@/components/ui/workbench-primitives";
 import type { ChatSession, InterviewSessionState } from "@/types";
 import { isInterviewSession } from "@/lib/agent/interview-session-state";
 
@@ -79,23 +80,15 @@ export default function AgentInterviewHistory({
             <span className="text-sm text-[var(--color-muted)]">{interviewSessions.length} 条</span>
           </div>
           <div className="flex items-center gap-2 min-w-[220px] bg-[var(--color-bg)] border border-[var(--color-border)] rounded-[var(--radius-sm)] px-3 py-1.5">
-            <Search size={14} className="text-[var(--color-muted)] shrink-0" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="搜索历史对话"
-              className="flex-1 bg-transparent text-sm text-[var(--color-text)] placeholder:text-[var(--color-muted)] focus:outline-none"
-            />
+            <SearchInput value={query} onChange={setQuery} placeholder="搜索历史对话" />
           </div>
         </div>
 
         {interviewSessions.length === 0 ? (
-          <div className="text-center py-10">
-            <MessageSquare size={28} className="mx-auto text-[var(--color-muted)] mb-3" />
-            <p className="text-sm text-[var(--color-muted)]">
-              还没有可展示的 Agent 面试记录。去 Agent 里做一次模拟面试后，这里会自动出现。
-            </p>
-          </div>
+          <EmptyState
+            icon={<MessageSquare size={28} className="mx-auto text-[var(--color-muted)]" />}
+            title="还没有可展示的 Agent 面试记录。去 Agent 里做一次模拟面试后，这里会自动出现。"
+          />
         ) : (
           <div className="space-y-2 max-h-[520px] overflow-y-auto">
             {interviewSessions.map((session) => {

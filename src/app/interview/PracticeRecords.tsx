@@ -4,7 +4,6 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   BookOpen,
-  Search,
   Trash2,
   Clock,
   RefreshCw,
@@ -16,6 +15,7 @@ import {
   FilePlus,
 } from "lucide-react";
 import { PaperCard, WarmButton } from "@/components/design";
+import { SearchInput, EmptyState } from "@/components/ui/workbench-primitives";
 import type { PracticeRecord, StarStory } from "@/types";
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -127,13 +127,7 @@ export default function PracticeRecords({
         {/* Search and filter bar */}
         <div className="flex gap-2 flex-wrap">
           <div className="flex items-center gap-2 flex-1 min-w-[200px] bg-[var(--color-bg)] border border-[var(--color-border)] rounded-[var(--radius-sm)] px-3 py-1.5">
-            <Search size={14} className="text-[var(--color-muted)] shrink-0" />
-            <input
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="搜索练习记录或故事..."
-              className="flex-1 bg-transparent text-sm text-[var(--color-text)] placeholder:text-[var(--color-muted)] focus:outline-none"
-            />
+            <SearchInput value={searchQuery} onChange={setSearchQuery} placeholder="搜索练习记录或故事..." />
           </div>
           <div className="flex gap-1">
             {([
@@ -158,14 +152,12 @@ export default function PracticeRecords({
 
         {/* Items list */}
         {filtered.length === 0 ? (
-          <div className="text-center py-10">
-            <BookOpen size={28} className="mx-auto text-[var(--color-muted)] mb-3" />
-            <p className="text-sm text-[var(--color-muted)]">
-              {searchQuery
-                ? "没有匹配的结果"
-                : "还没有练习记录或故事。完成练习后会自动出现在这里"}
-            </p>
-          </div>
+          <EmptyState
+            icon={<BookOpen size={28} className="mx-auto text-[var(--color-muted)]" />}
+            title={searchQuery
+              ? "没有匹配的结果"
+              : "还没有练习记录或故事。完成练习后会自动出现在这里"}
+          />
         ) : (
           <div className="space-y-2 max-h-[480px] overflow-y-auto">
             {filtered.map((item) => {

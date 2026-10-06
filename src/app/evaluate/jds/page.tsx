@@ -20,6 +20,7 @@ import {
   Download,
 } from "lucide-react";
 import { WarmButton, PaperCard } from "@/components/design";
+import { PageHeading, SearchInput } from "@/components/ui/workbench-primitives";
 import { StaggerList, StaggerItem } from "@/components/design/PageTransition";
 import {
   deleteJD,
@@ -164,34 +165,24 @@ export default function JDLibraryPage() {
   return (
     <div className="">
       {/* Header */}
-      <div className="page-heading mb-6 flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h2 className="font-[family-name:var(--font-display)] text-2xl font-bold text-[var(--color-text)]">
-            JD 库
-          </h2>
-          <p className="text-sm text-[var(--color-text-soft)] mt-1">
-            管理所有录入的职位描述
-          </p>
-        </div>
-        <WarmButton variant="primary" size="sm" onClick={() => router.push("/evaluate")}>
-          <Sparkles size={14} className="mr-1.5" />
-          快速评估
-          <ArrowRight size={14} className="ml-1" />
-        </WarmButton>
+      <div className="mb-6">
+        <PageHeading
+          as="h2"
+          meta="管理所有录入的职位描述"
+          title="JD 库"
+          actions={
+            <WarmButton variant="primary" size="sm" onClick={() => router.push("/evaluate")}>
+              <Sparkles size={14} className="mr-1.5" />
+              快速评估
+              <ArrowRight size={14} className="ml-1" />
+            </WarmButton>
+          }
+        />
       </div>
 
       {/* Search + Filters */}
       <div className="flex items-center gap-3 mb-4">
-        <div className="relative flex-1">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-muted)]" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="搜索公司、职位、关键词..."
-            className="surface-inset w-full pl-9 pr-3 py-2 rounded-[var(--radius-sm)] text-sm text-[var(--color-text)] placeholder:text-[var(--color-muted)] focus:outline-none focus:border-[var(--color-primary)]"
-          />
-        </div>
+        <SearchInput value={search} onChange={setSearch} placeholder="搜索公司、职位、关键词..." />
       </div>
 
       {/* Filter chips */}

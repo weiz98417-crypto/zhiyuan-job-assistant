@@ -3,7 +3,8 @@
 import { useEffect, useState, useRef } from "react";
 import { Download, Upload, Trash2, User, Target, Banknote, Loader2, Database, Sparkles, Wrench, Heart, AlertTriangle, FileText, BellRing, Plus, X, LogOut, KeyRound } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { HandwritingTitle, WarmButton, PaperCard } from "@/components/design";
+import { WarmButton, PaperCard } from "@/components/design";
+import { PageHeading } from "@/components/ui/workbench-primitives";
 import Skeleton from "@/components/design/Skeleton";
 import db from "@/lib/db";
 import { exportApplicationsMD, downloadAsFile } from "@/lib/exporters";
@@ -236,9 +237,7 @@ export default function SettingsPage() {
 
   return (
     <div className="max-w-2xl mx-auto space-y-8">
-      <div className="page-heading">
-        <HandwritingTitle as="h1">个人设置</HandwritingTitle>
-      </div>
+      <PageHeading meta="" title="个人设置" />
 
       {/* Zhiyuan Profile Card — from explore summary */}
       {(profile.archetype || profile.narrative) && (
