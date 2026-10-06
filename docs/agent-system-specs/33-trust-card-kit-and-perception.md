@@ -45,3 +45,8 @@ CEO 定性「80% 价值锁在服务端,前端零渲染」。0.19.0 交付了两�
 
 - 施工顺序:B6(35)先行拆 hook → 本 spec 换装,避免在巨石上继续堆;34 的原语可并行。
 - `use-agent-conversation.tsx`(2346 行/24 useState)是热点第 6(9 月以来 14 次变更),本 spec 是它换装前最后的「堆料」窗口——按顺序执行就不违反 B6 的约束。
+
+## 实施记录(2026-10-06,0.21.0)
+
+- 词汇/公式单一源定在 **knowledge/registry/band-labels.ts**(DIMENSION_LABELS/bandFromFiveScale/scoreBadge),band-scale.ts 为客户端转发层;interview-session-state 反向引用注册表,消灭三份拷贝。
+- **记录在案的偏差**:①「仅供参考」前缀双通道——服务端 label 前缀(advisory 持久化形态)+ advisory 结构化字段并存,面板用正则剥前缀渲染徽章;改协议需动持久化 content_json 契约,留给后续列车。②D 板块来源卡是**追加**非替换——服务端 blocks.d 的来源句由 Spec 28/30 的注入契约治理(含引用纪律句),移除需 eval 重校准,本轮只加卡片渲染 salaryDataSource(stale 判据=「方向参考」前缀)。③感知 metric 词汇抽 leaf 模块 `src/lib/agent/perception-metrics.ts`(纯数据零依赖),服务端写入通道与客户端仪表盘共用。

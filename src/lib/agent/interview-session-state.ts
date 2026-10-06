@@ -13,7 +13,7 @@ import type {
   InterviewTurn,
   JDRecord,
 } from "@/types";
-import { bandLabel } from "@/lib/agent/knowledge/registry/band-labels";
+import { bandLabel, DIMENSION_LABELS, bandFromFiveScale } from "@/lib/agent/knowledge/registry/band-labels";
 
 function makeId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -598,12 +598,7 @@ export function shouldPersistInterviewRecap(userContent: string): boolean {
   return /复盘|总结|回顾|结束面试|结束模拟|recap|summary/i.test(userContent);
 }
 
-const SCORE_DIMENSION_LABELS: Record<string, string> = {
-  structure: "结构完整度",
-  specificity: "具体程度",
-  highlight: "亮点突出",
-  timing: "时间控制",
-};
+const SCORE_DIMENSION_LABELS = DIMENSION_LABELS;
 
 function compactText(text: string, max = 120): string {
   const clean = text.replace(/\s+/g, " ").trim();
@@ -748,7 +743,7 @@ export function buildInterviewRecapFromState(
   return {
     generatedAt: new Date().toISOString(),
     overallVerdict: averageScore
-      ? `${company} ${role} 模拟面试已完成 ${answeredQuestions.length} 道已回答问题（主问题 ${mainAnswered}，追问/探针 ${followUpAnswered}），平均档位 ${bandLabel(Math.max(0, Math.min(4, Math.round(averageScore) - 1)))} · ${Math.round(averageScore)}/5（五分刻度）。`
+      ? `${company} ${role} 模拟面试已完成 ${answeredQuestions.length} 道已回答问题（主问题 ${mainAnswered}，追问/探针 ${followUpAnswered}），平均档位 ${bandLabel(bandFromFiveScale(averageScore))} · ${Math.round(averageScore)}/5（五分刻度）。`
       : `${company} ${role} 模拟面试已记录 ${answeredQuestions.length} 道已回答问题，尚未生成结构化评分。`,
     strengths,
     weaknesses,

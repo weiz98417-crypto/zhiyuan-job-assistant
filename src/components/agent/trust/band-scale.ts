@@ -1,18 +1,11 @@
 /**
- * 信任卡档位换算收口(spec 33):band-labels(注册表,与 rubric prompt 逐词一致)是
- * 唯一档位词源;本模块收口跨组件复用的换算逻辑——复盘页与信任卡此前各自维护一份。
- * 只做纯换算,零 React 依赖。
+ * 信任卡档位换算收口(spec 33):词汇/公式/徽标文案的单一源在
+ * knowledge/registry/band-labels.ts(与 rubric prompt 逐词一致);
+ * 本模块是客户端便利转发层,不再自持映射。
  */
-import { bandLabel, stateLabel } from "@/lib/agent/knowledge/registry/band-labels";
+import { bandLabel, stateLabel, DIMENSION_LABELS, bandFromFiveScale, scoreBadge } from "@/lib/agent/knowledge/registry/band-labels";
 
-export { bandLabel, stateLabel };
-
-export const DIMENSION_LABELS: Record<string, string> = {
-  structure: "结构完整度",
-  specificity: "具体程度",
-  highlight: "亮点突出",
-  timing: "时间控制",
-};
+export { bandLabel, stateLabel, DIMENSION_LABELS, bandFromFiveScale, scoreBadge };
 
 export const REJECTION_REASON_LABELS: Record<string, string> = {
   resume_mismatch: "简历不匹配",
@@ -21,15 +14,6 @@ export const REJECTION_REASON_LABELS: Record<string, string> = {
   no_response: "流程无回应",
   other: "其他",
 };
-
-/** 统一档位徽标文案。rubric.overallBand 优先(根治双刻度歧义);无 rubric 时
- *  legacy /5 直映,durable /10(值域 2-10)÷2 回 1-5 再映。裸值 2-4 双刻度歧义接受(S1 已知)。 */
-export function scoreBadge(score: number, rubricBand?: number): string {
-  const band = typeof rubricBand === "number"
-    ? rubricBand
-    : Math.max(0, Math.min(4, Math.round(score > 5 ? score / 2 : score) - 1));
-  return `${bandLabel(band)} · ${band}/4`;
-}
 
 /** 复盘均值:未评分哨兵(0)不入均值;durable /10 归一为 /5 刻度后再平均(跨刻度不混算)。 */
 export function averageScore(

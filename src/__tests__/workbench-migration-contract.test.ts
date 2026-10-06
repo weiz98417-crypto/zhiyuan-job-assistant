@@ -34,9 +34,14 @@ const OVERLAY_WHITELIST = [
 
 describe("spec 34 工作台换装契约", () => {
   it("src/app 页面层不再出现手写 page-heading 块(原语在 components/ui,不在遍历范围)", () => {
+    /** 已记录的豁免(spec 34 评审记录):结构不符合 PageHeading 规范形的两处——
+     *  memory:类直接挂在 h1 上(标题即边框盒,无 meta 行);profile:无画像时的居中 hero 页头。 */
+    const PAGE_HEADING_WHITELIST = appTsxFiles.filter(
+      (file) => file.endsWith(join("memory", "page.tsx")) || (file.endsWith(join("profile", "page.tsx")) && readFileSync(file, "utf-8").includes("page-heading mx-auto")),
+    );
     const offenders = appTsxFiles
       .map((file) => ({ file, code: readFileSync(file, "utf-8") }))
-      .filter(({ code }) => code.includes('className="page-heading"'))
+      .filter(({ file, code }) => !PAGE_HEADING_WHITELIST.includes(file) && /className="[^"]*page-heading/.test(code))
       .map(({ file }) => file);
     expect(offenders).toEqual([]);
   });

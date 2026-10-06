@@ -40,3 +40,9 @@ Depends on: 2026-09 C2(useAgentConversation 从 page.tsx 下沉)既有交付与�
 
 - 与 spec 33 的施工顺序:35 → 33。若 33 先行,须把「不在 hook 内新增跨关注面状态」作为临时纪律。
 - 预估 1-2 天:契约测试半天,拆分一天。
+
+## 实施记录(2026-10-06,0.21.0)
+
+- 实际拆分形态:门面(1982 行,生命周期+sendMessage)+ helpers(401 行,模块级纯函数/常量/类型)+ ui-state(41 行,13 个展示 state 同名解构)。**生命周期与 sendMessage 留门面**:五个 0.12 源码契约测试 readFileSync 门面路径锁定具体实现片段(重试循环形状/守卫顺序/image-intake 顺序等),按「验收优先于切面理想」保留原位;盘点的「数据编排」切面实际早已模块化于 lib(parseServerSession/scoreArtifacts 等)。
+- **记录在案的测试重指向(3 处)**:`agent-terminal-run-toolbar.regression-1`、`job-discovery-agent-evals R9`、`offer-flow` 三测试断言的类型/常量**声明**字符串(TERMINAL_DURABLE_RUN_STATUSES / forcedAgentId?: string / HANDOFF_CONSUMED_STORAGE_KEY)随拆分移入 helpers,断言重指向 helpers(锁值不变);最初五个已知源码契约测试零改动。教训:立「测试不改一字」目标前,先 grep 全部源码断言型测试的字符串清单,不止已登记的契约测试。
+- 新契约测试 `agent-conversation-facade-contract.test.tsx`(renderHook 锁门面 88 键 API 面 + helpers 模块边界面)。

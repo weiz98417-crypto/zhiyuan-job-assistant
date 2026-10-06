@@ -5,14 +5,9 @@
  */
 import { getDatabaseDriver, isPostgresConfigured, getPostgresPool } from "@/lib/postgres";
 
-export const PERCEPTION_METRICS = [
-  "fact_gate_repair",
-  "score_evidence_expand",
-  "sourced_jd_follow_through",
-  "question_source_followup",
-] as const;
+import { PERCEPTION_METRICS, type PerceptionMetric } from "@/lib/agent/perception-metrics";
 
-export type PerceptionMetric = (typeof PERCEPTION_METRICS)[number];
+export { PERCEPTION_METRICS, type PerceptionMetric };
 
 export function isPerceptionMetric(metric: string): metric is PerceptionMetric {
   return (PERCEPTION_METRICS as readonly string[]).includes(metric);

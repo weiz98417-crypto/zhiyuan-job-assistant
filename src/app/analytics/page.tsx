@@ -16,13 +16,6 @@ import {
 } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip as ReTooltip, Legend } from "recharts";
 
-/* 感知仪表盘(spec 33):metric 清单本地常量——服务端 perception-events 模块含 pg 驱动,不进客户端包 */
-const PERCEPTION_METRICS = [
-  "fact_gate_repair",
-  "score_evidence_expand",
-  "sourced_jd_follow_through",
-  "question_source_followup",
-] as const;
 const PERCEPTION_LABELS: Record<string, string> = {
   fact_gate_repair: "事实门拦截后修复",
   score_evidence_expand: "评分依据展开",
@@ -45,6 +38,7 @@ import { PageHeading } from "@/components/ui/workbench-primitives";
 import type { Application, ApplicationStatus } from "@/types";
 import { STATUS_ORDER } from "@/types";
 import { computeFunnel, analyzeFollowUps, type Urgency } from "@/lib/analytics";
+import { PERCEPTION_METRICS } from "@/lib/agent/perception-metrics";
 
 const URGENCY_LABELS: Record<Urgency, { level: string; action: string }> = {
   urgent: { level: "立即处理", action: "对方已回复，尽快响应" },
