@@ -11,6 +11,28 @@ export type ReleaseNote = {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: "0.13.1",
+    stage: "production",
+    summary: "今日手账首页升级：把求职数据整理成可执行的今日行动台。",
+    sections: [
+      {
+        title: "首页体验",
+        changes: [
+          { description: "新增今日焦点主舞台、行动队列、求职进展摘要和阶段路径，打开首页即可知道下一步做什么。" },
+          { description: "面试、跟进和已评估未投递的事项按优先级集中展示，避免重复统计已发现与已评估岗位。" },
+          { description: "加入纸鸢视觉资源、微动效，以及加载、错误、空态和移动端布局，首页在不同状态下都保持可用。" },
+        ],
+      },
+      {
+        title: "数据与稳定性",
+        changes: [
+          { description: "首页数据计算收敛到独立的 dashboard 领域逻辑，并补充覆盖关键排序与阶段统计的测试。" },
+          { description: "新闻内容降级为后部外部风向，首页主路径优先服务当天的求职行动。" },
+        ],
+      },
+    ],
+  },
+  {
     version: "0.13.0",
     stage: "production",
     summary: "10 月能力升级：语音面试、可信度门禁、题库与薪资基准、岗位精选和 Agent 运行可观测性。",

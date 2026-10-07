@@ -1,56 +1,33 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import {
-  FileSearch,
-  ListTodo,
-  FileText,
-  MessageCircle,
-} from "lucide-react";
-import { HandwritingTitle, PaperCard } from "@/components/design";
-import HeroMetrics from "@/components/home/HeroMetrics";
-import PipelineFunnel from "@/components/home/PipelineFunnel";
-import TodoReminders from "@/components/home/TodoReminders";
-import MiniPipeline from "@/components/home/MiniPipeline";
+import { ArrowUpRight, CalendarDays, Check, FileSearch, FileText, ListTodo, MessageCircle, RefreshCw } from "lucide-react";
+import { MotionConfig } from "framer-motion";
+import { HandwritingTitle } from "@/components/design";
 import IndustryNews from "@/components/home/IndustryNews";
 import CompanyNews from "@/components/home/CompanyNews";
-import ErrorState from "@/components/design/ErrorState";
+import TodayFocus, { type HomeAction } from "@/components/home/TodayFocus";
+import ActionQueue from "@/components/home/ActionQueue";
+import ProgressSnapshot from "@/components/home/ProgressSnapshot";
+import PipelineFunnel from "@/components/home/PipelineFunnel";
 import db from "@/lib/db";
-import type { Application, ApplicationStatus, InterviewSchedule } from "@/types";
+import { buildHomeActions, getHomeSnapshot } from "@/lib/home-dashboard";
+import type { Application, InterviewSchedule } from "@/types";
 
-/* ── Daily greeting ── */
-function getGreeting(): string {
-  const hour = new Date().getHours();
-  const day = new Date().getDay();
-  const dayNames = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
-
-  if (hour < 10) return `早安，${dayNames[day]}愉快`;
-  if (hour < 14) return `午安，${dayNames[day]}顺利`;
-  if (hour < 19) return `下午好，${dayNames[day]}加油`;
-  return `晚安，${dayNames[day]}辛苦了`;
-}
-
-/* ── Daily encouragement ── */
-const ENCOURAGEMENTS = [
-  "每一次评估都是一次自我认知的校准。",
-  "求职不是海投，是找到双向奔赴的机会。",
-  "你的独特经历是这个市场上稀缺的。",
-  "好机会值得等待，也值得认真准备。",
-  "投递数量不重要，重要的是每一次投递的质量。",
-  "你在构建的不仅是一份工作，而是一段职业旅程。",
-  "AI 在帮你分析职位，但决策的力量在你手里。",
+const tools = [
+  { href: "/evaluate", label: "评估 JD", detail: "判断一个机会是否值得投入", icon: FileSearch },
+  { href: "/tracker", label: "投递追踪", detail: "接住每一次进展与回应", icon: ListTodo },
+  { href: "/cv", label: "打磨简历", detail: "让经历说出你的价值", icon: FileText },
+  { href: "/agent", label: "聊聊下一步", detail: "把想法整理成可执行的行动", icon: MessageCircle },
 ];
 
-/* ── Helpers ── */
-function getWeekAgo(): Date {
-  const now = new Date();
-  return new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-}
-
-function getTwoWeeksAgo(): Date {
-  const now = new Date();
-  return new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+function getGreeting(now: Date) {
+  const hour = now.getHours();
+  if (hour < 10) return "早安，今天也从容一点。";
+  if (hour < 14) return "午安，为下一步留一点时间。";
+  if (hour < 19) return "下午好，让机会慢慢成形。";
+  return "晚上好，认真走过的每一步都算数。";
 }
 
 export default function HomePage() {
@@ -58,207 +35,117 @@ export default function HomePage() {
   const [interviews, setInterviews] = useState<InterviewSchedule[]>([]);
   const [offerCount, setOfferCount] = useState(0);
   const [reportCount, setReportCount] = useState(0);
-  const [mounted, setMounted] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [interviewUnavailable, setInterviewUnavailable] = useState(false);
+  const [now, setNow] = useState<Date | null>(null);
 
-  useEffect(() => {
-    async function load() {
-      // Server data is authoritative; local storage is only used for local interview drafts.
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(false);
+    try {
+      const responses = await Promise.all([
+        fetch("/api/data/applications", { cache: "no-store" }),
+        fetch("/api/data/reports", { cache: "no-store" }),
+        fetch("/api/offers", { cache: "no-store" }),
+      ]);
+      if (responses.some((response) => !response.ok)) throw new Error("load failed");
+      const [appsJson, reportsJson, offersJson] = await Promise.all(responses.map((response) => response.json()));
+      if (!appsJson.success || !reportsJson.success || !offersJson.success) throw new Error("response failed");
+      setApplications(Array.isArray(appsJson.data) ? appsJson.data : []);
+      setReportCount(Array.isArray(reportsJson.data) ? reportsJson.data.length : 0);
+      setOfferCount(Array.isArray(offersJson.data) ? offersJson.data.length : 0);
       try {
-        const [appsRes, reportsRes, offersRes] = await Promise.all([
-          fetch("/api/data/applications", { cache: "no-store" }),
-          fetch("/api/data/reports", { cache: "no-store" }),
-          fetch("/api/offers", { cache: "no-store" }),
-        ]);
-        if (!appsRes.ok || !reportsRes.ok || !offersRes.ok) throw new Error("server load failed");
-        const [appsJson, reportsJson, offersJson] = await Promise.all([appsRes.json(), reportsRes.json(), offersRes.json()]);
-        if (!appsJson.success || !reportsJson.success || !offersJson.success) throw new Error("server response failed");
-        setApplications(Array.isArray(appsJson.data) ? appsJson.data : []);
-        setReportCount(Array.isArray(reportsJson.data) ? reportsJson.data.length : 0);
-        setOfferCount(Array.isArray(offersJson.data) ? offersJson.data.length : 0);
-        const ivs = await db.interviews.toArray();
-        setInterviews(ivs);
+        setInterviews(await db.interviews.toArray());
+        setInterviewUnavailable(false);
       } catch {
-        setError(true);
+        setInterviews([]);
+        setInterviewUnavailable(true);
       }
-      setMounted(true);
+      setLoaded(true);
+      setNow(new Date());
+    } catch {
+      setError(true);
+    } finally {
+      setLoading(false);
     }
-    load();
   }, []);
 
-  const encouragement = ENCOURAGEMENTS[new Date().getDay() % ENCOURAGEMENTS.length];
+  useEffect(() => {
+    const initialLoad = window.setTimeout(() => {
+      setNow(new Date());
+      void load();
+    }, 0);
+    const timer = window.setInterval(() => setNow(new Date()), 60000);
+    return () => {
+      window.clearTimeout(initialLoad);
+      window.clearInterval(timer);
+    };
+  }, [load]);
 
-  // ── Compute metrics ──
-  const weekAgo = getWeekAgo();
-  const twoWeeksAgo = getTwoWeeksAgo();
-
-  const thisWeek = applications.filter((a) => new Date(a.date) >= weekAgo);
-  const lastWeek = applications.filter((a) => {
-    const d = new Date(a.date);
-    return d >= twoWeeksAgo && d < weekAgo;
-  });
-
-  const s = (a: Application) => (a as unknown as { status: string }).status;
-  const evaluated = Math.max(reportCount, applications.filter((a) => s(a) === "evaluated" || s(a) === "Evaluated").length);
-  const applied = applications.filter((a) =>
-    ["applied", "Applied", "responded", "Responded", "interview", "Interview", "offer", "Offer"].includes(s(a))
-  ).length;
-  const interviewing = applications.filter((a) => s(a) === "interview" || s(a) === "Interview").length;
-  const offers = offerCount > 0 ? offerCount : applications.filter((a) => s(a) === "offer" || s(a) === "Offer").length;
-
-  const scoredApps = applications.filter((a) => a.score > 0);
-  const avgScore = scoredApps.length > 0
-    ? scoredApps.reduce((sum, a) => sum + a.score, 0) / scoredApps.length
-    : 0;
-
-  // Previous week for trend
-  const prevEvaluated = lastWeek.filter((a) => s(a) === "evaluated" || s(a) === "Evaluated").length;
-  const prevApplied = lastWeek.filter((a) =>
-    ["applied", "Applied", "responded", "Responded", "interview", "Interview", "offer", "Offer"].includes(s(a))
-  ).length;
-  const prevInterviewing = lastWeek.filter((a) => s(a) === "interview" || s(a) === "Interview").length;
-  const prevOffers = lastWeek.filter((a) => s(a) === "offer" || s(a) === "Offer").length;
-  const prevScored = lastWeek.filter((a) => a.score > 0);
-  const prevAvgScore = prevScored.length > 0
-    ? prevScored.reduce((sum, a) => sum + a.score, 0) / prevScored.length
-    : 0;
-
-  // Pipeline counts per status
-  const statusCounts = applications.reduce((acc, app) => {
-    acc[app.status] = (acc[app.status] || 0) + 1;
-    return acc;
-  }, {} as Partial<Record<ApplicationStatus, number>>);
-
-  // Funnel stages
-  const funnelStages = [
-    { label: "已发现", count: evaluated + applied + interviewing + offers },
-    { label: "已评估", count: evaluated + applied + interviewing + offers },
-    { label: "已投递", count: applied },
-    { label: "面试中", count: interviewing },
-    { label: "Offer", count: offers },
-  ];
-
-  // For todo reminders, format app data
-  const appsForTodos = applications.map((a) => ({
-    company: a.company,
-    role: a.role,
-    status: a.status,
-    date: a.date,
-    updatedAt: (() => {
-      const persisted = a as Application & { updated_at?: string };
-      const d = persisted.updatedAt || persisted.updated_at || a.date;
-      const parsed = new Date(d);
-      return isNaN(parsed.getTime()) ? a.date : parsed.toISOString().split("T")[0];
-    })(),
+  const snapshot = getHomeSnapshot(applications, reportCount, offerCount, now || new Date());
+  const rawActions = buildHomeActions(applications, interviews, now || new Date());
+  const actions: HomeAction[] = rawActions.map((action) => ({
+    id: action.id, kind: action.kind, company: action.company, role: action.role,
+    reason: action.reason, dueLabel: action.dueLabel, href: action.href, actionLabel: action.actionLabel,
   }));
 
-  if (error) {
-    return <ErrorState onRetry={() => { setError(false); setMounted(false); window.location.reload(); }} />;
-  }
-
-  if (!mounted) {
-    return (
-      <div className="space-y-8 animate-pulse">
-        <div className="h-8 bg-[var(--color-divider)] rounded w-48" />
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-          {[1, 2, 3, 4, 5].map((i) => (
-            <div key={i} className="h-20 bg-[var(--color-divider)] rounded-[var(--radius-lg)]" />
-          ))}
-        </div>
-        <div className="h-40 bg-[var(--color-divider)] rounded-[var(--radius-lg)]" />
-        <div className="h-32 bg-[var(--color-divider)] rounded-[var(--radius-lg)]" />
-      </div>
-    );
-  }
-
-  const isEmpty = applications.length === 0;
-
   return (
-    <div className="space-y-8">
-      {/* Header */}
-      <header className="journal-heading">
-        <p className="text-[var(--color-text-soft)] text-sm mb-1">{getGreeting()}</p>
-        <HandwritingTitle as="h1">
-          {isEmpty ? "欢迎打开你的求职手帳" : "今日手帳"}
-        </HandwritingTitle>
-      </header>
+    <MotionConfig reducedMotion="user">
+      <div className="mx-auto max-w-[1360px] space-y-7 pb-8 text-[var(--color-text)]">
+        <header className="flex items-end justify-between gap-5">
+          <div className="journal-heading">
+            <p className="mb-1 flex items-center gap-2 text-sm text-[var(--color-text-soft)]"><CalendarDays size={15} className="text-[var(--color-primary)]" />{now ? getGreeting(now) : "为下一步，翻开新的一页。"}</p>
+            <HandwritingTitle as="h1">今日手账<span className="ml-3 inline-block h-2 w-2 rounded-full bg-[var(--color-primary)] align-middle" aria-hidden="true" /></HandwritingTitle>
+            <p className="mt-2 text-xs text-[var(--color-muted)]">把今天最重要的一步，留在纸面上。</p>
+          </div>
+          <div className="flex items-center gap-4 pb-2 text-xs text-[var(--color-text-soft)]">
+            <time>{now ? new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "long" }).format(now) : "今天"}</time>
+            <button type="button" onClick={() => void load()} disabled={loading} className="inline-flex items-center gap-1.5 border-b border-[var(--color-border)] py-1.5 transition-colors hover:text-[var(--color-primary)]" aria-label="刷新求职数据">
+              <RefreshCw size={13} className={loading ? "animate-spin" : ""} />{loading ? "同步中" : error ? "重新同步" : "刷新数据"}
+            </button>
+          </div>
+        </header>
 
-      {/* News — top of dashboard */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <IndustryNews />
-        <CompanyNews />
+        {error && <div role="alert" className="flex items-center justify-between gap-4 rounded-[var(--radius-md)] bg-[var(--color-primary-muted)] px-4 py-3 text-sm"><span>{loaded ? "暂时无法同步，保留上次成功加载的求职数据。" : "求职数据未能加载，重新同步后即可继续。"}</span><button type="button" onClick={() => void load()} disabled={loading} className="text-[var(--color-primary)] underline underline-offset-4">重新同步</button></div>}
+
+        {!loaded ? (
+          <div className="grid animate-pulse gap-4 lg:grid-cols-[minmax(0,1.65fr)_minmax(260px,.8fr)]" role="status" aria-label="正在加载求职数据">
+            <div className="min-h-[330px] rounded-[var(--radius-xl)] bg-[var(--color-divider)]/70" />
+            <div className="min-h-[330px] rounded-[var(--radius-xl)] bg-[var(--color-divider)]/70" />
+          </div>
+        ) : (
+          <>
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1.65fr)_minmax(260px,.8fr)]">
+              <TodayFocus action={actions[0]} totalActions={actions.length} isEmpty={snapshot.isEmpty} />
+              <ProgressSnapshot evaluated={snapshot.evaluated} applied={snapshot.applied} interviewing={snapshot.interviewing} offers={snapshot.offers} avgScore={snapshot.avgScore ?? 0} weeklyNew={snapshot.weeklyNew} isEmpty={snapshot.isEmpty} />
+            </div>
+            <div className="grid gap-5 lg:grid-cols-[minmax(0,1.7fr)_minmax(260px,.9fr)]">
+              <ActionQueue actions={actions} />
+              <PipelineFunnel stages={[
+                { label: "已评估", count: snapshot.evaluated },
+                { label: "已投递", count: snapshot.applied },
+                { label: "面试中", count: snapshot.interviewing },
+                { label: "Offer", count: snapshot.offers },
+              ]} />
+            </div>
+            {interviewUnavailable && <p className="text-xs text-[var(--color-muted)]">面试草稿暂不可用，以上行动仅基于已同步的求职记录。</p>}
+          </>
+        )}
+
+        <section aria-labelledby="news-title" className="border-t border-[var(--color-border)] pt-6">
+          <div className="mb-3 flex items-end justify-between gap-3"><div><h2 id="news-title" className="font-[family-name:var(--font-display)] text-xl font-semibold">看看外面的风向</h2><p className="mt-1 text-xs text-[var(--color-muted)]">行业与目标企业动态，作为今天的背景信息。</p></div></div>
+          <div className="grid gap-4 lg:grid-cols-2"><IndustryNews /><CompanyNews /></div>
+        </section>
+
+        <nav aria-label="求职工具" className="grid grid-cols-2 border-y border-[var(--color-border)] py-3 sm:grid-cols-4">
+          {tools.map(({ href, label, detail, icon: Icon }, index) => <Link key={href} href={href} className={`group flex items-center gap-3 px-3 py-3 transition-colors hover:bg-[var(--color-primary-muted)] ${index % 4 !== 3 ? "sm:border-r sm:border-[var(--color-divider)]" : ""}`}>
+            <Icon size={19} strokeWidth={1.75} className="shrink-0 text-[var(--color-primary)]" /><span className="min-w-0"><strong className="block text-sm font-medium">{label}</strong><small className="mt-1 block truncate text-[10px] text-[var(--color-muted)]">{detail}</small></span><ArrowUpRight size={14} className="ml-auto shrink-0 text-[var(--color-muted)] transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+          </Link>)}
+        </nav>
+        <footer className="flex items-center gap-2 px-1 text-xs text-[var(--color-muted)]"><Check size={14} className="text-[var(--color-primary)]" /><p>求职不是海投，是找到双向奔赴的机会。</p><span className="ml-auto font-[family-name:var(--font-display)] text-sm text-[var(--color-primary)]">每一步，都有方向。</span></footer>
       </div>
-
-      {/* Hero Metrics — always visible */}
-      <HeroMetrics
-        evaluated={evaluated}
-        applied={applied}
-        interviewing={interviewing}
-        offers={offers}
-        avgScore={avgScore}
-        prevEvaluated={prevEvaluated}
-        prevApplied={prevApplied}
-        prevInterviewing={prevInterviewing}
-        prevOffers={prevOffers}
-        prevAvgScore={prevAvgScore}
-      />
-
-      {/* Two-column: Funnel + Todos */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <PipelineFunnel stages={funnelStages} />
-        <TodoReminders applications={appsForTodos} interviews={interviews} />
-      </div>
-
-      {/* Mini Pipeline — only when has data */}
-      {!isEmpty && <MiniPipeline counts={statusCounts} />}
-
-      {/* Quick Actions */}
-      <div>
-        <h2 className="font-[family-name:var(--font-body)] text-sm font-medium text-[var(--color-muted)] mb-3">
-          快速操作
-        </h2>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <Link href="/evaluate" className="group">
-            <PaperCard hover="lift" padding="sm">
-              <FileSearch size={20} className="text-[var(--color-primary)] mb-2" />
-              <p className="text-sm font-medium text-[var(--color-text)] group-hover:text-[var(--color-primary)] transition-colors">
-                评估 JD
-              </p>
-            </PaperCard>
-          </Link>
-          <Link href="/tracker" className="group">
-            <PaperCard hover="lift" padding="sm">
-              <ListTodo size={20} className="text-[var(--color-primary)] mb-2" />
-              <p className="text-sm font-medium text-[var(--color-text)] group-hover:text-[var(--color-primary)] transition-colors">
-                查看追踪
-              </p>
-            </PaperCard>
-          </Link>
-          <Link href="/cv" className="group">
-            <PaperCard hover="lift" padding="sm">
-              <FileText size={20} className="text-[var(--color-primary)] mb-2" />
-              <p className="text-sm font-medium text-[var(--color-text)] group-hover:text-[var(--color-primary)] transition-colors">
-                优化简历
-              </p>
-            </PaperCard>
-          </Link>
-          <Link href="/agent" className="group">
-            <PaperCard hover="lift" padding="sm">
-              <MessageCircle size={20} className="text-[var(--color-primary)] mb-2" />
-              <p className="text-sm font-medium text-[var(--color-text)] group-hover:text-[var(--color-primary)] transition-colors">
-                AI 顾问
-              </p>
-            </PaperCard>
-          </Link>
-        </div>
-      </div>
-
-      {/* Daily encouragement */}
-      <div className="text-center py-4">
-        <p className="text-[var(--color-muted)] text-sm italic">
-          「{encouragement}」
-        </p>
-      </div>
-    </div>
+    </MotionConfig>
   );
 }
