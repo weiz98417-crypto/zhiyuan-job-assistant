@@ -11,6 +11,27 @@ export type ReleaseNote = {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: "0.13.2",
+    stage: "production",
+    summary: "今日手账首页视觉升级：让求职进展更像一张有方向的行动地图。",
+    sections: [
+      {
+        title: "视觉舞台",
+        changes: [
+          { description: "纸鸢主视觉成为今日焦点的深色舞台，悬浮的开始与完成手账卡把三张美术资源串成一段行动叙事。" },
+          { description: "保留纸鸢朱砂品牌色，同时加强明暗、层次、阴影和动效，让首屏从信息卡片变成有记忆点的入口。" },
+        ],
+      },
+      {
+        title: "机会旅程",
+        changes: [
+          { description: "机会进展改为横向旅程地图，用节点、连线和完成标记表达阶段关系，移除低信息量的圆角进度条。" },
+          { description: "旅程地图继续使用真实阶段数量，不引入虚构转化率，并保留直达投递追踪的入口。" },
+        ],
+      },
+    ],
+  },
+  {
     version: "0.13.1",
     stage: "production",
     summary: "今日手账首页升级：把求职数据整理成可执行的今日行动台。",
