@@ -7,6 +7,8 @@ Start here when you need to understand, run, or change Zhiyuan.
 | Document | Use it for |
 | --- | --- |
 | [../README.md](../README.md) | Product overview, quick start, and high-level capabilities. |
+| [../README.cn.md](../README.cn.md) | Chinese product overview, current release, complete Web/Worker setup, and operations. |
+| [../src/app/changelog/release-notes.ts](../src/app/changelog/release-notes.ts) | User-facing release history, including production release 0.13.2. |
 | [PRD.md](PRD.md) | Detailed product requirements, module map, Agent governance, eval gates, and loop engineering goals. |
 | [course-system/README.md](course-system/README.md) | Full course system built from the project: requirements, POC, multi-agent architecture, evals, page collaboration, auth, privacy, and safety. |
 | [SETUP.md](SETUP.md) | Local setup, LAN testing, auth, OCR, PostgreSQL, and embeddings. |
@@ -40,6 +42,8 @@ The `0.10.7` decisions remain `ADR-0023` through `ADR-0025`. The decisions intro
 | [../deploy/agent-runtime/README.md](../deploy/agent-runtime/README.md) | Alibaba Cloud PM2 Worker release, shared artifact directory, preflight, rollback, and alerts. |
 
 ## Evolution Notes
+
+The daily journal homepage research and implementation plan for the `0.13.1` / `0.13.2` releases are documented in [research/today-journal-homepage-research-2026-10-07.md](research/today-journal-homepage-research-2026-10-07.md) and [review/today-journal-homepage-upgrade-plan-2026-10-07.md](review/today-journal-homepage-upgrade-plan-2026-10-07.md).
 
 The `docs/evolution/` files describe product modules and earlier design decisions. The most relevant current entries are:
 
