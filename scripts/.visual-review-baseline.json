@@ -1,0 +1,37 @@
+{
+  "samples": {
+    "thin-junior": {
+      "htmlHash": "513b90ea71f2a1565969b29803864d72a5a853419da913f6335d5f28b8ffca9a",
+      "scores": {
+        "layout_hierarchy": 5,
+        "density": 3,
+        "alignment": 6,
+        "color": 7
+      },
+      "total": 21,
+      "judgedAt": "2026-10-06T15:44:06.413Z"
+    },
+    "standard": {
+      "htmlHash": "289d28f61effb920288f7c2e025dfd55e295640e4b512e89aa376581e58c7c59",
+      "scores": {
+        "layout_hierarchy": 5,
+        "density": 4,
+        "alignment": 4,
+        "color": 6
+      },
+      "total": 19,
+      "judgedAt": "2026-10-06T15:44:10.429Z"
+    },
+    "dense-senior": {
+      "htmlHash": "7b40d21a624902498ef665ea151bf89fdd23b4f64b0b1186a2e440a41dd4da5d",
+      "scores": {
+        "layout_hierarchy": 6,
+        "density": 5,
+        "alignment": 5,
+        "color": 7
+      },
+      "total": 23,
+      "judgedAt": "2026-10-06T15:44:14.140Z"
+    }
+  }
+}

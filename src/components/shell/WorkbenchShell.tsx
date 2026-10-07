@@ -50,6 +50,7 @@ import {
 } from "lucide-react";
 import NavItem from "./NavItem";
 import CommandPalette from "./CommandPalette";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/overlay";
 import { useTheme } from "@/components/providers/ThemeProvider";
 import { createPortal } from "react-dom";
 import { motion } from "framer-motion";
@@ -528,16 +529,13 @@ export default function WorkbenchShell({ children }: { children: ReactNode }) {
             </dialog>
           )}
 
-          {/* ── 移动菜单 Sheet:完整导航 + 旅程栏 ── */}
+          {/* ── 移动菜单 Sheet:完整导航 + 旅程栏(浮层 kit)── */}
           {mobileRailOpen && (
-            <div className="lg:hidden fixed inset-0 z-[60]" role="dialog" aria-modal="true" aria-label="导航与旅程">
-              <div className="absolute inset-0 bg-black/40" onClick={() => setMobileRailOpen(false)} />
-              <div className="absolute left-0 top-0 bottom-0 w-[min(300px,85vw)] bg-[var(--color-surface)] border-r border-[var(--color-border)] flex flex-col">
+            <Dialog open onOpenChange={(next) => { if (!next) setMobileRailOpen(false); }}>
+              <DialogContent side="left" className="lg:hidden flex flex-col max-w-[min(300px,85vw)]! z-[60]!">
+                <DialogTitle className="sr-only">导航与旅程</DialogTitle>
                 <div className="flex items-center justify-between border-b border-[var(--color-divider)] px-4 py-3">
                   <BrandLogo variant="full" size="sm" />
-                  <button type="button" onClick={() => setMobileRailOpen(false)} aria-label="关闭菜单" className="rounded-[var(--radius-sm)] p-2 text-[var(--color-muted)] hover:bg-[var(--color-primary-muted)]">
-                    <X size={18} />
-                  </button>
                 </div>
                 <nav aria-label="站点导航" className="flex-1 overflow-y-auto px-2 py-3 space-y-1">
                   {ALL_ITEMS.map((item) => (
@@ -574,8 +572,8 @@ export default function WorkbenchShell({ children }: { children: ReactNode }) {
                     {theme === "light" ? "深色" : "浅色"}
                   </button>
                 </div>
-              </div>
-            </div>
+              </DialogContent>
+            </Dialog>
           )}
         </div>
         {paletteElement}

@@ -50,6 +50,8 @@ const SERVER_EXECUTION_TOOLS = new Set([
   "update_report_metadata",
   "track_application",
   "update_application_status",
+  // Spec 29: 拒信解析以候选态写记忆（用户确认后才激活），服务端执行。
+  "log_rejection_notice",
   "check_health",
   "web_search",
   "get_weather",
@@ -58,6 +60,8 @@ const SERVER_EXECUTION_TOOLS = new Set([
   "search_jobs",
   "transfer_to_agent",
   "delegate_research",
+  // Spec 19: the digest run executes in the worker under a read-only contract.
+  "get_job_digest",
 ]);
 
 const WORKER_BACKGROUND_TOOLS = new Set([

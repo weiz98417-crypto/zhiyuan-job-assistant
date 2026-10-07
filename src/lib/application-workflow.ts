@@ -200,6 +200,10 @@ export async function updateApplicationStatus(input: UpdateApplicationStatusInpu
   }
   const repos = getDataRepositories();
   const beforeStatus = normalizeApplicationStatus(match.application.status);
+  // Spec 29 幂等守卫（eng review S3-2）：同状态重复迁移不重复写事件、不重复入账本
+  if (beforeStatus === status) {
+    return { success: true, data: match.application, nextActions: suggestNextActions(match.application, await repos.applications.listEvents(match.application.id, userId)) };
+  }
   const saved = await repos.applications.updateStatus(match.application.id, status, userId, input.note);
   if (!saved?.id) return { success: false, error: "状态更新后没有读回记录。", errorCategory: "permanent" };
 
@@ -212,8 +216,109 @@ export async function updateApplicationStatus(input: UpdateApplicationStatusInpu
     source: input.source || "pipeline",
     metadata_json: eventMetadata(input.metadata),
   }, userId);
+  // Spec 29（投递结果回流）：状态迁移作为确定性完成事件写记忆账本——
+  // 投递结局是客观事件（即事实、不需确认）；由它推导的偏好属推断，仍走候选确认。
+  void recordApplicationOutcomeEvent(userId, saved, beforeStatus, status, input.note || "", event?.id).catch(() => undefined);
   const events = await repos.applications.listEvents(saved.id, userId);
   return { success: true, data: saved, event, nextActions: suggestNextActions(saved, events) };
+}
+
+/** Spec 29：投递结局 → 记忆账本 verified_task 事件（沿 JD 评估完成事件同款管线）。
+ *  admission.ts 对 verified_task 硬性要求 evidence 三件套（verifiedReadBack + artifactId + resultEvidence），缺一即拒。 */
+async function recordApplicationOutcomeEvent(
+  userId: string,
+  application: AppRow,
+  fromStatus: ApplicationStatus | "evaluated",
+  toStatus: string,
+  note: string,
+  eventId?: number,
+): Promise<void> {
+  const { getDatabaseDriver, isPostgresConfigured } = await import("./postgres");
+  if (getDatabaseDriver() !== "postgres" || !isPostgresConfigured()) return;
+  const { admitMemory } = await import("./memory/admission");
+  const result = await admitMemory({ userId, ...buildApplicationOutcomeAdmission(application, fromStatus, toStatus, note, eventId) });
+  if (result.outcome === "rejected") {
+    console.warn(`[application-outcome] admitMemory rejected: ${result.reason}`);
+  }
+  // Spec 30 / WP5：sourced_jd_follow_through——带薪资来源标注的评估完成后同 report 投递
+  void recordSourcedFollowThrough(userId, application.num).catch(() => undefined);
+}
+
+/** 查关联 report 是否带薪资来源标注；是则记 follow-through 事件（无窗口扫描，payload 带时间可事后算）。 */
+async function recordSourcedFollowThrough(userId: string, reportNum?: number): Promise<void> {
+  if (!reportNum) return;
+  const { getDatabaseDriver, isPostgresConfigured, getPostgresPool } = await import("./postgres");
+  if (getDatabaseDriver() !== "postgres" || !isPostgresConfigured()) return;
+  const pool = getPostgresPool();
+  const client = await pool.connect();
+  try {
+    const sourced = await client.query(
+      `SELECT 1 FROM reports WHERE report_num = $1 AND user_id = $2 AND salary_data_source IS NOT NULL LIMIT 1`,
+      [reportNum, userId],
+    );
+    if ((sourced.rowCount ?? 0) === 0) return;
+    const { recordPerceptionEvent } = await import("./server/perception-events");
+    await recordPerceptionEvent(userId, "sourced_jd_follow_through", { reportNum });
+  } finally {
+    client.release();
+  }
+}
+
+/** 构造投递结局事件的 admitMemory 入参（纯函数，可测——evidence 三件套是 admission 硬门槛）。 */
+export function buildApplicationOutcomeAdmission(
+  application: Pick<AppRow, "id" | "company" | "role">,
+  fromStatus: ApplicationStatus | "evaluated",
+  toStatus: string,
+  note: string,
+  eventId?: number,
+): {
+  agentId: string;
+  kind: "verified_task";
+  sourceType: "application";
+  sourceId: string;
+  fact: {
+    partition: "core";
+    subject: string;
+    predicate: "application_outcome";
+    object: Record<string, unknown>;
+    canonicalText: string;
+    confidence: number;
+    importance: number;
+  };
+  evidence: {
+    quote: string;
+    artifactId: string;
+    resultEvidence: string;
+    verifiedReadBack: true;
+    extractionMethod: string;
+  };
+} {
+  const company = application.company || "未知公司";
+  const role = application.role || "未知岗位";
+  return {
+    agentId: "general",
+    kind: "verified_task",
+    sourceType: "application",
+    sourceId: String(application.id),
+    fact: {
+      partition: "core",
+      subject: company,
+      predicate: "application_outcome",
+      object: { role, fromStatus, toStatus, note: note.slice(0, 300) },
+      canonicalText: `${company} ${role} 投递状态更新：${fromStatus} → ${toStatus}${note ? `（${note.slice(0, 80)}）` : ""}`,
+      confidence: 0.9,
+      importance: toStatus === "offer" || toStatus === "rejected" ? 0.7 : 0.5,
+    },
+    evidence: {
+      quote: `application #${application.id} status_changed ${fromStatus}→${toStatus}`,
+      artifactId: eventId ? `application-event-${eventId}` : `application-${application.id}`,
+      resultEvidence: eventId
+        ? `status_changed event #${eventId} persisted and read back for application #${application.id}`
+        : `application #${application.id} row read back after updateStatus`,
+      verifiedReadBack: true,
+      extractionMethod: "application_status_event",
+    },
+  };
 }
 
 export async function getApplicationContext(input: ApplicationContextInput, userId: string): Promise<ApplicationContext> {

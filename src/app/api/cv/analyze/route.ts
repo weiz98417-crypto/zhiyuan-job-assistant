@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { parseLlmJsonObject } from "@/lib/llm-json";
 import fs from "fs";
 import path from "path";
 
@@ -41,12 +42,12 @@ export async function POST(request: Request) {
       );
     }
 
-    // Load Block B (CV Match) context from modes
-    const jianzhiPath = path.join(process.cwd(), "modes", "zh", "jianzhi.md");
+    // Load Block B (CV Match) context from modes（Spec 25 统一加载器）
+    const { loadModeDocument } = await import("@/lib/agent/knowledge/registry/loader");
+    const jianzhiContent = loadModeDocument("zh", "jianzhi");
     let cvMatchContext = "";
-    if (fs.existsSync(jianzhiPath)) {
-      const content = fs.readFileSync(jianzhiPath, "utf-8");
-      const blockBMatch = content.match(/## B[.\s]+简历匹配([\s\S]*?)(?=## C|$)/);
+    if (jianzhiContent !== null) {
+      const blockBMatch = jianzhiContent.match(/## B[.\s]+简历匹配([\s\S]*?)(?=## C|$)/);
       if (blockBMatch) cvMatchContext = blockBMatch[1].trim().slice(0, 2000);
     }
 
@@ -111,15 +112,9 @@ matchPercent 是 0-100 的整数。每个建议必须具体可操作。只用中
       return NextResponse.json({ success: false, error: "AI 返回为空" }, { status: 500 });
     }
 
-    let parsed;
-    try {
-      parsed = JSON.parse(content);
-    } catch {
-      const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-      if (jsonMatch) parsed = JSON.parse(jsonMatch[1]);
-      else {
-        return NextResponse.json({ success: false, error: "AI 返回格式解析失败" }, { status: 500 });
-      }
+    const parsed = parseLlmJsonObject(content);
+    if (!parsed) {
+      return NextResponse.json({ success: false, error: "AI 返回格式解析失败" }, { status: 500 });
     }
 
     return NextResponse.json({

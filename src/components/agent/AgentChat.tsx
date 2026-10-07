@@ -25,6 +25,7 @@ import type { SuggestionChip } from "./SuggestionChips";
 import { AgentShellActionsContext } from "./assistant-ui/AgentToolCards";
 import { AgentThreadMessages } from "./assistant-ui/AgentThreadMessages";
 import { AgentComposer, type ComposerAttachment } from "./assistant-ui/AgentComposer";
+import { VoiceCoachBar } from "./assistant-ui/VoiceCoachBar";
 
 export type { CompletionInfo, EvalBlockProgress } from "./AgentDomainCards";
 export type { AgentPhase } from "./assistant-chat";
@@ -105,6 +106,15 @@ export default function AgentChat({
   const [sendErrors, setSendErrors] = useState<Record<string, string>>({});
   const draft = draftsBySession[draftKey] || EMPTY_CHAT_DRAFT;
   const hasRealChat = messages.some((m) => m.role === "user");
+  // 语音教练(spec 39)在所有 agent 会话出现(2026-10-06 用户决策:对话无处不在);
+  // 最新教练消息 useMemo 免每渲染全量倒扫
+  const lastAssistantText = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i];
+      if (message.role === "assistant" && typeof message.content === "string") return message.content;
+    }
+    return "";
+  }, [messages]);
 
   const updateDraft = useCallback((key: string, update: (current: ChatDraft) => ChatDraft) => {
     setDraftsBySession((current) => ({ ...current, [key]: update(current[key] || EMPTY_CHAT_DRAFT) }));
@@ -231,6 +241,12 @@ export default function AgentChat({
 
           {/* Input area */}
           <div className="mt-auto">
+            <VoiceCoachBar
+              key={draftKey}
+              streaming={streaming}
+              lastAssistantText={lastAssistantText}
+              onSendTranscript={(text) => { void onSend(text); }}
+            />
             {suggestions && !hasRealChat && !streaming && (
               <div className="mb-3">
                 <SuggestionChips

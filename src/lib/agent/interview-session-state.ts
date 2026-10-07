@@ -13,6 +13,7 @@ import type {
   InterviewTurn,
   JDRecord,
 } from "@/types";
+import { bandLabel, DIMENSION_LABELS, bandFromFiveScale } from "@/lib/agent/knowledge/registry/band-labels";
 
 function makeId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -389,6 +390,157 @@ export function updateInterviewStateWithToolResult(
   };
 }
 
+/**
+ * Spec 27 / ADR-0044：durable 面试引擎状态的纯投影。
+ *
+ * durable 引擎（interview/engine.ts 的阶段机）是面试状态唯一写者；
+ * 本函数把它的持久化形状（company/role/phase/questions/answers/currentFollowups）
+ * 确定性投影为 chat 侧 InterviewSessionState——不再从消息文本正则推断题型。
+ * 返回 undefined 表示输入不是 durable 引擎形状（旧投影会话照走原路径）。
+ */
+export function projectDurableInterviewEngineState(value: unknown): InterviewSessionState | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const durable = value as Record<string, unknown>;
+  const company = typeof durable.company === "string" ? durable.company : "";
+  const role = typeof durable.role === "string" ? durable.role : "";
+  const phase = typeof durable.phase === "string" ? durable.phase : "";
+  if (!company || !role || !["intro", "tech", "behavioral", "reverse", "summary", "done"].includes(phase)) {
+    return undefined;
+  }
+  const planSnapshot: InterviewPlanSnapshot = {
+    snapshotId: makeId("plan"),
+    source: { resumeId: "durable-engine" },
+    jdSnapshot: { company, role, body: "" },
+    mode: "realistic",
+    difficulty: "normal",
+    focusAreas: [],
+    allowFollowUps: true,
+    createdAt: new Date().toISOString(),
+  };
+
+  const questions = Array.isArray(durable.questions) ? durable.questions as Array<Record<string, unknown>> : [];
+  const answers = Array.isArray(durable.answers) ? durable.answers as Array<Record<string, unknown>> : [];
+
+  const transcript: InterviewTurn[] = [];
+  const questionGraph: InterviewQuestionNode[] = [];
+  const scoreArtifacts: NonNullable<InterviewSessionState["scoreArtifacts"]> = [];
+  const answerByQuestionText = new Map<string, Record<string, unknown>>();
+  for (const answer of answers) {
+    if (typeof answer.question === "string") answerByQuestionText.set(answer.question, answer);
+  }
+
+  for (const question of questions) {
+    const text = typeof question.text === "string" ? question.text : "";
+    if (!text) continue;
+    const nodeId = makeId("q");
+    const node: InterviewQuestionNode = {
+      id: nodeId,
+      kind: "main",
+      reason: `durable 引擎阶段：${String(question.phase || "tech")}`,
+      question: text,
+      answerTurnIds: [],
+      createdAt: String(question.createdAt || new Date().toISOString()),
+    };
+    const answer = answerByQuestionText.get(text);
+    if (answer) {
+      const turn: InterviewTurn = {
+        id: makeId("turn_user"),
+        role: "user",
+        content: String(answer.answer || ""),
+        questionNodeId: nodeId,
+        createdAt: node.createdAt,
+      };
+      node.answerTurnIds = [turn.id];
+      transcript.push(turn);
+      if (answer.score !== undefined && answer.score !== null) {
+        scoreArtifacts.push({
+          questionNodeId: nodeId,
+          // Spec 30 / E4：统一 .score 包装层（与工具路径 artifact 形状一致——复盘页消费单一形状）
+          score: {
+            overall: Number(answer.score),
+            // Spec 30 / WP1：rubric 细节投影（复盘页档位/证据/三态渲染源）
+            ...(answer.rubric && typeof answer.rubric === "object"
+              ? { rubric: answer.rubric as Record<string, unknown> }
+              : {}),
+          },
+          feedback: String(answer.feedback || ""),
+          createdAt: node.createdAt,
+        } as unknown as NonNullable<InterviewSessionState["scoreArtifacts"]>[number]);
+      }
+      // 追问归属原主问题（durable answers.followups），不推断、不建多层链
+      const followups = Array.isArray(answer.followups) ? answer.followups as Array<Record<string, unknown>> : [];
+      for (const followup of followups) {
+        const followupText = typeof followup.question === "string" ? followup.question : "";
+        if (!followupText) continue;
+        const followupNodeId = makeId("q");
+        questionGraph.push({
+          id: followupNodeId,
+          kind: "follow_up",
+          parentId: nodeId,
+          reason: "durable 引擎追问记录",
+          question: followupText,
+          answerTurnIds: typeof followup.answer === "string" && followup.answer
+            ? [(() => {
+                const fuTurn: InterviewTurn = {
+                  id: makeId("turn_user"),
+                  role: "user",
+                  content: String(followup.answer),
+                  questionNodeId: followupNodeId,
+                  createdAt: node.createdAt,
+                };
+                transcript.push(fuTurn);
+                return fuTurn.id;
+              })()]
+            : [],
+          createdAt: node.createdAt,
+        });
+      }
+    }
+    questionGraph.push(node);
+  }
+
+  // currentQuestion / currentFollowups（进行中、尚未进入 answers 的部分）
+  const current = durable.currentQuestion as Record<string, unknown> | undefined;
+  const currentText = current && typeof current.text === "string" ? current.text : "";
+  const currentPhase = current && typeof current.phase === "string" ? current.phase : phase;
+  if (currentText && !questionGraph.some((node) => node.question === currentText)) {
+    const nodeId = makeId("q");
+    questionGraph.push({
+      id: nodeId,
+      kind: "main",
+      reason: `durable 引擎当前题（阶段：${currentPhase}）`,
+      question: currentText,
+      answerTurnIds: [],
+      createdAt: new Date().toISOString(),
+    });
+  }
+  const currentFollowups = Array.isArray(durable.currentFollowups) ? durable.currentFollowups as string[] : [];
+  const lastMainId = [...questionGraph].reverse().find((node) => node.kind === "main")?.id;
+  for (const followupText of currentFollowups) {
+    if (!followupText || questionGraph.some((node) => node.question === followupText)) continue;
+    questionGraph.push({
+      id: makeId("q"),
+      kind: "follow_up",
+      parentId: lastMainId,
+      reason: "durable 引擎进行中追问",
+      question: followupText,
+      answerTurnIds: [],
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  return {
+    planSnapshot,
+    status: "active",
+    rebindHistory: [],
+    currentQuestionId: [...questionGraph].reverse().find((node) => node.kind === "main" && node.answerTurnIds.length === 0)?.id
+      || [...questionGraph].reverse().find((node) => node.kind === "main")?.id,
+    questionGraph,
+    transcript,
+    scoreArtifacts,
+  };
+}
+
 export function rebuildInterviewStateFromMessages(
   state: InterviewSessionState | undefined,
   messages: AgentMessage[],
@@ -446,12 +598,7 @@ export function shouldPersistInterviewRecap(userContent: string): boolean {
   return /复盘|总结|回顾|结束面试|结束模拟|recap|summary/i.test(userContent);
 }
 
-const SCORE_DIMENSION_LABELS: Record<string, string> = {
-  structure: "结构完整度",
-  specificity: "具体程度",
-  highlight: "亮点突出",
-  timing: "时间控制",
-};
+const SCORE_DIMENSION_LABELS = DIMENSION_LABELS;
 
 function compactText(text: string, max = 120): string {
   const clean = text.replace(/\s+/g, " ").trim();
@@ -584,6 +731,7 @@ export function buildInterviewRecapFromState(
       answerExcerpt: compactText(answers.map((turn) => turn.content).join("\n"), 160),
       sourceTurnIds: answers.map((turn) => turn.id),
       score: score?.overall,
+      rubricOverallBand: score?.overallBand,
       feedback: summarizeScore(score),
     };
   });
@@ -595,7 +743,7 @@ export function buildInterviewRecapFromState(
   return {
     generatedAt: new Date().toISOString(),
     overallVerdict: averageScore
-      ? `${company} ${role} 模拟面试已完成 ${answeredQuestions.length} 道已回答问题（主问题 ${mainAnswered}，追问/探针 ${followUpAnswered}），平均评分 ${averageScore}/5。`
+      ? `${company} ${role} 模拟面试已完成 ${answeredQuestions.length} 道已回答问题（主问题 ${mainAnswered}，追问/探针 ${followUpAnswered}），平均档位 ${bandLabel(bandFromFiveScale(averageScore))} · ${Math.round(averageScore)}/5（五分刻度）。`
       : `${company} ${role} 模拟面试已记录 ${answeredQuestions.length} 道已回答问题，尚未生成结构化评分。`,
     strengths,
     weaknesses,

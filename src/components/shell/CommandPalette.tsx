@@ -10,6 +10,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CornerDownLeft, FileText, Search } from "lucide-react";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/overlay";
 
 export interface CommandPaletteSession {
   id: number;
@@ -87,18 +88,13 @@ export default function CommandPalette({ open, onClose, onNewChat, onSelectSessi
   };
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-start justify-center bg-black/30 px-4 pt-[14vh]"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-      aria-label="命令面板"
-    >
-      <div
-        className="w-full max-w-lg overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-lg)]"
-        onClick={(event) => event.stopPropagation()}
+    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
+      <DialogContent
+        aria-label="命令面板"
+        className="top-[14vh]! translate-y-0! z-[60]! w-[calc(100%-2rem)]! max-w-lg! overflow-hidden p-0!"
       >
-        <div className="flex items-center gap-2 border-b border-[var(--color-divider)] px-4 py-3">
+        <DialogTitle className="sr-only">命令面板</DialogTitle>
+        <div className="flex items-center gap-2 border-b border-[var(--color-divider)] px-4 py-3 pr-11">
           <Search size={15} className="text-[var(--color-muted)]" />
           <input
             ref={inputRef}
@@ -148,7 +144,7 @@ export default function CommandPalette({ open, onClose, onNewChat, onSelectSessi
             </button>
           ))}
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -7,6 +7,7 @@ import {
   Heart, Activity, EyeOff, Clock, Building2, Briefcase, Zap,
 } from "lucide-react";
 import { PaperCard } from "@/components/design";
+import { PageHeading, EmptyState } from "@/components/ui/workbench-primitives";
 import { loadProfile } from "@/lib/profile-storage";
 import db from "@/lib/db";
 import { syncProfileToCache } from "@/lib/profile-update";
@@ -312,26 +313,31 @@ export default function ProfilePage() {
   return (
     <div className="max-w-4xl mx-auto py-8 px-4 space-y-6">
       {/* ── Header ── */}
-      <div className="flex items-start justify-between flex-wrap gap-3">
-        <div className="page-heading">
-          <h1 className="text-2xl font-display text-[var(--color-text)]">求职画像</h1>
-          <p className="text-sm text-[var(--color-muted)] mt-1">
+      <PageHeading
+        as="h1"
+        meta={
+          <>
             上次更新：{formatTime(profile.lastUpdated)}
             {" · "}由 Agent 对话和评估自动更新
             <Link href="/agent" className="text-[var(--color-primary)] hover:underline ml-1">去更新 →</Link>
-          </p>
-        </div>
-        {marketScore !== null && marketScore > 0 && (
-          <div className={`flex items-center gap-3 px-4 py-2 rounded-xl ${scoreLevel.bg}`}>
-            <div className="text-right">
-              <p className="text-xs text-[var(--color-muted)]">竞争力评级</p>
-              <p className={`text-lg font-display font-bold ${scoreLevel.color}`}>{scoreLevel.label}</p>
-            </div>
-            <div className="text-3xl font-display font-bold text-[var(--color-primary)]">{marketScore}</div>
-          </div>
-        )}
-        {marketScore === null && <p className="text-sm text-[var(--color-muted)]">历史评分超出 0–100，重新分析后显示</p>}
-      </div>
+          </>
+        }
+        title={<span className="text-2xl font-normal">求职画像</span>}
+        actions={
+          <>
+            {marketScore !== null && marketScore > 0 && (
+              <div className={`flex items-center gap-3 px-4 py-2 rounded-xl ${scoreLevel.bg}`}>
+                <div className="text-right">
+                  <p className="text-xs text-[var(--color-muted)]">竞争力评级</p>
+                  <p className={`text-lg font-display font-bold ${scoreLevel.color}`}>{scoreLevel.label}</p>
+                </div>
+                <div className="text-3xl font-display font-bold text-[var(--color-primary)]">{marketScore}</div>
+              </div>
+            )}
+            {marketScore === null && <p className="text-sm text-[var(--color-muted)]">历史评分超出 0–100，重新分析后显示</p>}
+          </>
+        }
+      />
 
       {/* ── Card 1: 目标方向 ── */}
       <PaperCard padding="md">
@@ -365,11 +371,11 @@ export default function ProfilePage() {
             )}
           </>
         ) : (
-          <div className="text-sm text-[var(--color-muted)] text-center py-4">
-            <Compass size={20} className="mx-auto mb-2 text-[var(--color-primary)]" />
-            <p>还未设定求职目标方向</p>
-            <Link href="/agent" className="text-[var(--color-primary)] hover:underline text-xs mt-1 inline-block">去纸鸢 Agent 聊聊求职方向 →</Link>
-          </div>
+          <EmptyState
+            icon={<Compass size={20} className="mx-auto text-[var(--color-primary)]" />}
+            title="还未设定求职目标方向"
+            action={<Link href="/agent" className="text-[var(--color-primary)] hover:underline text-xs inline-block">去纸鸢 Agent 聊聊求职方向 →</Link>}
+          />
         )}
       </PaperCard>
 
@@ -417,11 +423,11 @@ export default function ProfilePage() {
             ))}
           </div>
         ) : (
-          <div className="text-sm text-[var(--color-muted)] text-center py-4">
-            <Zap size={20} className="mx-auto mb-2 text-[var(--color-primary)]" />
-            <p>尚未识别到技能信息</p>
-            <p className="text-xs mt-1">在 Agent 对话中提及你的技能（如"我精通 React"），系统会自动提取</p>
-          </div>
+          <EmptyState
+            icon={<Zap size={20} className="mx-auto text-[var(--color-primary)]" />}
+            title="尚未识别到技能信息"
+            hint={'在 Agent 对话中提及你的技能（如"我精通 React"），系统会自动提取'}
+          />
         )}
         {pendingSkillCandidates.length > 0 && (
           <div className="mt-4 border-t border-[var(--color-divider)] pt-3">
@@ -506,11 +512,11 @@ export default function ProfilePage() {
             ))}
           </div>
         ) : (
-          <div className="text-sm text-[var(--color-muted)] text-center py-4">
-            <EyeOff size={20} className="mx-auto mb-2 text-[var(--color-primary)]" />
-            <p>尚未发现明确的底线条件</p>
-            <p className="text-xs mt-1">在对话中说出你的底线（如"不接受 996"），系统会自动记录</p>
-          </div>
+          <EmptyState
+            icon={<EyeOff size={20} className="mx-auto text-[var(--color-primary)]" />}
+            title="尚未发现明确的底线条件"
+            hint={'在对话中说出你的底线（如"不接受 996"），系统会自动记录'}
+          />
         )}
       </PaperCard>
 
@@ -553,11 +559,11 @@ export default function ProfilePage() {
             )}
           </div>
         ) : (
-          <div className="text-sm text-[var(--color-muted)] text-center py-4">
-            <Heart size={20} className="mx-auto mb-2 text-[var(--color-primary)]" />
-            <p>尚未收集到偏好信号</p>
-            <p className="text-xs mt-1">评估更多 JD 或在对话中表达偏好，系统会逐步学习你的求职倾向</p>
-          </div>
+          <EmptyState
+            icon={<Heart size={20} className="mx-auto text-[var(--color-primary)]" />}
+            title="尚未收集到偏好信号"
+            hint="评估更多 JD 或在对话中表达偏好，系统会逐步学习你的求职倾向"
+          />
         )}
       </PaperCard>
 
@@ -644,11 +650,11 @@ export default function ProfilePage() {
             ))}
           </div>
         ) : (
-          <div className="text-sm text-[var(--color-muted)] text-center py-4">
-            <Activity size={20} className="mx-auto mb-2 text-[var(--color-primary)]" />
-            <p>暂无活动记录</p>
-            <p className="text-xs mt-1">每次聊天和评估都会在这里留下记录</p>
-          </div>
+          <EmptyState
+            icon={<Activity size={20} className="mx-auto text-[var(--color-primary)]" />}
+            title="暂无活动记录"
+            hint="每次聊天和评估都会在这里留下记录"
+          />
         )}
       </PaperCard>
 
@@ -662,10 +668,10 @@ export default function ProfilePage() {
             {showSkillRadar ? (
               <SkillRadar skills={skills} />
             ) : (
-              <div className="text-sm text-[var(--color-muted)] text-center py-8">
-                <Compass size={24} className="mx-auto mb-2 text-[var(--color-text-soft)]" />
-                <p>{!hasSkills ? "去 Agent 对话中聊聊你的技能" : skills.length < 3 ? `已有 ${skills.length} 项技能，再积累 ${3 - skills.length} 项或完成 1 次 JD 评估` : "完成 1 次 JD 评估来解锁雷达图"}</p>
-              </div>
+              <EmptyState
+                icon={<Compass size={24} className="mx-auto text-[var(--color-text-soft)]" />}
+                title={!hasSkills ? "去 Agent 对话中聊聊你的技能" : skills.length < 3 ? `已有 ${skills.length} 项技能，再积累 ${3 - skills.length} 项或完成 1 次 JD 评估` : "完成 1 次 JD 评估来解锁雷达图"}
+              />
             )}
           </PaperCard>
           <PaperCard padding="md">
@@ -675,10 +681,10 @@ export default function ProfilePage() {
             {showSkillGaps ? (
               <SkillGapList gaps={marketFit?.skillGaps || []} />
             ) : (
-              <div className="text-sm text-[var(--color-muted)] text-center py-8">
-                <Target size={24} className="mx-auto mb-2 text-[var(--color-text-soft)]" />
-                <p>完成 2 次 JD 评估或发现技能缺口数据后展示</p>
-              </div>
+              <EmptyState
+                icon={<Target size={24} className="mx-auto text-[var(--color-text-soft)]" />}
+                title="完成 2 次 JD 评估或发现技能缺口数据后展示"
+              />
             )}
           </PaperCard>
         </div>
@@ -688,11 +694,11 @@ export default function ProfilePage() {
             {showPrefBars ? (
               <PreferenceBars preferences={preferences} />
             ) : (
-              <div className="text-sm text-[var(--color-muted)] text-center py-8">
-                <Compass size={24} className="mx-auto mb-2 text-[var(--color-text-soft)]" />
-                <p>偏好数据将从 JD 评估中逐步积累</p>
-                <p className="text-xs mt-1">评估岗位越多，偏好分布越准确</p>
-              </div>
+              <EmptyState
+                icon={<Compass size={24} className="mx-auto text-[var(--color-text-soft)]" />}
+                title="偏好数据将从 JD 评估中逐步积累"
+                hint="评估岗位越多，偏好分布越准确"
+              />
             )}
           </PaperCard>
           <PaperCard padding="md">
@@ -704,10 +710,10 @@ export default function ProfilePage() {
                 <EvolutionTimeline history={profileHistory} />
               </div>
             ) : (
-              <div className="text-sm text-[var(--color-muted)] text-center py-8">
-                <Clock size={24} className="mx-auto mb-2 text-[var(--color-text-soft)]" />
-                <p>暂无进化记录</p>
-              </div>
+              <EmptyState
+                icon={<Clock size={24} className="mx-auto text-[var(--color-text-soft)]" />}
+                title="暂无进化记录"
+              />
             )}
           </PaperCard>
         </div>

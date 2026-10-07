@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { parseLlmJsonObject } from "@/lib/llm-json";
 import { getDataRepositories } from "@/lib/data-repositories";
 import type { NewsCacheRow } from "@/lib/server-db";
 
@@ -169,19 +170,10 @@ async function summarizeWithDeepSeek(
   if (!content) throw new Error("Empty DeepSeek response");
 
   let summaries: { index: number; summary: string }[] = [];
-  try {
-    const parsed = JSON.parse(content);
-    summaries = parsed.summaries || parsed.items || [];
-    if (!Array.isArray(summaries)) summaries = [];
-  } catch {
-    const m = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (m) {
-      try {
-        const inner = JSON.parse(m[1]);
-        summaries = inner.summaries || inner.items || [];
-        if (!Array.isArray(summaries)) summaries = [];
-      } catch { /* ignore */ }
-    }
+  const parsed = parseLlmJsonObject(content);
+  if (parsed) {
+    const candidate = parsed.summaries || parsed.items;
+    if (Array.isArray(candidate)) summaries = candidate as { index: number; summary: string }[];
   }
 
   return summaries.map((s) => {
@@ -330,8 +322,8 @@ async function generateNewsWithDeepSeek(): Promise<{ title: string; summary: str
   const content = data.choices?.[0]?.message?.content;
   if (!content) return [];
 
-  try {
-    const parsed = JSON.parse(content);
+  const parsed = parseLlmJsonObject(content);
+  if (parsed) {
     const items = parsed.news || parsed.items || [];
     if (!Array.isArray(items)) return [];
     return items.map((item: Record<string, string>) => ({
@@ -339,9 +331,8 @@ async function generateNewsWithDeepSeek(): Promise<{ title: string; summary: str
       summary: item.summary || item.title || "",
       source_name: item.source_name || item.source || "AI快讯",
     }));
-  } catch {
-    return [];
   }
+  return [];
 }
 
 function formatNewsItem(row: NewsCacheRow) {

@@ -1,0 +1,27 @@
+{
+  "family": "ai_algorithm",
+  "provenance": "generated_seed",
+  "provenanceDetail": "spec-27 starter set (2026-10-03, hand-authored)",
+  "questions": [
+    { "question": "介绍你优化过的一个模型或检索系统：基线是什么、你改了什么、指标变化多少。", "topic": "优化闭环与量化表达", "phase": "tech", "difficulty": "medium", "answerPoints": "基线数字、改动点、离线/在线指标、消融验证" },
+    { "question": "RAG 系统回答质量差时，你的排查顺序是什么？逐层说。", "topic": "RAG 调试方法论", "phase": "tech", "difficulty": "hard", "answerPoints": "分层：召回率→排序→切片→提示词→生成；每层有对应指标" },
+    { "question": "讲一次 badcase 分析让你改变了技术方案的经历。", "topic": "Badcase 归因能力", "phase": "behavioral", "difficulty": "medium", "answerPoints": "抽样方法、归因分类、方案转向的依据" },
+    { "question": "微调和提示词工程你怎么选？给出你的决策框架和一个实例。", "topic": "微调 vs 提示词决策", "phase": "tech", "difficulty": "hard", "answerPoints": "数据量/任务稳定性/成本/迭代速度四维；实例有数字" },
+    { "question": "你如何设计一个在线 A/B 实验来验证模型改动？样本量和周期怎么定？", "topic": "实验设计", "phase": "tech", "difficulty": "hard", "answerPoints": "指标选择、显著性/功效、周期与流量、护栏指标" },
+    { "question": "介绍你对 embedding 模型选型的经验：维度、语言、成本、更新策略怎么权衡。", "topic": "Embedding 选型", "phase": "tech", "difficulty": "medium", "answerPoints": "评测集先行、多语言需求、索引成本、版本升级的重建成本" },
+    { "question": "讲一次你在生产环境处理模型服务延迟或成本超标的经历。", "topic": "生产化与成本意识", "phase": "behavioral", "difficulty": "medium", "answerPoints": "监控发现、缓存/批处理/蒸馏/路由等手段、结果数字" },
+    { "question": "如果标注数据只有 500 条，你要做一个分类任务，你的完整方案是什么？", "topic": "小样本方案设计", "phase": "case-study", "difficulty": "hard", "answerPoints": "少样本学习/数据增强/预训练模型/主动学习；给出验证方式" },
+    { "question": "你如何保证模型迭代不出现线上回退？说说你的回归测试体系。", "topic": "回归与评测基建", "phase": "tech", "difficulty": "hard", "answerPoints": "评测集版本化、门禁阈值、分批发布、回滚预案" },
+    { "question": "介绍一次你和产品经理就「多准才算准」达成一致的过程。", "topic": "指标与业务对齐", "phase": "behavioral", "difficulty": "medium", "answerPoints": "把业务损失函数翻译成技术指标、分级验收" },
+    { "question": "大模型推理优化的常用手段有哪些？你实际用过哪些、效果如何？", "topic": "推理优化", "phase": "tech", "difficulty": "hard", "answerPoints": "量化/KV缓存/批处理/投机解码/模型裁剪；有实测数字更佳" },
+    { "question": "描述你处理过最难的一个数据质量问题，它是怎么被发现的？", "topic": "数据质量意识", "phase": "behavioral", "difficulty": "medium", "answerPoints": "发现机制（监控/审计）、修复与预防" },
+    { "question": "如果让你从零搭建团队的 LLM 应用评测体系，你的前三个动作是什么？", "topic": "评测体系从0到1", "phase": "case-study", "difficulty": "hard", "answerPoints": "样本库→自动指标+LLM 评审→门禁接入 CI；忌只谈工具" },
+    { "question": "你怎么看多模态模型在实际业务里的落地现状？讲一个你评估过或做过的场景。", "topic": "多模态落地判断", "phase": "tech", "difficulty": "medium", "answerPoints": "场景匹配度、成本、失败案例与兜底" },
+    { "question": "讲一次你的技术方案被否的经历，你怎么处理的？", "topic": "抗压与开放性", "phase": "behavioral", "difficulty": "medium", "answerPoints": "对事不对人、吸收对方合理处、后续验证" },
+    { "question": "解释一下你最近关注的一个模型架构或训练技术的进展，以及它对业务可能的影响。", "topic": "技术视野", "phase": "tech", "difficulty": "medium", "answerPoints": "理解准确、能落到业务影响而非堆术语" },
+    { "question": "你的模型上线后出现了和数据集表现完全不同的线上行为，你怎么办？", "topic": "分布偏移处理", "phase": "case-study", "difficulty": "hard", "answerPoints": "数据分布对比、线上采样、快速回滚、再训练策略" },
+    { "question": "介绍一次你做数据标注规范的经历：规范怎么定、分歧怎么裁决。", "topic": "标注体系建设", "phase": "tech", "difficulty": "medium", "answerPoints": "标注手册、试标一致性、仲裁机制" },
+    { "question": "你怎么向非技术同事解释一个模型为什么「不能做到 100% 准」？", "topic": "沟通翻译", "phase": "behavioral", "difficulty": "easy", "answerPoints": "概率本质、错误代价分级、能落到产品预期管理" },
+    { "question": "如果算力预算砍半，你会怎么调整当前项目的模型方案？", "topic": "资源约束下的方案调整", "phase": "case-study", "difficulty": "hard", "answerPoints": "蒸馏/量化/更小模型+更好的数据/缓存；保指标的取舍" }
+  ]
+}

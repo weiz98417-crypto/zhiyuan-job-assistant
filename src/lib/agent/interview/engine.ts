@@ -22,6 +22,14 @@ export interface InterviewAnswer {
   score?: number;
   feedback?: string;
   followups: { question: string; answer: string }[];
+  /** Spec 30 / WP1：rubric 细节（来自 scoreSessionAnswer 的 rubric 透传）——复盘页档位/证据/三态渲染源。 */
+  rubric?: {
+    bands: Record<string, number>;
+    overallBand: number;
+    evidence: Record<string, string>;
+    states: Record<string, string>;
+    review: { effectiveEvidence: string; mainGaps: string; stateVerdict: string; betterStructure: string };
+  };
 }
 
 export interface InterviewSession {

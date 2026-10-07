@@ -131,3 +131,8 @@ openspec/changes/*
 # Local production packages and raw QA captures may contain personal content.
 /release-*.tar.gz
 /.private/
+
+# promptfoo red-team build artifacts (rebuilt via npm run eval:redteam:build)
+promptfoo/.build/
+screenshots/
+.visual-build/

@@ -8,11 +8,12 @@
  * 组件本身来自 AgentDomainCards(原样迁出),本文件只做登记与分发。
  */
 
-import { Ban, Check, CheckCircle, FileText, Image as ImageIcon, User, X } from "lucide-react";
+import { Ban, CheckCircle, Image as ImageIcon, User, X } from "lucide-react";
 import { motion } from "framer-motion";
 import { createContext, useContext, type ReactNode } from "react";
 import type { ToolCallMessagePartProps } from "@assistant-ui/react";
 import type { AgentEventType } from "@/lib/agent/events/dialect";
+import { ElementToolCard } from "@/components/design/elements";
 import {
   AgentDelegationCard,
   AgentHandoffBanner,
@@ -34,6 +35,13 @@ import {
   ToolResultCard,
   ApplicationPipelineCard,
 } from "../AgentDomainCards";
+
+import { FileText as FileTextIconRaw } from "lucide-react";
+import { InterviewScoreCard, RejectionParseCard } from "./InterviewTrustCards";
+
+function FileTextIcon() {
+  return <FileTextIconRaw size={14} className="text-[var(--color-primary)]" />;
+}
 
 /** ToolUI 分发可用的动作(page.tsx 既有回调,不新增语义)。 */
 export interface AgentShellActions {
@@ -120,42 +128,28 @@ export function AgentToolCardOverride({ toolName, result }: ToolCallMessagePartP
     const label = DATA_QUERY_TOOLS[toolName!];
     return (
       <div className={COMPACT_AGENT_CARD_CLASS}>
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="rounded-[var(--radius-md)] border border-[var(--color-divider)] overflow-hidden"
-        >
-          <div className="flex items-center gap-2 px-3 py-2">
-            <FileText size={14} className="text-[var(--color-primary)]" />
-            <span className="text-xs font-medium text-[var(--color-text)]">{success ? label : "工具调用失败"}</span>
-            {success ? (
-              <Check size={12} className="text-emerald-500 ml-auto flex-shrink-0" />
-            ) : (
-              <X size={12} className="text-red-500 ml-auto flex-shrink-0" />
-            )}
-          </div>
-        </motion.div>
+        <ElementToolCard
+          label={success ? label : "工具调用失败"}
+          status={success ? "success" : "failed"}
+          icon={<FileTextIcon />}
+        />
       </div>
     );
   }
   if (toolName === "get_profile") {
     return (
       <div className={COMPACT_AGENT_CARD_CLASS}>
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="rounded-[var(--radius-md)] border border-[var(--color-divider)] overflow-hidden"
-        >
-          <div className="flex items-center gap-2 px-3 py-2">
-            <User size={14} className="text-[var(--color-primary)]" />
-            <span className="text-xs font-medium text-[var(--color-text)]">已读取求职画像</span>
-            <Check size={12} className="text-emerald-500 ml-auto flex-shrink-0" />
-          </div>
-        </motion.div>
+        <ElementToolCard
+          label="已读取求职画像"
+          status={success ? "success" : "failed"}
+          icon={<User size={14} className="text-[var(--color-primary)]" />}
+        />
       </div>
     );
   }
   if (payload?.type === "interview_questions") return <InterviewQuestionCard payload={payload} />;
+  if (payload?.type === "interview_score") return <InterviewScoreCard payload={payload} />;
+  if (payload?.type === "rejection_parse") return <RejectionParseCard payload={payload} />;
   if (
     payload?.type === "resume_edit_proposal"
     || payload?.type === "resume_edit_proposal_applied"

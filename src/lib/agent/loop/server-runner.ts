@@ -267,6 +267,13 @@ export function normalizeReadFileParams(input: {
   return { ...input.params, path: "我的简历" };
 }
 
+export interface ModelUsageReport {
+  modelUsed: string;
+  promptTokens: number;
+  completionTokens: number;
+  latencyMs: number;
+}
+
 async function callLLM(
   messages: DeepSeekMessage[],
   systemPrompt: string,
@@ -275,7 +282,9 @@ async function callLLM(
   modelRecovery?: ModelRecoveryPolicy,
   includeLatestImages = false,
   signal?: AbortSignal,
+  onUsage?: (report: ModelUsageReport) => void,
 ): Promise<{ text: string; toolCalls: NativeToolCall[] }> {
+  const startedAt = Date.now();
   const result = await streamChat({
     messages: modelMessages(messages, includeLatestImages),
     systemPrompt,
@@ -286,6 +295,14 @@ async function callLLM(
     chain: resolveLoopChain(modelPreference, modelRecovery),
   });
   const parsed = await parseToolCallStream(result.response, signal);
+  if (onUsage && parsed.usage) {
+    onUsage({
+      modelUsed: result.modelUsed,
+      promptTokens: parsed.usage.promptTokens,
+      completionTokens: parsed.usage.completionTokens,
+      latencyMs: Date.now() - startedAt,
+    });
+  }
   const dsml = extractDsmlToolCalls(parsed.text);
   return {
     text: dsml.text,
@@ -316,8 +333,10 @@ export async function* agentLoopServer(opts: {
   executionContext?: ToolExecutionContext;
   modelRecovery?: ModelRecoveryPolicy;
   frozenToolCall?: { name: string; args: Record<string, unknown> };
+  /** Spec 18: receives one report per model call (metadata only, no content). */
+  onModelUsage?: (report: ModelUsageReport) => void;
 }): AsyncGenerator<SSEEvent> {
-  const { systemPrompt, messages, config = DEFAULT_LOOP_CONFIG, signal, interviewState, interviewRebindAction, taskContract, executionContext, modelRecovery } = opts;
+  const { systemPrompt, messages, config = DEFAULT_LOOP_CONFIG, signal, interviewState, interviewRebindAction, taskContract, executionContext, modelRecovery, onModelUsage } = opts;
   // M4: agent identity is mutable — transfer_to_agent hands responsibility to
   // another specialist mid-run (handoff swaps prompt context and tool table).
   let agent = opts.agent;
@@ -422,6 +441,7 @@ export async function* agentLoopServer(opts: {
           modelRecovery,
           resumeDiagnosis || currentJDImages.length > 0,
           signal,
+          onModelUsage,
         );
         thinkText = resp.text;
         toolCalls = resp.toolCalls;
@@ -945,6 +965,7 @@ export async function* agentLoopServer(opts: {
           modelRecovery,
           resumeDiagnosis || currentJDImages.length > 0,
           signal,
+          onModelUsage,
         );
         const clean = forceResp.text.trim();
         if (clean) yield { type: "text", content: clean };

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import {
   createCsrfToken,
@@ -8,7 +8,6 @@ import {
 
 const originalOrigin = process.env.APP_ORIGIN;
 const originalSecret = process.env.CSRF_SECRET;
-const originalNodeEnv = process.env.NODE_ENV;
 
 function mutationRequest(options: {
   origin?: string;
@@ -36,8 +35,7 @@ describe('CSRF and origin protection', () => {
     else process.env.APP_ORIGIN = originalOrigin;
     if (originalSecret === undefined) delete process.env.CSRF_SECRET;
     else process.env.CSRF_SECRET = originalSecret;
-    if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
-    else process.env.NODE_ENV = originalNodeEnv;
+    vi.unstubAllEnvs();
   });
 
   it('rejects an untrusted or missing browser origin', () => {
@@ -50,7 +48,7 @@ describe('CSRF and origin protection', () => {
   });
 
   it('accepts localhost loopback aliases during local development', () => {
-    process.env.NODE_ENV = 'development';
+    vi.stubEnv('NODE_ENV', 'development');
     process.env.APP_ORIGIN = 'http://localhost:3100';
     const request = new NextRequest('http://localhost:3100/api/auth/login', {
       method: 'POST',
@@ -61,7 +59,7 @@ describe('CSRF and origin protection', () => {
   });
 
   it('does not accept loopback aliases in production', () => {
-    process.env.NODE_ENV = 'production';
+    vi.stubEnv('NODE_ENV', 'production');
     process.env.APP_ORIGIN = 'https://localhost:3100';
     const request = new NextRequest('https://localhost:3100/api/auth/login', {
       method: 'POST',

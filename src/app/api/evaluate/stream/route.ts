@@ -3,6 +3,8 @@
 import fs from "fs";
 import path from "path";
 import { getCurrentUser } from "@/lib/auth";
+import { parseLlmJsonObject } from "@/lib/llm-json";
+import { loadModeDocument } from "@/lib/agent/knowledge/registry/loader";
 import { getDataRepositories } from "@/lib/data-repositories";
 import { computeEvaluationOverallScore, extractEvaluationBlockScore } from "@/lib/evaluation-scoring";
 import { getDeepSeekApiKey, DEEPSEEK_API_URL, DEEPSEEK_VISION_MODEL } from "@/lib/deepseek-provider";
@@ -75,14 +77,12 @@ function emit(controller: ReadableStreamDefaultController<Uint8Array>, event: Re
 /* ── Modes loader ── */
 
 function loadModes(language: "zh" | "en"): { shared: string; eval: string; profile: string } {
-  const modesDir = path.join(process.cwd(), "modes", language === "zh" ? "zh" : "");
-  const read = (f: string) => fs.existsSync(f) ? fs.readFileSync(f, "utf-8") : "";
-
-  const sharedDir = path.join(process.cwd(), "modes", language === "zh" ? "zh" : "");
+  // Spec 25：modes 统一经注册表加载器读取（en 无 _profile 属既有事实，读缺失返回 ""）
+  const read = (name: string) => loadModeDocument(language, name) ?? "";
   return {
-    shared: read(path.join(sharedDir, "_shared.md")),
-    eval: read(path.join(modesDir, language === "zh" ? "jianzhi.md" : "oferta.md")),
-    profile: read(path.join(sharedDir, "_profile.md")),
+    shared: read("_shared"),
+    eval: read(language === "zh" ? "jianzhi" : "oferta"),
+    profile: read("_profile"),
   };
 }
 
@@ -475,11 +475,9 @@ export async function POST(request: Request) {
 
         try {
           const archetypeText = await quickLLM(archetypeSystem, `请分析以下JD的archetype:\n\n${state.jdText.slice(0, 3000)}`, signal);
-          const archMatch = archetypeText.match(/\{[\s\S]*\}/);
-          if (archMatch) {
-            const arch = JSON.parse(archMatch[0]);
-            state.archetype = arch.archetype || "未检测";
-          }
+          const arch = parseLlmJsonObject(archetypeText);
+          if (!arch) throw new Error("archetype 解析失败");
+          state.archetype = typeof arch.archetype === "string" && arch.archetype ? arch.archetype : "未检测";
         } catch (err) {
           console.error("Archetype detection failed:", err instanceof Error ? err.message : String(err));
           emit(controller, { type: "error", message: "Archetype 检测失败，使用默认分类" });
@@ -579,10 +577,12 @@ export async function POST(request: Request) {
             bp.sys = `你是AI求职评估引擎。当前日期: ${todayCN} (${today})。只生成「D板块·薪资与市场」，不要涉及其他板块。分析薪资竞争力（税前月薪、五险一金、年终奖、加班情况）。${state.searchInfo ? `参考数据: ${state.searchInfo}` : '无公开数据，基于行业估算并标注。'}用中文markdown表格输出。`;
           }
 
-          // Block F: inject story bank
+          // Block F: inject story bank（Spec 25 经注册表条目读取，frontmatter 已剥离）
           if (bk === "f") {
-            const sp = path.join(process.cwd(), "interview-prep", "story-bank.md");
-            if (fs.existsSync(sp)) bp.sys += `\n用户已有故事库:\n${fs.readFileSync(sp, "utf-8").slice(0, 2000)}`;
+            try {
+              const { loadRegistryText } = await import("@/lib/agent/knowledge/registry/loader");
+              bp.sys += `\n用户已有故事库:\n${loadRegistryText("data.story-bank-template").slice(0, 2000)}`;
+            } catch { /* 模板缺失不阻塞 F 板块 */ }
           }
 
           // Block G: inject risk scan results (from /api/agent/scan-risks)

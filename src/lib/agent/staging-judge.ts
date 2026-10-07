@@ -32,8 +32,13 @@ const TASK_DIMENSIONS: Partial<Record<AgentTaskType, string[]>> = {
 };
 
 const HARD_VETO_PATTERNS = [
-  /permission|owner.?scope|tool.?policy|read.?back|stale.?artifact|protocol.?leak|empty.?visible|fabricat/i,
+  /permission|owner.?scope|tool.?policy|read.?back|stale.?artifact|protocol.?leak|empty.?visible|fabricat|unsupported.?claim|missing.?evidence/i,
 ];
+
+/** Single source of truth for which veto strings survive into StagingJudgeResult. */
+export function hardVetoPasses(failure: string): boolean {
+  return HARD_VETO_PATTERNS.some((pattern) => pattern.test(failure));
+}
 
 export function listStagingRubricDimensions(taskType: AgentTaskType): string[] {
   return Array.from(new Set([...COMMON_DIMENSIONS, ...(TASK_DIMENSIONS[taskType] || [])]));
@@ -47,7 +52,7 @@ export function judgeStagingOutput(input: StagingJudgeInput): StagingJudgeResult
   const hardVetoes = Array.from(new Set([
     ...(input.deterministicFailures || []),
     ...(input.hardVetoes || []),
-  ].filter((failure) => HARD_VETO_PATTERNS.some((pattern) => pattern.test(failure)))));
+  ])).filter(hardVetoPasses);
   const evidence = [
     ...(output ? ["output_present"] : ["empty_output"]),
     ...(input.expectedFacts || []).filter((fact) => output.toLowerCase().includes(fact.toLowerCase())).map((fact) => `fact_present:${fact}`),

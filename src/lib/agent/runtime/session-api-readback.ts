@@ -1,6 +1,12 @@
 import { getDatabaseDriver, isPostgresConfigured } from "@/lib/postgres";
-import { getSessionMemoryAdapter, type SessionMemoryMessage } from "@/lib/memory/postgres-memory";
+import { getSessionMemoryAdapter, resolveExecutionRole, type SessionMemoryMessage } from "@/lib/memory/postgres-memory";
 import { safeAssistantText } from "@/lib/agent/runtime/run-event-projection";
+import {
+  collectJobDiscoveryScanIds,
+  reconcileJobDiscoveryRunMessages,
+} from "@/lib/agent/job-discovery-card-status";
+import { getScanStatusesForUser } from "@/lib/scan-data";
+import type { AgentMessage } from "@/types";
 
 function toSessionTranscriptMessage(message: SessionMemoryMessage, fallbackTimestamp: string, includeImages: boolean) {
   const execution = message.metadata?.execution;
@@ -8,7 +14,7 @@ function toSessionTranscriptMessage(message: SessionMemoryMessage, fallbackTimes
     ? execution as Record<string, unknown>
     : {};
   return {
-    role: typeof metadata.role === "string" ? metadata.role : message.role,
+    role: resolveExecutionRole(message),
     content: message.role === "assistant" ? safeAssistantText(message.content) : message.content,
     timestamp: message.createdAt || fallbackTimestamp,
     ...(message.id ? { id: message.id, itemId: message.id } : {}),
@@ -23,7 +29,9 @@ export async function readSessionRowsWithDurableMessages<T extends Record<string
   userId: string,
   options: { includeImages?: boolean } = {},
 ): Promise<T[]> {
-  if (getDatabaseDriver() !== "postgres" || !isPostgresConfigured()) return rows;
+  if (getDatabaseDriver() !== "postgres" || !isPostgresConfigured()) {
+    return reconcileSessionRows(rows, userId);
+  }
   const adapter = getSessionMemoryAdapter();
   const result: T[] = [];
   for (let index = 0; index < rows.length; index += 5) {
@@ -40,5 +48,38 @@ export async function readSessionRowsWithDurableMessages<T extends Record<string
     }));
     result.push(...batch);
   }
-  return result;
+  return reconcileSessionRows(result, userId);
+}
+
+/** Spec 20: 读回层对账——job_discovery_run 卡的瞬时状态在返回客户端前用 scan_queue
+ *  终态覆写（读时投影，不写回 transcript）。挂在出口使 legacy 早退与 durable 路径
+ *  都被覆盖；对账失败只记日志，绝不阻塞会话读回。 */
+async function reconcileSessionRows<T extends Record<string, unknown>>(rows: T[], userId: string): Promise<T[]> {
+  try {
+    const parsed = rows.map((row) => {
+      try {
+        const raw = row.messages_json;
+        // 哨兵：绝大多数会话没有岗位发现卡，字符串扫描先挡掉全量 JSON.parse。
+        if (typeof raw !== "string" || !raw.includes("job_discovery_run")) return { row, messages: [] as AgentMessage[] };
+        const messages = raw.trim() ? (JSON.parse(raw) as AgentMessage[]) : [];
+        return { row, messages: Array.isArray(messages) ? messages : [] };
+      } catch (error) {
+        console.error(`[session-readback] transcript parse failed during card reconciliation: ${error instanceof Error ? error.message : error}`);
+        return { row, messages: [] as AgentMessage[] };
+      }
+    });
+    const scanIds = Array.from(new Set(parsed.flatMap((entry) => collectJobDiscoveryScanIds(entry.messages))));
+    if (!scanIds.length) return rows;
+    const statuses = await getScanStatusesForUser(userId, scanIds);
+    return rows.map((row, index) => {
+      const { messages } = parsed[index];
+      if (!messages.length) return row;
+      const reconciled = reconcileJobDiscoveryRunMessages(messages, statuses);
+      if (reconciled === messages) return row;
+      return { ...row, messages_json: JSON.stringify(reconciled) };
+    });
+  } catch (error) {
+    console.error(`[session-readback] job discovery card reconciliation failed: ${error instanceof Error ? error.message : error}`);
+    return rows;
+  }
 }

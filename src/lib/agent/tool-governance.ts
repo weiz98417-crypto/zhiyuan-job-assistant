@@ -611,6 +611,18 @@ export const TOOL_GOVERNANCE_REGISTRY: Record<string, ToolGovernance> = {
     userVisibleNameZh: "更新投递状态",
     conflictPriority: 86,
   }),
+  log_rejection_notice: meta({
+    name: "log_rejection_notice",
+    effect: "write",
+    allowedTaskTypes: ["general_chat", "interview_coaching", "job_search", "offer_evaluation"],
+    agentAllowlist: ["general", "interview", "evaluate", "offer"],
+    documentTypes: ["session"],
+    // 候选态写入、等用户确认——不是 verified write，不套读回门（否则每次调用被改写为永久失败）
+    requiresUserConfirmation: false,
+    requiresReadBack: false,
+    successContract: "Parse a pasted rejection notice into a closed label set with an evidence quote and return the candidate memory id; activation waits for user confirmation in memory governance.",
+    userVisibleNameZh: "记录拒信原因",
+  }),
   transfer_to_agent: meta({
     name: "transfer_to_agent",
     effect: "read",
@@ -698,6 +710,19 @@ export const TOOL_GOVERNANCE_REGISTRY: Record<string, ToolGovernance> = {
     successContract: "Read external web search results only.",
     userVisibleNameZh: "联网搜索",
   }),
+  // Spec 19: the digest run's single tool — reads the user's opportunity pool since the
+  // watermark. Read-only: the unattended run never writes (the scheduler advances the watermark).
+  get_job_digest: meta({
+    name: "get_job_digest",
+    effect: "read",
+    allowedTaskTypes: ["job_digest"],
+    agentAllowlist: ["general"],
+    documentTypes: ["session"],
+    requiresUserConfirmation: false,
+    requiresReadBack: false,
+    successContract: "Read opportunity pool entries since the watermark; no writes.",
+    userVisibleNameZh: "岗位精选素材",
+  }),
 };
 
 export const TASK_CONTRACT_POLICY: Record<AgentTaskType, TaskContractPolicy> = {
@@ -713,6 +738,7 @@ export const TASK_CONTRACT_POLICY: Record<AgentTaskType, TaskContractPolicy> = {
   reference_resume_save: "high_risk_verified_write",
   file_export: "export_verified",
   job_search: "verified_write",
+  job_digest: "read_only",
 };
 
 export function getTaskContractPolicy(taskType: AgentTaskType): TaskContractPolicy {

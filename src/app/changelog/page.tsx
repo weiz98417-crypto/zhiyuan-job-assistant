@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowRight, ScrollText } from "lucide-react";
-import { HandwritingTitle } from "@/components/design";
+import { PageHeading } from "@/components/ui/workbench-primitives";
 import appPackage from "../../../package.json";
 import { releaseNotes } from "./release-notes";
 
@@ -24,13 +24,18 @@ export default async function ChangelogPage({ searchParams }: ChangelogPageProps
 
   return (
     <div className="mx-auto w-full max-w-7xl space-y-8 pb-8">
-      <header className="page-heading space-y-3">
-        <div className="flex items-center gap-2 text-sm text-[var(--color-primary)]">
-          <ScrollText size={18} />
-          产品动态
-        </div>
-        <HandwritingTitle as="h1">版本更新</HandwritingTitle>
-        <p className="text-sm leading-7 text-[var(--color-text-soft)]">
+      <header>
+        <PageHeading
+          as="h1"
+          meta={
+            <span className="flex items-center gap-2 text-[var(--color-primary)]">
+              <ScrollText size={18} />
+              产品动态
+            </span>
+          }
+          title="版本更新"
+        />
+        <p className="text-sm leading-7 text-[var(--color-text-soft)] mt-3">
           选择版本查看完整记录。开发整合版本会单独标明，未核实的历史变更不会补写。
         </p>
       </header>

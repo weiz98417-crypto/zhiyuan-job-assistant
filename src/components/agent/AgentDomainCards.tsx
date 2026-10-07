@@ -9,11 +9,13 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowLeftRight, BookOpen, Check, CheckCircle, Download, ExternalLink, Image as ImageIcon, X, ChevronDown, ChevronUp, FileText, Loader2, MapPin, Maximize2, RefreshCw, ShieldCheck, Sparkles, Target, Briefcase, Trash2, User } from "lucide-react";
+import { ArrowLeftRight, BookOpen, Ban, Check, CheckCircle, Download, ExternalLink, Image as ImageIcon, X, ChevronDown, ChevronUp, FileText, Loader2, MapPin, Maximize2, RefreshCw, ShieldCheck, Sparkles, Target, Briefcase, Trash2, User } from "lucide-react";
 import { WarmButton, ScoreBadge } from "@/components/design";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/overlay";
 import MarkdownRenderer from "@/components/MarkdownRenderer";
 import { getToolDisplay } from "@/lib/agent/tool-display-names";
 import { getAgentDisplayName } from "@/lib/agent/client-metadata";
+import { JOB_DISCOVERY_UNKNOWN_STATUS } from "@/lib/agent/job-discovery-card-status";
 import { fetchDiscoveryJobDetail, getAgentEvaluationUrl, saveDiscoveryJobJD } from "@/lib/job-discovery";
 import type { AgentMessage, CoachMode, InterviewQuestion, InterviewSessionState } from "@/types";
 import { createJD } from "@/lib/jd-storage";
@@ -135,33 +137,23 @@ export function ImagePreviewModal({
   onClose: () => void;
 }) {
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-    >
-      <button
-        type="button"
-        onClick={onClose}
-        className="absolute right-4 top-4 rounded-full bg-white/15 p-2 text-white transition-colors hover:bg-white/25"
-        aria-label="关闭原图预览"
-      >
-        <X size={18} />
-      </button>
-      <div className="flex max-h-full max-w-full flex-col items-center gap-3" onClick={(e) => e.stopPropagation()}>
-        <img
-          src={src}
-          alt={name || "上传图片原图"}
-          className="max-h-[82vh] max-w-[92vw] rounded-[var(--radius-md)] bg-white object-contain shadow-2xl"
-        />
-        {(name || formatImageMeta(meta)) && (
-          <div className="rounded-full bg-black/65 px-3 py-1 text-xs text-white">
-            {[name, formatImageMeta(meta)].filter(Boolean).join(" · ")}
-          </div>
-        )}
-      </div>
-    </div>
+    <Dialog open onOpenChange={(next) => { if (!next) onClose(); }}>
+      <DialogContent className="w-fit! max-w-none! rounded-none! border-0! bg-transparent! p-0! shadow-none!">
+        <DialogTitle className="sr-only">图片预览：{name || "上传图片"}</DialogTitle>
+        <div className="flex max-h-full max-w-full flex-col items-center gap-3">
+          <img
+            src={src}
+            alt={name || "上传图片原图"}
+            className="max-h-[82vh] max-w-[92vw] rounded-[var(--radius-md)] bg-white object-contain shadow-2xl"
+          />
+          {(name || formatImageMeta(meta)) && (
+            <div className="rounded-full bg-black/65 px-3 py-1 text-xs text-white">
+              {[name, formatImageMeta(meta)].filter(Boolean).join(" · ")}
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -342,16 +334,33 @@ export function RunGateCard({
 
   return (
     <div className={COMPACT_AGENT_CARD_CLASS}>
-      {/* 样张 v2 审批卡形态:白瓷卡 + 朱砂描边,风险说明一行,主按钮「批准并应用」 */}
-      <div className="rounded-[14px] border-[1.5px] border-[var(--zhusha)] bg-[var(--color-surface)] px-4 py-4">
+      {/* Spec 17 三态审批卡:pending=白瓷卡+朱砂描边+双按钮;approved=翠色徽记;denied=朱红徽记 */}
+      <div className={`rounded-[14px] border-[1.5px] bg-[var(--color-surface)] px-4 py-4 ${status === "pending" ? "border-[var(--zhusha)]" : status === "approved" ? "border-emerald-300" : "border-red-300"}`}>
         <div className="mb-2 flex items-center gap-2">
-          <ShieldCheck size={16} className="text-[var(--zhusha)]" />
-          <span className="text-sm font-medium text-[var(--ink)]">需要你的批准 · {title}</span>
+          {status === "approved" ? (
+            <ShieldCheck size={16} className="text-emerald-600" />
+          ) : status === "denied" ? (
+            <Ban size={16} className="text-red-500" />
+          ) : (
+            <ShieldCheck size={16} className="text-[var(--zhusha)]" />
+          )}
+          <span className="text-sm font-medium text-[var(--ink)]">
+            {status === "approved" ? `已批准 · ${title}` : status === "denied" ? `已拒绝 · ${title}` : `需要你的批准 · ${title}`}
+          </span>
+          {status !== "pending" && (
+            <span className={`ml-auto rounded-full px-2 py-0.5 text-[11px] font-medium ${status === "approved" ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-600"}`}>
+              {status === "approved" ? "已批准" : "已拒绝"}
+            </span>
+          )}
         </div>
         <p className="mb-3 text-xs leading-5 text-[var(--muted)]">
-          此操作会修改已保存的数据，批准后才会继续
+          {status === "pending"
+            ? "此操作会修改已保存的数据，批准后才会继续"
+            : status === "approved"
+              ? "已按你的批准继续执行该动作"
+              : "已按你的决定拒绝该动作，任务会继续寻找安全路径"}
           {textValue(request.toolName) ? ` · 工具 ${textValue(request.toolName)}` : ""}
-          {" · 可回滚"}
+          {status === "pending" ? " · 可回滚" : ""}
         </p>
         <div className="flex items-center gap-2.5">
           {status === "pending" ? (
@@ -364,7 +373,7 @@ export function RunGateCard({
               </button>
             </>
           ) : (
-            <span className="text-xs text-[var(--muted)]">{status === "approved" ? "已批准，正在继续" : "已拒绝"}</span>
+            <span className="text-xs text-[var(--muted)]">{status === "approved" ? "正在继续" : "已结束该分支"}</span>
           )}
         </div>
       </div>
@@ -1303,15 +1312,20 @@ export function JobDiscoveryRunCard({
   const [jobs, setJobs] = useState<Record<string, unknown>[]>([]);
   const [pollError, setPollError] = useState("");
   const scanId = textValue(snapshot.scanId);
-  const status = textValue(snapshot.status) || "pending";
+  // Spec 20 渲染兜底：进行中状态必须有 scanId 支撑——无 scanId 的 pending/running
+  // 一律按「状态未知」呈现，绝不落到转圈判定；终态（done/failed/canceled）自含事实，照常显示。
+  const rawStatus = textValue(snapshot.status);
+  const inFlightish = !rawStatus || rawStatus === "pending" || rawStatus === "running";
+  const status = inFlightish && !scanId ? JOB_DISCOVERY_UNKNOWN_STATUS : (rawStatus || "pending");
   const companiesDone = numberValue(snapshot.companiesDone);
   const companiesTotal = numberValue(snapshot.companiesTotal);
   const jobsFound = numberValue(snapshot.jobsFound);
   const jobsNew = numberValue(snapshot.jobsNew);
   const progress = companiesTotal > 0 ? Math.min(100, Math.round((companiesDone / companiesTotal) * 100)) : 0;
   const recovered = snapshot.recoveredExistingScan === true;
-  const active = status === "pending" || status === "running";
+  const active = (status === "pending" || status === "running") && Boolean(scanId);
   const finished = status === "done";
+  const unknownState = status === JOB_DISCOVERY_UNKNOWN_STATUS;
 
   useEffect(() => {
     setSnapshot(payload);
@@ -1351,7 +1365,11 @@ export function JobDiscoveryRunCard({
           if (nextStatus === "done") await loadJobs();
         }
       } catch (error) {
-        if (!canceled) setPollError(error instanceof Error ? error.message : "岗位发现状态读取失败");
+        if (canceled) return;
+        setPollError(error instanceof Error ? error.message : "岗位发现状态读取失败");
+        // Spec 20 渲染兜底：轮询失败（404/401/500）不再挂着 spinner——降级为状态未知并停止轮询。
+        if (interval) clearInterval(interval);
+        setSnapshot((prev) => ({ ...prev, status: "unknown" }));
       }
     };
 
@@ -1370,8 +1388,8 @@ export function JobDiscoveryRunCard({
           className="overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-divider)] bg-[var(--color-surface)]">
           <div className="flex items-center gap-2 border-b border-[var(--color-divider)] bg-[var(--color-bg)] px-3 py-2">
             <RefreshCw size={14} className={active ? "animate-spin text-[var(--color-primary)]" : finished ? "text-emerald-500" : "text-amber-500"} />
-            <span className="text-xs font-medium text-[var(--color-text)]">{finished ? "岗位发现已完成" : active ? "岗位发现运行中" : "岗位发现已停止"}</span>
-            <span className="ml-auto text-xs text-[var(--color-muted)]">{status}</span>
+            <span className="text-xs font-medium text-[var(--color-text)]">{finished ? "岗位发现已完成" : active ? "岗位发现运行中" : unknownState ? "岗位发现状态未知" : "岗位发现已停止"}</span>
+            <span className="ml-auto text-xs text-[var(--color-muted)]">{unknownState ? "未知" : status}</span>
           </div>
           <div className="space-y-3 px-3 py-3 text-sm">
             <div className="flex flex-wrap gap-3 text-xs text-[var(--color-muted)]">

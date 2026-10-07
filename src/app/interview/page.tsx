@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
 import {
   Target,
   Sparkles,
@@ -14,6 +13,8 @@ import {
   MessageCircle,
 } from "lucide-react";
 import { HandwritingTitle, WarmButton, PaperCard } from "@/components/design";
+import { PageHeading } from "@/components/ui/workbench-primitives";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/overlay";
 import db from "@/lib/db";
 import InterviewLaunchPanel from "./InterviewLaunchPanel";
 import PracticeRecords from "./PracticeRecords";
@@ -256,26 +257,26 @@ export default function InterviewPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div className="page-heading">
-          <p className="text-[var(--color-muted)] text-sm mb-1">面试准备</p>
-          <div className="flex items-center gap-3">
-            <HandwritingTitle as="h1">面试看板</HandwritingTitle>
+      <PageHeading
+        meta="面试准备"
+        title="面试看板"
+        actions={
+          <>
             {stats.totalCount > 0 && (
-              <span className="text-sm text-[var(--color-muted)]">
+              <span className="self-center text-sm text-[var(--color-muted)]">
                 {stats.totalCount} 次练习 · {stories.length} 个故事
                 {upcomingInterviews.length > 0 && ` · ${upcomingInterviews.length} 场即将面试`}
               </span>
             )}
-          </div>
-        </div>
-        <a href="/agent">
-          <WarmButton>
-            <MessageCircle size={16} className="mr-1.5" />
-            去 Agent 练习
-          </WarmButton>
-        </a>
-      </div>
+            <a href="/agent">
+              <WarmButton>
+                <MessageCircle size={16} className="mr-1.5" />
+                去 Agent 练习
+              </WarmButton>
+            </a>
+          </>
+        }
+      />
 
       {/* Empty state */}
       {!hasData && (
@@ -491,32 +492,14 @@ export default function InterviewPage() {
         </PaperCard>
       )}
 
-      {/* ── Story editor modal ── */}
-      <AnimatePresence>
-        {showStoryEditor && (
-          <>
-            <motion.div
-              className="fixed inset-0 bg-black/20 z-40"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowStoryEditor(false)}
-            />
-            <motion.div
-              className="fixed inset-0 z-50 flex items-center justify-center p-4"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-            >
-              <motion.div
-                className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-[var(--radius-xl)] p-6 w-full max-w-lg max-h-[85vh] overflow-y-auto shadow-[var(--shadow-lg)]"
-                initial={{ scale: 0.95, y: 16 }}
-                animate={{ scale: 1, y: 0 }}
-                exit={{ scale: 0.95, y: 16 }}
-              >
-                <HandwritingTitle as="h2" className="mb-4">
-                  {editStory.id ? "编辑故事" : "添加故事"}
-                </HandwritingTitle>
+      {/* ── Story editor modal(浮层 kit)── */}
+      {showStoryEditor && (
+        <Dialog open onOpenChange={(open) => { if (!open) setShowStoryEditor(false); }}>
+          <DialogContent className="w-[calc(100%-2rem)]! rounded-[var(--radius-xl)]! max-h-[85vh] overflow-y-auto">
+            <DialogTitle className="sr-only">{editStory.id ? "编辑故事" : "添加故事"}</DialogTitle>
+            <HandwritingTitle as="h2" className="mb-4">
+              {editStory.id ? "编辑故事" : "添加故事"}
+            </HandwritingTitle>
 
                 <div className="space-y-3">
                   <div>
@@ -567,11 +550,9 @@ export default function InterviewPage() {
                   </WarmButton>
                   <WarmButton onClick={() => setShowStoryEditor(false)}>取消</WarmButton>
                 </div>
-              </motion.div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+          </DialogContent>
+        </Dialog>
+      )}
 
       {/* Add story FAB */}
       {!showStoryEditor && (

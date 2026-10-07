@@ -1,6 +1,7 @@
 /* ── POST /api/interview/coach/stream — 多轮流式教练对话 SSE ── */
 
 import { checkApiKey, streamDeepSeekChunks, extractSectionsFromBuffer } from "@/lib/stream-utils";
+import { parseLlmJsonValue } from "@/lib/llm-json";
 import type { CoachMode, CoachMessage, QuestionPracticeContext } from "@/types";
 import { COACH_MODES } from "@/types";
 
@@ -206,20 +207,15 @@ function tryExtractFollowUps(
   let riskWarnings: string[] = [];
   const rwMatch = buffer.match(/<<RISKWARNINGS>>\s*([\s\S]*?)\s*<<\/RISKWARNINGS>>/);
   if (rwMatch) {
-    try {
-      riskWarnings = JSON.parse(rwMatch[1].trim());
-    } catch {
-      // ignore parse failures
+    const parsed = parseLlmJsonValue(rwMatch[1].trim());
+    if (Array.isArray(parsed)) {
+      riskWarnings = parsed as string[];
     }
   }
 
-  try {
-    const questions = JSON.parse(fuMatch[1].trim());
-    if (Array.isArray(questions)) {
-      return { questions, riskWarnings };
-    }
-  } catch {
-    // ignore parse failures
+  const parsedQuestions = parseLlmJsonValue(fuMatch[1].trim());
+  if (Array.isArray(parsedQuestions)) {
+    return { questions: parsedQuestions as { question: string; hint: string }[], riskWarnings };
   }
   return null;
 }

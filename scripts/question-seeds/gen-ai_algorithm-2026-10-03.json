@@ -1,0 +1,1015 @@
+{
+  "family": "ai_algorithm",
+  "provenance": "generated_seed",
+  "provenanceDetail": "llm-batch 2026-10-03 (--out mode)",
+  "questions": [
+    {
+      "question": "讲一次你主动推动技术改进但遇到团队阻力，如何说服并落地的经历。",
+      "topic": "推动技术改进与跨团队说服能力",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "说明阻力来源，用数据验证价值，小范围试点，争取关键支持者，迭代推广。"
+    },
+    {
+      "question": "描述一次你需要在信息不完整的情况下做技术决策的经历，你是怎么做的？",
+      "topic": "信息不完整下的决策与风险控制",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "明确已知与假设，设定可逆决策，快速验证，准备备选方案，事后复盘。"
+    },
+    {
+      "question": "讲一次你与跨部门（如运营、销售）合作遇到目标冲突，如何对齐？",
+      "topic": "跨部门目标冲突的对齐与协作",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "理解对方KPI，寻找共同目标，用数据沟通，建立定期同步机制，必要时升级。"
+    },
+    {
+      "question": "你如何评估一个 LLM 生成内容的安全性/合规性？会设计哪些检测与拦截机制？",
+      "topic": "LLM内容安全与合规评估体系",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "分层检测：规则过滤、模型分类、人工审核；红队测试，实时拦截，日志审计。"
+    },
+    {
+      "question": "在推荐/搜索场景中，如何设计多目标融合排序模型？说说你的实践。",
+      "topic": "多目标融合排序模型设计",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "明确业务目标，设计多任务学习或加权融合，线上A/B调权，监控各目标平衡。"
+    },
+    {
+      "question": "解释一下你如何设计一个向量数据库的索引和分片策略来支撑亿级向量检索。",
+      "topic": "亿级向量检索的索引与分片",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "选HNSW/IVF，分片按哈希或范围，副本保证可用，量化压缩，缓存热数据。"
+    },
+    {
+      "question": "在 LLM 应用中，如何做长上下文窗口的有效利用？说说你的技术方案。",
+      "topic": "长上下文窗口的高效利用",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "分块检索、滑动窗口、注意力优化、压缩提示、关键信息前置，评估效果与成本。"
+    },
+    {
+      "question": "你如何监控线上模型的输入分布漂移？发现漂移后采取什么行动？",
+      "topic": "线上模型输入分布漂移监控",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "统计特征分布，PSI/KL散度监控，设置阈值告警，触发重训或回退，分析根因。"
+    },
+    {
+      "question": "假设你的 RAG 系统在回答时间敏感问题时经常给出过时信息，你会如何定位并解决？",
+      "topic": "RAG时间敏感信息过时问题定位",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "检查检索源时效，加入时间过滤，设计时间感知检索，提示词强调时效，定期更新索引。"
+    },
+    {
+      "question": "你的模型在 A/B 实验中核心指标提升但用户投诉增多，你怎么分析并决策？",
+      "topic": "A/B实验指标与投诉冲突分析",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "分群分析，定位投诉来源，检查指标定义，评估长期影响，小流量灰度，决策权衡。"
+    },
+    {
+      "question": "你如何看待 AI 伦理和隐私保护在业务落地中的平衡？",
+      "topic": "AI伦理与隐私保护的落地平衡",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "遵循法规，数据脱敏，用户授权，透明解释，伦理审查，技术手段保障隐私。"
+    },
+    {
+      "question": "在面试最后，你通常会问面试官哪些问题来评估团队的技术水平和项目前景？",
+      "topic": "评估团队与岗位的提问能力",
+      "phase": "reverse",
+      "difficulty": "medium",
+      "answerPoints": "问技术栈、迭代流程、团队分工、成功指标、失败案例、成长路径、业务挑战。"
+    },
+    {
+      "question": "如何设计一个持续学习系统，让线上模型在不遗忘旧知识的前提下吸收新数据？",
+      "topic": "持续学习与灾难性遗忘",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "回放旧数据、正则化约束、参数隔离、影子模式验证、小步快跑上线。"
+    },
+    {
+      "question": "在推荐系统中，如何处理用户行为序列建模中的长尾和冷启动问题？",
+      "topic": "序列建模与冷启动",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "内容特征冷启动、元学习、图嵌入、多任务学习、探索与利用平衡。"
+    },
+    {
+      "question": "讲一次你快速学习一门新技术（如新框架或新模型）并成功应用到项目中的经历。",
+      "topic": "学习能力与落地",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "学习路径、最小验证、迁移经验、解决实际问题、结果量化。"
+    },
+    {
+      "question": "模型整体指标好，但在某个关键少数群体上表现差，你如何诊断和缓解？",
+      "topic": "子群体性能差异与公平性",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "分群评估、偏差归因、重采样/加权、后处理校准、持续监控。"
+    },
+    {
+      "question": "如何设计一个基于用户反馈（点击、修改、点赞）的LLM/RAG系统闭环优化机制？",
+      "topic": "反馈闭环与持续优化",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "反馈采集、去噪、偏好建模、定期回归、A/B验证。"
+    },
+    {
+      "question": "你如何平衡AI项目中的创新探索与工程稳定性/技术债？",
+      "topic": "创新与工程平衡",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "时间盒探索、抽象隔离、灰度发布、偿还计划、优先级排序。"
+    },
+    {
+      "question": "如何防御LLM应用的提示注入攻击？请给出具体检测与拦截方案。",
+      "topic": "提示注入防御",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "输入清洗、指令隔离、输出过滤、权限最小化、红队测试。"
+    },
+    {
+      "question": "描述一次你指导初级工程师或提升团队AI能力的经历。",
+      "topic": "团队培养与知识分享",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "目标设定、代码审查、文档沉淀、分享会、效果评估。"
+    },
+    {
+      "question": "你的推荐系统导致用户陷入信息茧房，你如何衡量并改善？",
+      "topic": "推荐多样性与信息茧房",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "多样性指标、探索策略、用户调研、长期指标、干预实验。"
+    },
+    {
+      "question": "如何为多轮对话的LLM Agent设计上下文管理和状态追踪？",
+      "topic": "多轮对话状态管理",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "摘要压缩、关键信息抽取、外部记忆、状态机、超长截断策略。"
+    },
+    {
+      "question": "如何评估和优化一个生产环境中的Text-to-SQL模型？",
+      "topic": "Text-to-SQL评估与优化",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "执行准确率、模式链接、少样本、错误分析、检索增强。"
+    },
+    {
+      "question": "如何设计一个高并发低延迟的模型推理服务架构？",
+      "topic": "推理服务架构与性能",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "动态批处理、多级缓存、模型并行、自动扩缩容、监控告警。"
+    },
+    {
+      "question": "如何设计一个多租户场景下的模型推理服务，既保证租户间资源隔离，又能动态调整配额？",
+      "topic": "多租户推理服务的资源隔离与动态配额",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "按租户分队列/配额，计算资源隔离或共享池+优先级，监控限流与成本分摊，支持弹性扩缩。"
+    },
+    {
+      "question": "讲一次你负责的AI项目因数据延迟而面临延期，你如何调整计划并与干系人沟通？",
+      "topic": "数据延迟导致项目延期时的范围调整与沟通",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "透明同步风险，重排优先级，先用小样本或合成数据启动，并行推进，设定检查点。"
+    },
+    {
+      "question": "你的对话机器人频繁被用户引导到无关话题，回答质量下降，你会如何设计话题引导和兜底策略？",
+      "topic": "对话机器人话题漂移的检测、引导与兜底",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "意图识别+话题分类，检测漂移后拉回或拒答，设计兜底话术与人工转接，日志分析迭代。"
+    },
+    {
+      "question": "你如何看待AI团队中“快速试错”与“严谨实验”的文化冲突？你会如何推动两者平衡？",
+      "topic": "快速试错与严谨实验的文化平衡",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "探索期允许快速试错但设边界，验证期严格执行实验规范；用指标和复盘统一标准，分层管理。"
+    },
+    {
+      "question": "如何用LLM做结构化信息抽取，并保证字段级准确率？请给出技术方案和评估方法。",
+      "topic": "LLM结构化抽取的schema约束与字段级校验",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "定义JSON Schema，用约束解码/后校验，字段级准确率评测，难例回补与规则兜底，迭代提示。"
+    },
+    {
+      "question": "讲一次你从0到1搭建一个AI功能并上线的经历，其中最关键的技术决策是什么？",
+      "topic": "从0到1落地AI功能的关键决策",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "明确业务目标与验收指标，选最小可用方案，快速验证数据与模型，平衡自研/开源，灰度上线。"
+    },
+    {
+      "question": "你的搜索系统对长尾query召回差，但头部query效果好，如何在不损害头部的情况下提升长尾？",
+      "topic": "搜索长尾query召回优化与头部保护",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "分析长尾类型，补充语义召回/query改写/同义扩展，用多路召回融合，AB验证头部不降。"
+    },
+    {
+      "question": "如何设计一个LLM应用的缓存策略，在降低成本的同时保证回答的新鲜度？",
+      "topic": "LLM应用缓存的分层策略与新鲜度控制",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "分层缓存：精确/语义/前缀，设TTL和新鲜度标签，热点问题缓存，更新时失效，监控命中与成本。"
+    },
+    {
+      "question": "当业务要求使用一个效果更好但可解释性差的模型时，你如何推动决策？",
+      "topic": "效果与可解释性冲突时的决策推动",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "用AB验证业务收益，量化可解释性风险，提供事后解释或影子模式，分场景灰度，对齐合规底线。"
+    },
+    {
+      "question": "在面试最后，你会问哪些问题来判断我们团队的模型监控和告警体系是否成熟？",
+      "topic": "通过反问判断模型监控与告警成熟度",
+      "phase": "reverse",
+      "difficulty": "medium",
+      "answerPoints": "问监控指标覆盖、漂移告警阈值、badcase响应SLA、回归测试频率、值班机制，判断体系化程度。"
+    },
+    {
+      "question": "你的推荐系统新用户留存低，如何诊断这是模型问题还是产品问题？",
+      "topic": "新用户留存低的归因分析与诊断",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "对比新老用户行为，看冷启动策略、内容质量、引导流程；做AB分离模型与产品改动，定位瓶颈。"
+    },
+    {
+      "question": "如何设计一个LLM红队测试方案？请说明测试范围、攻击方式和评估指标。",
+      "topic": "LLM红队测试方案设计与执行",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "覆盖越狱/注入/偏见/隐私等，用自动化+人工攻击，定义危害等级和拦截率，闭环修复再测。"
+    },
+    {
+      "question": "如何为一个生成式摘要系统设计评测框架？会关注哪些指标和评估方法？",
+      "topic": "生成式摘要的评测指标设计",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "结合ROUGE/BERTScore与人工评估，分事实一致性、覆盖度、流畅度；建立标注规范与抽样校验。"
+    },
+    {
+      "question": "描述一次你收到关于你模型或代码的负面反馈，你是如何应对并改进的？",
+      "topic": "接受技术反馈与改进",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "虚心接受，分析根因，制定改进计划，验证效果，感谢反馈者，分享学习。"
+    },
+    {
+      "question": "你的LLM代码助手经常生成包含安全漏洞的代码，你会如何诊断并缓解？",
+      "topic": "代码助手安全漏洞的检测与缓解",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "静态分析集成，安全微调，红队测试，实时漏洞扫描，用户反馈闭环，安全规范提示。"
+    },
+    {
+      "question": "在生产环境中，你如何处理多语言输入或语码混合（code-switching）的NLP任务？",
+      "topic": "多语言与语码混合的模型处理",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "语言识别前置，多语言预训练模型微调，数据增强，分语言评估，回退策略。"
+    },
+    {
+      "question": "描述一次你和同事在技术方案（如模型架构选择）上产生分歧，你是如何解决的？",
+      "topic": "技术分歧的解决与协作",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "用数据实验对比，明确评估标准，尊重对方观点，寻求共识或向上决策，事后复盘。"
+    },
+    {
+      "question": "在AI团队中，你如何制定并推行技术标准与最佳实践，避免各自为战？",
+      "topic": "团队AI技术标准与最佳实践",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "制定编码规范、实验管理、模型版本控制、评审流程；以身作则；定期回顾更新。"
+    },
+    {
+      "question": "如何设计一个LLM幻觉检测与缓解系统？请给出关键模块和流程。",
+      "topic": "LLM幻觉检测与缓解系统设计",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "检索增强、事实核查模块、不确定性估计、自洽性检查、人工审核兜底、持续监控。"
+    },
+    {
+      "question": "你的客服LLM在不同会话中对同一问题给出不一致的答案，你会如何排查和修复？",
+      "topic": "对话系统回答不一致的排查",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "检查温度参数、上下文管理、缓存、检索差异；统一知识源；固定随机种子；A/B验证。"
+    },
+    {
+      "question": "当标注预算非常有限时，你如何为文本分类任务设计数据增强方案？",
+      "topic": "低资源NLP的数据增强",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "回译、同义词替换、EDA、生成式增强、质量过滤、评估增强效果。"
+    },
+    {
+      "question": "描述一次你不得不拒绝业务方或产品经理的不合理需求，因为它在技术上不可行或存在风险。",
+      "topic": "拒绝不合理需求的技术判断",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "解释技术边界与风险，提供替代方案，用数据支撑，保持合作态度，必要时升级。"
+    },
+    {
+      "question": "如何设计一个实时个性化推荐系统？请说明架构、特征更新和线上服务的关键点。",
+      "topic": "实时个性化推荐系统设计",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "流式特征更新，在线学习，低延迟服务，AB测试，冷启动策略。"
+    },
+    {
+      "question": "你如何确保团队的AI工作与公司业务战略保持一致？请举例说明你的做法。",
+      "topic": "AI工作与业务战略对齐",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "定期与业务方沟通，设定可量化目标，优先级排序，展示ROI，调整方向。"
+    },
+    {
+      "question": "如何设计一个LLM工具调用（function calling）的失败重试与降级机制？请给出关键设计点。",
+      "topic": "工具调用可靠性设计",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "分类错误（超时/参数错/无权限），指数退避重试，幂等设计，备选工具或模板回复，记录失败样本迭代提示词。"
+    },
+    {
+      "question": "如何用LLM-as-a-judge做自动化评估，并保证其与人类评分的一致性？",
+      "topic": "LLM自动评估器校准",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "定义评分维度与rubric，抽样人工标注，计算一致性（如Cohen's kappa），校准阈值，监控漂移，避免位置与长度偏见。"
+    },
+    {
+      "question": "如何优化大规模模型训练的数据流水线，避免GPU利用率过低？",
+      "topic": "训练数据流水线性能",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "分析IO/CPU瓶颈，使用WebDataset/LMDB，预取与并行，GPU预处理，异构存储，监控GPU利用率与吞吐。"
+    },
+    {
+      "question": "在推荐系统中，如何检测和消除位置偏差对模型训练的影响？",
+      "topic": "推荐位置偏差处理",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "使用随机曝光/探索数据，位置作为特征或倾向性加权，逆概率加权，CTR/CVR分离，线上A/B验证。"
+    },
+    {
+      "question": "如何设计一个基于知识蒸馏的轻量级模型，替代大模型在特定业务场景？",
+      "topic": "知识蒸馏业务落地",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "教师生成软标签，温度与损失设计，数据增强，学生模型选型，蒸馏后评测，权衡线上延迟与效果。"
+    },
+    {
+      "question": "描述一次你主动发现并修复一个长期存在但没人注意的模型缺陷的经历。",
+      "topic": "主动发现模型缺陷",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "发现问题信号（bad case/监控），根因分析，修复方案，验证效果，推动固化到流程，反思预防。"
+    },
+    {
+      "question": "讲一次你向非技术高层汇报AI项目风险并争取资源的经历。",
+      "topic": "向高层汇报与争取资源",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "用业务语言讲清风险与影响，量化收益/成本，给出选项与建议，管理预期，后续同步进展。"
+    },
+    {
+      "question": "描述一次你处理紧急线上模型事故（如服务宕机或严重bad case）的经历。",
+      "topic": "线上模型事故应急",
+      "phase": "behavioral",
+      "difficulty": "hard",
+      "answerPoints": "快速止损（回滚/降级），定位根因，沟通干系人，修复验证，复盘改进，建立预警。"
+    },
+    {
+      "question": "你的RAG系统对需要多跳推理的问题回答很差，如何定位并改进？",
+      "topic": "RAG多跳推理优化",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "分析失败案例，查询分解/改写，多轮检索，图检索/迭代检索，重排序，合成答案，评估多跳数据集。"
+    },
+    {
+      "question": "你的推荐系统突然出现大量重复推荐（同一商品反复曝光），如何排查和解决？",
+      "topic": "推荐重复曝光排查",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "检查去重逻辑、实时特征延迟、候选集生成、排序多样性约束、A/B实验，加实时去重和多样性打散。"
+    },
+    {
+      "question": "你认为AI工程师最重要的软技能是什么？为什么？",
+      "topic": "AI工程师软技能",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "沟通与业务理解，将技术翻译成价值，跨团队协作，持续学习，伦理意识，举例说明。"
+    },
+    {
+      "question": "在面试最后，你会问面试官哪些问题来判断团队是否重视AI伦理与安全？",
+      "topic": "反向面试伦理安全",
+      "phase": "reverse",
+      "difficulty": "medium",
+      "answerPoints": "问安全流程、红队测试、隐私评审、事故处理、伦理委员会，判断是否真落地而非口号。"
+    },
+    {
+      "question": "讲一次你需要向非技术背景的干系人解释一个复杂AI概念（如注意力机制、嵌入向量）的经历，你是如何让对方理解的？",
+      "topic": "考查将复杂AI概念转化为非技术语言并确保对方理解的能力",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "用类比、可视化；先了解对方背景；聚焦业务价值；确认理解；避免术语。"
+    },
+    {
+      "question": "描述一次你在AI项目中遭遇失败（如模型上线后效果远低于预期）的经历，你从中学到了什么？",
+      "topic": "考查从失败中学习、复盘和成长的能力",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "诚实复盘；分析根因（数据、假设、评估）；具体改进措施；后续成功验证。"
+    },
+    {
+      "question": "在AI团队中，你如何培养和推行负责任的AI文化（如公平性、可解释性、隐私保护）？",
+      "topic": "考查在团队中建立负责任AI实践和文化的能力",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "制定检查清单；培训与案例分享；将伦理指标纳入评估；领导以身作则。"
+    },
+    {
+      "question": "如何设计一个特征存储（Feature Store）来同时支持离线训练和实时在线推理？请说明关键组件和一致性保障。",
+      "topic": "考查特征存储的架构设计及线上线下一致性保障",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "离线/在线存储双写；特征版本控制；时间点正确性；低延迟读取；监控一致性。"
+    },
+    {
+      "question": "在生产环境中，你如何管理模型版本并实现安全的灰度发布和快速回滚？",
+      "topic": "考查模型生命周期管理、灰度发布和回滚机制的设计",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "版本化模型与元数据；影子/金丝雀发布；监控指标；一键回滚；自动化流水线。"
+    },
+    {
+      "question": "如何为一个内容推荐场景设计多臂老虎机（Multi-Armed Bandit）系统？请说明算法选型、探索策略和线上评估。",
+      "topic": "考查多臂老虎机在推荐系统中的设计、探索与利用平衡",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "Thompson采样或UCB；冷启动探索；上下文特征；在线A/B；遗憾值监控。"
+    },
+    {
+      "question": "如何通过量化和剪枝来优化大语言模型的推理延迟和显存占用？请说明具体方法和权衡。",
+      "topic": "考查LLM推理优化中的量化与剪枝技术及精度-效率权衡",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "PTQ/QAT；INT8/INT4；结构化剪枝；精度损失评估；硬件适配。"
+    },
+    {
+      "question": "你的模型上线后性能突然下降，经查是上游数据管道发生了变更。你会如何诊断并解决这个问题？",
+      "topic": "考查数据管道变更导致模型性能下降的排查与恢复能力",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "对比数据分布；检查管道日志；回滚变更；修复数据质量；重训练验证。"
+    },
+    {
+      "question": "你的RAG系统回答正确但引用来源不准确或缺失，你会如何改进引用质量？",
+      "topic": "考查RAG系统中引用准确性的评估与优化",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "检索与生成解耦；引用对齐训练；后处理校验；人工评估；来源置信度。"
+    },
+    {
+      "question": "你如何确保AI团队跟进最新研究并合理应用，同时避免盲目追逐热点？",
+      "topic": "考查团队技术前瞻性与务实落地的平衡能力",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "定期论文分享；小规模实验验证；与业务目标对齐；建立技术雷达；失败复盘。"
+    },
+    {
+      "question": "在面试最后，你会问哪些问题来评估我们团队的ML工程实践和可复现性？",
+      "topic": "考查候选人通过提问评估团队ML工程成熟度与可复现性",
+      "phase": "reverse",
+      "difficulty": "medium",
+      "answerPoints": "实验跟踪工具；数据版本控制；代码审查；环境容器化；模型注册表。"
+    },
+    {
+      "question": "在面试最后，你会问哪些问题来了解我们团队的数据质量和标注流程？",
+      "topic": "考查候选人通过提问评估团队数据质量与标注流程的成熟度",
+      "phase": "reverse",
+      "difficulty": "medium",
+      "answerPoints": "标注指南；一致性检查；数据版本；偏差监控；标注员培训与反馈。"
+    },
+    {
+      "question": "如何设计一个基于向量检索的RAG系统，有效处理“语义相似但无关”的难负例，提升检索精度？",
+      "topic": "RAG检索器难负例处理与去噪",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "难负例挖掘、交叉编码器重排、对比学习、相似度阈值过滤、查询扩展与多路召回融合。"
+    },
+    {
+      "question": "如何评估和提升LLM在超长上下文（如100K token）中的关键信息检索能力？请给出评测方法和优化手段。",
+      "topic": "长上下文信息检索评测与优化",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "Needle-in-a-haystack、多针多跳测试、位置编码外推、分块检索重排、关键信息压缩与注意力优化。"
+    },
+    {
+      "question": "如何为多模态RAG设计图文混合文档的检索与生成架构？请说明关键模块和挑战。",
+      "topic": "多模态RAG架构设计",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "图文联合embedding、OCR与版面解析、多向量索引、跨模态重排、生成时引用与一致性校验。"
+    },
+    {
+      "question": "如何设计一个模型监控系统，自动检测数据漂移、概念漂移和性能退化？",
+      "topic": "模型监控与漂移检测系统",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "统计检验、PSI/KL、影子模型、在线指标、告警分级、根因分析与自动回滚联动。"
+    },
+    {
+      "question": "如何优化embedding模型的领域适应，使垂直领域检索更准确？请给出训练和评估方案。",
+      "topic": "Embedding领域适应",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "领域对比学习、难负例采样、合成数据、指令微调、领域评测集、召回率与MRR评估。"
+    },
+    {
+      "question": "如何设计一个多任务学习模型，同时优化点击率、转化率和用户停留时长？请说明损失平衡和冲突处理。",
+      "topic": "多任务学习目标平衡",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "共享底层、MMoE/PLE、不确定性加权、梯度冲突处理、离线在线联合评估。"
+    },
+    {
+      "question": "描述一次你为了长期技术收益，主动承担短期项目延期风险并说服团队的经历。",
+      "topic": "技术长期收益与短期风险权衡",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "背景、风险量化、干系人沟通、分阶段交付、最终结果、反思与可复用经验。"
+    },
+    {
+      "question": "讲一次你不得不推翻自己之前技术方案并重新设计的经历，你如何决策和沟通？",
+      "topic": "推翻自己方案的决策与沟通",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "触发原因、数据验证、承认错误、替代方案、团队沟通、经验教训与后续预防。"
+    },
+    {
+      "question": "描述一次你与产品经理在AI功能“智能程度”预期上不一致，如何对齐期望并达成共识？",
+      "topic": "产品预期管理与对齐",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "明确场景边界、演示原型、指标定义、风险说明、分阶段交付、共识与验收标准。"
+    },
+    {
+      "question": "你的多模态文档问答系统对表格和图表中的问题回答很差，你会如何定位并改进？",
+      "topic": "多模态文档问答表格图表处理",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "版面解析、表格结构识别、图表转文本、混合检索、专项评测集与错误归因。"
+    },
+    {
+      "question": "你认为一个健康的AI团队应该如何处理模型失败和错误？请描述你推崇的文化。",
+      "topic": "AI团队错误处理文化",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "非指责复盘、快速止损、根因分析、知识沉淀、心理安全、从失败中学习与迭代。"
+    },
+    {
+      "question": "在面试最后，你会问哪些问题来了解团队的AI产品迭代节奏和决策流程？",
+      "topic": "面试反问：迭代节奏与决策流程",
+      "phase": "reverse",
+      "difficulty": "medium",
+      "answerPoints": "迭代周期、决策权归属、需求来源、实验流程、失败复盘机制、路线图更新频率。"
+    },
+    {
+      "question": "如何设计一个知识图谱增强的RAG系统，以提升复杂推理问题的回答质量？",
+      "topic": "知识图谱增强RAG",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "图检索与向量检索融合，实体链接，多跳推理，并设计图结构提示。"
+    },
+    {
+      "question": "描述一次你在AI项目中决定自研模型还是采用现成API的经历，你是如何权衡的？",
+      "topic": "自研与采购AI能力的决策",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "考虑成本、数据隐私、定制化需求、迭代速度，评估长期维护，并量化ROI。"
+    },
+    {
+      "question": "你的推荐系统多样性低导致用户疲劳，如何诊断并提升多样性？",
+      "topic": "推荐多样性诊断与提升",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "分析品类覆盖、基尼系数；引入多样性重排、MMR、探索策略，并A/B测试。"
+    },
+    {
+      "question": "你如何管理AI团队的技术债务，并平衡创新与维护？",
+      "topic": "AI团队技术债务管理",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "定期评估债务，制定偿还计划，预留创新时间，并建立代码审查与重构文化。"
+    },
+    {
+      "question": "如何设计一个主动学习流水线，以降低文本分类任务的标注成本？",
+      "topic": "主动学习降低标注成本",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "选择不确定性高或代表性样本，迭代标注与训练，评估标注效率提升。"
+    },
+    {
+      "question": "讲一次你推动跨职能团队采纳一项新AI工具或流程的经历。",
+      "topic": "跨职能推动AI工具落地",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "识别痛点，小范围试点，展示收益，培训支持，并建立反馈循环。"
+    },
+    {
+      "question": "你的LLM聊天机器人回答冗长且延迟高，如何优化使其更简洁快速？",
+      "topic": "优化LLM聊天机器人的冗长与延迟",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "提示工程约束长度，模型蒸馏或量化，流式输出，缓存，并设置最大token。"
+    },
+    {
+      "question": "你如何在一个远程或分布式的AI团队中保持高效的协作和沟通？",
+      "topic": "远程AI团队协作",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "异步沟通，文档化，定期视频同步，共享看板，明确责任与截止日期。"
+    },
+    {
+      "question": "如何设计一个LLM应用的提示注入攻击检测与缓解系统？",
+      "topic": "提示注入攻击检测与缓解",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "输入清洗与隔离，指令与数据分离，输出过滤，多模型投票，并持续红队测试。"
+    },
+    {
+      "question": "描述一次你在AI项目中遇到严重数据质量问题，如何推动解决并保证模型效果？",
+      "topic": "处理数据质量问题",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "定位问题源头，与数据团队协作，建立数据校验，并重新训练评估模型。"
+    },
+    {
+      "question": "在面试最后，你会问哪些问题来评估团队对模型可解释性的重视程度？",
+      "topic": "评估团队对模型可解释性的重视",
+      "phase": "reverse",
+      "difficulty": "medium",
+      "answerPoints": "询问可解释性工具、决策流程、业务沟通方式，以及是否纳入模型评审。"
+    },
+    {
+      "question": "在面试最后，你会问哪些问题来了解团队对AI模型公平性和偏见检测的实践？",
+      "topic": "评估团队对模型公平性的实践",
+      "phase": "reverse",
+      "difficulty": "medium",
+      "answerPoints": "询问公平性指标、偏见检测工具、审计流程，以及如何平衡公平与性能。"
+    },
+    {
+      "question": "如何设计一个基于RLHF的大语言模型对齐训练流程？请说明奖励模型训练、策略优化和评估的关键点。",
+      "topic": "考查RLHF三阶段流程与工程要点",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "先SFT，再训练奖励模型，再用PPO/DPO优化策略；注意奖励黑客、KL约束、人工评估与红队。"
+    },
+    {
+      "question": "如何为特定行业（如医疗或法律）的语音识别系统设计领域自适应方案？请给出数据、模型和评估策略。",
+      "topic": "考查语音识别领域自适应的数据与建模方法",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "收集领域音频与文本，做语言模型和声学模型微调；可用数据增强、课程学习；评估用领域WER和关键实体准确率。"
+    },
+    {
+      "question": "如何设计一个AI生成文本的检测系统？请说明关键特征、模型选择和评估挑战。",
+      "topic": "考查AI生成文本检测的特征、模型与评估",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "融合统计特征（困惑度、burstiness）与微调分类器；注意跨模型泛化、对抗改写和假阳性；需持续更新数据。"
+    },
+    {
+      "question": "你的推荐系统对新用户冷启动效果很差，你会如何设计冷启动策略并评估其效果？",
+      "topic": "考查推荐系统冷启动策略设计与评估",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "利用注册信息、上下文和热门内容；用多臂老虎机快速探索；评估新用户CTR、留存和探索效率。"
+    },
+    {
+      "question": "你的搜索系统对长尾查询召回率低，你会如何诊断根因并设计优化方案？",
+      "topic": "考查长尾查询召回问题的诊断与优化",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "分析查询日志和倒排索引覆盖；用查询改写、同义扩展、稠密检索；评估Recall@K和长尾分层指标。"
+    },
+    {
+      "question": "描述一次你主导的AI项目需要协调多个团队（如数据、工程、产品）的经历，你如何确保顺利交付？",
+      "topic": "考查跨团队AI项目协调与交付能力",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "明确RACI和里程碑，建立定期同步与风险看板；用接口文档和验收标准对齐；主动解决阻塞并向上管理。"
+    },
+    {
+      "question": "描述一次你在AI项目中面临隐私与模型效果之间的伦理困境，你是如何决策和沟通的？",
+      "topic": "考查隐私与效果冲突下的伦理决策",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "先做影响评估，列出法律与用户风险；与法务、安全评审；选择差分隐私或数据最小化，透明沟通权衡。"
+    },
+    {
+      "question": "你如何设计AI团队的模型发布评审流程，以平衡快速迭代与安全合规？",
+      "topic": "考查模型发布评审流程设计",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "设分级评审：低风险自动检查，高风险人工审查；检查数据、偏差、安全、回滚；用清单和自动化门禁。"
+    },
+    {
+      "question": "在面试最后，你会问哪些问题来了解团队AI模型的部署和运维成熟度？",
+      "topic": "考查通过反问评估部署运维成熟度",
+      "phase": "reverse",
+      "difficulty": "medium",
+      "answerPoints": "问部署频率、监控告警、灰度回滚、SLO、事故复盘和on-call；了解是否有自动化CI/CD和模型注册表。"
+    },
+    {
+      "question": "在面试最后，你会问哪些问题来评估团队将AI研究转化为产品的能力？",
+      "topic": "考查通过反问评估研究到产品转化",
+      "phase": "reverse",
+      "difficulty": "medium",
+      "answerPoints": "问研究项目到上线的周期、失败案例、产品指标闭环、跨职能协作；了解是否有试点到规模化的路径。"
+    },
+    {
+      "question": "如何设计一个多模态大模型的对抗鲁棒性测试方案？请说明攻击方法和防御策略。",
+      "topic": "考查多模态对抗鲁棒性测试与防御",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "覆盖文本、图像、音频扰动攻击，如FGSM、PGD、跨模态对齐攻击；用对抗训练、输入净化、一致性约束防御。"
+    },
+    {
+      "question": "你的LLM应用在高峰时段响应延迟超过SLA，你会如何做容量规划和性能优化？",
+      "topic": "考查LLM应用高峰SLA下的容量规划与优化",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "分析QPS、延迟分布和瓶颈；用缓存、批处理、量化、模型路由；做压测和自动扩缩容，设定降级策略。"
+    },
+    {
+      "question": "描述一次你在模型效果和推理延迟之间做权衡的经历，你是如何决策的？",
+      "topic": "考察在业务约束下做技术权衡的能力",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "明确业务SLA，量化精度损失，尝试量化/剪枝，A/B测试验证，沟通权衡依据。"
+    },
+    {
+      "question": "如何设计一个系统来检测和纠正大规模训练数据中的标签噪声？",
+      "topic": "数据质量与标签噪声处理",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "交叉验证发现噪声，置信学习，人工审核，鲁棒损失函数，数据清洗迭代。"
+    },
+    {
+      "question": "你的推荐模型离线AUC提升显著，但线上A/B测试核心指标无变化，如何排查？",
+      "topic": "离线与线上效果不一致的排查",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "检查特征穿越，训练/服务偏差，A/B流量分配，指标定义，用户分群分析。"
+    },
+    {
+      "question": "你如何在一个AI团队中推行代码审查和单元测试文化？",
+      "topic": "工程规范与质量文化",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "设立CI/CD，强制PR审查，写测试用例，分享最佳实践，领导以身作则。"
+    },
+    {
+      "question": "在面试最后，你会问哪些问题来评估团队的数据基础设施和管道可靠性？",
+      "topic": "评估数据工程成熟度",
+      "phase": "reverse",
+      "difficulty": "medium",
+      "answerPoints": "数据版本管理，管道监控，数据质量检查，故障恢复，数据血缘。"
+    },
+    {
+      "question": "如何设计一个多模态推荐系统，同时利用文本和图像信息？",
+      "topic": "多模态特征融合与推荐",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "分别编码文本和图像，特征融合，多任务学习，冷启动利用，在线服务优化。"
+    },
+    {
+      "question": "讲一次你给同事的模型设计提出建设性反馈的经历，你是如何沟通的？",
+      "topic": "技术反馈与协作沟通",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "先肯定优点，用数据说话，提出具体改进，共同实验验证，保持尊重。"
+    },
+    {
+      "question": "你的LLM代码助手生成了不安全的代码，你会如何检测和缓解？",
+      "topic": "LLM生成内容的安全风险控制",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "静态分析检测，安全规则过滤，提示工程引导，人工审核，持续监控。"
+    },
+    {
+      "question": "在多标签分类任务中，你如何处理类别不平衡问题？",
+      "topic": "多标签分类的类别不平衡",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "重采样，类别权重，Focal Loss，阈值调整，评估用mAP等指标。"
+    },
+    {
+      "question": "描述一次你没有直接权限却成功影响了一个技术决策的经历。",
+      "topic": "无授权影响力",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "建立信任，数据论证，寻找盟友，试点验证，尊重决策流程。"
+    },
+    {
+      "question": "你如何推动AI团队采用可解释性工具和技术？",
+      "topic": "可解释性实践推广",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "引入SHAP/LIME，定期解释案例，将可解释性纳入评审，培训，权衡性能。"
+    },
+    {
+      "question": "在面试最后，你会问哪些问题来了解团队如何衡量AI项目的成功？",
+      "topic": "评估项目成功指标",
+      "phase": "reverse",
+      "difficulty": "medium",
+      "answerPoints": "业务指标定义，离线在线一致性，长期影响，失败案例复盘，用户反馈闭环。"
+    },
+    {
+      "question": "如何设计一个面向流式传感器数据的实时异常检测系统，并处理概念漂移？",
+      "topic": "考查实时异常检测系统设计与概念漂移处理",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "滑动窗口特征、在线学习模型、漂移检测触发再训练、低延迟架构"
+    },
+    {
+      "question": "如何在模型训练中应用差分隐私，并说明隐私预算与模型效果的权衡？",
+      "topic": "考查差分隐私实现与隐私-效果权衡",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "DP-SGD、噪声注入、隐私预算ε、效果下降与隐私保护平衡"
+    },
+    {
+      "question": "如何设计知识蒸馏流程将大模型压缩至边缘设备，并保证精度？",
+      "topic": "考查知识蒸馏流程与边缘部署优化",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "教师-学生架构、软标签损失、中间层对齐、量化感知训练"
+    },
+    {
+      "question": "如何为一个新的排序算法设计A/B测试，包括指标、样本量和护栏指标？",
+      "topic": "考查A/B测试实验设计能力",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "核心指标与护栏指标、最小样本量计算、随机分流、显著性检验"
+    },
+    {
+      "question": "在生产ML管道中，如何处理缺失数据并保证模型稳定性？",
+      "topic": "考查缺失数据处理与管道鲁棒性",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "缺失模式分析、多重插补、缺失指示特征、监控缺失率变化"
+    },
+    {
+      "question": "描述一次你指导初级AI/ML工程师的经历，你是如何帮助其成长的？",
+      "topic": "考查技术指导与团队培养能力",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "设定目标、代码审查、结对编程、鼓励独立解决问题"
+    },
+    {
+      "question": "描述一次你在AI项目中信息不完整时做出关键决策的经历。",
+      "topic": "考查不完整信息下的决策能力",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "评估风险、快速验证假设、设定决策边界、事后复盘"
+    },
+    {
+      "question": "描述一次你在资源有限的情况下，如何对多个AI项目进行优先级排序。",
+      "topic": "考查项目优先级管理与资源分配",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "业务价值与成本评估、依赖关系、快速交付高影响项、沟通对齐"
+    },
+    {
+      "question": "你的图像分类模型在验证集上表现良好，但在真实场景中因分布偏移而效果差，如何诊断并改进？",
+      "topic": "考查分布偏移的诊断与领域适应",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "数据切片分析、领域适应、数据增强、重新采样、在线监控"
+    },
+    {
+      "question": "你的欺诈检测模型误报率高，导致客户投诉，如何在保持召回率的同时降低误报？",
+      "topic": "考查误报率优化与业务权衡",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "调整阈值、代价敏感学习、特征工程、人工审核反馈闭环"
+    },
+    {
+      "question": "你如何确保AI团队在招聘和项目分配中促进多样性与包容性？",
+      "topic": "考查团队多样性与包容性建设",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "结构化面试、多元化招聘渠道、包容性文化、公平项目分配"
+    },
+    {
+      "question": "在面试最后，你会问哪些问题来了解团队的实验文化和A/B测试实践？",
+      "topic": "考查对实验文化与A/B测试的评估",
+      "phase": "reverse",
+      "difficulty": "medium",
+      "answerPoints": "实验频率、失败处理、指标定义、决策流程、工具支持"
+    },
+    {
+      "question": "如何设计一个多智能体协作框架来解决复杂的软件工程任务？请说明角色分配、通信协议和冲突解决机制。",
+      "topic": "多智能体协作框架设计",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "定义角色(如规划、编码、测试)，设计消息传递与共享内存，引入仲裁机制解决冲突，通过沙箱执行验证结果。"
+    },
+    {
+      "question": "如何为LLM设计长期记忆机制，使其在多轮对话中保持长期一致性和个性？请说明存储、检索和遗忘策略。",
+      "topic": "LLM长期记忆机制",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "分层存储(短期/长期)，用向量库检索相关记忆，设计遗忘曲线和摘要更新，保持角色设定一致性。"
+    },
+    {
+      "question": "如何设计一个联邦学习系统，在保护用户隐私的同时处理非独立同分布数据？请给出聚合策略和评估方案。",
+      "topic": "联邦学习与非IID数据",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "采用个性化联邦或元学习，加权聚合按数据量/质量，评估全局与本地指标，引入差分隐私增强保护。"
+    },
+    {
+      "question": "描述一次你向非技术高管解释复杂AI模型限制的经历，你如何确保他们理解风险并做出明智决策？",
+      "topic": "向高管解释模型限制",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "用类比和可视化，聚焦业务影响而非技术细节，明确不确定性和边界，提供风险缓解选项，确认理解。"
+    },
+    {
+      "question": "描述一次你在模型上线后出现严重故障，你如何组织应急响应和复盘？",
+      "topic": "模型上线故障应急",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "快速回滚或降级，成立应急小组，定位根因，透明沟通，事后撰写复盘并改进监控和流程。"
+    },
+    {
+      "question": "描述一次你推动团队从模型为中心转向数据为中心的AI开发方式的经历。",
+      "topic": "推动数据为中心的文化",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "展示数据质量对效果的提升，引入数据版本和标注流程，调整评估指标，培训团队，小步试点推广。"
+    },
+    {
+      "question": "你的多语言LLM在低资源语言上表现极差，你会如何诊断并改进？",
+      "topic": "多语言LLM低资源语言优化",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "分析 tokenizer 覆盖和语言分布，采用跨语言迁移、数据增强、适配器微调，评估时用低资源语言测试集。"
+    },
+    {
+      "question": "你的对话系统在长对话中逐渐偏离主题，如何诊断并修复？",
+      "topic": "长对话主题漂移修复",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "检查上下文窗口和记忆衰减，引入主题追踪和摘要，用强化学习奖励主题一致性，人工评估对话质量。"
+    },
+    {
+      "question": "你的推荐系统在促销期间流量激增导致服务不稳定，如何设计降级和弹性方案？",
+      "topic": "推荐系统流量激增弹性",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "设计多级降级(缓存、简化模型、默认推荐)，自动扩缩容，压测和限流，保障核心链路可用。"
+    },
+    {
+      "question": "你认为AI团队应该如何平衡快速实验与负责任AI的原则？请描述你推崇的文化。",
+      "topic": "快速实验与负责任AI平衡",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "建立伦理审查和风险分级，鼓励小范围实验，失败快速回滚，将负责任AI纳入考核，开放讨论文化。"
+    },
+    {
+      "question": "在面试最后，你会问哪些问题来了解团队对AI模型安全性和红队测试的实践？",
+      "topic": "了解团队AI安全与红队测试",
+      "phase": "reverse",
+      "difficulty": "medium",
+      "answerPoints": "问红队频率、攻击面覆盖、漏洞修复流程、安全指标纳入发布标准、是否有专职安全团队。"
+    },
+    {
+      "question": "在面试最后，你会问哪些问题来评估团队对多模态AI的投入和规划？",
+      "topic": "评估团队多模态AI投入",
+      "phase": "reverse",
+      "difficulty": "medium",
+      "answerPoints": "问多模态项目占比、数据采集和标注能力、模型架构选型、跨模态评估方法、未来路线图。"
+    }
+  ]
+}

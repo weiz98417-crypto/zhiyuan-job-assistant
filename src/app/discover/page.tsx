@@ -13,6 +13,8 @@ import {
   HandwritingTitle, WarmButton, PaperCard,
   StaggerList, StaggerItem,
 } from "@/components/design";
+import { PageHeading, EmptyState } from "@/components/ui/workbench-primitives";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/overlay";
 import {
   DISCOVERY_VISIBLE_STATUSES,
   fetchDiscoveryJobDetail,
@@ -379,28 +381,28 @@ export default function DiscoverPage() {
   return (
     <div className="space-y-6">
       {/* ── Header ─────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div className="page-heading">
-          <p className="text-[var(--color-muted)] text-sm mb-1">
-            {loading ? "加载中..."
-              : visibleJobs.length > 0 ? `${visibleJobs.length} 个新机会`
-              : "企业招聘官网 · 自动发现"}
-          </p>
-          <HandwritingTitle as="h1">岗位发现</HandwritingTitle>
-        </div>
-        <div className="flex items-center gap-2">
-          <WarmButton variant="ghost" size="sm" onClick={() => setShowScanIntro(!showScanIntro)}>
-            <Settings size={14} className="mr-1" />
-            说明
-          </WarmButton>
-          {scanning && (
-            <WarmButton variant="ghost" size="sm" onClick={cancelScan}>
-              <X size={14} className="mr-1" />
-              取消扫描
+      <PageHeading
+        meta={
+          loading ? "加载中..."
+            : visibleJobs.length > 0 ? `${visibleJobs.length} 个新机会`
+            : "企业招聘官网 · 自动发现"
+        }
+        title="岗位发现"
+        actions={
+          <>
+            <WarmButton variant="ghost" size="sm" onClick={() => setShowScanIntro(!showScanIntro)}>
+              <Settings size={14} className="mr-1" />
+              说明
             </WarmButton>
-          )}
-        </div>
-      </div>
+            {scanning && (
+              <WarmButton variant="ghost" size="sm" onClick={cancelScan}>
+                <X size={14} className="mr-1" />
+                取消扫描
+              </WarmButton>
+            )}
+          </>
+        }
+      />
 
       <PaperCard padding="sm">
         <div className="grid gap-3 md:grid-cols-[1.2fr_1fr_0.8fr_0.7fr_auto] items-end">
@@ -807,7 +809,7 @@ export default function DiscoverPage() {
       {activeTab === "history" && (
         <div className="space-y-3">
           {history.length === 0 ? (
-            <p className="text-center text-[var(--color-muted)] text-sm py-8">暂无扫描历史</p>
+            <EmptyState title="暂无扫描历史" />
           ) : (
             <>
               {history.map(entry => (
@@ -844,23 +846,15 @@ export default function DiscoverPage() {
         </div>
       )}
 
-      {/* ── Eval slide-over panel ──────────────────────────────── */}
-      <AnimatePresence>
-        {evalJob && (
-          <>
-            <motion.div className="fixed inset-0 bg-black/20 z-40" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setEvalJob(null)} />
-            <motion.div
-              className="fixed right-0 top-0 bottom-0 w-full max-w-md bg-[var(--color-surface)] border-l border-[var(--color-border)] z-50 shadow-[var(--shadow-lg)] overflow-y-auto"
-              initial={{ x: 320 }} animate={{ x: 0 }} exit={{ x: 320 }}
-              transition={{ type: "spring", damping: 25, stiffness: 200 }}
-            >
-              <div className="p-6 space-y-4">
-                <div className="flex items-center justify-between">
-                  <HandwritingTitle as="h2" className="text-lg">JD 详情</HandwritingTitle>
-                  <button onClick={() => setEvalJob(null)} className="p-1 rounded-full hover:bg-[var(--color-divider)] transition-colors">
-                    <X size={18} className="text-[var(--color-muted)]" />
-                  </button>
-                </div>
+      {/* ── Eval slide-over panel(浮层 kit)──────────────────────── */}
+      {evalJob && (
+        <Dialog open onOpenChange={(open) => { if (!open) setEvalJob(null); }}>
+          <DialogContent side="right" className="max-w-md! overflow-y-auto">
+            <DialogTitle className="sr-only">JD 详情</DialogTitle>
+            <div className="p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <HandwritingTitle as="h2" className="text-lg">JD 详情</HandwritingTitle>
+              </div>
                 <PaperCard padding="md">
                   <p className="text-xs text-[var(--color-muted)] mb-1">{evalJob.company}</p>
                   <p className="text-sm font-medium text-[var(--color-text)]">{evalJob.title}</p>
@@ -908,11 +902,10 @@ export default function DiscoverPage() {
                     ) : null}
                   </div>
                 )}
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }

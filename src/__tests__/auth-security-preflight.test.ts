@@ -46,7 +46,7 @@ describe('authentication security deployment preflight', () => {
   });
 
   it('allows an explicitly deferred alert webhook without weakening other gates', () => {
-    const environment = { ...validEnvironment };
+    const environment: Record<string, string> = { ...validEnvironment };
     delete environment.SECURITY_ALERT_WEBHOOK_URL;
     environment.SECURITY_ALERT_WEBHOOK_REQUIRED = 'false';
 
@@ -54,7 +54,7 @@ describe('authentication security deployment preflight', () => {
   });
 
   it('keeps the alert webhook required by default', () => {
-    const environment = { ...validEnvironment };
+    const environment: Record<string, string> = { ...validEnvironment };
     delete environment.SECURITY_ALERT_WEBHOOK_URL;
 
     expect(() => validateAuthSecurityConfig(environment)).toThrow(/SECURITY_ALERT_WEBHOOK_URL must use https/);

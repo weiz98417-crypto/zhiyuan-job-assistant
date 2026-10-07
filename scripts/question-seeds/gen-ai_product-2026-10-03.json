@@ -1,0 +1,973 @@
+{
+  "family": "ai_product",
+  "provenance": "generated_seed",
+  "provenanceDetail": "llm-batch 2026-10-03 (--out mode)",
+  "questions": [
+    {
+      "question": "你如何设计一个 AI 产品的数据飞轮？从用户反馈到模型迭代的闭环怎么搭建？",
+      "topic": "数据飞轮设计",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "明确反馈收集点、清洗标注流程、迭代周期、指标验证。"
+    },
+    {
+      "question": "在选择第三方大模型 API 时，你会从哪些维度评估？如何做成本与效果的权衡？",
+      "topic": "模型选型评估",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "效果、延迟、成本、隐私、可定制性，A/B测试。"
+    },
+    {
+      "question": "如何设计多轮对话流程来完成一个复杂任务（如订机票）？关键节点有哪些？",
+      "topic": "多轮对话设计",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "意图识别、槽位填充、上下文管理、异常处理、确认机制。"
+    },
+    {
+      "question": "AI 功能响应延迟较高时，你会用哪些产品手段来提升用户体验？",
+      "topic": "延迟体验优化",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "流式输出、进度提示、预加载、异步通知、兜底文案。"
+    },
+    {
+      "question": "在低数据场景下（如冷启动），你会如何设计 AI 功能？",
+      "topic": "低数据场景设计",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "检索增强、少样本提示、迁移学习、人工规则兜底。"
+    },
+    {
+      "question": "如何设计一个人机协同的 AI 工作流？人在回路中应该介入哪些环节？",
+      "topic": "人机协同设计",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "置信度阈值、人工审核、反馈标注、权限设计。"
+    },
+    {
+      "question": "如何衡量一个 AI 功能的 ROI？你会关注哪些指标？",
+      "topic": "AI 功能 ROI",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "成本节省、收入提升、用户留存、效率指标，对比基线。"
+    },
+    {
+      "question": "设计 AI 产品时，如何考虑移动端和 Web 端的差异？",
+      "topic": "多端 AI 设计",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "交互方式、输入限制、计算资源、使用场景、通知机制。"
+    },
+    {
+      "question": "在高风险场景（如医疗、金融）中，AI 产品的设计原则有哪些？",
+      "topic": "高风险 AI 设计",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "可解释性、人工复核、安全边界、合规、错误恢复。"
+    },
+    {
+      "question": "当大模型服务不可用或超时时，你的产品降级策略是什么？",
+      "topic": "降级策略",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "缓存结果、规则兜底、友好提示、重试机制、监控告警。"
+    },
+    {
+      "question": "如何管理大规模产品中的 prompt？版本控制、测试、上线流程怎么设计？",
+      "topic": "Prompt 管理",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "版本库、A/B测试、回归测试、灰度发布、监控。"
+    },
+    {
+      "question": "如何设计一个基于 LLM 的个性化推荐功能？",
+      "topic": "LLM 个性化推荐",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "用户画像、上下文注入、反馈循环、多样性控制。"
+    },
+    {
+      "question": "多模态 AI 产品（如图文、语音）的设计要点有哪些？",
+      "topic": "多模态产品设计",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "输入输出一致性、跨模态理解、延迟、成本、交互反馈。"
+    },
+    {
+      "question": "设计一个 Agent 产品时，工具调用和任务规划的产品考量是什么？",
+      "topic": "Agent 工具调用",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "工具描述、错误处理、任务分解、状态管理、用户控制。"
+    },
+    {
+      "question": "面向企业客户的 AI 产品，如何满足安全与合规要求？",
+      "topic": "企业安全合规",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "数据隔离、权限控制、审计日志、私有化部署、合规认证。"
+    },
+    {
+      "question": "你负责的 AI 助手用户留存率低，你会如何诊断并制定改进方案？",
+      "topic": "留存诊断",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "分析流失节点、用户访谈、使用数据、竞品对比、迭代实验。"
+    },
+    {
+      "question": "公司要你为法律行业设计一个 AI 合同审查工具，你会如何从 0 到 1 规划？",
+      "topic": "行业 AI 规划",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "用户调研、场景拆解、数据获取、模型选型、MVP 验证。"
+    },
+    {
+      "question": "你的 AI 功能成本过高，如何在不影响体验的前提下优化？",
+      "topic": "成本优化",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "模型蒸馏、缓存、请求合并、动态降级、用量监控。"
+    },
+    {
+      "question": "你的 AI 产品在某个垂直场景效果很好，如何扩展到其他场景？",
+      "topic": "场景扩展",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "场景共性、数据迁移、模型微调、用户教育、试点。"
+    },
+    {
+      "question": "你的 AI 产品被用户以非预期方式使用，可能带来风险，你会如何处理？",
+      "topic": "非预期使用",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "监控检测、使用条款、限制功能、用户教育、应急响应。"
+    },
+    {
+      "question": "讲一次你必须在信息不完整的情况下做 AI 产品决策的经历。",
+      "topic": "不完整信息决策",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "决策框架、假设验证、风险评估、快速迭代、复盘。"
+    },
+    {
+      "question": "描述一次你主导的 AI 产品失败经历，你学到了什么？",
+      "topic": "失败反思",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "失败原因、责任担当、改进措施、后续成功。"
+    },
+    {
+      "question": "讲一次你说服管理层投资一个不确定的 AI 项目的经历。",
+      "topic": "向上说服",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "价值论证、小步验证、资源规划、风险沟通。"
+    },
+    {
+      "question": "举一个你快速学习一项新 AI 技术并应用到产品中的例子。",
+      "topic": "快速学习",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "学习方法、实践应用、团队分享、成果。"
+    },
+    {
+      "question": "描述一次你必须在用户体验和技术可行性之间做权衡的经历。",
+      "topic": "体验与可行性权衡",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "用户价值、技术限制、折中方案、沟通。"
+    },
+    {
+      "question": "讲一次你处理 AI 产品线上危机的经历。",
+      "topic": "危机处理",
+      "phase": "behavioral",
+      "difficulty": "hard",
+      "answerPoints": "快速响应、根因分析、用户沟通、修复、复盘。"
+    },
+    {
+      "question": "你如何保持对 AI 领域最新进展的跟踪？",
+      "topic": "持续学习",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "信息源、实践、社区、输出。"
+    },
+    {
+      "question": "你如何看待 AI 产品中的伦理问题？举一个你实际遇到的例子。",
+      "topic": "伦理意识",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "公平性、透明度、隐私、责任、案例。"
+    },
+    {
+      "question": "在 AI 产品团队中，你如何推动跨职能协作？",
+      "topic": "跨职能协作",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "共同目标、沟通机制、信任建立、冲突解决。"
+    },
+    {
+      "question": "如果你来面试这个岗位，你会问我们哪三个问题来评估这个机会？",
+      "topic": "反向提问",
+      "phase": "reverse",
+      "difficulty": "medium",
+      "answerPoints": "产品战略、团队文化、成功指标、资源支持。"
+    },
+    {
+      "question": "如何为一个基于 LLM 的功能设计完整的评估体系？离线评测集、在线 A/B 和人工评审分别该怎么用？",
+      "topic": "LLM 功能评估体系的设计能力",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "离线集覆盖典型/边界/对抗样本并按版本回归；在线看任务完成率、采纳率、重试率；人工评审校准主观质量，三者对齐同一套评分标准。"
+    },
+    {
+      "question": "面向 C 端用户时，你会用哪些产品手段降低大模型的幻觉，并在无法避免时让用户察觉？",
+      "topic": "幻觉治理的产品手段",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "约束知识来源与检索增强，高风险回答附引用与置信提示；用『请核实』文案、来源链接、一键反馈；对关键操作加确认步骤，减少盲目信任。"
+    },
+    {
+      "question": "给定一个具体业务场景，你会如何判断该用 prompt 工程、RAG 还是微调？决策依据是什么？",
+      "topic": "LLM 技术方案选型的产品判断",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "先看知识时效性与私域性：静态能力用 prompt，动态/私域知识用 RAG，风格格式稳定用微调；以最小成本先验证 prompt，再按数据缺口决定升级。"
+    },
+    {
+      "question": "在 AI 生成答案中，你会如何设计引用与溯源交互来建立用户信任？",
+      "topic": "溯源交互与信任设计",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "答案句子级挂载来源，悬停/点击可预览原文与定位；标注无来源的部分；让用户能一键跳转与反馈，用透明度换信任。"
+    },
+    {
+      "question": "为 AI 助手设计记忆能力时，你会怎么区分长期偏好与会话上下文？如何把控制权交给用户？",
+      "topic": "AI 记忆功能的设计与用户控制",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "会话上下文自动维护，长期记忆需显式触发并可在设置中查看、编辑、删除；敏感信息默认不记忆，用『已记住/忘记』反馈让用户有掌控感。"
+    },
+    {
+      "question": "设计一个面向企业内部的知识库问答产品，你如何处理权限与信息隔离？",
+      "topic": "企业知识问答的权限设计",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "检索层按用户身份过滤文档，答案只基于其有权限的内容生成；引用可见来源；审计日志记录问答与访问；权限变更实时生效，避免越权泄露。"
+    },
+    {
+      "question": "如果要为 AI 产品设计计费与用量模型（如 credits、按量付费），你会如何选择计量单位并定价？",
+      "topic": "AI 产品的商业化与计费设计",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "计量单位选用户可感知的价值单元（任务、文档、token 折算），避免纯 token 带来的焦虑；设免费额度培养习惯，分层定价并与成本挂钩留毛利。"
+    },
+    {
+      "question": "设计 AI 搜索产品时，你会如何权衡生成式答案与传统的链接结果列表？",
+      "topic": "生成式搜索的结果呈现权衡",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "默认给带引用的摘要答案，下方保留来源列表满足深挖与验证；对无可靠来源的问题降级为链接；用点击与停留数据判断何时该直接回答。"
+    },
+    {
+      "question": "当你判断模型质量还没达到上线标准，但业务方坚持按期发布，你会怎么处理？",
+      "topic": "模型质量与业务节奏的冲突处理",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "用评测数据量化风险与影响面，提出分阶段方案：限定场景灰度、加人工兜底与免责提示；明确上线后的观测指标与回滚线，把分歧转为实验。"
+    },
+    {
+      "question": "讲一次你推动非技术同事理解并接受 AI 能力边界的经历，你是怎么做的？",
+      "topic": "AI 能力边界的预期管理",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "用真实 demo 展示强项与失败案例，把能力写成『能/不能』清单；设定人机分工与检查点，用共同指标而非承诺来对齐预期。"
+    },
+    {
+      "question": "你如何在团队里建立既鼓励快速实验、又有安全兜底的 AI 产品文化？",
+      "topic": "AI 产品团队的文化建设",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "设小成本实验沙盒与预定义红线，失败复盘不问责；把安全评估与灰度机制变成默认流程，用公开评测结果形成对风险的共同判断。"
+    },
+    {
+      "question": "面试时你会问哪些问题来判断这家公司的 AI 是真正投入还是蹭概念？",
+      "topic": "反向判断公司 AI 成熟度",
+      "phase": "reverse",
+      "difficulty": "medium",
+      "answerPoints": "问数据与评测资产、模型迭代频率、算法与产品的协作方式、失败项目的处理；看是否有明确场景指标与长期投入，而非只谈模型名字。"
+    },
+    {
+      "question": "设计一个面向老年人的 AI 语音助手，你会特别关注哪些交互和信任设计？",
+      "topic": "老年人语音助手的交互与信任设计",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "大字体慢语速；容错确认；避免术语；一键人工；隐私透明；渐进引导。"
+    },
+    {
+      "question": "如何为 AI 产品的帮助中心和用户教育设计内容，让用户学会有效提问？",
+      "topic": "AI产品用户教育与提示引导设计",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "场景化示例库；实时提示；错误示范；交互式教学；分层引导；根据失败query优化。"
+    },
+    {
+      "question": "在多模态 RAG 中，处理图文混排文档时，产品上需要做哪些特殊设计来保证检索与生成质量？",
+      "topic": "多模态RAG图文混排的产品设计",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "图文分块关联；版面理解；引用定位到图/段；生成图文一致；降级纯文本；评测图表问答。"
+    },
+    {
+      "question": "如何设计 AI 功能的灰度发布和在线实验？它与传统 A/B 测试有哪些关键差异？",
+      "topic": "AI功能灰度发布与在线实验",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "模型与prompt版本隔离；质量/安全/成本指标；小流量人工评估；护栏指标；快速回滚；用户分层。"
+    },
+    {
+      "question": "如何设计 AI 产品的用户意图澄清策略？当用户问题模糊或信息不足时，产品应如何应对？",
+      "topic": "AI产品意图澄清与追问策略",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "识别模糊类型；提供选项或示例；限定追问次数；允许跳过；结合上下文补全；兜底转人工。"
+    },
+    {
+      "question": "为 AI 代码助手设计产品指标时，你会关注哪些与通用聊天助手不同的维度？",
+      "topic": "AI代码助手的产品指标体系",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "代码采纳率；编译通过率；留存；延迟；安全漏洞；上下文消耗；团队协作；付费转化。"
+    },
+    {
+      "question": "假设你要为电商平台设计一个 AI 导购助手，你会如何规划 MVP 并验证其商业价值？",
+      "topic": "电商AI导购助手MVP与价值验证",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "聚焦高转化品类；接商品知识库；对话推荐与对比；AB测转化率客单价；人工兜底；控成本；迭代扩品。"
+    },
+    {
+      "question": "公司想做一个面向中小企业的 AI 会议纪要产品，你会如何做竞品分析和差异化定位？",
+      "topic": "中小企业AI会议纪要竞品与定位",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "分析通用与垂直竞品；痛点：准确、行动项、集成；差异化：行业模板、CRM集成、隐私；定价；验证付费意愿。"
+    },
+    {
+      "question": "你的 AI 客服产品帮公司降低了人工成本，但用户满意度下降。你会如何诊断并平衡两者？",
+      "topic": "AI客服成本与满意度平衡",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "分场景归因；复杂/情绪问题转人工；优化知识库与话术；满意度纳入考核；分层服务；AB测成本与NPS。"
+    },
+    {
+      "question": "讲一次你为了 AI 产品的长期健康发展，主动放弃短期增长或收入机会的经历。",
+      "topic": "为长期健康放弃短期利益",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "背景与诱惑；风险判断；决策依据；沟通利益方；短期损失；长期结果与反思。"
+    },
+    {
+      "question": "讲一次你发现 AI 模型对某类用户群体存在偏见或不公平，并推动解决的过程。",
+      "topic": "发现并解决AI偏见问题",
+      "phase": "behavioral",
+      "difficulty": "hard",
+      "answerPoints": "发现方式；影响评估；跨团队协作；缓解措施：数据/规则/人工；上线决策；用户沟通；后续监测。"
+    },
+    {
+      "question": "面试 AI 产品岗时，你会问哪些问题来判断该团队对失败实验的容忍度和决策流程？",
+      "topic": "判断团队失败容忍度与决策流程",
+      "phase": "reverse",
+      "difficulty": "medium",
+      "answerPoints": "失败案例如何复盘；谁拍板上线；实验预算；安全与速度平衡；产品经理决策权；迭代节奏与资源支持。"
+    },
+    {
+      "question": "如何设计针对 prompt 注入与越狱攻击的产品防御体系？从输入、系统提示、工具调用和输出审核四层说明关键措施。",
+      "topic": "考查对 LLM 安全威胁与产品防御分层的理解",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "输入过滤与意图识别；系统提示隔离与权限最小化；工具调用白名单与确认；输出审核与敏感操作二次确认。"
+    },
+    {
+      "question": "如何为生成式 AI 功能设计多层次内容安全审核？输入审核、模型侧约束和输出拦截分别承担什么责任？",
+      "topic": "考查生成式内容安全审核的分层设计",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "输入审核拦截违规请求；模型侧用系统提示与微调约束；输出拦截兜底；结合人工复核与申诉，平衡误杀与体验。"
+    },
+    {
+      "question": "如何设计 AI 产品中的“不确定性表达”？置信度、候选答案、免责声明分别适合什么场景？",
+      "topic": "考查 AI 不确定性交互设计与用户信任",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "高置信直接答；中置信给候选或来源；低置信澄清或转人工；免责声明用于高风险，避免滥用导致麻木。"
+    },
+    {
+      "question": "如何评估并选择嵌入模型与向量数据库？关键指标和产品考量有哪些？",
+      "topic": "考查 RAG 基础设施选型的产品技术判断",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "检索准确率、延迟、成本、语言支持、维度与扩展性；向量库看过滤、混合检索、运维与安全；用业务评测集验证。"
+    },
+    {
+      "question": "讲一次你通过用户行为数据发现 AI 产品问题并推动改进的经历。",
+      "topic": "考查数据驱动发现 AI 产品问题的能力",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "明确数据指标与异常；下钻到具体场景；定位模型或交互根因；推动跨团队改进；用数据验证效果。"
+    },
+    {
+      "question": "讲一次你与算法/工程团队在模型效果指标上产生分歧，最终如何达成一致？",
+      "topic": "考查与算法团队对齐目标与指标的能力",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "先对齐业务目标；把离线指标映射到用户价值；设计联合评测；用实验数据决策；保留技术判断与妥协。"
+    },
+    {
+      "question": "讲一次你为了让 AI 产品符合监管或合规要求而调整产品方案的经历。",
+      "topic": "考查合规约束下的产品方案调整能力",
+      "phase": "behavioral",
+      "difficulty": "hard",
+      "answerPoints": "识别适用法规与风险点；与法务合规共创；调整数据留存、告知、可解释与人工复核；平衡体验与合规成本。"
+    },
+    {
+      "question": "设计一个 AI 写作助手的“改写/润色”功能，你会如何定义用户意图、控制粒度和评估指标？",
+      "topic": "考查具体生成式功能的设计与评估",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "区分改写目标如正式、简洁、生动；提供强度与保留项控制；评估流畅度、保真度、采纳率与编辑距离。"
+    },
+    {
+      "question": "假设你要为内容创作者设计一个 AI 视频剪辑助手，如何确定核心场景和交互？",
+      "topic": "考查垂直创作工具的场景选择与交互设计",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "从高频痛点如粗剪、字幕、找素材入手；以时间线操作为核心；AI 建议可预览可撤销；指标看节省时间与完播率。"
+    },
+    {
+      "question": "你的 AI 产品要进入海外市场，你会如何处理多语言、文化差异和本地合规？",
+      "topic": "考查 AI 产品国际化中的本地化与合规",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "多语言评测与数据本地化；文化适配提示与内容审核；遵守 GDPR 等法规；按市场灰度验证；保留本地人工兜底。"
+    },
+    {
+      "question": "你如何在一个业务导向的公司里，为 AI 产品的长期技术投入争取空间？",
+      "topic": "考查在业务压力下推动长期技术投入的文化匹配",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "用短期业务指标绑定长期投入；小步验证技术价值；争取高层赞助；用数据展示复利效应；设定阶段性里程碑。"
+    },
+    {
+      "question": "面试时你会问哪些问题来了解这家公司的 AI 数据治理和隐私保护实践？",
+      "topic": "考查候选人对数据治理与隐私的重视和判断",
+      "phase": "reverse",
+      "difficulty": "medium",
+      "answerPoints": "问数据来源与授权；训练数据隔离与脱敏；用户数据删除与审计；跨境合规；事故响应机制；团队归属与权限。"
+    },
+    {
+      "question": "如何为 AI 产品设计多轮对话中的上下文压缩与摘要策略？何时丢弃、何时摘要、何时检索历史？",
+      "topic": "考查多轮对话上下文管理的技术产品策略",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "按对话阶段设预算；近几轮保留原文，远期摘要成结构化要点；关键实体与决策不丢，可检索原始记录；给用户查看与纠错入口。"
+    },
+    {
+      "question": "如何设计 AI 产品中的多模型路由与回退策略？什么情况下切换不同模型？",
+      "topic": "考查多模型路由的决策逻辑与产品体验保障",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "按任务复杂度、成本、延迟、合规路由；设质量阈值与超时熔断；小模型兜底，大模型增强；路由对用户透明，异常时降级但保持语气一致。"
+    },
+    {
+      "question": "如何为 AI 生成内容设计版本对比与回滚功能？产品上如何呈现 diff？",
+      "topic": "考查生成内容的版本管理与用户控制设计",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "保留每次生成快照与来源；diff 高亮增删改，支持逐段采纳；一键回滚到任意版本；记录修改原因，便于团队复盘与合规审计。"
+    },
+    {
+      "question": "如何为 AI 语音交互产品设计端到端延迟评估与优化方案？哪些环节最影响用户体验？",
+      "topic": "考查语音交互延迟的拆解与优化产品意识",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "拆解 VAD、ASR、LLM、TTS 各段延迟；端到端目标小于 1 秒为佳；用流式、预加载、打断策略；给用户即时反馈如听筒音、思考提示。"
+    },
+    {
+      "question": "如何设计 AI 产品用户反馈（点赞/点踩/修改）的收集与利用机制？如何避免反馈偏差？",
+      "topic": "考查反馈闭环设计与数据偏差意识",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "低摩擦入口，区分内容质量与偏好；结合隐式行为如复制、追问；抽样人工复核；反馈用于评测集更新与模型迭代，避免只服务活跃用户。"
+    },
+    {
+      "question": "假设你要为招聘平台设计一个 AI 简历筛选助手，如何设计以减少偏见并提高匹配效率？",
+      "topic": "考查高风险招聘场景的公平性与效率平衡",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "定义与岗位相关的胜任力特征，剔除受保护属性；做偏见审计与对抗测试；给 HR 可解释理由与置信度；保留人工复核，记录决策链路。"
+    },
+    {
+      "question": "公司想做一个 AI 心理健康陪伴产品，你会如何设计安全边界和危机干预？",
+      "topic": "考查心理健康 AI 的安全伦理与危机响应设计",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "明确非医疗定位，不做诊断；识别自伤、自杀等风险信号，触发分级响应；转接热线与紧急联系人；限制对话深度，定期提示专业求助。"
+    },
+    {
+      "question": "设计一个 AI 驱动的智能家居控制助手，如何平衡语音交互的便捷性与误触发风险？",
+      "topic": "考查语音助手在物理世界中的误触发与确认设计",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "区分高、低风险指令，高风险需二次确认或声纹验证；唤醒词优化与本地 VAD 降误触；提供撤销与操作日志；模糊指令主动澄清。"
+    },
+    {
+      "question": "讲一次你为了 AI 产品的效果，主动推动数据收集或标注流程改进的经历。",
+      "topic": "考查数据驱动改进与跨团队推动力",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "说明问题、数据缺口与业务影响；设计标注规范与质检；小步试点验证；用效果提升数据说服算法与运营，形成持续反馈闭环。"
+    },
+    {
+      "question": "讲一次你因为 AI 产品可能造成用户伤害，而主动叫停或修改功能的经历。",
+      "topic": "考查用户安全优先的决策与担当",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "描述风险发现过程与潜在伤害；评估影响面与严重度；提出缓解方案如加限制、人工审核；向上沟通争取支持，并跟进效果。"
+    },
+    {
+      "question": "你如何评估一个 AI 产品团队的健康度？你会关注哪些信号？",
+      "topic": "考查对 AI 团队协作、迭代与文化的判断力",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "看指标是否兼顾体验与成本；失败实验是否复盘而非惩罚；产品、算法、工程是否共担目标；用户反馈能否快速进入迭代。"
+    },
+    {
+      "question": "面试时你会问哪些问题来了解该 AI 产品团队如何做用户研究和需求验证？",
+      "topic": "考查候选人评估团队用户研究成熟度的反问能力",
+      "phase": "reverse",
+      "difficulty": "medium",
+      "answerPoints": "问最近一次用户研究如何影响路线图；如何验证 AI 需求真伪；产品经理是否直接接触用户；实验失败后如何决策。"
+    },
+    {
+      "question": "讲一次你负责的 AI 产品在引入新模型或新数据后核心指标反而下降，你是如何定位原因并决策回滚或迭代的？",
+      "topic": "模型/数据更新导致指标回退的排查与决策",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "建立对照实验分环节归因；区分模型、数据、交互影响；设回滚阈值，小流量验证后再全量。"
+    },
+    {
+      "question": "讲一次你与法务或安全团队在 AI 功能上线节奏上发生冲突，最终如何达成一致。",
+      "topic": "与合规/安全团队协作与冲突解决",
+      "phase": "behavioral",
+      "difficulty": "hard",
+      "answerPoints": "提前拉齐红线，量化风险与收益；设计分期发布与兜底；用数据证明可控，共同对结果负责。"
+    },
+    {
+      "question": "讲一次你推动 AI 产品从内部工具走向外部商业化，你做了哪些关键决策？",
+      "topic": "AI产品从内部到商业化的关键决策",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "验证内部价值并抽象通用能力；设计定价与交付方式；处理合规与支持；先找种子客户共创。"
+    },
+    {
+      "question": "如何设计 AI 助手的“人设”与语气一致性，并做可量化的评估？",
+      "topic": "AI人设与语气一致性设计及评估",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "写系统提示与风格指南；构建多场景测试集；用人工评分加LLM judge衡量一致性，迭代提示。"
+    },
+    {
+      "question": "如何为多轮工具调用（function calling）设计错误处理与用户告知机制？",
+      "topic": "工具调用失败的产品化处理",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "区分可重试与不可重试；透明告知失败原因；提供替代路径与人工入口；记录日志用于优化。"
+    },
+    {
+      "question": "如何设计 AI 客服升级到人工的触发条件与上下文交接方案？",
+      "topic": "AI客服到人工的升级与交接",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "按置信度、情绪、重复失败、高风险触发；自动摘要对话与意图；保留历史，人工可无缝续接。"
+    },
+    {
+      "question": "如何为 AI 生成内容设计“可解释性”界面，让用户理解模型为何这样回答？",
+      "topic": "生成式AI的可解释性交互设计",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "展示关键依据与引用；用“为什么”展开推理链摘要；避免过度技术化，提供反馈入口纠错。"
+    },
+    {
+      "question": "为在线教育平台设计 AI 作业批改助手，如何保证反馈质量与公平性？",
+      "topic": "教育AI批改的质量与公平",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "分学科定义评分标准；人工抽检与校准；对主观题给建议而非绝对分；监控群体偏差。"
+    },
+    {
+      "question": "为银行设计 AI 理财顾问，如何平衡合规、风险提示与用户体验？",
+      "topic": "金融AI理财顾问的合规与体验平衡",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "强制风险提示与适当性匹配；话术合规审核；用分层推荐降低决策负担；全程可追溯。"
+    },
+    {
+      "question": "为医院设计 AI 预问诊产品，如何设计信息收集与转诊边界？",
+      "topic": "医疗预问诊的信息收集与转诊边界",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "按科室定制问诊树；明确不诊断只分诊；红旗症状立即转人工；隐私与知情同意。"
+    },
+    {
+      "question": "面试时你会问哪些问题来判断该公司的 AI 产品是否具备长期数据飞轮？",
+      "topic": "判断AI数据飞轮与长期壁垒",
+      "phase": "reverse",
+      "difficulty": "medium",
+      "answerPoints": "问数据来源、标注闭环、用户反馈如何回流；模型迭代周期；数据资产归属与隐私合规。"
+    },
+    {
+      "question": "你如何判断一个 AI 产品团队是真正以用户为中心，而不是技术驱动？",
+      "topic": "判断团队是否用户中心",
+      "phase": "reverse",
+      "difficulty": "medium",
+      "answerPoints": "看需求来源是否有用户研究；指标是否含体验与留存；是否愿为体验砍功能；失败复盘是否归因用户。"
+    },
+    {
+      "question": "如何为 AI 产品设计一套 prompt 版本管理与发布流程？",
+      "topic": "考查 prompt 生命周期管理能力",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "版本控制、灰度发布、A/B 测试、回滚机制、与模型解耦、变更审计，确保可追溯与快速迭代。"
+    },
+    {
+      "question": "如何评估多轮对话式 AI 产品的任务完成质量？",
+      "topic": "多轮对话评估方法",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "定义任务完成状态与成功标准，用模拟用户或人工标注关键轮次，追踪对话状态，计算任务成功率与轮次效率。"
+    },
+    {
+      "question": "讲一次你在 AI 产品中为了用户体验，在模型延迟与回答质量之间做权衡的经历。",
+      "topic": "延迟与质量的权衡决策",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "说明场景、权衡依据、用户反馈、最终选择及结果，体现对体验优先级的判断和跨团队沟通。"
+    },
+    {
+      "question": "讲一次你用数据说服业务方调整 AI 产品方向的经历。",
+      "topic": "数据驱动产品方向调整",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "描述数据洞察、沟通策略、利益相关者反应、调整方案及最终影响，突出用事实推动决策。"
+    },
+    {
+      "question": "你如何促进 AI 产品团队与算法研究团队的有效协作，确保技术落地产品？",
+      "topic": "产研协作机制",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "建立共同目标、定期同步、研究课题来自产品痛点、产品反馈反哺研究，用成功案例证明协作价值。"
+    },
+    {
+      "question": "为个人理财场景设计一个 AI 预算助手，你会如何确保建议的准确性与用户信任？",
+      "topic": "金融 AI 助手的设计要点",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "接入可靠数据源，明确风险提示，提供可解释建议，让用户控制授权，并做好合规与隐私保护。"
+    },
+    {
+      "question": "设计一个面向法务团队的 AI 合同审查助手，你会如何设计风险分级与人工复核流程？",
+      "topic": "法律 AI 的风险与人工介入",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "按风险等级分类，高风险必须人工复核，提供条款引用与溯源，保留审计日志，并设置权限隔离。"
+    },
+    {
+      "question": "面试时你会问哪些问题来了解这家公司如何监控和迭代已上线的 AI 模型？",
+      "topic": "评估公司模型监控与迭代能力",
+      "phase": "reverse",
+      "difficulty": "medium",
+      "answerPoints": "问监控指标、反馈闭环、迭代周期、数据飞轮、团队职责、异常处理，判断是否有持续优化机制。"
+    },
+    {
+      "question": "当主用的大模型 API 出现故障或限流时，你会如何设计产品的降级与容错方案？",
+      "topic": "AI 产品的容错与降级策略",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "多供应商备份、缓存常见回答、降级到规则或小模型、明确告知用户、监控告警并自动切换。"
+    },
+    {
+      "question": "讲一次你因为当前 AI 能力不可靠而拒绝某个功能需求的经历。",
+      "topic": "AI 能力边界的沟通",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "解释技术限制、提供替代方案、管理业务方预期、设定验证条件，并持续跟进技术进展。"
+    },
+    {
+      "question": "你如何在 AI 产品设计中嵌入伦理考量和多样性包容？",
+      "topic": "伦理与包容性设计实践",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "组建多元团队、做偏见测试、邀请目标用户参与、设立伦理审查、上线后持续监控与修正。"
+    },
+    {
+      "question": "为 K-12 学生设计一个 AI 个性化学习辅导产品，你会如何保证内容安全与学习效果？",
+      "topic": "教育 AI 的安全与效果平衡",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "内容分级过滤、年龄适配交互、学习效果评估、家长控制与数据隐私，并设置人工干预通道。"
+    },
+    {
+      "question": "如何为一个AI产品设计离线评估的黄金数据集？从样本选择、标注一致性到定期更新，关键步骤是什么？",
+      "topic": "离线评估黄金数据集构建",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "覆盖真实分布与边界案例；多标注者交叉验证；定期用线上bad case更新；明确评估指标与通过阈值。"
+    },
+    {
+      "question": "设计一个AI旅行规划助手，如何整合实时航班、酒店和用户偏好，并处理行程变更？",
+      "topic": "旅行规划AI的实时数据整合与动态调整",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "接入实时API；用户偏好建模；冲突时提供多方案；变更时主动通知并重规划；保留人工确认环节。"
+    },
+    {
+      "question": "讲一次你说服业务方推迟AI功能上线，因为质量未达标的经历。你如何沟通和权衡？",
+      "topic": "因AI质量推迟上线的说服与权衡",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "用数据展示风险与成本；提出分阶段上线或降级方案；对齐长期目标；设定明确的改进时间表。"
+    },
+    {
+      "question": "你如何在一个AI产品团队中培养负责任的AI文化？会采取哪些具体措施？",
+      "topic": "团队负责任AI文化建设",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "建立伦理评审清单；定期案例分享；将安全指标纳入考核；鼓励跨职能讨论；高层示范。"
+    },
+    {
+      "question": "如何为AI产品设计成本管理与token预算优化方案？从产品侧可以采取哪些措施？",
+      "topic": "AI产品成本与token预算优化",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "按场景分级调用模型；缓存常见问答；压缩上下文；设置用户配额；监控单位成本并告警。"
+    },
+    {
+      "question": "讲一次你引入新的AI技术或方法来解决产品问题的经历。你如何评估和落地？",
+      "topic": "应用新AI技术解决产品问题",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "明确问题与技术匹配度；小范围实验验证；评估效果与成本；与工程团队协作落地；持续迭代。"
+    },
+    {
+      "question": "如何为AI产品设计日志与追踪系统，以便快速定位模型输出异常或用户投诉？",
+      "topic": "AI产品日志与追踪设计",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "记录请求/响应、模型版本、参数、上下文；建立唯一trace ID；脱敏存储；支持回放与对比分析。"
+    },
+    {
+      "question": "设计一个AI会议调度助手，如何协调多人时区、偏好和优先级，并处理冲突？",
+      "topic": "会议调度AI的时区与偏好协调",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "获取日历与偏好；按时区排序候选时间；冲突时建议替代方案；允许手动覆盖；学习用户选择。"
+    },
+    {
+      "question": "面试AI产品岗时，你会问哪些问题来了解团队如何平衡AI创新与风险？",
+      "topic": "面试问AI创新与风险平衡",
+      "phase": "reverse",
+      "difficulty": "medium",
+      "answerPoints": "问最近因风险被砍的需求；风险评审流程；谁有否决权；如何度量风险；团队对监管的态度。"
+    },
+    {
+      "question": "如何设计AI产品中的人机协同（human-in-the-loop）工作流？何时必须人工介入？",
+      "topic": "人机协同工作流设计",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "按置信度与风险分级；高风险必须人工复核；提供便捷的修正界面；人工反馈回流训练；明确责任边界。"
+    },
+    {
+      "question": "设计一个AI房产助手，如何帮助用户搜索房源并辅助谈判？关键产品设计点是什么？",
+      "topic": "房产AI助手的搜索与谈判辅助",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "理解预算与偏好；聚合多源房源；提供可比成交价；谈判话术建议；强调信息透明与合规。"
+    },
+    {
+      "question": "讲一次你改进AI产品可访问性（如为视障用户优化）的经历。你如何发现和解决？",
+      "topic": "提升AI产品可访问性",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "与残障用户测试；支持屏幕阅读器；语音交互替代；简化界面；将可访问性纳入验收标准。"
+    },
+    {
+      "question": "如何为AI产品设计在线A/B实验与增量价值评估？当AI输出具有非确定性和长反馈周期时，如何设置对照组和核心指标？",
+      "topic": "AI功能在线实验与增量价值衡量",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "定义核心指标与护栏指标；随机分流；同模型版本对照；非确定性重复采样；长周期用代理指标；分层分析防污染。"
+    },
+    {
+      "question": "如何设计AI产品的长期记忆系统，让助手跨会话记住用户偏好，同时控制隐私泄露和错误记忆风险？",
+      "topic": "长期记忆的存储、检索与隐私控制",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "记忆分层为事实/偏好/情景；用户可查看编辑删除；敏感信息不落库；时效衰减与置信度；错误记忆纠正；合规审计。"
+    },
+    {
+      "question": "如何为AI产品设计防幻觉机制？从检索增强、工具调用、自我验证和用户提示四方面说明关键措施。",
+      "topic": "AI产品防幻觉的产品化手段",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "强制引用来源；工具获取事实；多步验证与一致性检查；不确定时拒答；界面标注置信度；用户可反馈纠错。"
+    },
+    {
+      "question": "如何为AI产品设计多模态输入（文本、语音、图像）的统一交互与错误恢复？关键设计点是什么？",
+      "topic": "多模态输入融合与交互容错",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "明确各模态适用场景；输入优先级与融合策略；实时反馈解析结果；模态失败时降级到文本；跨模态引用编辑；隐私提示。"
+    },
+    {
+      "question": "设计一个AI个人税务助手，帮助用户整理票据、计算抵扣并生成报税建议。你会如何保证准确性与合规？",
+      "topic": "AI税务助手的准确性与合规设计",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "规则引擎加AI提取；票据OCR校验；用户确认关键字段；区分建议与申报；定期更新税法；审计日志；免责与人工复核。"
+    },
+    {
+      "question": "设计一个AI销售陪练助手，模拟客户对话并给销售代表打分反馈。你会如何设计场景、评分与隐私？",
+      "topic": "AI销售陪练的场景与评估设计",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "按行业难度生成客户人设；多轮对话；评分维度含需求挖掘、异议处理、合规；录音授权脱敏；人工校准；反馈可操作。"
+    },
+    {
+      "question": "讲一次你推动AI产品在冷启动阶段（缺少用户数据）快速验证并迭代的经历。你如何定义最小可行场景？",
+      "topic": "AI产品冷启动验证与迭代",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "用合成数据或规则基线；找种子用户；定义最小可行场景；小流量实验；快速收集反馈；逐步引入个性化。"
+    },
+    {
+      "question": "讲一次你处理AI产品重大线上事故或用户投诉的经历，你如何止损、复盘并防止复发？",
+      "topic": "AI产品事故响应与复盘",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "立即降级或回滚；通知受影响用户；保留日志；根因分析；修复并加监控；更新SOP与预警；对外沟通透明。"
+    },
+    {
+      "question": "讲一次你在有限资源下对多个AI功能需求做优先级排序的经历，你依据什么做取舍？",
+      "topic": "AI功能优先级与资源分配",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "用影响力/成本/风险框架；对齐业务目标；评估技术可行性；快速验证假设；砍掉低价值需求；沟通取舍原因。"
+    },
+    {
+      "question": "讲一次你与设计师合作改善AI产品交互体验的经历，你如何把模型能力的不确定性转化为好的设计？",
+      "topic": "AI产品交互设计与不确定性传达",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "共创用户旅程；用原型测试；设计加载、澄清、纠错；管理预期；A/B验证；将模型限制转为交互规则。"
+    },
+    {
+      "question": "你如何为AI产品团队设计复盘机制，让失败和事故成为学习机会而不是追责？",
+      "topic": "AI产品团队复盘与学习文化",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "无责复盘；聚焦系统原因；记录行动项并跟踪；定期分享；奖励发现风险；高层示范；把教训写入检查清单。"
+    },
+    {
+      "question": "面试时你会问哪些问题来了解这家公司AI产品的商业化与盈利模式？",
+      "topic": "面试中考察AI产品商业化与盈利模式",
+      "phase": "reverse",
+      "difficulty": "medium",
+      "answerPoints": "收入来源；付费转化与定价；单位经济模型；成本结构；增长指标；与AI能力的关系；客户生命周期价值。"
+    },
+    {
+      "question": "讲一次你为AI产品设计或优化用户引导（onboarding）以降低首次使用门槛的经历。",
+      "topic": "考查AI产品用户引导设计能力与降低门槛的实践",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "目标明确、步骤精简、示例引导、即时反馈、A/B测试效果。"
+    },
+    {
+      "question": "讲一次你处理AI产品中用户对AI输出不信任的问题，并采取措施提升信任的经历。",
+      "topic": "考查处理AI信任危机与建立用户信任的能力",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "透明解释、置信度展示、人工兜底、用户纠正入口、信任指标追踪。"
+    },
+    {
+      "question": "讲一次你管理AI产品路线图，平衡短期交付与长期能力建设的经历。",
+      "topic": "考查AI产品路线图规划与短期长期平衡能力",
+      "phase": "behavioral",
+      "difficulty": "hard",
+      "answerPoints": "分阶段目标、资源分配、技术债管理、里程碑评审、灵活调整。"
+    },
+    {
+      "question": "如何为AI产品设计“用户意图澄清”机制，当模型不确定时主动提问？",
+      "topic": "考查模型不确定时的主动澄清交互设计",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "置信度阈值、澄清话术模板、多轮收敛、用户跳过选项、记录学习。"
+    },
+    {
+      "question": "如何设计AI产品的多轮对话状态管理（dialogue state tracking）？关键实体和槽位如何设计？",
+      "topic": "考查多轮对话状态跟踪与槽位设计能力",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "定义槽位与实体、状态更新策略、冲突消解、超时重置、可视化调试。"
+    },
+    {
+      "question": "如何为AI产品设计内容审核与过滤机制，覆盖输入和输出？",
+      "topic": "考查AI内容安全审核机制设计",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "输入输出双层过滤、规则+模型、分级处置、用户申诉、审核日志。"
+    },
+    {
+      "question": "如何为AI产品设计多租户（multi-tenant）下的数据隔离与模型微调策略？",
+      "topic": "考查多租户AI产品的数据隔离与模型定制",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "数据物理/逻辑隔离、租户级微调、共享基础模型、权限管控、合规审计。"
+    },
+    {
+      "question": "为电商平台设计AI导购助手，如何根据用户模糊需求推荐商品并处理退货咨询？",
+      "topic": "考查电商AI导购的需求理解与售后处理设计",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "多轮澄清偏好、推荐理由、退货政策问答、转人工、效果指标。"
+    },
+    {
+      "question": "为健身房设计AI私教助手，如何根据用户体能和目标生成训练计划并避免受伤？",
+      "topic": "考查健身AI私教的个性化与安全设计",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "体能评估问卷、渐进计划、动作纠正提示、风险预警、人工审核。"
+    },
+    {
+      "question": "为政务热线设计AI问答助手，如何保证政策解读准确并引导到人工？",
+      "topic": "考查政务AI问答的准确性与转人工设计",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "知识库权威来源、引用标注、置信度阈值、转人工规则、满意度回访。"
+    },
+    {
+      "question": "你如何评估一个AI产品团队的决策透明度和沟通效率？",
+      "topic": "考查对团队决策透明与沟通效率的评估能力",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "决策记录、跨职能同步、信息共享工具、反馈闭环、会议效率。"
+    },
+    {
+      "question": "面试时你会问哪些问题来了解这家公司AI产品的用户支持与社区运营？",
+      "topic": "考查反向提问了解用户支持与社区运营",
+      "phase": "reverse",
+      "difficulty": "medium",
+      "answerPoints": "支持团队规模、SLA、社区活跃度、反馈闭环、用户教育投入。"
+    }
+  ]
+}

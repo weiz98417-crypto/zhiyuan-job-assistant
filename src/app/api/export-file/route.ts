@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { writeFileSync, mkdirSync, existsSync, readFileSync, statSync } from "fs";
 import { resolve } from "path";
 import { createHash } from "crypto";
+import { markdownToSafeHtml, escapeHtmlText } from '@/lib/server-markdown';
 
 function sha256(buffer: Buffer): string {
   return createHash("sha256").update(buffer).digest("hex");
@@ -48,12 +49,12 @@ export async function POST(request: Request) {
     // Always generate a companion .html with proper markdown→HTML conversion
     const htmlName = `${safeBaseName}.html`;
     const htmlPath = resolve(outputDir, htmlName);
-    const htmlBody = mdToHtml(content);
+    const htmlBody = markdownToSafeHtml(content);
     const htmlDoc = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>${escapeHtml(safeBaseName)}</title>
+<title>${escapeHtmlText(safeBaseName)}</title>
 <style>
   body { font-family: "Microsoft YaHei","PingFang SC",sans-serif; max-width:840px; margin:40px auto; padding:24px; color:#333; line-height:1.7; }
   h1 { font-size:1.5em; border-bottom:2px solid #2563eb; padding-bottom:8px; }
@@ -146,152 +147,3 @@ export async function GET(request: Request) {
   }
 }
 
-/* ── Helpers ── */
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-function inlineMd(s: string): string {
-  return s
-    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-    .replace(/\*(.+?)\*/g, "<em>$1</em>")
-    .replace(/`(.+?)`/g, "<code>$1</code>")
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
-}
-
-function mdToHtml(md: string): string {
-  const lines = md.split("\n");
-  const result: string[] = [];
-  let pending: string[] = [];
-  let inTable = false;
-  let tableRows: string[][] = [];
-  let inCodeBlock = false;
-  let codeLines: string[] = [];
-  let inBlockquote = false;
-  let bqLines: string[] = [];
-
-  function flushPending() {
-    if (pending.length > 0) {
-      result.push(`<p>${pending.join("<br>")}</p>`);
-      pending = [];
-    }
-  }
-
-  function flushBlockquote() {
-    if (bqLines.length > 0) {
-      result.push(`<blockquote>${bqLines.join("<br>")}</blockquote>`);
-      bqLines = [];
-    }
-    inBlockquote = false;
-  }
-
-  function flushTable() {
-    if (tableRows.length === 0) return;
-    const clean: string[][] = [];
-    let hasSep = false;
-    for (const r of tableRows) {
-      if (r.every(c => /^:?-{3,}:?$/.test(c))) { hasSep = true; continue; }
-      clean.push(r);
-    }
-    if (clean.length === 0) { tableRows = []; return; }
-    if (!hasSep && clean.length > 1) {
-      clean.splice(1, 0, clean[0].map(() => "---"));
-    }
-    result.push("<table>");
-    for (let ri = 0; ri < clean.length; ri++) {
-      const tag = ri === 0 ? "th" : "td";
-      result.push(`<tr>${clean[ri].map(c => `<${tag}>${inlineMd(c)}</${tag}>`).join("")}</tr>`);
-    }
-    result.push("</table>");
-    tableRows = [];
-  }
-
-  for (const raw of lines) {
-    const line = raw.trimEnd();
-
-    // Fenced code block
-    if (line.startsWith("```")) {
-      if (inCodeBlock) {
-        const escaped = escapeHtml(codeLines.join("\n"));
-        result.push(`<pre><code>${escaped}</code></pre>`);
-        codeLines = [];
-        inCodeBlock = false;
-        continue;
-      }
-      flushTable();
-      flushBlockquote();
-      flushPending();
-      inCodeBlock = true;
-      continue;
-    }
-    if (inCodeBlock) { codeLines.push(raw); continue; }
-
-    // Table row
-    if (line.startsWith("|") && line.endsWith("|")) {
-      flushBlockquote();
-      flushPending();
-      inTable = true;
-      tableRows.push(line.slice(1, -1).split("|").map(c => c.trim()));
-      continue;
-    }
-    if (inTable) { flushTable(); inTable = false; }
-
-    // Headings
-    if (/^#{1,3}\s/.test(line)) {
-      flushBlockquote(); flushPending();
-      const m = line.match(/^(#{1,3})\s+(.+)/);
-      if (m) { result.push(`<h${m[1].length}>${inlineMd(m[2])}</h${m[1].length}>`); }
-      continue;
-    }
-
-    // HR
-    if (/^(\s*[-*]\s*){3,}$/.test(line)) { flushBlockquote(); flushPending(); result.push("<hr>"); continue; }
-
-    // Blockquote
-    if (line.startsWith("> ")) {
-      flushPending();
-      if (!inBlockquote) inBlockquote = true;
-      bqLines.push(inlineMd(line.slice(2)));
-      continue;
-    }
-
-    // Unordered list
-    if (/^[-*]\s/.test(line)) {
-      flushBlockquote(); flushPending();
-      result.push(`<li>${inlineMd(line.replace(/^[-*]\s+/, ""))}</li>`);
-      continue;
-    }
-
-    // Ordered list
-    if (/^\d+\.\s/.test(line)) {
-      flushBlockquote(); flushPending();
-      result.push(`<li>${inlineMd(line.replace(/^\d+\.\s+/, ""))}</li>`);
-      continue;
-    }
-
-    // Empty line
-    if (line.trim() === "") {
-      flushTable();
-      flushBlockquote();
-      flushPending();
-      continue;
-    }
-
-    // Regular text
-    if (inBlockquote) {
-      flushBlockquote();
-    }
-    pending.push(inlineMd(line));
-  }
-
-  flushTable();
-  flushBlockquote();
-  flushPending();
-
-  return result.join("\n");
-}

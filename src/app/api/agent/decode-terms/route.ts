@@ -1,22 +1,11 @@
 import { NextResponse } from "next/server";
-import { readFileSync, existsSync } from "fs";
-import { resolve } from "path";
+import { loadModeDocument } from "@/lib/agent/knowledge/registry/loader";
 import yaml from "js-yaml";
 
 function loadRiskIntel() {
-  // Try multiple possible paths
-  const candidates = [
-    resolve(process.cwd(), "modes", "zh", "risk-intel.md"),
-  ];
-
-  let raw: string | null = null;
-  for (const path of candidates) {
-    if (existsSync(path)) {
-      raw = readFileSync(path, "utf-8");
-      break;
-    }
-  }
-  if (!raw) return null;
+  // Spec 25：modes 统一经注册表加载器读取
+  const raw = loadModeDocument("zh", "risk-intel");
+  if (raw === null) return null;
 
   try {
     // Extract YAML from markdown code fence (```yaml ... ```)

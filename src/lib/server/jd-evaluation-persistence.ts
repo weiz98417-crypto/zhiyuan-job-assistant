@@ -21,6 +21,8 @@ export interface PersistJDEvaluationInput {
   legitimacy?: string;
   blocks?: unknown;
   keywords?: unknown;
+  /** Spec 30 / WP5：D 板块薪资数据来源标注。 */
+  salaryDataSource?: string;
   jdText?: string;
   forceReportNum?: number;
 }
@@ -42,6 +44,8 @@ interface NormalizedPersistenceInput {
   legitimacy: string;
   blocksJson: string;
   keywordsJson: string;
+  /** Spec 30 / WP5：D 板块薪资数据来源标注（带来源的评估 → sourced_jd_follow_through 指标数据源）。 */
+  salaryDataSource?: string;
   jdText?: string;
   sourceHash: string;
   forceReportNum?: number;
@@ -73,6 +77,7 @@ export async function persistJDEvaluation(
     legitimacy: input.legitimacy || "",
     blocksJson: canonicalJson(input.blocks, {}),
     keywordsJson: canonicalJson(input.keywords, []),
+    salaryDataSource: input.salaryDataSource,
     jdText: input.jdText,
     sourceHash: hashSource(input.jdText),
     forceReportNum: input.forceReportNum,
@@ -236,13 +241,13 @@ async function persistPostgresTransaction(
     rows.application.notes,
   ]);
   await client.query(`
-    INSERT INTO reports (user_id, report_num, date, company, role, archetype, overall_score, legitimacy, blocks_json, keywords_json, source_hash)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11)
+    INSERT INTO reports (user_id, report_num, date, company, role, archetype, overall_score, legitimacy, blocks_json, keywords_json, source_hash, salary_data_source)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12)
     ON CONFLICT (user_id, report_num) DO UPDATE SET
       date=EXCLUDED.date, company=EXCLUDED.company, role=EXCLUDED.role, archetype=EXCLUDED.archetype,
       overall_score=EXCLUDED.overall_score, legitimacy=EXCLUDED.legitimacy,
       blocks_json=EXCLUDED.blocks_json, keywords_json=EXCLUDED.keywords_json,
-      source_hash=EXCLUDED.source_hash
+      source_hash=EXCLUDED.source_hash, salary_data_source=EXCLUDED.salary_data_source
   `, [
     input.userId,
     rows.report.report_num,
@@ -255,6 +260,7 @@ async function persistPostgresTransaction(
     rows.report.blocks_json,
     rows.report.keywords_json,
     rows.report.source_hash || "",
+    input.salaryDataSource ?? null,
   ]);
   const reportReadBack = (await client.query(
     "SELECT * FROM reports WHERE report_num = $1 AND user_id = $2",

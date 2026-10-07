@@ -43,12 +43,14 @@ import { saveResumeSection } from "./action/save-resume-section";
 import { saveReferenceResume } from "./action/save-reference-resume";
 import { getReferenceDetail } from "./query/get-reference-detail";
 import { readFile } from "./query/read-file";
+import { getJobDigestTool } from "./query/get-job-digest";
 import { downloadReportPDF } from "./action/download-report-pdf";
 import { updateReportMetadata } from "./action/update-report-metadata";
 import { trackApplicationTool } from "./action/track-application";
 import { updateApplicationStatusTool } from "./action/update-application-status";
 import { transferToAgent } from "./action/transfer-to-agent";
 import { delegateResearch } from "./action/delegate-research";
+import { logRejectionNotice } from "./action/log-rejection-notice";
 
 // Interview tools
 import { generateInterviewQuestions, scoreInterviewAnswer } from "./interview-tools";
@@ -70,6 +72,7 @@ registry.register(searchApplications);
 registry.register(getReportDetail);
 registry.register(getReferenceDetail);
 registry.register(readFile);
+registry.register(getJobDigestTool);
 registry.register(getProfile);
 registry.register(getRecentActivity);
 registry.register(getRecentJDContext);
@@ -112,6 +115,7 @@ registry.register(downloadReportPDF);
 registry.register(updateReportMetadata);
 registry.register(trackApplicationTool);
 registry.register(updateApplicationStatusTool);
+registry.register(logRejectionNotice);
 registry.register(transferToAgent);
 registry.register(delegateResearch);
 

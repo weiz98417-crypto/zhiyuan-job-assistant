@@ -1,4 +1,9 @@
-/* ── JD 信号词典 ── */
+/**
+ * JD 信号词典（Spec 25 注册条目 data.jd-signals-glossary）。
+ * 只保留词表本体作为速查 glossary 注入；此前的 detectSignals/formatSignalsForLLM
+ * 检测接线从未被生产触发（无调用方传 jdText），已按 Spec 25 删除。
+ * JD 风险判定走 jd-risk-service 的 risk-intel 规则引擎——两者消费语义不同，勿合并。
+ */
 
 export interface JDSignal {
   phrase: string;
@@ -39,23 +44,3 @@ export const JD_SIGNALS: JDSignal[] = [
   { phrase: "技术驱动", possibleMeaning: "可能技术文化好，但需确认是否真的以技术为核心", severity: "info", category: "growth" },
   { phrase: "核心团队", possibleMeaning: "重要度高但压力可能也大", severity: "info", category: "growth" },
 ];
-
-export function detectSignals(text: string): JDSignal[] {
-  return JD_SIGNALS.filter((s) => text.includes(s.phrase));
-}
-
-export function formatSignalsForLLM(text: string): string {
-  const detected = detectSignals(text);
-  if (detected.length === 0) return "";
-
-  const dangerCount = detected.filter((s) => s.severity === "danger").length;
-  const warningCount = detected.filter((s) => s.severity === "warning").length;
-
-  const header = `检测到 ${detected.length} 个JD信号词（${dangerCount}个危险信号，${warningCount}个需注意）：`;
-
-  const lines = detected.map(
-    (s) => `- \`${s.phrase}\` (${s.severity === "danger" ? "⚠危险" : s.severity === "warning" ? "⚡注意" : "ℹ信息"}) → ${s.possibleMeaning}`,
-  );
-
-  return [header, ...lines].join("\n");
-}

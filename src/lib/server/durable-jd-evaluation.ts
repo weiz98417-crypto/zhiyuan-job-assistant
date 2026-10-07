@@ -133,6 +133,8 @@ export async function runDurableJDEvaluation(
     archetype: evaluation.archetype,
     legitimacy: evaluation.legitimacy,
     blocks,
+    // Spec 30 / WP5：sourced_jd_follow_through 感知指标数据源（D 板块来源标注 → reports 列）
+    salaryDataSource: evaluation.salaryDataSource,
     keywords: evaluation.keywords,
     jdText: resolved.jdText,
   });

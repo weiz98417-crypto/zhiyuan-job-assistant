@@ -11,6 +11,34 @@ export type ReleaseNote = {
 
 export const releaseNotes: ReleaseNote[] = [
   {
+    version: "0.13.0",
+    stage: "production",
+    summary: "10 月能力升级：语音面试、可信度门禁、题库与薪资基准、岗位精选和 Agent 运行可观测性。",
+    sections: [
+      {
+        title: "语音面试",
+        changes: [
+          { description: "面试教练支持按住说话、MiMo ASR 转写和 MiMo TTS 逐句朗读，语音模式可在所有 Agent 会话中使用。" },
+          { description: "语音密钥仅由服务端读取，前端不暴露供应商凭据；播放中可停止，录音和播放状态相互独立。" },
+        ],
+      },
+      {
+        title: "可信度与评估",
+        changes: [
+          { description: "简历生成增加事实来源和忠实度门禁，ATS 与 PDF 视觉检查纳入发布前验证。" },
+          { description: "面试评分显示证据引用和三态结论，题库、薪资来源和岗位精选结果保留可追溯依据。" },
+        ],
+      },
+      {
+        title: "运行体验",
+        changes: [
+          { description: "统一工作台原语和浮层，补齐 Agent 调用追踪、token 成本、浏览器工具治理与 MCP 重连。" },
+          { description: "导出链路和依赖完成收敛，保留生产门禁、数据库迁移和 Worker 发布前检查。" },
+        ],
+      },
+    ],
+  },
+  {
     version: "0.12.2",
     stage: "production",
     summary: "9 月 30 日补丁：执行态布局、对话可读性、简历草稿完成条件和记忆回写修复。",

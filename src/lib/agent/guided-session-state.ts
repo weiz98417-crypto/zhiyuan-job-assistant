@@ -80,6 +80,7 @@ const TASK_AGENT_ID: Record<AgentTaskType, string> = {
   reference_resume_save: "resume",
   file_export: "general",
   job_search: "general",
+  job_digest: "general",
 };
 
 const TASK_LABEL_ZH: Record<AgentTaskType, string> = {
@@ -95,6 +96,7 @@ const TASK_LABEL_ZH: Record<AgentTaskType, string> = {
   reference_resume_save: "优秀简历沉淀",
   file_export: "文件导出",
   job_search: "岗位发现",
+  job_digest: "岗位精选",
 };
 
 export function taskAgentId(taskType: AgentTaskType): string {

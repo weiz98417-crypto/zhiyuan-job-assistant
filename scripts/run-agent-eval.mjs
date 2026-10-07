@@ -26,7 +26,7 @@ console.log(JSON.stringify({
 }, null, 2));
 
 const vitestEntrypoint = fileURLToPath(new URL("../node_modules/vitest/vitest.mjs", import.meta.url));
-const result = spawnSync(process.execPath, [vitestEntrypoint, "run", "src/__tests__/agent-journey-eval.test.ts", "src/__tests__/agent-staging-judge.test.ts"], {
+const result = spawnSync(process.execPath, [vitestEntrypoint, "run", "src/__tests__/agent-journey-eval.test.ts", "src/__tests__/agent-staging-judge.test.ts", "src/__tests__/agent-llm-scored-judge.eval.test.ts"], {
   stdio: "inherit",
   env: { ...process.env, AGENT_EVAL_MODE: mode },
 });

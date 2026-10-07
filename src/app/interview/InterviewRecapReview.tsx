@@ -3,8 +3,10 @@
 import { useMemo } from "react";
 import { BookOpenText, Clock, ExternalLink, FileText, MessageSquare, Star } from "lucide-react";
 import { PaperCard } from "@/components/design";
+import { EmptyState } from "@/components/ui/workbench-primitives";
 import type { ChatSession, InterviewPlanSnapshot, InterviewRecap, InterviewSessionState, InterviewTurn } from "@/types";
 import { isInterviewSession } from "@/lib/agent/interview-session-state";
+import { scoreBadge, averageScore } from "@/components/agent/trust";
 
 interface InterviewRecapReviewProps {
   sessions: ChatSession[];
@@ -13,15 +15,6 @@ interface InterviewRecapReviewProps {
 
 function sessionDate(session: ChatSession): Date {
   return new Date(session.updatedAt || session.createdAt || Date.now());
-}
-
-function averageScore(state?: InterviewSessionState): number | null {
-  const scores = [
-    ...(state?.scoreArtifacts || []).map((item) => item.score.overall),
-    ...(state?.questionGraph || []).map((item) => item.score?.overall),
-  ].filter((score): score is number => typeof score === "number" && Number.isFinite(score));
-  if (!scores.length) return null;
-  return Math.round((scores.reduce((sum, score) => sum + score, 0) / scores.length) * 10) / 10;
 }
 
 function lastTranscriptText(session: ChatSession): string {
@@ -181,7 +174,7 @@ function StructuredRecap({ recap, state }: { recap: InterviewRecap; state?: Inte
               <div key={item.questionNodeId || index} className="text-xs text-[var(--color-text-soft)] leading-relaxed">
                 <p className="font-medium text-[var(--color-text)]">
                   {index + 1}. {item.question}
-                  {typeof item.score === "number" ? ` · ${item.score}/5` : ""}
+                  {typeof item.score === "number" ? ` · ${scoreBadge(item.score, item.rubricOverallBand)}` : ""}
                 </p>
                 {item.answerExcerpt ? <p>答题证据：{item.answerExcerpt}</p> : null}
                 {item.feedback ? <p>反馈：{item.feedback}</p> : null}
@@ -227,12 +220,10 @@ export default function InterviewRecapReview({
         </div>
 
         {reviewSessions.length === 0 ? (
-          <div className="text-center py-10">
-            <FileText size={28} className="mx-auto text-[var(--color-muted)] mb-3" />
-            <p className="text-sm text-[var(--color-muted)]">
-              完成一次 Agent 模拟面试并请求复盘后，这里会展示结构化总结和转录入口。
-            </p>
-          </div>
+          <EmptyState
+            icon={<FileText size={28} className="mx-auto text-[var(--color-muted)]" />}
+            title="完成一次 Agent 模拟面试并请求复盘后，这里会展示结构化总结和转录入口。"
+          />
         ) : (
           <div className="grid gap-3 md:grid-cols-2">
             {reviewSessions.map((session) => {
@@ -240,7 +231,10 @@ export default function InterviewRecapReview({
               if (id == null) return null;
               const state = session.interviewState;
               const plan = state?.planSnapshot;
-              const score = averageScore(state);
+              const score = averageScore([
+                ...(state?.scoreArtifacts || []).map((item) => item.score?.overall),
+                ...(state?.questionGraph || []).map((item) => item.score?.overall),
+              ]);
               const recap = state?.recap;
               const date = sessionDate(session);
               return (
@@ -278,7 +272,7 @@ export default function InterviewRecapReview({
                     {score != null && (
                       <span className="inline-flex items-center gap-1 text-[var(--color-primary)]">
                         <Star size={11} />
-                        {score}/5
+                        {scoreBadge(score)}
                       </span>
                     )}
                   </div>

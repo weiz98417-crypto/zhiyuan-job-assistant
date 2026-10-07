@@ -124,6 +124,8 @@ export interface EvaluationReport {
   differentiationTips?: DifferentiationTip[];
   applicationId?: number;
   createdAt: Date;
+  /** D 板块薪资数据来源标注(Spec 30 WP5 reports 列;spec 33 来源卡渲染既有字段) */
+  salaryDataSource?: string;
 }
 
 /* ── Offers ── */
@@ -394,6 +396,13 @@ export interface OptimizeVariant {
   content: string;
   approach: string;
   placeholderCount?: number;
+  /** 软门降级(spec 33):advisory 产物由服务端标注,前端渲染「仅供参考」降级卡 */
+  advisory?: boolean;
+  factuality?: {
+    provenanceChecked?: number;
+    faithfulnessScore?: number;
+    advisoryReason?: string;
+  };
 }
 
 export interface AskQuestion {
@@ -603,6 +612,18 @@ export interface AnswerScore {
     text: string;
     rating: "good" | "expand" | "compress";
   }[];
+  /** Spec 30 / WP1：rubric 细节（scoreAnswerWithRubric 透传，工具卡/复盘页渲染源）。 */
+  bands?: Record<string, number>;
+  overallBand?: number;
+  evidence?: Record<string, string>;
+  states?: Record<string, string>;
+  review?: {
+    effectiveEvidence: string;
+    mainGaps: string;
+    stateVerdict: string;
+    betterStructure: string;
+  };
+  scoringVersion?: string;
 }
 
 export interface InterviewQuestion {
@@ -610,8 +631,10 @@ export interface InterviewQuestion {
   question: string;
   context: string;
   storyHint: string;
-  source: "jd" | "weakness" | "general";
+  /** bank = 题库命中/改编（provenance 字段带原题出处）；provenance 存在于新链路的题目卡上。 */
+  source: "jd" | "bank" | "weakness" | "general";
   weaknessNote?: string;
+  provenance?: string;
 }
 
 /* ── Pipeline: Interview Practice ── */
@@ -960,6 +983,18 @@ export interface InterviewScore {
   overall: number;
   dimensions?: Record<string, number>;
   feedback?: string;
+  /** Spec 30 / WP1：rubric 细节（durable 会话持久化，工具卡/复盘页档位+证据+三态渲染源）。 */
+  bands?: Record<string, number>;
+  overallBand?: number;
+  evidence?: Record<string, string>;
+  states?: Record<string, string>;
+  review?: {
+    effectiveEvidence: string;
+    mainGaps: string;
+    stateVerdict: string;
+    betterStructure: string;
+  };
+  scoringVersion?: string;
 }
 
 export interface InterviewScoreArtifact {
@@ -988,6 +1023,8 @@ export interface InterviewRecap {
     answerExcerpt?: string;
     sourceTurnIds?: string[];
     score?: number;
+    /** Spec 30 / WP1：rubric 档位（复盘页档位徽标渲染源）。 */
+    rubricOverallBand?: number;
     feedback?: string;
   }[];
   sourceTurnIds?: string[];

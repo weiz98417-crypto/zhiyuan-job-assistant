@@ -1,0 +1,427 @@
+{
+  "family": "tech_general",
+  "provenance": "generated_seed",
+  "provenanceDetail": "llm-batch 2026-10-03 (--out mode)",
+  "questions": [
+    {
+      "question": "讲一次你犯过的技术错误，造成了什么影响，你从中学到了什么？",
+      "topic": "从错误中学习与责任感",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "如实描述错误、影响、补救措施；重点突出反思与改进，避免推卸责任。"
+    },
+    {
+      "question": "如何设计一个分布式事务？你常用的方案有哪些，各自的优缺点是什么？",
+      "topic": "分布式事务方案与取舍",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "2PC、TCC、Saga、本地消息表等；对比一致性、性能、复杂度，结合业务选型。"
+    },
+    {
+      "question": "如果让你设计一个短链接服务，你会如何设计？需要考虑哪些关键点？",
+      "topic": "系统设计能力与细节考虑",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "发号器、哈希、存储选型、缓存、高并发、防冲突、跳转性能、统计等。"
+    },
+    {
+      "question": "你心目中健康的工程师文化是什么样的？你如何在一个团队中推动这种文化？",
+      "topic": "文化价值观与影响力",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "开放、协作、质量、学习；通过代码评审、分享、复盘等具体行动推动。"
+    },
+    {
+      "question": "当你手头任务很多且都紧急时，你如何排优先级？请举例说明。",
+      "topic": "优先级管理与沟通",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "评估影响、紧急度、依赖；对齐上级；使用工具；举例说明取舍与结果。"
+    },
+    {
+      "question": "如何实现接口的幂等性？有哪些常见方案？",
+      "topic": "幂等设计",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "唯一ID、Token、乐观锁、状态机、去重表；分析适用场景与代价。"
+    },
+    {
+      "question": "线上服务响应变慢，但CPU和内存都不高，你会如何排查？",
+      "topic": "性能问题排查思路",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "检查IO、网络、锁、下游依赖、GC、线程池；用工具如arthas、tcpdump定位。"
+    },
+    {
+      "question": "你如何看待工作与生活的平衡？在高压下你如何保持效率？",
+      "topic": "工作节奏与自我管理",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "重视可持续性；通过规划、专注、休息、运动保持效率；举例说明。"
+    },
+    {
+      "question": "你希望加入什么样的团队？你对下一份工作最看重什么？",
+      "topic": "求职动机与团队匹配",
+      "phase": "reverse",
+      "difficulty": "medium",
+      "answerPoints": "技术氛围、成长空间、业务前景、团队协作；与个人规划匹配，真诚表达。"
+    },
+    {
+      "question": "如何设计一个高可用的系统？你会考虑哪些关键点？",
+      "topic": "高可用设计原则",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "冗余、故障转移、限流降级、熔断、监控告警、容量规划、混沌工程。"
+    },
+    {
+      "question": "描述一次你成功说服他人接受你的技术方案的经历，你用了什么方法？",
+      "topic": "影响力与沟通",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "理解对方顾虑；用数据、原型、试点证明；寻找共赢点；尊重决策。"
+    },
+    {
+      "question": "如果让你把一个遗留系统重写，你会如何制定迁移计划？",
+      "topic": "遗留系统迁移策略",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "评估风险、绞杀者模式、逐步迁移、双写、灰度、回滚方案、测试覆盖。"
+    },
+    {
+      "question": "讲一次你在信息不完整的情况下做技术决策的经历。你当时怎么权衡风险？",
+      "topic": "信息不全下的决策",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "明确已知与未知，评估最坏情况，设定可回滚方案，快速验证假设，事后复盘调整。"
+    },
+    {
+      "question": "如何设计一个分布式限流器？需要考虑哪些关键点？",
+      "topic": "分布式限流设计",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "算法选型（令牌桶/漏桶）、存储（Redis）、原子性、性能、降级、多节点一致性。"
+    },
+    {
+      "question": "设计一个支持千万级日活的消息推送系统，你会怎么架构？",
+      "topic": "大规模推送系统设计",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "接入层、消息队列削峰、推送网关、离线存储、去重、重试、监控、水平扩展。"
+    },
+    {
+      "question": "当你和产品经理对需求优先级有分歧时，你怎么处理？",
+      "topic": "跨职能协作与沟通",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "理解业务目标，用数据说话，提出替代方案，寻找共赢，必要时上升决策。"
+    },
+    {
+      "question": "讲一次你指导初级工程师成长的经历。你用了什么方法？",
+      "topic": "导师与团队培养",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "制定学习计划，结对编程，代码评审反馈，逐步放权，定期沟通，肯定进步。"
+    },
+    {
+      "question": "如何实现一个分布式锁？有哪些常见方案和坑？",
+      "topic": "分布式锁实现",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "Redis（SETNX+过期）、ZooKeeper、etcd；考虑锁续期、误删、脑裂、可重入。"
+    },
+    {
+      "question": "线上服务出现偶发500错误，但日志信息很少。你如何定位？",
+      "topic": "偶发故障排查",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "增加日志埋点、链路追踪、复现、检查依赖、分析线程/内存、监控指标关联。"
+    },
+    {
+      "question": "面试最后，你通常会问哪些问题来了解团队的技术现状？",
+      "topic": "反向面试提问",
+      "phase": "reverse",
+      "difficulty": "medium",
+      "answerPoints": "技术栈、部署频率、监控告警、技术债、团队协作、成长路径、决策流程。"
+    },
+    {
+      "question": "描述一次你不得不推迟交付时间的经历。你如何与相关方沟通？",
+      "topic": "交付管理与沟通",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "尽早预警，说明原因与影响，提供新时间线，给出缓解措施，保持透明。"
+    },
+    {
+      "question": "在微服务架构下，如何安全地做数据库表结构变更？",
+      "topic": "数据库在线迁移",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "扩展-收缩模式：先加字段、双写、迁移数据、切读、删旧字段；版本兼容，灰度。"
+    },
+    {
+      "question": "公司要求下季度云成本降低30%，你会如何制定方案？",
+      "topic": "云成本优化",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "成本分析、资源闲置、实例规格、存储分层、预留实例、自动伸缩、架构优化。"
+    },
+    {
+      "question": "你如何给同级别的同事提出负面反馈？请举例。",
+      "topic": "建设性反馈",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "私下沟通，对事不对人，具体事实，倾听对方，共同改进，保持尊重。"
+    },
+    {
+      "question": "如何设计一个分布式ID生成器？有哪些常见方案，各自的优缺点是什么？",
+      "topic": "分布式ID生成方案",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "常见方案：UUID、数据库自增、号段模式、雪花算法。重点考察ID唯一性、有序性、高可用、时钟回拨处理。"
+    },
+    {
+      "question": "如何设计一个支持多租户的SaaS系统？数据隔离有哪些方案？",
+      "topic": "多租户架构与数据隔离",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "隔离方案：独立数据库、共享数据库独立schema、共享表加租户ID。权衡成本、隔离性、扩展性，考虑数据安全与运维复杂度。"
+    },
+    {
+      "question": "如何设计一个分布式链路追踪系统？核心组件有哪些？",
+      "topic": "分布式追踪系统设计",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "核心组件：埋点SDK、收集器、存储、查询界面。关键：TraceID透传、采样策略、低开销、与日志监控集成。"
+    },
+    {
+      "question": "如何实现服务的优雅关闭？需要考虑哪些问题？",
+      "topic": "优雅关闭与流量摘除",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "先摘除流量，等待处理中请求完成，关闭线程池，释放资源。注意超时控制、注册中心反注册、K8s preStop钩子。"
+    },
+    {
+      "question": "设计一个秒杀系统，你会如何架构？如何解决超卖和限流？",
+      "topic": "秒杀系统架构",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "分层过滤：CDN、网关限流、Redis预减库存、MQ异步下单。解决超卖：Redis原子操作+数据库乐观锁。防刷：令牌、验证码。"
+    },
+    {
+      "question": "如何设计一个分布式配置中心？需要考虑哪些关键点？",
+      "topic": "分布式配置中心设计",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "关键点：配置存储、推送机制（长轮询/WebSocket）、版本管理、灰度发布、高可用。客户端容灾：本地缓存、降级。"
+    },
+    {
+      "question": "讲一次你说服团队放弃一个你曾坚持的技术方案的经历。",
+      "topic": "放弃个人方案，团队利益优先",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "用数据说话，对比方案优劣，承认自己方案不足，以团队目标为重。展示开放心态和协作精神。"
+    },
+    {
+      "question": "描述一次你不得不向上级汇报坏消息的经历。你如何沟通？",
+      "topic": "向上沟通坏消息",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "及时、坦诚、带解决方案。先讲影响，再讲原因，最后给补救计划和预防措施。保持冷静，不推诿。"
+    },
+    {
+      "question": "讲一次你在项目中主动承担额外责任的经历。结果如何？",
+      "topic": "主动承担责任",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "描述背景、主动承担的任务、遇到的困难、如何解决、结果与成长。体现主人翁意识和领导力。"
+    },
+    {
+      "question": "你如何在一个团队中推动代码质量提升？",
+      "topic": "推动代码质量提升",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "建立规范、自动化检查、代码评审、技术分享、度量指标。从小处着手，持续改进，激励团队参与。"
+    },
+    {
+      "question": "你如何看待工程师的职业道德？在什么情况下你会拒绝一个需求？",
+      "topic": "工程师职业道德与拒绝需求",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "涉及安全、隐私、法律、伦理时拒绝。沟通风险，提供替代方案，坚持原则，向上反馈。"
+    },
+    {
+      "question": "在反向面试环节，你会如何了解团队的技术决策流程？",
+      "topic": "反向面试了解技术决策流程",
+      "phase": "reverse",
+      "difficulty": "medium",
+      "answerPoints": "问：技术选型谁拍板？如何权衡业务与技术？有无技术评审委员会？决策失误如何复盘？了解团队工程文化。"
+    },
+    {
+      "question": "如何设计一个支持断点续传和秒传的大文件上传服务？需要考虑哪些关键点？",
+      "topic": "大文件上传架构与优化",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "分片上传、断点续传、秒传（文件哈希）、并发控制、存储选型、CDN加速、一致性校验。"
+    },
+    {
+      "question": "如何实现数据库分库分表？分片键怎么选？迁移时如何保证数据一致性？",
+      "topic": "分库分表设计与迁移",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "分片键选择（范围/哈希）、路由规则、全局ID、跨库查询、数据迁移双写与校验、灰度切换。"
+    },
+    {
+      "question": "如何设计一个高并发点赞/计数系统？如何解决热点和一致性？",
+      "topic": "高并发计数系统设计",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "Redis原子计数、分片计数、异步落库、热点key拆分、最终一致性、缓存与DB同步策略。"
+    },
+    {
+      "question": "如果让你设计一个 A/B 测试平台，你会如何设计？需要考虑哪些关键点？",
+      "topic": "A/B测试平台架构",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "实验分流、流量正交、指标计算、数据隔离、实验生命周期、统计显著性、与业务解耦。"
+    },
+    {
+      "question": "设计一个分布式任务调度系统，你会考虑哪些核心问题？",
+      "topic": "分布式任务调度设计",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "任务分片、故障转移、幂等执行、调度触发、负载均衡、任务依赖、高可用与一致性。"
+    },
+    {
+      "question": "讲一次你接手一个遗留项目并快速上手的经历。你用了什么方法？",
+      "topic": "遗留项目快速上手",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "阅读文档、跑通流程、画架构图、找关键人访谈、小步修改、补测试、记录问题清单。"
+    },
+    {
+      "question": "讲一次你收到负面反馈的经历，你如何应对和改进？",
+      "topic": "负面反馈的应对与改进",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "先倾听不辩解、确认具体点、制定改进计划、主动寻求帮助、定期复盘、用行动证明改变。"
+    },
+    {
+      "question": "讲一次你推动跨团队协作完成项目的经历。遇到最大的阻力是什么？",
+      "topic": "跨团队协作与推动",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "明确共同目标、建立沟通机制、处理利益冲突、向上同步、里程碑对齐、复盘。"
+    },
+    {
+      "question": "你如何做项目排期和任务估算？讲一次估算偏差很大的经历。",
+      "topic": "任务估算与排期",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "拆解任务、参考历史数据、预留缓冲、识别依赖、定期同步、偏差后复盘原因。"
+    },
+    {
+      "question": "你如何看待“速度 vs 质量”的权衡？请举例说明你的选择。",
+      "topic": "速度与质量的权衡",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "根据阶段和风险决定、MVP快速验证、核心路径保质量、技术债可视化管理、事后补救。"
+    },
+    {
+      "question": "你如何推动团队的知识分享和文档建设？",
+      "topic": "团队知识管理与文档",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "建立模板、定期分享会、文档与代码同仓、奖励贡献、新人onboarding、减少重复答疑。"
+    },
+    {
+      "question": "在反向面试中，你会如何了解团队的 on-call 和故障响应机制？",
+      "topic": "反向面试：on-call与故障响应",
+      "phase": "reverse",
+      "difficulty": "medium",
+      "answerPoints": "问告警轮值、故障等级、复盘文化、改进闭环、工具链、团队压力与支持。"
+    },
+    {
+      "question": "讲一次你主动优化了开发流程或工具链，提升了团队效率。",
+      "topic": "考查主动改进与效率提升意识",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "识别痛点、方案设计、落地推动、量化收益、团队反馈"
+    },
+    {
+      "question": "描述一次你处理线上故障的经历，你如何组织应急和事后复盘？",
+      "topic": "故障应急组织与复盘能力",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "快速止血、分工协作、信息同步、根因分析、改进措施闭环"
+    },
+    {
+      "question": "讲一次你与测试或运维同事协作中遇到的冲突，如何解决的？",
+      "topic": "跨职能协作与冲突解决",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "理解立场、数据沟通、共同目标、流程改进、关系维护"
+    },
+    {
+      "question": "如何设计一个 API 网关？核心功能有哪些？",
+      "topic": "API网关架构与核心能力",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "路由、鉴权、限流、熔断、日志监控、协议转换、灰度、高可用"
+    },
+    {
+      "question": "如何实现消息队列的可靠投递？如何保证消息不丢不重？",
+      "topic": "消息可靠投递与幂等",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "生产端确认、持久化、消费端手动ACK、重试、幂等消费、事务消息"
+    },
+    {
+      "question": "如何设计一个灰度发布系统？需要考虑哪些关键点？",
+      "topic": "灰度发布系统设计",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "流量切分、规则引擎、监控回滚、数据隔离、版本管理、自动化"
+    },
+    {
+      "question": "如何实现一个熔断降级组件？核心状态机怎么设计？",
+      "topic": "熔断降级原理与状态机",
+      "phase": "tech",
+      "difficulty": "medium",
+      "answerPoints": "关闭/半开/打开三态、滑动窗口统计、阈值策略、降级逻辑、恢复探测"
+    },
+    {
+      "question": "设计一个在线文档协同编辑系统（如 Google Docs），你会如何架构？",
+      "topic": "协同编辑架构与一致性",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "OT/CRDT算法、WebSocket实时同步、版本管理、冲突解决、存储与快照"
+    },
+    {
+      "question": "设计一个网约车派单系统，你会如何设计核心流程？",
+      "topic": "派单系统核心流程与调度",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "位置更新、订单匹配、司机调度、路径规划、高并发、容灾"
+    },
+    {
+      "question": "设计一个支付系统，如何保证资金安全和对账？",
+      "topic": "支付系统资金安全与对账",
+      "phase": "tech",
+      "difficulty": "hard",
+      "answerPoints": "幂等、事务、风控、异步对账、差错处理、审计日志、资金池隔离"
+    },
+    {
+      "question": "你如何看待代码 review 的文化？好的 review 应该是什么样的？",
+      "topic": "代码review文化与最佳实践",
+      "phase": "behavioral",
+      "difficulty": "medium",
+      "answerPoints": "建设性反馈、学习导向、小PR、及时响应、自动化检查、尊重"
+    },
+    {
+      "question": "反向面试时，你会如何了解团队的工程效率和开发流程？",
+      "topic": "反向面试了解工程效率",
+      "phase": "reverse",
+      "difficulty": "medium",
+      "answerPoints": "问CI/CD、代码审查、发布频率、故障恢复、技术债处理、工具链"
+    }
+  ]
+}

@@ -19,6 +19,15 @@ vi.mock("@/lib/agent/runtime/agent-read-service", () => ({
   })),
 }));
 
+// Hermetic: the classifier previously hit the real DeepSeek endpoint (8s timeout window),
+// which made this file flaky under full-suite parallelism. Fail fast to the regex fallback.
+vi.mock("@/lib/ai/model-gateway", () => ({
+  complete: vi.fn(async () => {
+    throw new Error("hermetic test: LLM classification unavailable");
+  }),
+  getThinkModelChain: vi.fn(() => []),
+}));
+
 describe("Agent orchestration browser boundary", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -69,7 +78,9 @@ describe("Agent orchestration browser boundary", () => {
     expect(payload.data.tools.length).toBe(payload.data.toolWhitelist.length);
     expect(payload.data.systemPrompt).toContain("career dna");
     expect(getProfileDnaSummaryMock).toHaveBeenCalledWith({ userId: "user-1" });
-  });
+    // Route module graph takes >10s under full-suite parallelism; a timeout here would
+    // leave a dangling POST that consumes the next test's mockRejectedValueOnce.
+  }, 30_000);
 
   it("rejects orchestration metadata requests without an authenticated principal", async () => {
     getCurrentUserMock.mockRejectedValueOnce(new Error("unauthorized"));
@@ -84,5 +95,5 @@ describe("Agent orchestration browser boundary", () => {
     }));
 
     expect(response.status).toBe(401);
-  });
+  }, 30_000);
 });

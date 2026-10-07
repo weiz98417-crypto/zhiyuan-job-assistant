@@ -62,7 +62,7 @@ describe("transcript merge (0.11.0-C, ADR-0036)", () => {
 
   it("reconciles the PDF extraction appended to a submitted turn", () => {
     const local = [{ role: "user", content: "分析简历", images: ["data:application/pdf;base64,dGVzdA=="], timestamp: "2026-09-29T10:00:00Z" }];
-    const server = [{ itemId: "memory-user-1", role: "user", content: "分析简历\n\n---\n已读取的 PDF 文本（仅用于本次分析，不会自动保存）：\n内容", timestamp: "2026-09-29T10:00:01Z" }];
+    const server = [{ itemId: "memory-user-1", role: "user", content: "分析简历\n\n---\n已读取的 PDF 文本（仅用于本次分析，不会自动保存）：\n内容", images: [], timestamp: "2026-09-29T10:00:01Z" }];
     expect(mergeServerTranscript(local, server)).toEqual(server);
   });
 

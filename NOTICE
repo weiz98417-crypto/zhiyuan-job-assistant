@@ -1,0 +1,30 @@
+NOTICE — third-party attributions for the 2026-10B capability train
+====================================================================
+
+This product incorporates or adapts material from the following open-source
+projects. All attributions are per their respective licenses.
+
+1. LuJie CareerKit (https://github.com/Chozzc/Lujie-Careerkit)
+   License: Apache-2.0
+   Used in: interview answer scoring rubric
+            (src/lib/agent/knowledge/registry/prompts/interview-answer-scoring.md —
+            band anchors, evidence-citation requirement, three-state distinction,
+            and the "do not convert bands to percentages" discipline are adapted
+            from its evaluation-rubric into the Zhiyuan domain dialect).
+
+2. JavaGuide (https://github.com/Snailclimb/JavaGuide) — Apache-2.0
+   doocs/leetcode (https://github.com/doocs/leetcode) — CC-BY-SA-4.0
+   Used in: interview question bank secondary-family corpus seeds
+            (scripts/question-seeds/; seeded questions derived from or inspired
+            by these corpora carry provenance "corpus:javaguide" /
+            "corpus:doocs-leetcode" in the interview_questions table).
+   CC-BY-SA note: corpus-derived entries inherit share-alike obligations;
+   they are stored as structured question records with attribution.
+
+3. promptfoo (https://github.com/promptfoo/promptfoo) — MIT
+   Used in: red-team harness configuration (promptfoo/) executed via npx;
+   no source code vendored.
+
+4. autoevals (https://github.com/openai/autoevals) — MIT
+   Used in: LLM quality scorer prompt drafts in src/lib/agent/llm-scorers.ts
+   (Spec 15; prompt skeletons translated and adapted, no runtime dependency).

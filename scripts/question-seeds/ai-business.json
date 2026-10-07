@@ -1,0 +1,23 @@
+{
+  "family": "ai_business",
+  "provenance": "generated_seed",
+  "provenanceDetail": "spec-27 starter set (2026-10-03, hand-authored)",
+  "questions": [
+    { "question": "向完全不懂技术的客户介绍你们 AI 产品的价值，你会怎么讲？现场演示一下。", "topic": "价值表达与翻译", "phase": "tech", "difficulty": "medium", "answerPoints": "从客户业务痛点切入、避免术语、给出可验证的成功标准" },
+    { "question": "客户质疑 AI 输出结果不准，你作为售前/运营怎么处理？讲一次真实经历。", "topic": "异议处理与信任建设", "phase": "behavioral", "difficulty": "medium", "answerPoints": "先了解场景预期、现场归因、给出兜底方案而非辩解" },
+    { "question": "你如何判断一个潜在客户是真需求还是只想蹭 AI 热点？", "topic": "需求甄别（售前视角）", "phase": "tech", "difficulty": "medium", "answerPoints": "预算/决策链/可量化成功标准/数据准备度四个信号" },
+    { "question": "介绍一次你运营的 AI 功能用户活跃度下滑，你的归因和挽救动作。", "topic": "运营归因与挽救", "phase": "behavioral", "difficulty": "medium", "answerPoints": "数据分层定位、假设验证、动作与效果回看" },
+    { "question": "给客户做 POC 时，你怎么设计成功标准让双方都认可？", "topic": "POC 设计", "phase": "case-study", "difficulty": "hard", "answerPoints": "样本共选、指标先签、边界条件写清、验收流程" },
+    { "question": "AI 解决方案售前常遇到「拿我们数据试一下」的诉求，你怎么管理这类期望？", "topic": "期望管理", "phase": "tech", "difficulty": "medium", "answerPoints": "数据质量门槛、时间盒、分阶段承诺" },
+    { "question": "讲一次你把一个失败的交付项目挽回的经历。", "topic": "危机处理", "phase": "behavioral", "difficulty": "hard", "answerPoints": "及时上报、根因、客户沟通节奏、挽回后的关系修复" },
+    { "question": "如果客户的业务流程和产品标准能力冲突，你怎么平衡定制化与标准化？", "topic": "定制 vs 标准判断", "phase": "case-study", "difficulty": "hard", "answerPoints": "定制成本核算、产品化可能性、报价与排期杠杆" },
+    { "question": "你怎么给运营活动设计 AI 能力（如智能文案、智能客服）的效果指标？", "topic": "运营指标设计", "phase": "tech", "difficulty": "medium", "answerPoints": "过程指标+结果指标、人机协作比、成本节约口径" },
+    { "question": "介绍你对目标行业（如金融/零售/制造）AI 落地成熟度的理解。", "topic": "行业认知", "phase": "tech", "difficulty": "medium", "answerPoints": "数据基础/合规约束/ROI 特点；有具体观察更佳" },
+    { "question": "客户高层和一线使用者的诉求冲突时（如降本 vs 好用），你怎么推进？", "topic": "多干系人协调", "phase": "behavioral", "difficulty": "hard", "answerPoints": "分别锚定诉求、找共同指标、分层汇报" },
+    { "question": "你怎么写一份让客户愿意签字的 AI 方案建议书？结构是什么？", "topic": "方案文档能力", "phase": "tech", "difficulty": "medium", "answerPoints": "痛点→方案→证据（案例/POC）→实施与验收→风险；忌功能罗列" },
+    { "question": "讲一次竞争对手在客户现场压价，你的应对。", "topic": "竞争应对", "phase": "behavioral", "difficulty": "medium", "answerPoints": "回到价值差异、不轻易跟价、置换条件" },
+    { "question": "AI 产品的用户教育成本高，你有哪些降低使用门槛的运营手段？", "topic": "用户教育", "phase": "case-study", "difficulty": "medium", "answerPoints": "模板/示例/引导流/场景化入口；有转化数据更佳" },
+    { "question": "如果让你为新客户设计上手 30 天的陪跑计划，你怎么设计？", "topic": "客户成功设计", "phase": "case-study", "difficulty": "medium", "answerPoints": "分周目标、培训节奏、健康度指标、升级通道" },
+    { "question": "你对 AI 售前/运营岗位未来三年的变化怎么看？你在怎么准备？", "topic": "岗位趋势自认知", "phase": "reverse", "difficulty": "easy", "answerPoints": "有观点、与个人学习计划呼应" }
+  ]
+}

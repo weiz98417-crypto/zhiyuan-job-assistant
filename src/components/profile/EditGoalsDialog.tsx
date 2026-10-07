@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { X, Plus, Trash2, Lock, Unlock } from "lucide-react";
+import { Plus, Trash2, Lock, Unlock } from "lucide-react";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/overlay";
 import type { ZhiyuanProfileGoals } from "@/types";
 
 interface Props {
@@ -96,18 +97,14 @@ export default function EditGoalsDialog({ open, goals, isLocked, onClose, onSave
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
-      <div
-        className="bg-[var(--color-bg)] rounded-xl shadow-2xl w-full max-w-lg mx-4 max-h-[85vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
+    <Dialog open onOpenChange={(next) => { if (!next) onClose(); }}>
+      <DialogContent className="w-[calc(100%-2rem)]! max-w-lg! rounded-xl! bg-[var(--color-bg)]! shadow-2xl! p-0! max-h-[85vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--color-divider)]">
           <div className="flex items-center gap-2">
-            <h2 className="text-lg font-display text-[var(--color-text)]">编辑求职目标</h2>
+            <DialogTitle className="text-lg font-display text-[var(--color-text)]">编辑求职目标</DialogTitle>
             {isLocked && <Lock size={14} className="text-[var(--color-primary)]" aria-label="手动锁定，AI 不会自动修改" />}
           </div>
-          <button onClick={onClose} className="p-1 rounded hover:bg-[var(--color-bg-alt)]"><X size={18} /></button>
         </div>
 
         {/* Body */}
@@ -195,7 +192,7 @@ export default function EditGoalsDialog({ open, goals, isLocked, onClose, onSave
             {saving ? "保存中..." : "保存"}
           </button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

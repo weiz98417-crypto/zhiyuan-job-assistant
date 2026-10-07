@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import {
   Search,
   Clipboard,
@@ -12,7 +12,6 @@ import {
   ExternalLink,
   Trash2,
   Pencil,
-  X,
   Bookmark,
   Filter,
   Sparkles,
@@ -20,6 +19,8 @@ import {
   Download,
 } from "lucide-react";
 import { WarmButton, PaperCard } from "@/components/design";
+import { PageHeading, SearchInput } from "@/components/ui/workbench-primitives";
+import { Dialog, DialogContent, DialogTitle, AlertDialog, AlertDialogContent, AlertDialogTitle, AlertDialogDescription } from "@/components/ui/overlay";
 import { StaggerList, StaggerItem } from "@/components/design/PageTransition";
 import {
   deleteJD,
@@ -164,34 +165,24 @@ export default function JDLibraryPage() {
   return (
     <div className="">
       {/* Header */}
-      <div className="page-heading mb-6 flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h2 className="font-[family-name:var(--font-display)] text-2xl font-bold text-[var(--color-text)]">
-            JD 库
-          </h2>
-          <p className="text-sm text-[var(--color-text-soft)] mt-1">
-            管理所有录入的职位描述
-          </p>
-        </div>
-        <WarmButton variant="primary" size="sm" onClick={() => router.push("/evaluate")}>
-          <Sparkles size={14} className="mr-1.5" />
-          快速评估
-          <ArrowRight size={14} className="ml-1" />
-        </WarmButton>
+      <div className="mb-6">
+        <PageHeading
+          as="h2"
+          meta="管理所有录入的职位描述"
+          title="JD 库"
+          actions={
+            <WarmButton variant="primary" size="sm" onClick={() => router.push("/evaluate")}>
+              <Sparkles size={14} className="mr-1.5" />
+              快速评估
+              <ArrowRight size={14} className="ml-1" />
+            </WarmButton>
+          }
+        />
       </div>
 
       {/* Search + Filters */}
       <div className="flex items-center gap-3 mb-4">
-        <div className="relative flex-1">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-muted)]" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="搜索公司、职位、关键词..."
-            className="surface-inset w-full pl-9 pr-3 py-2 rounded-[var(--radius-sm)] text-sm text-[var(--color-text)] placeholder:text-[var(--color-muted)] focus:outline-none focus:border-[var(--color-primary)]"
-          />
-        </div>
+        <SearchInput value={search} onChange={setSearch} placeholder="搜索公司、职位、关键词..." />
       </div>
 
       {/* Filter chips */}
@@ -327,46 +318,28 @@ export default function JDLibraryPage() {
         })}
       </StaggerList>
 
-      {/* Detail / Edit Sheet */}
-      <AnimatePresence>
-        {selectedJD && !editingJD && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/30 backdrop-blur-[2px] z-40"
-            onClick={() => setSelectedJD(null)}
-          >
-            <motion.div
-              initial={{ x: "100%" }}
-              animate={{ x: 0 }}
-              exit={{ x: "100%" }}
-              transition={{ type: "spring", damping: 25, stiffness: 200 }}
-              onClick={(e) => e.stopPropagation()}
-              className="surface-panel fixed right-0 top-0 bottom-0 w-full max-w-lg border-l border-[var(--color-border)] overflow-y-auto z-50"
-            >
-              <div className="p-6">
-                {/* Header */}
-                <div className="flex items-center justify-between mb-4">
+      {/* Detail / Edit Sheet(浮层 kit) */}
+      {selectedJD && !editingJD && (
+        <Dialog open onOpenChange={(open) => { if (!open) setSelectedJD(null); }}>
+          <DialogContent side="right" className="surface-panel max-w-lg! overflow-y-auto">
+            <div className="p-6">
+              {/* Header */}
+              <div className="flex items-center justify-between mb-4 pr-10">
+                <DialogTitle asChild>
                   <h3 className="font-[family-name:var(--font-display)] text-lg font-bold text-[var(--color-text)]">
                     JD 详情
                   </h3>
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => setDeleteConfirm(selectedJD)}
-                      className="p-1.5 rounded-[var(--radius-sm)] hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/20 text-[var(--color-muted)]"
-                      title="删除 JD"
-                    >
-                      <Trash2 size={17} />
-                    </button>
-                    <button
-                      onClick={() => setSelectedJD(null)}
-                      className="p-1.5 rounded-[var(--radius-sm)] hover:bg-[var(--color-primary-muted)] text-[var(--color-muted)]"
-                    >
-                      <X size={18} />
-                    </button>
-                  </div>
+                </DialogTitle>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setDeleteConfirm(selectedJD)}
+                    className="p-1.5 rounded-[var(--radius-sm)] hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/20 text-[var(--color-muted)]"
+                    title="删除 JD"
+                  >
+                    <Trash2 size={17} />
+                  </button>
                 </div>
+              </div>
 
                 {/* Source badge + date */}
                 <div className="flex items-center gap-2 mb-4">
@@ -459,33 +432,20 @@ export default function JDLibraryPage() {
                   </WarmButton>
                 </div>
               </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          </DialogContent>
+        </Dialog>
+      )}
 
-      {/* Edit Sheet */}
-      <AnimatePresence>
-        {editingJD && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/30 backdrop-blur-[2px] z-40"
-            onClick={() => setEditingJD(null)}
-          >
-            <motion.div
-              initial={{ x: "100%" }}
-              animate={{ x: 0 }}
-              exit={{ x: "100%" }}
-              transition={{ type: "spring", damping: 25, stiffness: 200 }}
-              onClick={(e) => e.stopPropagation()}
-              className="surface-panel fixed right-0 top-0 bottom-0 w-full max-w-lg border-l border-[var(--color-border)] overflow-y-auto z-50"
-            >
-              <div className="p-6">
+      {/* Edit Sheet(浮层 kit) */}
+      {editingJD && (
+        <Dialog open onOpenChange={(open) => { if (!open) setEditingJD(null); }}>
+          <DialogContent side="right" className="surface-panel max-w-lg! overflow-y-auto">
+            <div className="p-6">
+              <DialogTitle asChild>
                 <h3 className="font-[family-name:var(--font-display)] text-lg font-bold text-[var(--color-text)] mb-4">
                   编辑 JD
                 </h3>
+              </DialogTitle>
                 <div className="space-y-3 mb-6">
                   <div>
                     <label className="text-xs font-medium text-[var(--color-text-soft)] block mb-1">
@@ -529,45 +489,34 @@ export default function JDLibraryPage() {
                     取消
                   </WarmButton>
                 </div>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
 
-      {/* Delete Confirmation */}
-      <AnimatePresence>
-        {deleteConfirm && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/30 backdrop-blur-[2px] z-50 flex items-center justify-center"
-            onClick={() => setDeleteConfirm(null)}
-          >
-            <motion.div
-              initial={{ scale: 0.95 }}
-              animate={{ scale: 1 }}
-              exit={{ scale: 0.95 }}
-              onClick={(e) => e.stopPropagation()}
-              className="surface-panel rounded-[var(--radius-md)] p-6 max-w-sm mx-4"
-            >
+      {/* Delete Confirmation(浮层 kit) */}
+      {deleteConfirm && (
+        <AlertDialog open onOpenChange={(open) => { if (!open) setDeleteConfirm(null); }}>
+          <AlertDialogContent className="surface-panel w-[calc(100%-2rem)]! rounded-[var(--radius-md)]!">
+            <AlertDialogTitle asChild>
               <h4 className="font-semibold text-[var(--color-text)] mb-2">确认删除</h4>
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
               <p className="text-sm text-[var(--color-text-soft)] mb-4">
                 确定删除该 JD 记录？关联的报告不受影响。
               </p>
-              <div className="flex items-center gap-2 justify-end">
-                <WarmButton variant="ghost" size="sm" onClick={() => setDeleteConfirm(null)}>
-                  取消
-                </WarmButton>
-                <WarmButton variant="primary" size="sm" onClick={handleDelete}>
-                  确认删除
-                </WarmButton>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            </AlertDialogDescription>
+            <div className="flex items-center gap-2 justify-end">
+              <WarmButton variant="ghost" size="sm" onClick={() => setDeleteConfirm(null)}>
+                取消
+              </WarmButton>
+              <WarmButton variant="primary" size="sm" onClick={handleDelete}>
+                确认删除
+              </WarmButton>
+            </div>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </div>
   );
 }

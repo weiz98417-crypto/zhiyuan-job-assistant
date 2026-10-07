@@ -18,6 +18,14 @@
       "package": "@iflow-mcp/mergedao-mcp-jobs",
       "env": {},
       "optional": true
+    },
+    "playwright": {
+      "package": "@playwright/mcp",
+      "args": ["--headless", "--isolated", "--browser", "chromium"],
+      "timeoutMs": 60000,
+      "env": {},
+      "optional": true,
+      "policy": "browser"
     }
   }
 }

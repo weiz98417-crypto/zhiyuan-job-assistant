@@ -275,6 +275,8 @@ describe("Offer Agent routing and tool contracts", () => {
   it("Offer workspace source keeps report, stale badge, and Agent handoff boundaries", () => {
     const source = readFileSync(path.join(process.cwd(), "src/app/compare/page.tsx"), "utf-8");
     const agentPage = readFileSync(path.join(process.cwd(), "src/components/agent/use-agent-conversation.tsx"), "utf-8");
+    // spec 35 拆分:handoff 消费标记(key+读写函数)移入 use-agent-conversation-helpers
+    const conversationHelpers = readFileSync(path.join(process.cwd(), "src/components/agent/use-agent-conversation-helpers.ts"), "utf-8");
 
     expect(source).toContain("/api/offers");
     expect(source).toContain("/api/offer-reports");
@@ -288,7 +290,7 @@ describe("Offer Agent routing and tool contracts", () => {
     expect(agentPage).toContain("createdHandoffSessionIdRef");
     expect(agentPage).toContain('searchParams.get("newSession") === "1"');
     expect(agentPage).toContain('forcedAgentId: "offer"');
-    expect(agentPage).toContain("HANDOFF_CONSUMED_STORAGE_KEY");
+    expect(conversationHelpers).toContain("HANDOFF_CONSUMED_STORAGE_KEY");
     expect(agentPage).toContain("hasConsumedHandoff(handoffKey)");
     expect(agentPage).toContain("markHandoffConsumed(handoffKey)");
     expect(agentPage).toContain("replaceAgentSessionUrl(window.location.href");

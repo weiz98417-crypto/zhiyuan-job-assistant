@@ -1,6 +1,7 @@
 import db from "@/lib/db";
 import type { AgentMessage, AgentSessionState, ChatSession, InterviewSessionState } from "@/types";
 import { projectAgentMessages } from "@/lib/agent/surface-projection";
+import { projectDurableInterviewEngineState } from "@/lib/agent/interview-session-state";
 
 const MAX_MESSAGES_PER_SESSION = 200;
 export const MEMORY_DIGEST_USER_MESSAGE_THRESHOLD = 5;
@@ -37,7 +38,13 @@ function parseServerSession(row: ServerSessionRow): ChatSession {
   let interviewState: InterviewSessionState | undefined;
   try {
     const parsed = JSON.parse(row.interview_state_json || "{}") as InterviewSessionState;
-    if (parsed?.planSnapshot) interviewState = parsed;
+    if (parsed?.planSnapshot) {
+      interviewState = parsed;
+    } else {
+      // Spec 30 / WP0：durable 引擎形状（company/role/phase，无 planSnapshot）走纯投影——
+      // 复盘页的数据送达路径（单写者不变：只读投影，不回写）
+      interviewState = projectDurableInterviewEngineState(parsed);
+    }
   } catch {
     interviewState = undefined;
   }

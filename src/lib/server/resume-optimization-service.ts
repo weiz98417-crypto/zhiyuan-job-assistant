@@ -3,11 +3,14 @@ import type { ExecutionPrincipal } from "@/lib/agent/runtime/durable-agent-run";
 import { assembleAgentMemoryContext } from "@/lib/agent/memory-context";
 import { stableContentHash } from "@/lib/agent/verified-action";
 import { validateResumeSectionContent, type ResumeSectionId } from "@/lib/agent/resume-save-guard";
+import { scoreAgentOutput, BLOCKING_SCORE_THRESHOLD } from "@/lib/agent/llm-scorers";
+import type { ChatCompletionRequest, ChatResult } from "@/lib/ai/model-gateway";
 import { getDataRepositories } from "@/lib/data-repositories";
 import { retrieveExcellentResumePatternMemory } from "@/lib/excellent-resume-patterns";
 import { buildJudgePrompt, getTemperatureByEffort } from "@/lib/judge-engine";
 import { retrieveReferenceResumeSnippets } from "@/lib/reference-resume-vector";
 import { stableResumeHash, type ResumeDraftRecord } from "@/lib/resume/document";
+import { checkNumberProvenance, formatProvenanceFeedback } from "@/lib/server/resume-factuality";
 import { requestResumeOptimizationModel } from "@/lib/server/resume-optimization-model";
 import type { Operation } from "@/types";
 
@@ -39,13 +42,17 @@ export class ResumeOptimizationInputError extends Error {
 export async function optimizeResumeSectionForAgent(
   principal: ExecutionPrincipal,
   input: ResumeOptimizationInput,
-  options: { signal?: AbortSignal } = {},
+  options: {
+    signal?: AbortSignal;
+    /** 测试注入：quality scorer 的 LLM 客户端（与 model-gateway complete 同形）。 */
+    qualityComplete?: (request: ChatCompletionRequest) => Promise<ChatResult>;
+  } = {},
 ): Promise<{
   sectionId: ResumeSectionId;
   artifactId: string;
   baseVersion: string;
   baseHash: string;
-  variants: Array<{ id: string; variantId: string; label: string; approach: string; content: string }>;
+  variants: OptimizedVariant[];
   readBackVerified: true;
   referenceMemory: Record<string, unknown>;
 }> {
@@ -150,20 +157,119 @@ export async function optimizeResumeSectionForAgent(
   });
   const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
   const parsed = parseModelJson(payload.choices?.[0]?.message?.content || "{}");
-  const variants = arrayValue(parsed.variants).slice(0, 6).map(parseObject).filter((variant) => stringValue(variant.content));
-  if (variants.length === 0) throw new Error("AI 未生成有效简历优化方案");
+  let candidateVariants = arrayValue(parsed.variants).slice(0, 6).map(parseObject).filter((variant) => stringValue(variant.content));
+  if (candidateVariants.length === 0) throw new Error("AI 未生成有效简历优化方案");
+
+  // ── Spec 24 / ADR-0041 产物事实门 ──
+  // 硬门（确定性）：数字溯源。软门（LLM Judge）：faithfulness/hallucination。
+  const factualitySources = [
+    sectionContent,
+    ...Object.values(fullCV),
+    stringValue(input.jdText),
+    [stringValue(input.instruction), ...arrayValue(input.questionAnswers).map((qa) => parseObject(qa)).map((qa) => `${stringValue(qa.question)} ${stringValue(qa.answer)}`)].filter(Boolean).join("\n"),
+  ];
+  const provenanceOf = (content: string) => checkNumberProvenance(content, factualitySources);
+
+  // 硬门第一遍：任一方案有编造数字嫌疑 → 带违规清单重试一次（仅一次，ADR-0041）
+  // Spec 30 / WP5：provenanceRetried 标志随 draft 持久化（fact_gate_repair 感知指标数据源）
+  const retriedHashes = new Set<string>();
+  let provenanceRetried = false;
+  const firstPassFailures = candidateVariants
+    .map((variant) => ({ variant, result: provenanceOf(stringValue(variant.content)) }))
+    .filter((entry) => !entry.result.ok);
+  if (firstPassFailures.length > 0) {
+    provenanceRetried = true;
+    const allViolations = firstPassFailures.flatMap((entry) => entry.result.violations);
+    const retryResponse = await requestResumeOptimizationModel({
+      fast: false,
+      messages: [
+        { role: "system", content: prompt },
+        { role: "user", content: `请优化 ${input.sectionId}，生成改写方案并严格返回 JSON。\n\n${formatProvenanceFeedback({ ok: false, checked: allViolations.length, violations: allViolations })}` },
+      ],
+      temperature: getTemperatureByEffort(effort),
+      maxTokens: 8000,
+      signal: options.signal,
+    });
+    const retryPayload = await retryResponse.json() as { choices?: Array<{ message?: { content?: string } }> };
+    const retryParsed = parseModelJson(retryPayload.choices?.[0]?.message?.content || "{}");
+    const retryVariants = arrayValue(retryParsed.variants).slice(0, 6).map(parseObject).filter((variant) => stringValue(variant.content));
+    const retryPassing = retryVariants.filter((variant) => provenanceOf(stringValue(variant.content)).ok);
+    const firstPassPassing = candidateVariants.filter((variant) => provenanceOf(stringValue(variant.content)).ok);
+    // 重试只此一次：通过者取两遍并集（按内容去重），仍不通过者淘汰并放弃
+    const seenContents = new Set(firstPassPassing.map((variant) => stableResumeHash(stringValue(variant.content))));
+    for (const variant of retryPassing) retriedHashes.add(stableResumeHash(stringValue(variant.content)));
+    candidateVariants = [...firstPassPassing, ...retryPassing.filter((variant) => !seenContents.has(stableResumeHash(stringValue(variant.content))))];
+    if (candidateVariants.length === 0) {
+      throw new ResumeOptimizationInputError(
+        `数字溯源未通过（重试 1 次后仍失败），${input.sectionId} 保持原文未改动。编造嫌疑数字：${[...new Set(allViolations.map((violation) => violation.token))].slice(0, 12).join("、")}`,
+      );
+    }
+  }
+
+  // 软门：faithfulness/hallucination（Spec 15 评分器推进生产 verify 位）。
+  // veto（编造数组非空）→ 淘汰；低分无 veto → 降级「仅供参考」提案。
+  const factualityByContent = new Map<string, { advisory: boolean; faithfulnessScore?: number; advisoryReason?: string }>();
+  const scoringCandidates = candidateVariants.slice(0, 3); // 通常 2-3 个方案；上限防判官成本失控
+  for (const variant of scoringCandidates) {
+    const content = stringValue(variant.content);
+    try {
+      const quality = await scoreAgentOutput({
+        taskType: "resume_edit",
+        output: content,
+        sourceMaterials: factualitySources.map((source) => source || "").filter(Boolean),
+        request: stringValue(input.instruction) || undefined,
+      }, options.qualityComplete ? { complete: options.qualityComplete } : {});
+      const vetoed = quality.hardVetoes.length > 0;
+      // Spec 15 语义：blocking 任务低分不进 qualityWarnings（那是 advisory 任务的信号），
+      // 生产软门直接用合并分对阈值判定（ADR-0041：低分降级「仅供参考」，不阻断）。
+      const lowScore = !vetoed && quality.score < BLOCKING_SCORE_THRESHOLD;
+      factualityByContent.set(stableResumeHash(content), {
+        advisory: lowScore,
+        faithfulnessScore: quality.score,
+        advisoryReason: vetoed
+          ? `编造判定：${quality.hardVetoes.join(",")}`
+          : lowScore
+            ? `忠实度评分 ${quality.score} 低于阈值`
+            : undefined,
+      });
+    } catch {
+      // 判官不可用不阻塞主链路（软门语义）；无记录 = 未评分
+    }
+  }
+  // veto（编造数组非空）→ 淘汰该方案；低分无 veto → 保留但降级「仅供参考」。
+  // 判官配额外（第 4-6 个方案）不裸进草稿：强制降级「仅供参考」（P1-1）
+  for (const variant of candidateVariants) {
+    const contentHash = stableResumeHash(stringValue(variant.content));
+    if (!factualityByContent.has(contentHash)) {
+      factualityByContent.set(contentHash, { advisory: true, advisoryReason: "判官评分配额外，未评分——按仅供参考处理" });
+    }
+  }
+  const survivingVariants = candidateVariants.filter((variant) => {
+    const factuality = factualityByContent.get(stableResumeHash(stringValue(variant.content)));
+    return !factuality || !factuality.advisoryReason?.startsWith("编造判定");
+  });
+  if (survivingVariants.length === 0) {
+    const reasons = [...factualityByContent.values()].map((entry) => entry.advisoryReason).filter(Boolean).join("；");
+    throw new ResumeOptimizationInputError(`产物未通过忠实度校验（重试后仍失败），${input.sectionId} 保持原文未改动。${reasons}`);
+  }
+  candidateVariants = survivingVariants;
 
   const activeDocument = await repositories.resumeDocuments.getActive(principal.userId);
-  const drafts: ResumeDraftRecord[] = variants.flatMap((variant, index) => {
+  const drafts: ResumeDraftRecord[] = candidateVariants.flatMap((variant, index) => {
     const content = stringValue(variant.content);
     const validation = validateResumeSectionContent(input.sectionId, content);
     if (!validation.valid) return [];
+    const provenance = provenanceOf(content);
+    const factuality = factualityByContent.get(stableResumeHash(content));
+    const advisory = factuality?.advisory === true;
+    const retriedHere = retriedHashes.has(stableResumeHash(content));
+    const label = (stringValue(variant.label) || `方案 ${index + 1}`).slice(0, 140);
     return [{
       id: deterministicId(`draft_${index + 1}`, principal.userId, input.requestKey),
       document_id: activeDocument?.id || null,
       artifact_id: artifactId,
       variant_id: stringValue(variant.variantId) || `variant_${index + 1}`,
-      title: (stringValue(variant.label) || `方案 ${index + 1}`).slice(0, 160),
+      title: advisory ? `仅供参考：${label}` : label,
       status: "draft",
       base_version: activeVersion,
       base_hash: baseHash,
@@ -175,9 +281,17 @@ export async function optimizeResumeSectionForAgent(
       }]),
       content_json: JSON.stringify({
         sectionId: input.sectionId,
-        label: stringValue(variant.label) || `方案 ${index + 1}`,
+        label: advisory ? `仅供参考：${label}` : label,
         content,
         approach: stringValue(variant.approach),
+        advisory,
+        provenanceRetried,
+        factuality: {
+          provenanceChecked: provenance.checked,
+          provenanceOk: provenance.ok,
+          faithfulnessScore: factuality?.faithfulnessScore,
+          advisoryReason: factuality?.advisoryReason,
+        },
       }),
       integrity_json: JSON.stringify({
         contentHash: stableResumeHash(content),
@@ -203,6 +317,16 @@ export async function optimizeResumeSectionForAgent(
   });
 }
 
+export interface OptimizedVariant {
+  id: string;
+  variantId: string;
+  label: string;
+  approach: string;
+  content: string;
+  advisory?: boolean;
+  factuality?: { provenanceChecked?: number; faithfulnessScore?: number; advisoryReason?: string };
+}
+
 function buildResult(
   sectionId: ResumeSectionId,
   artifactId: string,
@@ -210,7 +334,15 @@ function buildResult(
   baseHash: string,
   drafts: ResumeDraftRecord[],
   referenceMemory: Record<string, unknown>,
-) {
+): {
+  sectionId: ResumeSectionId;
+  artifactId: string;
+  baseVersion: string;
+  baseHash: string;
+  variants: OptimizedVariant[];
+  readBackVerified: true;
+  referenceMemory: Record<string, unknown>;
+} {
   return {
     sectionId,
     artifactId,
@@ -218,12 +350,17 @@ function buildResult(
     baseHash,
     variants: drafts.map((draft) => {
       const content = parseObject(draft.content_json);
+      const factuality = parseObject(content.factuality);
       return {
         id: draft.id,
         variantId: draft.variant_id,
         label: stringValue(content.label) || draft.title,
         approach: stringValue(content.approach),
         content: stringValue(content.content),
+        ...(content.advisory === true ? { advisory: true as const } : {}),
+        ...(Object.keys(factuality).length > 0
+          ? { factuality: factuality as { provenanceChecked?: number; faithfulnessScore?: number; advisoryReason?: string } }
+          : {}),
       };
     }),
     readBackVerified: true as const,

@@ -3,7 +3,7 @@
 import { ZHIYUAN_LEVELS, COMPANY_LEVEL_MAP, getLevelDescription, getCompanyLevel } from "./zhiyuan-levels";
 import { findBenchmarks, formatBenchmarkForLLM } from "./salary-benchmarks";
 import { findCompanyStyle, formatCompanyStyleForLLM } from "./interview-styles";
-import { detectSignals, formatSignalsForLLM, JD_SIGNALS } from "./jd-signals";
+import { JD_SIGNALS } from "./jd-signals";
 
 export type AgentScenario = "explore" | "evaluate" | "dashboard" | "interview_prep" | "dingwei";
 
@@ -49,10 +49,8 @@ function interviewStyleSection(ctx?: KnowledgeContext): string {
   return formatCompanyStyleForLLM(ctx.company);
 }
 
-function jdSignalsSection(ctx?: KnowledgeContext): string {
-  if (!ctx?.jdText) return "";
-  return formatSignalsForLLM(ctx.jdText);
-}
+// jdText 实时信号检测接线已删（Spec 25）：evaluate 场景的风险判定由 jd-risk-service
+// 的确定性引擎负责，这里只保留 JD_SIGNALS 静态速查表。
 
 function jdSignalsGlossary(): string {
   const byCategory = new Map<string, string[]>();
@@ -87,11 +85,7 @@ export function injectKnowledge(scenario: AgentScenario, ctx?: KnowledgeContext)
       break;
     }
     case "evaluate": {
-      // Full evaluation context — signals + company style + salary + levels
-      if (ctx?.jdText) {
-        const signals = jdSignalsSection(ctx);
-        if (signals) parts.push(section("JD信号检测", signals));
-      }
+      // Full evaluation context — company style + salary + levels + signals glossary
       if (ctx?.company) {
         const style = interviewStyleSection(ctx);
         if (style) parts.push(section("公司面试风格", style));
@@ -135,7 +129,5 @@ export {
   formatBenchmarkForLLM,
   findCompanyStyle,
   formatCompanyStyleForLLM,
-  detectSignals,
-  formatSignalsForLLM,
   JD_SIGNALS,
 };

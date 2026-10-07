@@ -1,15 +1,16 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { loadModeDocument, loadRegistryText } from "@/lib/agent/knowledge/registry/loader";
 
-const MODE_FILES = {
-  dingwei: join("modes", "zh", "dingwei.md"),
-  "interview-prep": join("modes", "zh", "interview-prep.md"),
-} as const;
+const MODE_FILES = ["dingwei", "interview-prep"] as const;
 
-export function loadAgentMode(name: keyof typeof MODE_FILES): string {
-  return readFileSync(join(process.cwd(), MODE_FILES[name]), "utf8");
+export type AgentModeName = (typeof MODE_FILES)[number];
+
+export function loadAgentMode(name: AgentModeName): string {
+  const content = loadModeDocument("zh", name);
+  if (content === null) throw new Error(`模式文件不存在: ${name}`);
+  return content;
 }
 
+/** 经注册表条目 data.story-bank-template 读取（frontmatter 已剥离）。 */
 export function loadInterviewStoryBank(): string {
-  return readFileSync(join(process.cwd(), "interview-prep", "story-bank.md"), "utf8");
+  return loadRegistryText("data.story-bank-template");
 }

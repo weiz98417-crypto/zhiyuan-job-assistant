@@ -226,6 +226,7 @@ export async function* orchestrateGen(
   // Phase 6: Delegate to agent loop
   // Dynamic import to avoid circular deps
   const { agentLoopServer } = await import("@/lib/agent/loop/server-runner");
+  const { recordModelGeneration } = await import("@/lib/agent/runtime/agent-trace-store");
   yield* agentLoopServer({
     agent: agentWithModel,
     systemPrompt,
@@ -246,6 +247,21 @@ export async function* orchestrateGen(
           workerId: ctx.workerId,
           fencingToken: ctx.fencingToken,
           taskContract: ctx.taskContract || undefined,
+        }
+      : undefined,
+    onModelUsage: ctx.runId
+      ? (report) => {
+          // Spec 18: metadata-only generation observation; failures are loud, never silent.
+          recordModelGeneration({
+            runId: ctx.runId,
+            userId: ctx.principal?.userId,
+            model: report.modelUsed,
+            promptTokens: report.promptTokens,
+            completionTokens: report.completionTokens,
+            latencyMs: report.latencyMs,
+          }).catch((error) => {
+            console.error(`[agent-trace] model generation trace failed: ${error instanceof Error ? error.message : error}`);
+          });
         }
       : undefined,
   });

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { parseLlmJsonObject } from "@/lib/llm-json";
 import { buildAskQuestionsPrompt } from "@/lib/judge-engine";
 import type { Operation } from "@/types";
 
@@ -83,22 +84,16 @@ export async function POST(request: Request) {
       );
     }
 
-    let parsed;
-    try {
-      parsed = JSON.parse(content);
-    } catch {
-      const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-      if (jsonMatch) {
-        parsed = JSON.parse(jsonMatch[1]);
-      } else {
-        return NextResponse.json(
-          { success: false, error: "AI 返回格式解析失败" },
-          { status: 500 }
-        );
-      }
+    const parsed = parseLlmJsonObject(content);
+    if (!parsed) {
+      return NextResponse.json(
+        { success: false, error: "AI 返回格式解析失败" },
+        { status: 500 }
+      );
     }
 
-    const questions = parsed.questions || [];
+    const rawQuestions = parsed.questions;
+    const questions = Array.isArray(rawQuestions) ? rawQuestions as { question: string; hint: string }[] : [];
     if (questions.length === 0) {
       return NextResponse.json(
         { success: false, error: "AI 未生成有效追问" },

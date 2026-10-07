@@ -4,7 +4,10 @@ import { assembleAgentMemoryContext } from "@/lib/agent/memory-context";
 import { stableContentHash } from "@/lib/agent/verified-action";
 import { validateResumeSectionContent, type ResumeSectionId } from "@/lib/agent/resume-save-guard";
 import { getDataRepositories } from "@/lib/data-repositories";
+import { parseLlmJsonObject } from "@/lib/llm-json";
 import { llmRetry } from "@/lib/llm-retry";
+import { scoreAgentOutput, BLOCKING_SCORE_THRESHOLD } from "@/lib/agent/llm-scorers";
+import { checkNumberProvenance, filterSectionsByProvenance, formatProvenanceFeedback } from "@/lib/server/resume-factuality";
 import { stableResumeHash, type ResumeDraftRecord } from "@/lib/resume/document";
 
 const SECTION_IDS: ResumeSectionId[] = ["summary", "experience", "projects", "education", "skills"];
@@ -74,48 +77,113 @@ export async function generateResumeDraftForAgent(
   });
   const apiKey = process.env.DEEPSEEK_API_KEY?.trim();
   if (!apiKey) throw new Error("未配置 DEEPSEEK_API_KEY");
-  const response = await llmRetry("https://api.deepseek.com/chat/completions", apiKey, {
-    model: "deepseek-flash",
-    messages: [
-      {
-        role: "system",
-        content: `你是严谨的简历定制专家。只能重组和润色原简历已有事实，禁止编造经历、数字、公司、项目或技能。针对 JD 强化相关关键词并保持完整。严格返回 JSON：{"sections":[{"id":"summary|experience|projects|education|skills","label":"定制版","content":"完整正文"}]}`,
-      },
-      {
-        role: "user",
-        content: [
-          `目标岗位：${input.targetRole || "从 JD 推断"}`,
-          `语言：${input.language || "zh"}`,
-          `JD：\n${jdText.slice(0, 6000)}`,
-          `原简历：\n${currentSections.map((section) => `【${section.id}】\n${section.content}`).join("\n\n").slice(0, 9000)}`,
-          references.filter(Boolean).length ? `参考简历仅用于风格，不得复制事实：\n${references.filter(Boolean).map((row) => String(row?.sections_json || "")).join("\n").slice(0, 2500)}` : "",
-          memory.llmSummary ? `长期记忆：\n${memory.llmSummary}` : "",
-        ].filter(Boolean).join("\n\n"),
-      },
-    ],
-    temperature: 0.25,
-    max_tokens: 10000,
-    response_format: { type: "json_object" },
-    thinking: { type: "disabled" },
-    retries: 2,
-    fallbackModel: "deepseek-flash",
-    signal: options.signal,
-    timeout: 180_000,
+  // Spec 24（ADR-0041）生成链事实门：产物数字必须溯源到原简历/JD/记忆；失败 section 淘汰保原文，全败带反馈重试一次
+  const provenanceSources = [
+    ...currentSections.map((section) => section.content),
+    jdText,
+    memory.llmSummary,
+  ].filter(Boolean);
+  const violationsOf = (sections: Array<{ id: ResumeSectionId; label: string; content: string }>) =>
+    sections.flatMap((section) => checkNumberProvenance(section.content, provenanceSources).violations);
+
+  const callGeneration = async (feedback?: string) => {
+    const response = await llmRetry("https://api.deepseek.com/chat/completions", apiKey, {
+      model: "deepseek-flash",
+      messages: [
+        {
+          role: "system",
+          content: `你是严谨的简历定制专家。只能重组和润色原简历已有事实，禁止编造经历、数字、公司、项目或技能。针对 JD 强化相关关键词并保持完整。严格返回 JSON：{"sections":[{"id":"summary|experience|projects|education|skills","label":"定制版","content":"完整正文"}]}`,
+        },
+        {
+          role: "user",
+          content: [
+            `目标岗位：${input.targetRole || "从 JD 推断"}`,
+            `语言：${input.language || "zh"}`,
+            `JD：\n${jdText.slice(0, 6000)}`,
+            `原简历：\n${currentSections.map((section) => `【${section.id}】\n${section.content}`).join("\n\n").slice(0, 9000)}`,
+            references.filter(Boolean).length ? `参考简历仅用于风格，不得复制事实：\n${references.filter(Boolean).map((row) => String(row?.sections_json || "")).join("\n").slice(0, 2500)}` : "",
+            memory.llmSummary ? `长期记忆：\n${memory.llmSummary}` : "",
+            feedback ? `\n${feedback}` : "",
+          ].filter(Boolean).join("\n\n"),
+        },
+      ],
+      temperature: 0.25,
+      max_tokens: 10000,
+      response_format: { type: "json_object" },
+      thinking: { type: "disabled" },
+      retries: 2,
+      fallbackModel: "deepseek-flash",
+      signal: options.signal,
+      timeout: 180_000,
+    });
+    const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+    return normalizeGeneratedSections(parseLlmJsonObject(payload.choices?.[0]?.message?.content || "{}") ?? {});
+  };
+
+  let generated = await callGeneration();
+  // 硬门第一遍：全部 section 都带编造嫌疑数字 → 带违规清单重试一次（仅一次，ADR-0041）
+  let passing = filterSectionsByProvenance(generated, provenanceSources).passing;
+  if (passing.length === 0 && generated.length > 0) {
+    const feedback = formatProvenanceFeedback({ ok: false, checked: 0, violations: violationsOf(generated) });
+    generated = await callGeneration(feedback);
+    passing = filterSectionsByProvenance(generated, provenanceSources).passing;
+    if (passing.length === 0) {
+      throw new ResumeGenerationInputError(
+        `数字溯源未通过（重试 1 次后仍失败），生成草稿已放弃、原简历未改动。编造嫌疑数字：${[...new Set(violationsOf(generated).map((violation) => violation.token))].slice(0, 12).join("、")}`,
+      );
+    }
+  }
+  // 软门：faithfulness/hallucination（spec 31，与优化链 resume-optimization-service.ts 软门同语义）。
+  // veto（编造数组非空）→ 淘汰该 section；低分无 veto → 降级「仅供参考」；判官不可用 → 未评分放行（不阻塞）。
+  // 生成链 section ≤5 且内容互异（非同题变体），故逐一评分、不设优化链的 3 个变体评分上限。
+  const factualityByContent = new Map<string, { vetoed: boolean; advisory: boolean; faithfulnessScore?: number; advisoryReason?: string }>();
+  for (const section of passing) {
+    try {
+      const quality = await scoreAgentOutput({
+        taskType: "resume_edit",
+        output: section.content,
+        sourceMaterials: provenanceSources,
+        request: input.targetRole || undefined,
+      });
+      const vetoed = quality.hardVetoes.length > 0;
+      const lowScore = !vetoed && quality.score < BLOCKING_SCORE_THRESHOLD;
+      factualityByContent.set(stableResumeHash(section.content), {
+        vetoed,
+        advisory: lowScore,
+        faithfulnessScore: quality.score,
+        advisoryReason: vetoed
+          ? `编造判定：${quality.hardVetoes.join(",")}`
+          : lowScore
+            ? `忠实度评分 ${quality.score} 低于阈值`
+            : undefined,
+      });
+    } catch {
+      // 判官不可用不阻塞主链路（软门语义）；无记录 = 未评分
+    }
+  }
+  // 淘汰判定用结构化 vetoed 标志，不用 advisoryReason 文案前缀（文案是展示层，不当控制流）
+  const survivingSections = passing.filter((section) => {
+    return !factualityByContent.get(stableResumeHash(section.content))?.vetoed;
   });
-  const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
-  const parsed = parseModelJson(payload.choices?.[0]?.message?.content || "{}");
-  const generated = normalizeGeneratedSections(parsed);
+  if (survivingSections.length === 0 && passing.length > 0) {
+    const reasons = [...factualityByContent.values()].map((entry) => entry.advisoryReason).filter(Boolean).join("；");
+    throw new ResumeGenerationInputError(`产物未通过忠实度校验（重试后仍失败），生成草稿已放弃、原简历未改动。${reasons}`);
+  }
+
   const activeDocument = await repositories.resumeDocuments.getActive(principal.userId);
-  const drafts: ResumeDraftRecord[] = generated.flatMap((section, index) => {
+  const drafts: ResumeDraftRecord[] = survivingSections.flatMap((section, index) => {
     const validation = validateResumeSectionContent(section.id, section.content);
     if (!validation.valid) return [];
+    const factuality = factualityByContent.get(stableResumeHash(section.content));
+    const advisory = factuality?.advisory === true;
+    const label = advisory ? `仅供参考：${section.label}` : section.label;
     const originalContent = currentSections.find((current) => current.id === section.id)?.content || "";
     return [{
       id: deterministicId(`draft_cv_${section.id}`, principal.userId, input.requestKey || String(index)),
       document_id: activeDocument?.id || null,
       artifact_id: artifactId,
       variant_id: `targeted_${section.id}`,
-      title: section.label,
+      title: label,
       status: "draft",
       base_version: baseVersion,
       base_hash: baseHash,
@@ -127,9 +195,14 @@ export async function generateResumeDraftForAgent(
       }]),
       content_json: JSON.stringify({
         sectionId: section.id,
-        label: section.label,
+        label,
         content: section.content,
         approach: "jd_targeted",
+        advisory,
+        factuality: {
+          faithfulnessScore: factuality?.faithfulnessScore,
+          advisoryReason: factuality?.advisoryReason,
+        },
       }),
       integrity_json: JSON.stringify({ contentHash: stableResumeHash(section.content), valid: true }),
     }];
@@ -189,15 +262,6 @@ function deterministicId(prefix: string, userId: string, requestKey?: string): s
   return requestKey
     ? `${prefix}_${createHash("sha256").update(`${userId}:${requestKey}`).digest("hex").slice(0, 24)}`
     : `${prefix}_${randomUUID()}`;
-}
-
-function parseModelJson(value: string): Record<string, unknown> {
-  const normalized = value.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "").trim();
-  try { return parseObject(JSON.parse(normalized)); } catch {
-    const match = normalized.match(/\{[\s\S]*\}/);
-    if (!match) return {};
-    try { return parseObject(JSON.parse(match[0])); } catch { return {}; }
-  }
 }
 
 function parseObject(value: unknown): Record<string, unknown> {

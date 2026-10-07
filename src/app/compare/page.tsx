@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Bot, CheckSquare, FileText, HelpCircle, Pencil, Plus, Scale, X } from "lucide-react";
+import { Bot, CheckSquare, FileText, HelpCircle, Pencil, Plus, Scale } from "lucide-react";
 import { HandwritingTitle, PaperCard, ScoreBadge, WarmButton } from "@/components/design";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/overlay";
 import { createSession } from "@/lib/agent/sessions";
 import { formatFivePointScore } from "@/lib/score-scale";
 import type { Offer, OfferEvaluationModule, OfferVerdict } from "@/types";
@@ -744,11 +745,11 @@ export default function ComparePage() {
       )}
 
       {showForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4">
-          <div className="w-full max-w-lg rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-6 shadow-[var(--shadow-lg)]">
-            <div className="mb-4 flex items-center justify-between">
+        <Dialog open onOpenChange={(open) => { if (!open) { setShowForm(false); resetForm(); } }}>
+          <DialogContent className="w-[calc(100%-2rem)]!">
+            <DialogTitle className="sr-only">{editingOfferId ? "编辑 Offer" : "录入 Offer"}</DialogTitle>
+            <div className="mb-4">
               <HandwritingTitle as="h2">{editingOfferId ? "编辑 Offer" : "录入 Offer"}</HandwritingTitle>
-              <button onClick={() => { setShowForm(false); resetForm(); }}><X size={20} className="text-[var(--color-muted)]" /></button>
             </div>
             <div className="space-y-4">
               <div className="grid gap-3 sm:grid-cols-2">
@@ -788,8 +789,8 @@ export default function ComparePage() {
                 <WarmButton variant="primary" size="sm" onClick={saveOffer}>保存</WarmButton>
               </div>
             </div>
-          </div>
-        </div>
+          </DialogContent>
+        </Dialog>
       )}
     </div>
   );

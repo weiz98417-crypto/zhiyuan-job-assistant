@@ -12,6 +12,7 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import { PaperCard, WarmButton } from "@/components/design";
+import { EmptyState } from "@/components/ui/workbench-primitives";
 import type {
   InterviewQuestion,
   CoachMode,
@@ -306,12 +307,10 @@ export default function PracticePanel({
         <div className="min-h-[320px] max-h-[480px] overflow-y-auto space-y-4 mb-4">
           {/* Empty state */}
           {displayMessages.length === 0 && !loading && (
-            <div className="text-center py-12">
-              <MessageSquare size={32} className="mx-auto text-[var(--color-muted)] mb-3" />
-              <p className="text-[var(--color-muted)] text-sm">
-                在下方输入你的回答，AI 教练会给出结构化反馈
-              </p>
-            </div>
+            <EmptyState
+              icon={<MessageSquare size={32} className="mx-auto text-[var(--color-muted)]" />}
+              title="在下方输入你的回答，AI 教练会给出结构化反馈"
+            />
           )}
 
           {/* Messages */}

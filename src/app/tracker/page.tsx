@@ -3,7 +3,6 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Search,
   Filter,
   ArrowUpDown,
   Grid3X3,
@@ -31,6 +30,7 @@ import {
   StatusTag,
 } from "@/components/design";
 import { StaggerList, StaggerItem } from "@/components/design/PageTransition";
+import { PageHeading, SearchInput } from "@/components/ui/workbench-primitives";
 import LandingCelebration from "@/components/tracker/LandingCelebration";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Dialog, DialogContent } from "@/components/ui/overlay";
@@ -418,45 +418,29 @@ export default function TrackerPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-4">
-        <div className="page-heading">
-          <p className="text-[var(--color-muted)] text-sm mb-1">
-            {applications.length} 条投递记录
-          </p>
-          <HandwritingTitle as="h1">投递追踪</HandwritingTitle>
-        </div>
-        <div className="flex gap-2">
-          <WarmButton variant="ghost" size="sm" onClick={exportAll}>
-            <Download size={16} className="mr-1.5" />
-            导出全部
-          </WarmButton>
-          {selected.size > 0 && (
-            <WarmButton variant="ghost" size="sm" onClick={exportSelected}>
+      <PageHeading
+        meta={`${applications.length} 条投递记录`}
+        title="投递追踪"
+        actions={
+          <>
+            <WarmButton variant="ghost" size="sm" onClick={exportAll}>
               <Download size={16} className="mr-1.5" />
-              导出已选 ({selected.size})
+              导出全部
             </WarmButton>
-          )}
-        </div>
-      </div>
+            {selected.size > 0 && (
+              <WarmButton variant="ghost" size="sm" onClick={exportSelected}>
+                <Download size={16} className="mr-1.5" />
+                导出已选 ({selected.size})
+              </WarmButton>
+            )}
+          </>
+        }
+      />
 
       {/* Filters */}
       <PaperCard padding="sm">
         <div className="flex flex-wrap gap-3 items-center">
-          <div className="flex items-center gap-2 flex-1 min-w-[200px]">
-            <Search size={16} className="text-[var(--color-muted)]" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="搜索公司或岗位..."
-              className="flex-1 bg-transparent text-sm text-[var(--color-text)] placeholder:text-[var(--color-muted)] focus:outline-none"
-            />
-            {search && (
-              <button onClick={() => setSearch("")}>
-                <X size={14} className="text-[var(--color-muted)]" />
-              </button>
-            )}
-          </div>
+          <SearchInput value={search} onChange={setSearch} placeholder="搜索公司或岗位..." />
 
           <select
             value={statusFilter}

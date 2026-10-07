@@ -1,10 +1,10 @@
 # Change: agent-architecture-specs
 
-将已确认的纸鸢 Agent 系统架构与记忆治理方案拆为十三个可独立领取的实施 spec。Spec 01–07 定义运行架构，Spec 08–13 定义分层记忆、用户治理和迁移门禁。各篇遵守所引用的 ADR，以及“代码渐进迁移、生产一次切换、稳定后删除旧路径”的运行架构发布策略。
+将已确认的纸鸢 Agent 系统架构与记忆治理方案，以及 2026-09/2026-10/2026-10B/2026-10C 四轮升级计划拆为三十九份可独立领取的实施 spec。Spec 01–07 定义运行架构，Spec 08–13 定义分层记忆、用户治理和迁移门禁，Spec 14–19 定义 2026-10 能力引入，Spec 20–23 定义 eng review 后的缺陷修复与登录态路线，Spec 24–29 定义 2026-10B 能力层深化，Spec 30 为 0.19.0 信任卡（已交付），Spec 31–39 定义 2026-10C 信任补丁/前端信任周/导出与视觉/语音面试四班车。各篇遵守所引用的 ADR，以及“代码渐进迁移、生产一次切换、稳定后删除旧路径”的运行架构发布策略。
 
 ## Status
 
-本目录中的文档是可发布为 GitHub Issue 的本地草案。每份草案的目标标签均为 `ready-for-agent`。Spec 08–13 尚未在远端创建 Issue，发布状态以本索引为准。
+本目录中的文档是可发布为 GitHub Issue 的本地草案。每份草案的目标标签均为 `ready-for-agent`（Spec 23 为 `proposed` 设计轮候选，除外）。Spec 08–29 尚未在远端创建 Issue，发布状态以本索引为准。Spec 14–19 来自 2026-10 Agent 能力引入计划（`docs/UPGRADE-PLAN-2026-10.md`、ADR-0039、ADR-0040）；Spec 20–23 来自同日 eng review 之后的缺陷修复轮与登录态路线决策；Spec 24–29 来自 2026-10B 能力层深化计划（`docs/UPGRADE-PLAN-2026-10B.md`、ADR-0041~0044）。
 
 ## Release Boundary
 
@@ -31,6 +31,32 @@ Spec 08–13 属于后续记忆运行时升级，不扩大 `0.10.8` 的既定发
 | 11 | Targeted Memory Erasure | 08–10、ADR-0028、0033 |
 | 12 | User Memory Governance | 08–11、ADR-0028、0032、0034 |
 | 13 | Memory Migration And Release Gates | 05–07、08–12、ADR-0028、0033、0034 |
+| 14 | Memory Embedding Failure Visibility And Dead Flag Removal | 08、13 的门禁证据要求 |
+| 15 | LLM Quality Scorers Behind The Staging Judge | 06 的门禁聚合与 fixtures、14 |
+| 16 | Governed Browser Tool Via Playwright MCP | 01 的 Admission 词汇、ADR-0008、0009、0039 |
+| 17 | Approval And Tool Card Visual Upgrade | 04 的 Conversation Item、ADR-0016、0037 |
+| 18 | Agent Trace Observability With Metadata-Only Production | 05 的 schema ownership、ADR-0040 |
+| 19 | Scheduled Unattended Job Digest | 01、02、ADR-0039、词表 无人值守 Run / 岗位精选 |
+| 20 | Job Discovery Card Replay Reconciliation | ADR-0020/0030/0036、Spec 04 的投影原则；hotfix |
+| 21 | Digest Success Requires Delivered Digest | Spec 19、ADR-0039 |
+| 22 | MCP Server Reconnect On Dead Stdio Child | Spec 16 的 MCPManager 接缝 |
+| 23 | QR Login Session Handoff（proposed，设计轮候选） | Spec 16、ADR-0008/0009/0033 |
+| 24 | Resume Artifact Factuality Gate | ADR-0041、Spec 15 的评分器接缝与 veto 约定；批次 0.15.0（f） |
+| 25 | Knowledge And Prompt Registry | 2026-10B Q6/Q17（无独立 ADR）、verify:tokens 护栏模式；批次 0.15.0（g） |
+| 26 | Interview Scoring Rubric Anchoring | ADR-0042、ADR-0028/0034 候选语义、Spec 15 veto 纪律、Spec 25 挂载点；批次 0.16.0（h） |
+| 27 | Question Bank And Interview Engine | ADR-0044、Spec 25 注册表、Spec 14 嵌入失败教训；批次 0.17.0（i） |
+| 28 | Salary Benchmark Pipeline | ADR-0039 只读边界、ADR-0043、Spec 27 岗位族共用分类；批次 0.18.0（j） |
+| 29 | Outcome Feedback Loop | Spec 26 可信复盘（硬前置）、Spec 08–09 账本与准入、ADR-0034；批次 0.18.0（k） |
+| 30 | Trust Cards, Data Freshness, And Perception Metrics | Spec 26/28/29 的既有字段、CEO 审查 2026-10-04、`/api/memory/candidates` PATCH 既有端点；批次 0.19.0（i-trust-cards，方案 a 含投影扩展） |
+| 31 | Generation Chain Soft-Gate Completion | ADR-0041、Spec 24 优化链软门语义、生成链硬门既有接线（0e782cd）；批次 0.20.0 |
+| 32 | LLM JSON Consolidation | `src/lib/llm-json.ts` 既有两级修复；批次 0.20.0 |
+| 33 | Trust Card Kit And Perception Completion | Spec 30 既有实现与字段、surface-projection 三处同步纪律；批次 0.21.0（先于 33 做 35） |
+| 34 | Workbench Primitives And Overlay Migration | 2026-09 C3/C4 交付的浮层/工作台 kit；批次 0.21.0 |
+| 35 | Agent Conversation Hook Split | 2026-09 C2 交付、纯 hook 决策；批次 0.21.0（先于 33 施工） |
+| 36 | Dependency Diet | 无硬依赖（先于 37 动 package.json）；批次 0.21.0 |
+| 37 | Export Pipeline Consolidation | 无；批次 0.22.0（先于 38） |
+| 38 | Resume Visual Review Loop | Spec 37 的单一渲染出口、`cv-pdf-html.ts` 接缝；批次 0.22.0 |
+| 39 | Voice Interview MVP | Spec 25/26/27 的面试与注册表资产、Spec 32 收口入口、MiMo API（key 已冒烟验证）；批次 0.23.0 |
 
 ## Shared Seams
 
@@ -46,4 +72,4 @@ Spec 08–13 属于后续记忆运行时升级，不扩大 `0.10.8` 的既定发
 
 ## Publishing
 
-将每个尚未发布的编号文件作为一个 Issue body 创建，并添加 `ready-for-agent` 标签。创建顺序遵循上表；实现可以在依赖满足后并行。发布前核对主要测试 seam 与用户确认的范围。
+将每个尚未发布、标签为 `ready-for-agent` 的编号文件作为一个 Issue body 创建，并添加 `ready-for-agent` 标签（`proposed` 状态的 spec——目前是 Spec 23——不发布，待其设计轮定稿升级后再发）。创建顺序遵循上表；实现可以在依赖满足后并行。发布前核对主要测试 seam 与用户确认的范围。

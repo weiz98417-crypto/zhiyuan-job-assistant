@@ -34,6 +34,10 @@ export const TASK_PROGRAM_REGISTRY: Record<AgentTaskType, TaskProgram> = {
   reference_resume_save: program("reference_resume_save", "deterministic", DETERMINISTIC_STAGES, ["source resume content present", "role category confirmed", "reference resume persisted", "reference resume read-back verification passes"], ["source_resume_present", "role_category", "read_back_match"]),
   file_export: program("file_export", "deterministic", ["preflight", "execute", "verify_read_back", "persist_artifact", "respond"], ["export generated", "file exists", "file size is non-zero", "file hash verified"], ["file_exists", "file_size", "file_hash"]),
   job_search: program("job_search", "deterministic", ["preflight", "clarify_or_gate", "execute", "verify_read_back", "respond"], ["job discovery criteria confirmed", "scan creation gated by user confirmation", "scan read-back or opportunity pool response returned"], ["confirmation_required", "scan_read_back", "opportunity_pool_response"]),
+  // Spec 19 / ADR-0039: unattended digest run — no clarify_or_gate stage (nobody to ask),
+  // read-only contract. Digest persistence is structural via the worker transcript
+  // single-writer; the two stop-guard criteria are tool-markable (get_job_digest).
+  job_digest: program("job_digest", "deterministic", ["preflight", "digest", "persist_artifact", "respond"], ["opportunity pool read since watermark", "digest summary generated (top opportunities with dedup note)"], ["digest_generated"]),
 };
 
 export function getTaskProgram(taskType: AgentTaskType): TaskProgram {
@@ -62,6 +66,10 @@ export interface TaskProgramStopGuard {
   incompleteResponse(missing: string[]): string;
 }
 
+/** Spec 21: 降级文案的机器标记（HTML 注释，对用户不可见）——无人值守对账按它排除
+ *  「任务未完成」降级输出，不做脆弱的文案字符串匹配。 */
+export const TASK_INCOMPLETE_MARKER = "<!-- system:task-incomplete -->";
+
 export function createTaskProgramStopGuard(taskOrContract: AgentTaskType | AgentTaskContract): TaskProgramStopGuard | null {
   const taskType = typeof taskOrContract === "string" ? taskOrContract : taskOrContract.taskType;
   const taskProgram = TASK_PROGRAM_REGISTRY[taskType];
@@ -84,7 +92,10 @@ export function createTaskProgramStopGuard(taskOrContract: AgentTaskType | Agent
       ].join("\n");
     },
     incompleteResponse(missing) {
+      // Spec 21: 机器标记前缀（HTML 注释，对用户不可见）——无人值守对账按它排除
+      // 「任务未完成」降级文案，不做脆弱的文案字符串匹配。
       return [
+        TASK_INCOMPLETE_MARKER,
         `「${label}」还没有完成，我先不把它标记为成功。缺少的部分：`,
         ...missing.map((criterion) => `- ${CRITERION_LABELS[criterion] || criterion}`),
         "请补充材料或确认后继续；已产生的中间结果不会丢。",
@@ -106,6 +117,7 @@ const TASK_LABELS: Record<AgentTaskType, string> = {
   reference_resume_save: "优秀简历沉淀",
   file_export: "文件导出",
   job_search: "岗位发现",
+  job_digest: "岗位精选",
 };
 
 const CRITERION_LABELS: Record<string, string> = {

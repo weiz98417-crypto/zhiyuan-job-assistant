@@ -1,0 +1,83 @@
+{
+  "generatedAt": "2026-10-05T16:11:08.623Z",
+  "files": {
+    "_shared.md": {
+      "zhSource": "modes/zh/_shared.md",
+      "zhHash": "56fd0b032c782cd011b343f2cb0ecafd4470a5d0e0863b21b0226797a3686281",
+      "enHash": "243b969749eab24b853251fdb92fb76bd3dbf7f12d55b2eab0268262295a7818"
+    },
+    "apply.md": {
+      "zhSource": "modes/zh/apply.md",
+      "zhHash": "91d722c03894dfcc77fbeca8c8291dc08e32bb0b1fcf9f0b5a7845cfeb6c3be0",
+      "enHash": "3972d34154bcc676ac825fdc244753d29c301950cc257ea903ffba280c1abc7f"
+    },
+    "auto-pipeline.md": {
+      "zhSource": "modes/zh/auto-pipeline.md",
+      "zhHash": "d673001c8d0d0968459c2c99d7afae695c530f172c39ea5fe4562ecfbd9ff423",
+      "enHash": "0d6f906b892b01fcf3a10d408dcd249937500ea84de42ba67451c0d791547564"
+    },
+    "deep.md": {
+      "zhSource": "modes/zh/deep.md",
+      "zhHash": "e888b978f3222151e02ba56b369372ab406dbcb2efc784a09fe59ef288ff6ecb",
+      "enHash": "c4be3c7bee48b4f07544e7139637d70346ed7337fdfb0f597af91a595ce95cd1"
+    },
+    "followup.md": {
+      "zhSource": "modes/zh/followup.md",
+      "zhHash": "1fea8830360d879c135455365ac3a056ade04a43a0433436d67cb2ee5d00327a",
+      "enHash": "04e25411dd6acce180263f7a35fa38fa96d7b8847b86fccf0bfe3e218c28bfff"
+    },
+    "interview-prep.md": {
+      "zhSource": "modes/zh/interview-prep.md",
+      "zhHash": "2b21d64230d138462a2ba82ea267ae871d3783b0917b3a457d0aac1c69539059",
+      "enHash": "c1ba877e650702a2abd3dfca6c76ae1e26529baff0980cef9b862be64b82715a"
+    },
+    "oferta.md": {
+      "zhSource": "modes/zh/jianzhi.md",
+      "zhHash": "d967a7d4ec6c52ad6f183fde3e42e9ae49ec9f94fb79f8e5fcb001d41ea606db",
+      "enHash": "3c80ccfc84108bd594c264185937970fb64dbb237a004d59d7bb1dca8c62485a"
+    },
+    "ofertas.md": {
+      "zhSource": "modes/zh/ofertas.md",
+      "zhHash": "db73b3b93a687b48375996be9a3a59fc5b731c30a49a58b928d31848e1432860",
+      "enHash": "e35e11178b3b2cb6da83cde67b2bfccc728f21fba4c0e618195c98e5087fc816"
+    },
+    "pdf.md": {
+      "zhSource": "modes/zh/pdf.md",
+      "zhHash": "97d504b4a55e47cef0a9246db897f55de637171e0ba4fd7eeb9f19b3f824667f",
+      "enHash": "cca1f8d8c49468a44524617ba29de891cd2ab54d7d9672a191374d74c8699787"
+    },
+    "pipeline.md": {
+      "zhSource": "modes/zh/pipeline.md",
+      "zhHash": "4ae7174f5643f04b91a9ebbacca2d527eb10539a8b2f631540929fc7f21490be",
+      "enHash": "715423519ec05e37e332e1d47cdf9784aa649be1214bd5e4b354dae71feb9084"
+    },
+    "scan.md": {
+      "zhSource": "modes/zh/scan.md",
+      "zhHash": "d19fec3976233649b8c07c3b2948f1c1014ddb8cfce23bb04351c3e05a3287d6",
+      "enHash": "758737508a9fe09684ff6f9694f2dc378452576c329460cc6f734c86ceb68a9a"
+    },
+    "tracker.md": {
+      "zhSource": "modes/zh/tracker.md",
+      "zhHash": "96a9d81395fb18e9c50962536439cdecc21a6ea0342f983622b2aad94f8054e6",
+      "enHash": "7779ec2ff99dbcc5c5ae60ac14893f1895c4388346f22825a794e970efd57b42"
+    }
+  },
+  "legacy": {
+    "batch.md": {
+      "enHash": "d2dd55b6101988f9a35c0522fc23e28ad54ce1a03303eaf82959b12cba89a035",
+      "note": "legacy_en_only"
+    },
+    "patterns.md": {
+      "enHash": "0aaeccf31b098be74385b45cde4fee97de87a483f49ede288f4a402059197a1a",
+      "note": "legacy_en_only"
+    },
+    "project.md": {
+      "enHash": "4975fcd866ac14a84ffc205ff74e1e09f76fdbdde138a8f6e812f5e7cd0e1ccb",
+      "note": "legacy_en_only"
+    },
+    "training.md": {
+      "enHash": "a940f496aab9d363cd837628d9cdcc5af0e468c9d000187c55b7c1f13d45cf5f",
+      "note": "legacy_en_only"
+    }
+  }
+}

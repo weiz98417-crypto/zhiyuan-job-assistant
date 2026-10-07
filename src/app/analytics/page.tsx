@@ -14,16 +14,31 @@ import {
   Shield,
   Eye,
 } from "lucide-react";
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip as ReTooltip, Legend } from "recharts";
+import { ResponsiveContainer, BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip as ReTooltip, Legend } from "recharts";
+
+const PERCEPTION_LABELS: Record<string, string> = {
+  fact_gate_repair: "事实门拦截后修复",
+  score_evidence_expand: "评分依据展开",
+  sourced_jd_follow_through: "带来源评估后跟进",
+  question_source_followup: "带出处题追问",
+};
+const PERCEPTION_COLORS: Record<string, string> = {
+  fact_gate_repair: "var(--color-primary)",
+  score_evidence_expand: "var(--color-primary-soft)",
+  sourced_jd_follow_through: "var(--color-primary-muted)",
+  question_source_followup: "#94a3b8",
+};
 import {
   HandwritingTitle,
   WarmButton,
   PaperCard,
   StatusTag,
 } from "@/components/design";
+import { PageHeading } from "@/components/ui/workbench-primitives";
 import type { Application, ApplicationStatus } from "@/types";
 import { STATUS_ORDER } from "@/types";
 import { computeFunnel, analyzeFollowUps, type Urgency } from "@/lib/analytics";
+import { PERCEPTION_METRICS } from "@/lib/agent/perception-metrics";
 
 const URGENCY_LABELS: Record<Urgency, { level: string; action: string }> = {
   urgent: { level: "立即处理", action: "对方已回复，尽快响应" },
@@ -68,6 +83,9 @@ function serverApplicationToUi(row: ServerApplicationRow): Application {
 
 export default function AnalyticsPage() {
   const [applications, setApplications] = useState<Application[]>([]);
+  // 感知仪表盘(spec 33):null=加载中/不可用,连本地(SQLite)模式显示提示
+  const [perception, setPerception] = useState<{ totals: Record<string, number>; daily: Array<{ day: string; metric: string; count: number }> } | null>(null);
+  const [perceptionState, setPerceptionState] = useState<"loading" | "ready" | "unavailable">("loading");
   const [mounted, setMounted] = useState(false);
   const [timeRange, setTimeRange] = useState<"4w" | "8w" | "all">("8w");
 
@@ -83,6 +101,25 @@ export default function AnalyticsPage() {
       }
     }
     load();
+  }, []);
+
+  useEffect(() => {
+    async function loadPerception() {
+      try {
+        const res = await fetch("/api/perception-events/summary", { cache: "no-store" });
+        if (!res.ok) { setPerceptionState("unavailable"); return; }
+        const json = await res.json();
+        if (json.success && json.data?.totals) {
+          setPerception({ totals: json.data.totals, daily: Array.isArray(json.data.daily) ? json.data.daily : [] });
+          setPerceptionState("ready");
+        } else {
+          setPerceptionState("unavailable");
+        }
+      } catch {
+        setPerceptionState("unavailable");
+      }
+    }
+    loadPerception();
   }, []);
 
   /* ── Funnel data ── */
@@ -228,29 +265,27 @@ export default function AnalyticsPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div className="page-heading">
-          <p className="text-[var(--color-muted)] text-sm mb-1">
-            {applications.length} 条投递数据
-          </p>
-          <HandwritingTitle as="h1">数据分析</HandwritingTitle>
-        </div>
-        <div className="flex gap-2">
-          {(["4w", "8w", "all"] as const).map((r) => (
-            <button
-              key={r}
-              onClick={() => setTimeRange(r)}
-              className={`text-xs px-3 py-1.5 rounded-[var(--radius-sm)] transition-colors ${
-                timeRange === r
-                  ? "bg-[var(--color-primary)] text-[var(--color-surface-raised)]"
-                  : "bg-[var(--color-divider)] text-[var(--color-text-soft)]"
-              }`}
-            >
-              {r === "4w" ? "4周" : r === "8w" ? "8周" : "全部"}
-            </button>
-          ))}
-        </div>
-      </div>
+      <PageHeading
+        meta={`${applications.length} 条投递数据`}
+        title="数据分析"
+        actions={
+          <>
+            {(["4w", "8w", "all"] as const).map((r) => (
+              <button
+                key={r}
+                onClick={() => setTimeRange(r)}
+                className={`text-xs px-3 py-1.5 rounded-[var(--radius-sm)] transition-colors ${
+                  timeRange === r
+                    ? "bg-[var(--color-primary)] text-[var(--color-surface-raised)]"
+                    : "bg-[var(--color-divider)] text-[var(--color-text-soft)]"
+                }`}
+              >
+                {r === "4w" ? "4周" : r === "8w" ? "8周" : "全部"}
+              </button>
+            ))}
+          </>
+        }
+      />
 
       <div className="grid gap-6 lg:grid-cols-2">
         {/* ── Funnel Chart ── */}
@@ -377,6 +412,61 @@ export default function AnalyticsPage() {
       {/* Trend Chart */}
       {/* eslint-disable-next-line */}
       <TrendChart />
+
+      {/* ── 感知指标仪表盘(spec 33):四指标 30 天趋势,Postgres-only ── */}
+      {perceptionState === "ready" && perception && (
+        <PaperCard padding="md">
+          <div className="flex items-center gap-2 mb-4">
+            <Shield size={16} className="text-[var(--color-primary)]" />
+            <h3 className="font-[family-name:var(--font-display)] font-bold text-[var(--color-text)]">
+              信任特征感知(近 30 天)
+            </h3>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            {PERCEPTION_METRICS.map((metric) => (
+              <div key={metric} className="rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface)] p-2.5">
+                <p className="text-[10px] text-[var(--color-muted)] leading-snug">{PERCEPTION_LABELS[metric]}</p>
+                <p className="text-lg font-bold text-[var(--color-text)] tabular-nums mt-1">
+                  {perception.totals[metric] ?? 0}
+                </p>
+              </div>
+            ))}
+          </div>
+          {(() => {
+            const days = Array.from(new Set(perception.daily.map((d) => d.day))).sort();
+            const series = days.map((day) => {
+              const row: Record<string, string | number> = { day: day.slice(5) };
+              for (const metric of PERCEPTION_METRICS) {
+                row[metric] = perception.daily.find((d) => d.day === day && d.metric === metric)?.count || 0;
+              }
+              return row;
+            });
+            if (series.length === 0) {
+              return <p className="text-xs text-[var(--color-muted)]">近 30 天暂无感知事件记录。</p>;
+            }
+            return (
+              <div className="h-44">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={series} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
+                    <XAxis dataKey="day" tick={{ fontSize: 10, fill: "var(--color-muted)" }} axisLine={{ stroke: "var(--color-border)" }} tickLine={false} />
+                    <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: "var(--color-muted)" }} axisLine={false} tickLine={false} width={32} />
+                    <ReTooltip contentStyle={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", borderRadius: 12, fontSize: 12 }} />
+                    <Legend wrapperStyle={{ fontSize: 11 }} formatter={(value: string) => PERCEPTION_LABELS[value] || value} />
+                    {PERCEPTION_METRICS.map((metric) => (
+                      <Line key={metric} type="monotone" dataKey={metric} name={PERCEPTION_LABELS[metric]} stroke={PERCEPTION_COLORS[metric]} strokeWidth={1.5} dot={false} />
+                    ))}
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            );
+          })()}
+        </PaperCard>
+      )}
+      {perceptionState === "unavailable" && applications.length > 0 && (
+        <p className="text-xs text-[var(--color-muted)]">
+          信任特征感知需 Postgres 模式(当前本地模式不可用)。
+        </p>
+      )}
 
       {/* ── AI Insights ── */}
       <div>

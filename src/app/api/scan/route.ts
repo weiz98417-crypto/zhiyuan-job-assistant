@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { startJobDiscoveryRunForUser, type JobDiscoveryRunInput } from "@/lib/job-discovery-run";
 import { getCurrentScanUserId, isScanAuthError } from "@/lib/scan-auth";
+import { ensureWeeklyDigestSchedule } from "@/lib/agent/runtime/scheduled-runs";
 
 export async function POST(request: NextRequest) {
   try {
@@ -30,6 +31,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Spec 19: first job-discovery use implicitly enables the weekly digest (settings page is phase 2).
+    await ensureWeeklyDigestSchedule(userId).catch((error: unknown) => {
+      console.error(`[scheduled-runs] failed to ensure digest schedule: ${error instanceof Error ? error.message : error}`);
+    });
     return NextResponse.json({ scanId: run.scanId, companiesTotal: run.companiesTotal }, { status: 201 });
   } catch (error: unknown) {
     if (isScanAuthError(error)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
