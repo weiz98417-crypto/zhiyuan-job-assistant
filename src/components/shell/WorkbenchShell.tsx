@@ -169,6 +169,22 @@ export default function WorkbenchShell({ children }: { children: ReactNode }) {
       setNavCollapsed(isWorkspacePage);
     }
   }, [isWorkspacePage]);
+
+  useEffect(() => {
+    if (!isWorkspacePage) return;
+    const root = document.documentElement;
+    const body = document.body;
+    const previousRootOverflow = root.style.overflow;
+    const previousBodyOverflow = body.style.overflow;
+    root.style.overflow = "hidden";
+    body.style.overflow = "hidden";
+    root.dataset.workbenchScrollLock = "agent";
+    return () => {
+      root.style.overflow = previousRootOverflow;
+      body.style.overflow = previousBodyOverflow;
+      delete root.dataset.workbenchScrollLock;
+    };
+  }, [isWorkspacePage]);
   const toggleCollapsed = useCallback(() => {
     setNavCollapsed((current) => {
       const next = !current;

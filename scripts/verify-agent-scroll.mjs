@@ -47,6 +47,8 @@ try {
     console.log(JSON.stringify(result));
     try {
       assert.ok(geometry.documentHeight <= viewport.height + 1, "workspace creates an outer page scrollbar");
+      assert.equal(await page.evaluate(() => getComputedStyle(document.documentElement).overflowY), "hidden", "html must lock outer scrolling");
+      assert.equal(await page.evaluate(() => getComputedStyle(document.body).overflowY), "hidden", "body must lock outer scrolling");
       assert.ok(geometry.composerBottom <= viewport.height, "composer falls below viewport");
       assert.ok(result.composerMoved <= 1, "outer scrolling moves composer");
       assert.ok(geometry.messageScrollHeight > geometry.messageHeight, "long conversation must scroll inside message viewport");
