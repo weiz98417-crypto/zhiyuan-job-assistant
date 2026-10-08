@@ -21,7 +21,7 @@ import {
   resolveActiveGuidedSession,
   type GuidedSessionState,
 } from "@/lib/agent/guided-session-state";
-import { countAnsweredInterviewRounds } from "@/lib/agent/interview-session-state";
+import { countAnsweredInterviewRounds, projectDurableInterviewEngineState } from "@/lib/agent/interview-session-state";
 
 function countAnsweredRounds(state: InterviewSessionState): number {
   try {
@@ -32,8 +32,9 @@ function countAnsweredRounds(state: InterviewSessionState): number {
 }
 
 export function buildInterviewContext(interviewState: InterviewSessionState): string {
-  if (!interviewState.planSnapshot) return "";
+  if (!interviewState.planSnapshot || interviewState.status === "completed" || interviewState.status === "abandoned") return "";
   const snapshot = interviewState.planSnapshot;
+  const currentQuestion = interviewState.questionGraph?.find((node) => node.id === interviewState.currentQuestionId);
   return `
 
 ## Active Interview Session
@@ -45,6 +46,7 @@ Difficulty: ${snapshot.difficulty}
 Focus areas: ${snapshot.focusAreas.join(", ") || "none"}
 Allow follow-ups: ${snapshot.allowFollowUps ? "yes" : "no"}
 Answered user turns: ${countAnsweredRounds(interviewState)}
+Current question: ${currentQuestion?.question || "No current question recorded; use the latest assistant question in the conversation."}
 
 JD snapshot excerpt:
 ${(snapshot.jdSnapshot?.body || "").slice(0, 1600) || "No JD snapshot available."}
@@ -58,6 +60,7 @@ Rules:
 - Before the question, include four concise coaching lines: 题型, 考察点, JD 关联, 简历关联.
 - Then ask exactly one question and stop. Wait for the user's answer.
 - Attach follow-ups to the current question and the original JD/resume snapshot.
+- If the user says “不知道/我不知道/不会”, they are answering the current question. Briefly explain an answer structure and ask one smaller guiding question about their actual experience. Do not restart task selection, invent their experience, or move to a new interview question.
 - Do not ask the user to repost JD/resume unless the snapshot is empty and no recent JD can be read.`;
 }
 
@@ -174,9 +177,10 @@ async function loadInterviewState(
       ?? (row as Record<string, unknown>).interviewState;
     if (!raw) return undefined;
     const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
-    return parsed && typeof parsed === "object" && (parsed as InterviewSessionState).planSnapshot
+    if (!parsed || typeof parsed !== "object") return undefined;
+    return (parsed as InterviewSessionState).planSnapshot
       ? parsed as InterviewSessionState
-      : undefined;
+      : projectDurableInterviewEngineState(parsed);
   } catch {
     return undefined;
   }

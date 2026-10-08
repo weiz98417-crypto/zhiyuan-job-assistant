@@ -9,6 +9,7 @@ vi.mock("@/lib/ai/model-gateway", () => ({
 
 import { resolveIntentEnvelope } from "@/lib/agent/intent-envelope";
 import { routeAgentTask } from "@/lib/agent/task-routing";
+import { startOrContinueGuidedSession } from "@/lib/agent/guided-session-state";
 
 function llmReply(primaryTask: string, confidence: "high" | "medium" | "low"): string {
   return JSON.stringify({ primaryTask, confidence });
@@ -19,6 +20,32 @@ afterEach(() => {
 });
 
 describe("IntentEnvelope (M2)", () => {
+  const activeInterview = startOrContinueGuidedSession({ taskType: "interview_coaching", phase: "answering_question" });
+
+  it.each(["我不知道", "下一题", "2"])("keeps the persisted interview for %s even if the model misroutes it", async (content) => {
+    completeMock.mockResolvedValue({ text: llmReply("jd_evaluation", "low"), modelUsed: "test" });
+    const resolution = await resolveIntentEnvelope({ content, activeGuidedSession: activeInterview });
+    expect(resolution).toMatchObject({ kind: "resolved", envelope: { primaryTask: "interview_coaching" } });
+  });
+
+  it("retains a substantive interview answer classified as general chat", async () => {
+    completeMock.mockResolvedValue({ text: llmReply("general_chat", "high"), modelUsed: "test" });
+    const resolution = await resolveIntentEnvelope({ content: "我做过客服流程改进，先访谈再验证指标。不要更新画像。", activeGuidedSession: activeInterview });
+    expect(resolution).toMatchObject({ kind: "resolved", envelope: { primaryTask: "interview_coaching", constraints: { noProfileWrite: true } } });
+  });
+
+  it("does not create a continuation from an agent hint or a completed session", async () => {
+    completeMock.mockResolvedValue({ text: llmReply("general_chat", "low"), modelUsed: "test" });
+    expect(await resolveIntentEnvelope({ content: "我不知道", agentId: "interview" })).toMatchObject({ kind: "clarify" });
+    expect(await resolveIntentEnvelope({ content: "我不知道", activeGuidedSession: { ...activeInterview, status: "completed" } })).toMatchObject({ kind: "clarify" });
+  });
+
+  it("asks a specific task-switch question and allows a confirmed switch", async () => {
+    completeMock.mockResolvedValue({ text: llmReply("resume_edit", "high"), modelUsed: "test" });
+    expect(await resolveIntentEnvelope({ content: "帮我修改简历", activeGuidedSession: activeInterview })).toMatchObject({ kind: "clarify", question: expect.stringContaining("简历修改") });
+    expect(await resolveIntentEnvelope({ content: "确认切换到简历修改", activeGuidedSession: activeInterview })).toMatchObject({ kind: "resolved", envelope: { primaryTask: "resume_edit" } });
+  });
+
   it("PE2E-ROUTE-001: '不要更新画像，帮我做职业定位' keeps career positioning as the primary task", async () => {
     completeMock.mockResolvedValue({ text: llmReply("career_positioning_guidance", "high"), modelUsed: "test" });
     const resolution = await resolveIntentEnvelope({ content: "不要更新画像，帮我做职业定位" });

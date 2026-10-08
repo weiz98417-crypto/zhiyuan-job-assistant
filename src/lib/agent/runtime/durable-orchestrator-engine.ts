@@ -291,12 +291,20 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
     // events so the UI and the audit trail see the same decision.
     let effectiveAgentId = input.run.agentId;
     let clarificationQuestion: string | null = null;
+    const sessionDirectives = await buildServerRunContextDirectives({
+      principal,
+      conversationId: input.run.conversationId,
+      content: latestInput,
+    }).catch(() => undefined);
     try {
       const { resolveIntentEnvelope } = await import("@/lib/agent/intent-envelope");
       const { taskAgentId: envelopeTaskAgentId } = await import("@/lib/agent/guided-session-state");
       const envelope = await resolveIntentEnvelope({
         content: latestInput,
         agentId: input.run.agentId || undefined,
+        activeGuidedSession: sessionDirectives?.activeGuidedSession,
+        messages: executionContext.messages,
+        interviewContext: sessionDirectives?.interviewContext,
       }).catch(() => undefined);
       if (envelope) {
         await this.options.runtime.recordEvent({
@@ -327,8 +335,6 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
           (envelope.source === "llm" || envelope.source === "fast_path")
           && envelope.envelope.primaryTask !== contract?.taskType
           && envelope.envelope.confidence !== "low"
-          && !(Array.isArray(contract?.successCriteria)
-            && contract.successCriteria.includes("clarification question asked"))
         ) {
           contract = buildContractForTask(envelope.envelope.primaryTask, latestInput);
           effectiveAgentId = envelopeTaskAgentId(envelope.envelope.primaryTask);
@@ -402,12 +408,15 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
     // (previously assembled by the browser for the deleted legacy loop).
     // Forced non-interview agents skip interview binding, mirroring the old
     // client's explicitForcedAgentId bypass.
-    const directives = await buildServerRunContextDirectives({
-      principal,
-      conversationId: input.run.conversationId,
-      content: latestInput,
-      bypassConversationLocks: effectiveAgentId !== "interview",
-    }).catch(() => undefined);
+    const continuesGuidedTask = sessionDirectives?.activeGuidedSession?.taskType === contract?.taskType;
+    const directives = sessionDirectives ? {
+      ...sessionDirectives,
+      interviewContext: effectiveAgentId === "interview" ? sessionDirectives.interviewContext : "",
+      interviewState: effectiveAgentId === "interview" ? sessionDirectives.interviewState : undefined,
+      interviewRebindAction: effectiveAgentId === "interview" ? sessionDirectives.interviewRebindAction : null,
+      rebindContext: effectiveAgentId === "interview" ? sessionDirectives.rebindContext : "",
+      guidedDirective: continuesGuidedTask ? sessionDirectives.guidedDirective : "",
+    } : undefined;
     const stream = this.orchestrate({
       content: modelLatestInput,
       messages: executionContext.messages,

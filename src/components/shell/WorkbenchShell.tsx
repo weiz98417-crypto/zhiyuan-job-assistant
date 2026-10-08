@@ -250,7 +250,7 @@ export default function WorkbenchShell({ children }: { children: ReactNode }) {
     <WorkbenchRailContext.Provider value={{ railLabel, desktopSlot, mobileSlot, mobileRailOpen, setMobileRailOpen }}>
       <ToastProvider>
         <div
-          className="flex min-h-full min-w-0 overflow-x-hidden"
+          className={`flex min-w-0 overflow-x-hidden ${isWorkspacePage ? "h-dvh min-h-0 overflow-hidden" : "min-h-full"}`}
           style={{
             backgroundImage: `linear-gradient(var(${backdropOverlay}), var(${backdropOverlay})), url('${backdrop}')`,
             backgroundSize: "cover",
@@ -415,7 +415,7 @@ export default function WorkbenchShell({ children }: { children: ReactNode }) {
           </aside>
 
           {/* ── 主内容区:工作台页 = 旅程栏 + 内容 的行内双栏 ── */}
-          <main className={`min-w-0 flex-1 overflow-x-hidden flex flex-col lg:flex-row ${navMarginClass(isWorkspacePage, navCollapsed)}`}>
+          <main className={`min-w-0 flex-1 overflow-x-hidden flex flex-col lg:flex-row ${isWorkspacePage ? "min-h-0 overflow-hidden" : ""} ${navMarginClass(isWorkspacePage, navCollapsed)}`}>
             {isWorkspacePage && (
               <aside
                 data-testid="workbench-journey-rail"
@@ -462,14 +462,14 @@ export default function WorkbenchShell({ children }: { children: ReactNode }) {
                 )}
               </div>
             </header>
-            <div className="min-w-0 flex-1 overflow-x-hidden flex flex-col">
+            <div className={`min-w-0 flex-1 overflow-x-hidden flex flex-col ${isWorkspacePage ? "min-h-0 overflow-hidden" : ""}`}>
             <motion.div
               key="page-content"
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.4, ease: [0.19, 1, 0.22, 1] }}
               className={`h-full min-w-0 overflow-x-hidden flex flex-col px-[var(--space-page)] py-[var(--space-section)] pb-[calc(5rem+env(safe-area-inset-bottom))] lg:pb-[var(--space-section)] ${
-                isWorkspacePage ? "w-full max-w-none" : "max-w-[1600px]"
+                isWorkspacePage ? "min-h-0 flex-1 overflow-hidden w-full max-w-none" : "max-w-[1600px]"
               }`}
             >
               {children}

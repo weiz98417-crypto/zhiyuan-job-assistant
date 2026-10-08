@@ -25,7 +25,7 @@ describe("agent chat overflow containment", () => {
     expect(chat).toContain("max-w-[92%] min-w-0");
 
     expect(layout).toContain("h-full overflow-x-hidden");
-    expect(appShell).toContain("flex min-h-full min-w-0 overflow-x-hidden");
+    expect(appShell).toContain("flex min-w-0 overflow-x-hidden");
     expect(appShell).toContain("min-w-0 flex-1 overflow-x-hidden");
     expect(appShell).toContain("h-full min-w-0 overflow-x-hidden flex flex-col");
     expect(agentPage).toContain("w-full min-w-0 max-w-full flex-1");

@@ -87,7 +87,7 @@ function AgentMessageRow({ message }: { message: ThreadMessage }) {
  */
 export function AgentThreadMessages() {
   return (
-    <ThreadPrimitive.Viewport className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden py-4 space-y-4 cursor-default">
+    <ThreadPrimitive.Viewport className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden overscroll-y-contain py-4 space-y-4 cursor-default">
       <ThreadPrimitive.Messages>
         {({ message }) => <AgentMessageRow message={message} />}
       </ThreadPrimitive.Messages>

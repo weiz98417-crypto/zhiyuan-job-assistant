@@ -15,10 +15,14 @@ The intent envelope (structured LLM routing introduced in 0.11.0-A) initially ra
 Run Admission on the POST path is purely deterministic: idempotent requestId replay, active-run conflict check, and immediate run creation with a sub-second receipt. The intent envelope runs as the first worker step and its decision flows back as events:
 
 - A confident envelope task (LLM or the zero-ambiguity fast path) that differs from the admitted task redirects the run in place — contract rebuilt, `agent_switch` emitted — recorded in the audit trail alongside the admitted task.
-- Low confidence creates a **clarification run**: a general_chat run whose success criterion is asking one precise question, entering waiting-user (the safe switch point). The user's reply continues the same run; the envelope may then redirect it to the real task. A clarify run asks at most two questions.
+- With no persisted active task, low confidence creates a **clarification run**: a general_chat run whose success criterion is asking one precise question, entering waiting-user (the safe switch point). The user's reply continues the same run; the envelope may then redirect it to the real task. A clarify run asks at most two questions.
 - The regex fallback may never redirect a contract — it records its guess as audit only, so a keyless environment degrades to deterministic admission behaviour instead of guessing.
 
 The browser submits turns with hints and renders events; it holds no routing logic, and its pending-task contract construction was deleted.
+
+### Conversation continuation (2026-10-07)
+
+Before the envelope runs, the worker loads the server-persisted guided/interview state. The classifier receives the active task, current interview question, bound materials, and the six most recent user/assistant messages. A short follow-up such as “我不知道” continues the persisted task even if the classifier returns low confidence; an agent hint alone does not establish an active task. A proposed task change asks a specific switch question, and a confirmed switch releases the old prompt directives. A clarification contract may redirect on the next turn so an existing conversation can recover its interview context.
 
 ## Consequences
 

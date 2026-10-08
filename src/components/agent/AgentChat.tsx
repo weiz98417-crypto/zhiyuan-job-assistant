@@ -240,7 +240,7 @@ export default function AgentChat({
           </div>
 
           {/* Input area */}
-          <div className="mt-auto">
+          <div className="mt-auto shrink-0">
             <VoiceCoachBar
               key={draftKey}
               streaming={streaming}
