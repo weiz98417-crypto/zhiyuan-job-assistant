@@ -10,7 +10,6 @@ import { complete, getThinkModelChain } from "@/lib/ai/model-gateway";
 import type { AgentTaskType } from "@/lib/agent/task-contract";
 import type { ImageDocumentType, ImageIntakeResult } from "@/lib/agent/image-intake";
 import {
-  detectNegatedWriteIntent,
   hasProfileWriteIntent,
   hasReferenceResumeSaveIntent,
   hasResumeWriteIntent,
@@ -25,14 +24,8 @@ import {
   type GuidedSessionState,
 } from "@/lib/agent/guided-session-state";
 
-export type IntentWritePolicy = "forbidden" | "proposal_only" | "allowed";
-
-export interface IntentConstraints {
-  writePolicy: IntentWritePolicy;
-  noProfileWrite: boolean;
-  noResumeWrite: boolean;
-  noReferenceResumeWrite: boolean;
-}
+import { deriveIntentConstraints, type IntentConstraints } from "@/lib/agent/intent-constraints";
+export type { IntentConstraints, IntentWritePolicy } from "@/lib/agent/intent-constraints";
 
 export interface ReferencedMaterial {
   kind: "jd" | "resume" | "offer" | "report" | "profile";
@@ -113,32 +106,6 @@ const FAST_PATHS: FastPath[] = [
     task: "job_search",
   },
 ];
-
-function emptyConstraints(): IntentConstraints {
-  return {
-    writePolicy: "allowed",
-    noProfileWrite: false,
-    noResumeWrite: false,
-    noReferenceResumeWrite: false,
-  };
-}
-
-/** Derive constraints locally — negation detection is deterministic and cheap;
- * the LLM only needs to confirm the primary task. This keeps the PE2E-ROUTE
- * family (constraint-overrides-intent) safe even if the model misses it. */
-function deriveConstraints(content: string): IntentConstraints {
-  const constraints = emptyConstraints();
-  const negated = detectNegatedWriteIntent(content);
-  if (negated === "profile") constraints.noProfileWrite = true;
-  if (negated === "resume") constraints.noResumeWrite = true;
-  if (negated === "reference_resume") constraints.noReferenceResumeWrite = true;
-  if (constraints.noProfileWrite || constraints.noResumeWrite || constraints.noReferenceResumeWrite) {
-    constraints.writePolicy = hasResumeWriteIntent(content) || hasProfileWriteIntent(content)
-      ? "proposal_only"
-      : "forbidden";
-  }
-  return constraints;
-}
 
 function deriveMaterials(content: string, imageIntake: ImageIntakeResult | null | undefined): ReferencedMaterial[] {
   const materials: ReferencedMaterial[] = [];
@@ -239,7 +206,7 @@ export async function resolveIntentEnvelope(input: {
         source: "fast_path",
         envelope: {
           primaryTask: fast.task,
-          constraints: deriveConstraints(content),
+          constraints: deriveIntentConstraints(content),
           referencedMaterials: deriveMaterials(content, input.imageIntake),
           confidence: "high",
           audit,
@@ -281,7 +248,7 @@ export async function resolveIntentEnvelope(input: {
         source: "fast_path",
         envelope: {
           primaryTask: activeTask.taskType,
-          constraints: deriveConstraints(content),
+          constraints: deriveIntentConstraints(content),
           referencedMaterials: deriveMaterials(content, input.imageIntake),
           confidence: "high",
           audit,
@@ -295,7 +262,7 @@ export async function resolveIntentEnvelope(input: {
         kind: "clarify",
         question: switchDecision.clarificationQuestion,
         source: "llm_low_confidence",
-        envelope: { primaryTask: null, constraints: deriveConstraints(content), referencedMaterials: deriveMaterials(content, input.imageIntake), confidence: "low", audit },
+        envelope: { primaryTask: null, constraints: deriveIntentConstraints(content), referencedMaterials: deriveMaterials(content, input.imageIntake), confidence: "low", audit },
       };
     }
   }
@@ -307,7 +274,7 @@ export async function resolveIntentEnvelope(input: {
       source: "llm_low_confidence",
       envelope: {
         primaryTask: null,
-        constraints: deriveConstraints(content),
+        constraints: deriveIntentConstraints(content),
         referencedMaterials: deriveMaterials(content, input.imageIntake),
         confidence: "low",
         audit,
@@ -321,7 +288,7 @@ export async function resolveIntentEnvelope(input: {
       source: "llm",
       envelope: {
         primaryTask: llmTask,
-        constraints: deriveConstraints(content),
+        constraints: deriveIntentConstraints(content),
         referencedMaterials: deriveMaterials(content, input.imageIntake),
         confidence: llmConfidence === "medium" ? "medium" : "high",
         audit,
@@ -337,7 +304,7 @@ export async function resolveIntentEnvelope(input: {
     source: "regex_fallback",
     envelope: {
       primaryTask: fallbackTask,
-      constraints: deriveConstraints(content),
+      constraints: deriveIntentConstraints(content),
       referencedMaterials: deriveMaterials(content, input.imageIntake),
       confidence: "medium",
       audit,
@@ -350,7 +317,7 @@ function fallbackIntent(
   content: string,
   input: { agentId?: string; imageIntake?: ImageIntakeResult | null; preferredDocumentType?: ImageDocumentType; forcedAgentId?: string },
 ): AgentTaskType | null {
-  const constraints = deriveConstraints(content);
+  const constraints = deriveIntentConstraints(content);
   const documentType = input.imageIntake?.documentType || input.preferredDocumentType;
 
   if (constraints.noProfileWrite || constraints.noResumeWrite || constraints.noReferenceResumeWrite) {

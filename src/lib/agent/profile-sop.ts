@@ -1,5 +1,7 @@
 /* ── Profile Mining SOP State Manager ── */
 
+import { ownerLocalStorage } from "@/lib/browser-owner";
+
 const SOP_KEY = "zhiyuan-profile-sop-state";
 
 export interface SOPState {
@@ -21,12 +23,12 @@ export function initSOP(): SOPState {
 
 export function loadSOP(): SOPState | null {
   try {
-    const raw = localStorage.getItem(SOP_KEY);
+    const raw = ownerLocalStorage().getItem(SOP_KEY);
     if (!raw) return null;
     const state = JSON.parse(raw) as SOPState;
     // Expire after 24h
     if (Date.now() - new Date(state.updatedAt).getTime() > 24 * 60 * 60 * 1000) {
-      localStorage.removeItem(SOP_KEY);
+      ownerLocalStorage().removeItem(SOP_KEY);
       return null;
     }
     return state;
@@ -37,11 +39,11 @@ export function loadSOP(): SOPState | null {
 
 export function saveSOP(state: SOPState): void {
   state.updatedAt = new Date().toISOString();
-  localStorage.setItem(SOP_KEY, JSON.stringify(state));
+  ownerLocalStorage().setItem(SOP_KEY, JSON.stringify(state));
 }
 
 export function clearSOP(): void {
-  localStorage.removeItem(SOP_KEY);
+  ownerLocalStorage().removeItem(SOP_KEY);
 }
 
 export function advanceStage(state: SOPState, answer: string): SOPState {

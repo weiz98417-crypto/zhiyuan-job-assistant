@@ -30,7 +30,9 @@ import {
 } from "@/lib/agent/task-contract";
 import { buildCareerPositioningFallback } from "@/lib/agent/career-positioning-result";
 import { buildServerRunContextDirectives } from "@/lib/agent/runtime/server-run-context-directives";
-import { buildContractForTask } from "@/lib/agent/run-admission";
+import { buildContractForTask, constrainTaskContract } from "@/lib/agent/run-admission";
+import { taskAgentId } from "@/lib/agent/guided-session-state";
+import { deriveIntentConstraints } from "@/lib/agent/intent-constraints";
 import type { VerifiedActionResult } from "@/lib/agent/verified-action";
 import { projectDurableUiEvent } from "@/lib/agent/runtime/run-event-projection";
 import { inferJDResumeMatchingDirective } from "@/lib/agent/jd-resume-scope-intent";
@@ -40,6 +42,7 @@ import {
   type DurableRunContextSource,
   type RunContextMessage,
 } from "@/lib/agent/runtime/run-context";
+import { prepareRunAttachment, type InspectRunImages, type RunAttachmentMaterial } from "@/lib/agent/runtime/run-attachment-material";
 
 type Orchestrate = (input: {
   content: string;
@@ -48,11 +51,13 @@ type Orchestrate = (input: {
   sessionId: number | null;
   userId: string;
   runId: string;
+  requestId?: string;
   workerId: string;
   fencingToken: number;
   taskContract: AgentTaskContract | null;
   modelRecovery?: ModelRecoveryPolicy;
   frozenToolCall?: { name: string; args: Record<string, unknown> };
+  attachmentMaterial?: RunAttachmentMaterial | null;
   signal: AbortSignal;
   /** M1 gap closure: server-derived interview session state for the loop's tool policy. */
   interviewState?: InterviewSessionState;
@@ -68,6 +73,7 @@ export interface DurableOrchestratorExecutionEngineOptions {
   orchestrate?: Orchestrate;
   circuitBreaker?: RuntimeCircuitBreaker;
   contextSource?: DurableRunContextSource;
+  inspectImages?: InspectRunImages;
 }
 
 interface StoredContractEvaluation {
@@ -134,12 +140,22 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
       return this.finalizeStoredCompletion(input, storedCompletion);
     }
     const durableMessages = pendingInputs.map((item) => ({
+      id: "run:" + input.run.id + ":input:" + item.id,
       role: "user" as const,
       content: item.content.content,
       images: item.content.images ? [...item.content.images] : undefined,
       timestamp: item.createdAt,
     }));
-    const originalContract = asTaskContract(input.run.contract);
+    const attachment = await prepareRunAttachment({
+      run: input.run, pendingInputs,
+      checkpointMaterial: input.checkpoint?.context.attachmentMaterial,
+      latestInput: durableMessages.at(-1)?.content || String(input.checkpoint?.context.latestInput || ""),
+      inspectImages: this.options.inspectImages, signal: input.signal,
+    });
+    const storedContract = asTaskContract(input.checkpoint?.context.taskContract) || asTaskContract(input.run.contract);
+    const originalContract = storedContract
+      ? constrainTaskContract(storedContract, deriveIntentConstraints(storedContract.target + "\n" + durableMessages.map((message) => message.content).join("\n")))
+      : null;
     const checkpointMatchingScope = typeof input.checkpoint?.context.jdMatchResume === "boolean"
       ? input.checkpoint.context.jdMatchResume
       : undefined;
@@ -165,10 +181,11 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
             : jdSourceChanged ? { target: "评估当前用户提供的 JD" } : {}),
           routing: { ...originalContract.routing, jdMatchResume },
         }
-      : input.run.contract;
+      : originalContract || input.run.contract;
     const durableConversationMessages = pendingInputs
       .filter((item) => item.content.persistInConversation !== false)
       .map((item) => ({
+        id: "run:" + input.run.id + ":input:" + item.id,
         role: "user" as const,
         content: item.content.content,
         images: item.content.images ? [...item.content.images] : undefined,
@@ -188,7 +205,9 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
         }]
       : [];
     const checkpointMessages = (jdSourceChanged ? [] : runContextMessages(input.checkpoint?.context.messages))
-      .filter((message) => !(message.role === "system" && message.content.startsWith("Durable Run Contract:")));
+      .filter((message) => !(message.role === "system" && (
+        message.content.startsWith("Durable Run Contract:") || message.content.startsWith("[ATTACHMENT_MATERIAL")
+      )));
     const contextCheckpointMessages = jdMatchResume === false
       ? filterJDNoResumeMessages(checkpointMessages)
       : checkpointMessages;
@@ -208,12 +227,17 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
         factRefs: jdSourceChanged ? [] : input.checkpoint?.factRefs || [],
       },
       conversationMessages: contextConversationMessages,
-      pendingInputs: [...(jdMatchResume === false || jdSourceChanged ? [] : recoveryMessages), ...safeContextInputs],
+      pendingInputs: [...(jdMatchResume === false || jdSourceChanged ? [] : recoveryMessages), ...attachment.contextMessages, ...safeContextInputs],
       completedToolFacts: contextCompletedToolFacts,
       recoveryObservations: contextRecoveryObservations,
       evidence: contextEvidence,
       gates: jdSourceChanged ? [] : durableMaterial.gates,
-      factRefs: jdSourceChanged ? [] : durableMaterial.factRefs,
+      factRefs: [
+        ...(jdSourceChanged ? [] : durableMaterial.factRefs),
+        ...(attachment.material ? [{
+          type: "attachment", id: attachment.material.id, version: "v1", hash: attachment.material.sourceHash,
+        }] : []),
+      ],
     });
     const messages: ExecutionConversationMessage[] = rebuiltContext.messages;
     const checkpointConversationMessages = executionConversationMessages(
@@ -222,7 +246,10 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
     const baseConversationMessages = checkpointConversationMessages.length > 0
       ? appendPendingConversationMessages(checkpointConversationMessages, durableConversationMessages)
       : [...priorMessages, ...durableConversationMessages];
-    const conversationMessages = reconcileExecutionRunGates(baseConversationMessages, durableMaterial.gates);
+    const conversationMessages = appendPendingConversationMessages(
+      reconcileExecutionRunGates(baseConversationMessages, durableMaterial.gates),
+      attachment.transcriptMessages,
+    );
     const forceCompaction = String(recoveryDecision.action || "") === "compact_context";
     const configuredContextLimit = Number(process.env.AGENT_CONTEXT_MAX_CHARS || 48_000);
     const contextLimit = forceCompaction
@@ -230,6 +257,8 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
       : configuredContextLimit;
     const executionContext = compactExecutionConversation(messages, contextLimit);
     const latestDurableMessage = durableMessages.at(-1);
+    const latestInputRequestId = pendingInputs.at(-1)?.requestId
+      || String(input.checkpoint?.context.latestInputRequestId || input.run.requestId);
     const latestInput = latestDurableMessage?.content
       || (latestDurableMessage?.images?.length ? "请分析我刚才发送的图片。" : "")
       || String(input.checkpoint?.context.latestInput || "");
@@ -247,6 +276,9 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
         messages: executionContext.messages,
         conversationMessages,
         latestInput,
+        latestInputRequestId,
+        attachmentMaterial: attachment.material,
+        taskContract: originalContract,
         jdMatchResume,
         jdSourceKey: jdScope?.sourceKey,
         compacted: executionContext.compacted,
@@ -289,7 +321,7 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
     // the run to the real task (in-run handoff via agent_switch) or turn an
     // ambiguous turn into a clarification contract; both are recorded as
     // events so the UI and the audit trail see the same decision.
-    let effectiveAgentId = input.run.agentId;
+    let effectiveAgentId = contract ? taskAgentId(contract.taskType) : input.run.agentId;
     let clarificationQuestion: string | null = null;
     const sessionDirectives = await buildServerRunContextDirectives({
       principal,
@@ -299,7 +331,7 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
     try {
       const { resolveIntentEnvelope } = await import("@/lib/agent/intent-envelope");
       const { taskAgentId: envelopeTaskAgentId } = await import("@/lib/agent/guided-session-state");
-      const envelope = await resolveIntentEnvelope({
+      const envelope = attachment.envelope || await resolveIntentEnvelope({
         content: latestInput,
         agentId: input.run.agentId || undefined,
         activeGuidedSession: sessionDirectives?.activeGuidedSession,
@@ -307,6 +339,7 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
         interviewContext: sessionDirectives?.interviewContext,
       }).catch(() => undefined);
       if (envelope) {
+        if (contract) contract = constrainTaskContract(contract, envelope.envelope.constraints);
         await this.options.runtime.recordEvent({
           runId: input.run.id,
           workerId: input.run.ownerId!,
@@ -324,19 +357,20 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
         if (envelope.kind === "clarify") {
           clarificationQuestion = envelope.question;
           contract = {
-            ...buildContractForTask("general_chat", latestInput),
+            ...buildContractForTask("general_chat", latestInput, undefined, contract?.routing?.intentConstraints || envelope.envelope.constraints),
             successCriteria: ["clarification question asked"],
           };
         } else if (!envelope.envelope.primaryTask) {
-          contract = buildContractForTask("general_chat", latestInput);
+          contract = buildContractForTask("general_chat", latestInput, undefined, contract?.routing?.intentConstraints || envelope.envelope.constraints);
         } else if (
           // Only a confident source may redirect the contract; the regex
           // fallback records its guess as audit but never mutates the run.
           (envelope.source === "llm" || envelope.source === "fast_path")
-          && envelope.envelope.primaryTask !== contract?.taskType
+          && (envelope.envelope.primaryTask !== contract?.taskType
+            || contract?.successCriteria.includes("clarification question asked"))
           && envelope.envelope.confidence !== "low"
         ) {
-          contract = buildContractForTask(envelope.envelope.primaryTask, latestInput);
+          contract = buildContractForTask(envelope.envelope.primaryTask, latestInput, undefined, contract?.routing?.intentConstraints || envelope.envelope.constraints);
           effectiveAgentId = envelopeTaskAgentId(envelope.envelope.primaryTask);
           await this.options.runtime.recordEvent({
             runId: input.run.id,
@@ -355,6 +389,34 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
     } catch {
       // Envelope failures must never block execution — the admitted contract stands.
     }
+    if (contract) {
+      const contractMessage = executionContext.messages.find((message) => (
+        message.role === "system" && message.content.startsWith("Durable Run Contract:")
+      ));
+      if (contractMessage) contractMessage.content = "Durable Run Contract:\n" + JSON.stringify(contract);
+    }
+    await this.options.runtime.saveCheckpoint({
+      runId: input.run.id,
+      workerId: input.run.ownerId!,
+      fencingToken: input.run.fencingToken,
+      boundary: "intent_resolved",
+      context: {
+        messages: executionContext.messages,
+        conversationMessages,
+        latestInput,
+        latestInputRequestId,
+        attachmentMaterial: attachment.material,
+        taskContract: contract,
+        jdMatchResume,
+        jdSourceKey: jdScope?.sourceKey,
+        compacted: executionContext.compacted,
+        omittedMessageCount: executionContext.omittedCount,
+        ...(Object.keys(recovery).length > 0 ? { recovery } : {}),
+      },
+      plan: rebuiltContext.plan,
+      budgets: input.checkpoint?.budgets || input.run.budgets,
+      factRefs: rebuiltContext.factRefs,
+    });
     if (clarificationQuestion && contract) {
       const timestamp = new Date().toISOString();
       const assistantMessage: ExecutionConversationMessage = {
@@ -394,9 +456,12 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
           messages: completedRunContext.messages,
           conversationMessages: completedConversationMessages,
           latestInput,
+          latestInputRequestId,
+          attachmentMaterial: attachment.material,
           compacted: completedRunContext.compacted,
           omittedMessageCount: completedRunContext.omittedCount,
           modelCompletion: completion,
+          taskContract: contract,
         },
         plan: rebuiltContext.plan,
         budgets: input.checkpoint?.budgets || input.run.budgets,
@@ -424,10 +489,12 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
       sessionId: input.run.conversationId,
       userId: input.run.userId,
       runId: input.run.id,
+      requestId: latestInputRequestId,
       workerId: input.run.ownerId!,
       fencingToken: input.run.fencingToken,
       taskContract: contract,
       modelRecovery,
+      attachmentMaterial: attachment.envelope?.kind === "resolved" ? attachment.material : undefined,
       interviewState: directives?.interviewState,
       interviewRebindAction: directives?.interviewRebindAction || undefined,
       promptContextInjection: directives
@@ -468,6 +535,43 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
           eventSequenceCursor = recordedEvent.sequence;
         }
         if (event.type === "text") assistantText += String(event.content || "");
+        if (
+          event.type === "interview_state_updated"
+          && contract?.taskType === "interview_coaching"
+          && event.conversationId === input.run.conversationId
+          && event.readBackVerified === true
+          && Number.isInteger(event.checkpointVersion)
+          && Number(event.checkpointVersion) > 0
+          && typeof event.engineSessionId === "string"
+          && event.engineSessionId.trim().length > 0
+        ) {
+          if (event.requiresReview === true) {
+            waitingUserRequested = true;
+          } else {
+            const action = String(event.action || "");
+            const status = String(event.status || "");
+            const questionAction = ["started", "next", "followup"].includes(action) && status === "active";
+            const controlAction = action === "paused" && status === "paused"
+              || ["resumed", "material_context", "help", "format"].includes(action) && status === "active"
+              || action === "done" && status === "completed"
+              || action === "cancelled" && status === "abandoned";
+            if (questionAction || controlAction) {
+              completedCriteria.add("JD/resume context bound");
+              completedCriteria.add("session state updated without losing context");
+              if (questionAction && typeof event.questionId === "string" && event.questionId.trim()) {
+                completedCriteria.add("one question generated");
+              }
+              if (controlAction) {
+                contract = {
+                  ...contract,
+                  successCriteria: contract.successCriteria.map((criterion) => (
+                    criterion === "one question generated" ? "interview control response generated" : criterion
+                  )),
+                };
+              }
+            }
+          }
+        }
         if (event.type === "tool_result") {
           if (waitingUserRequested && event.success !== true && !waitingUserToolName) {
             waitingUserToolName = String(event.name || "");
@@ -545,9 +649,12 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
       const interruptedCheckpoint = await this.saveInterruptedOutput({
         input,
         assistantText,
+        taskContract: contract,
+        attachmentMaterial: attachment.material,
         executionMessages: executionContext.messages,
         conversationMessages,
         latestInput,
+        latestInputRequestId,
         jdMatchResume,
         jdSourceKey: jdScope?.sourceKey,
         compacted: executionContext.compacted,
@@ -568,7 +675,7 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
       ? buildCareerPositioningFallback({
           messages: conversationMessages.flatMap((message) => (
             message.role === "user" || message.role === "assistant" || message.role === "tool"
-              ? [{ role: message.role, content: message.content }]
+              ? [{ role: message.role, content: message.content, itemId: message.itemId || message.id }]
               : []
           )),
           assistantText,
@@ -590,9 +697,12 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
       const interruptedCheckpoint = await this.saveInterruptedOutput({
         input,
         assistantText,
+        taskContract: contract,
+        attachmentMaterial: attachment.material,
         executionMessages: executionContext.messages,
         conversationMessages,
         latestInput,
+        latestInputRequestId,
         jdMatchResume,
         jdSourceKey: jdScope?.sourceKey,
         compacted: executionContext.compacted,
@@ -694,11 +804,14 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
         messages: completedRunContext.messages,
         conversationMessages: completedConversationMessages,
         latestInput,
+        latestInputRequestId,
         jdMatchResume,
         jdSourceKey: jdScope?.sourceKey,
         compacted: completedRunContext.compacted,
         omittedMessageCount: completedRunContext.omittedCount,
         modelCompletion: completion,
+        taskContract: contract,
+        attachmentMaterial: attachment.material,
       },
       plan: rebuiltContext.plan,
       budgets: input.checkpoint?.budgets || input.run.budgets,
@@ -710,9 +823,12 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
   private async saveInterruptedOutput(input: {
     input: Parameters<AgentRunExecutionEngine["execute"]>[0];
     assistantText: string;
+    taskContract: AgentTaskContract | null;
+    attachmentMaterial: RunAttachmentMaterial | null;
     executionMessages: ExecutionConversationMessage[];
     conversationMessages: ExecutionConversationMessage[];
     latestInput: string;
+    latestInputRequestId: string;
     jdMatchResume?: boolean;
     jdSourceKey?: string;
     compacted: boolean;
@@ -729,6 +845,9 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
         messages: input.executionMessages,
         conversationMessages: input.conversationMessages,
         latestInput: input.latestInput,
+        latestInputRequestId: input.latestInputRequestId,
+        taskContract: input.taskContract,
+        attachmentMaterial: input.attachmentMaterial,
         jdMatchResume: input.jdMatchResume,
         jdSourceKey: input.jdSourceKey,
         compacted: input.compacted,
@@ -1004,6 +1123,7 @@ function runContextMessages(value: unknown): RunContextMessage[] {
       ? message.images.filter((image): image is string => typeof image === "string")
       : undefined;
     return [{
+      id: typeof message.id === "string" ? message.id : undefined,
       role: role as RunContextMessage["role"],
       content: message.content,
       images,
@@ -1020,6 +1140,8 @@ function executionConversationMessages(value: unknown): ExecutionConversationMes
       ? message.images.filter((image): image is string => typeof image === "string")
       : undefined;
     return [{
+      id: typeof message.id === "string" ? message.id : undefined,
+      itemId: typeof message.itemId === "string" ? message.itemId : undefined,
       role: message.role,
       content: message.content,
       images,
@@ -1034,15 +1156,15 @@ function appendPendingConversationMessages(
   conversationMessages: ExecutionConversationMessage[],
   pendingMessages: ExecutionConversationMessage[],
 ): ExecutionConversationMessage[] {
-  const existing = new Set(conversationMessages.map((message) => JSON.stringify([
-    message.role,
-    message.content,
-    message.images || [],
-    message.timestamp,
-  ])));
+  const messageKey = (message: ExecutionConversationMessage) => (
+    message.id || message.itemId
+      ? "id:" + (message.id || message.itemId)
+      : JSON.stringify([message.role, message.content, message.images || [], message.timestamp])
+  );
+  const existing = new Set(conversationMessages.map(messageKey));
   const appended = [...conversationMessages];
   for (const message of pendingMessages) {
-    const key = JSON.stringify([message.role, message.content, message.images || [], message.timestamp]);
+    const key = messageKey(message);
     if (existing.has(key)) continue;
     existing.add(key);
     appended.push(message);
@@ -1062,8 +1184,8 @@ function addAssistantCriteria(contract: AgentTaskContract | null, completed: Set
   if (contract.taskType === "career_positioning_guidance") {
     completed.add("next question or guidance response generated");
   }
-  if (contract.taskType === "interview_coaching") {
-    completed.add("one question generated");
+  if (contract.taskType === "interview_coaching" && contract.successCriteria.includes("interview control response generated")) {
+    completed.add("interview control response generated");
   }
 }
 
@@ -1078,11 +1200,13 @@ function defaultOrchestrate(input: Parameters<Orchestrate>[0]): AsyncIterable<SS
     signal: input.signal,
     principal: { userId: input.userId },
     runId: input.runId,
+    requestId: input.requestId,
     workerId: input.workerId,
     fencingToken: input.fencingToken,
     taskContract: input.taskContract,
     modelRecovery: input.modelRecovery,
     frozenToolCall: input.frozenToolCall,
+    attachmentMaterial: input.attachmentMaterial,
     durable: true,
     forcedAgentId: input.agentId,
     interviewState: input.interviewState,

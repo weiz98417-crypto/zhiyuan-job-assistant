@@ -9,6 +9,7 @@ import {
 import { buildOfferAgentHandoffUrl } from "@/lib/agent/offer-handoff";
 import { routeAgentTask } from "@/lib/agent/task-routing";
 import { createDefaultCVData, loadCVDataFromServer } from "@/lib/cv-storage";
+import { LEGACY_QUARANTINE_PREFIX, ownerLocalStorage, setBrowserOwner } from "@/lib/browser-owner";
 import { transitionAgentRun } from "@/lib/agent/runtime/state-machine";
 import {
   DurableAgentRunService,
@@ -105,16 +106,20 @@ describe("production Agent short/long-chain regressions", () => {
     expect(decision.auditSummary).toBe("guided:career_positioning_guidance:locked");
   });
 
-  it("overwrites a previous account's local CV cache when the server CV is empty", async () => {
-    let cache = JSON.stringify({
+  it("quarantines an unowned CV and initializes only the verified account's empty server cache", async () => {
+    const entries = new Map<string, string>();
+    entries.set("zhiyuan-cv", JSON.stringify({
       activeVersion: "v1",
       versions: { v1: { id: "v1", label: "旧账号", createdAt: "2026-01-01", sections: [{ id: "summary", title: "概述", content: "E2E 基线简历" }] } },
-    });
+    }));
     vi.stubGlobal("localStorage", {
-      getItem: vi.fn(() => cache),
-      setItem: vi.fn((_key: string, value: string) => { cache = value; }),
-      removeItem: vi.fn(),
+      get length() { return entries.size; },
+      key: (index: number) => Array.from(entries.keys())[index] ?? null,
+      getItem: (key: string) => entries.get(key) ?? null,
+      setItem: (key: string, value: string) => entries.set(key, value),
+      removeItem: (key: string) => entries.delete(key),
     });
+    setBrowserOwner("empty-cv-owner");
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ success: true, data: null }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
@@ -122,8 +127,10 @@ describe("production Agent short/long-chain regressions", () => {
 
     const loaded = await loadCVDataFromServer();
     expect(loaded).toEqual(expect.objectContaining({ activeVersion: "v1" }));
+    const cache = ownerLocalStorage().getItem("zhiyuan-cv")!;
     expect(cache).not.toContain("E2E 基线简历");
     expect(cache).toContain("个人概述");
+    expect([...entries].filter(([key]) => key.startsWith(LEGACY_QUARANTINE_PREFIX)).map(([, value]) => value).join(" ")).toContain("E2E 基线简历");
   });
 
   it("starts the CV page empty and reads interview material from the authenticated server", () => {

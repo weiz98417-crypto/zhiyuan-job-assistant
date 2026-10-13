@@ -125,6 +125,50 @@ describe("server Agent Loop image compatibility", () => {
     expect(messages.every((message) => !message.tool_call_id)).toBe(true);
   });
 
+  it("binds a short JD assessment reply to the inspected attachment instead of an older JD", async () => {
+    vi.stubEnv("DEEPSEEK_API_KEY", "test-key");
+    executeToolMock.mockResolvedValue({
+      success: true,
+      data: { reportNum: 91, reportReadBackVerified: true },
+      llmSummary: "当前附件已评估",
+      errorCategory: "ok",
+    });
+    const requests: Record<string, unknown>[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url, init) => {
+      requests.push(JSON.parse(String(init?.body || "{}")));
+      return new Response('data: {"choices":[{"delta":{"content":"当前附件的 Agent 评估职责已分析。"}}]}\n\ndata: [DONE]\n\n', { status: 200 });
+    }));
+    const { agentLoopServer } = await import("@/lib/agent/loop/server-runner");
+    const extractedText = "E2E_JD_CURRENT_ONLY，纸鸢测试公司招聘 AI 产品经理，岗位职责：建设 Agent 评估系统；任职要求：熟悉产品规划和数据分析。";
+    const events = [];
+    const options = {
+      agent: { id: "evaluate", toolNames: ["evaluate_jd_full"] } as never,
+      systemPrompt: "JD 助手",
+      messages: [
+        { role: "user", content: "先评估 JD id=12，公司：旧公司", images: ["data:image/png;base64,old-jd"] },
+        { role: "assistant", content: "上一份 JD 已评估。" },
+        { role: "user", content: "帮我看", images: ["data:image/png;base64,current-jd"] },
+        { role: "assistant", content: "你要我先评估还是提取关键内容？" },
+        { role: "user", content: "评估" },
+      ],
+      tools: [{ type: "function", function: { name: "evaluate_jd_full" } }],
+      taskContract: createAgentTaskContract({ taskType: "jd_evaluation", target: "评估" }),
+      attachmentMaterial: {
+        id: "attachment-current", userId: "owner", runId: "run-current",
+        sourceHash: "current-hash", sourceImages: ["data:image/png;base64,current-jd"],
+        images: ["data:image/png;base64,current-jd"],
+        intake: { documentType: "jd" as const, confidence: 0.96, quality: "clear" as const, extractedText },
+      },
+    };
+    for await (const event of agentLoopServer(options)) events.push(event);
+
+    expect(executeToolMock).toHaveBeenCalledTimes(1);
+    expect(executeToolMock.mock.calls[0][0]).toBe("evaluate_jd_full");
+    expect(executeToolMock.mock.calls[0][1]).toEqual({ jd_text: extractedText });
+    expect(requests).toHaveLength(1);
+    expect(events.some((event) => event.type === "text" && event.content.includes("当前附件"))).toBe(true);
+  });
+
   it("blocks resume-reading tools when the JD contract forbids matching", async () => {
     vi.stubEnv("DEEPSEEK_API_KEY", "test-key");
     const requestBodies: Record<string, unknown>[] = [];
@@ -212,6 +256,35 @@ describe("server Agent Loop image compatibility", () => {
     expect(events.some((event) => event.type === "text" && event.content.includes("当前对话粘贴简历文字"))).toBe(true);
     expect(events).toContainEqual(expect.objectContaining({ type: "run_directive", directive: "wait_user" }));
     expect(events.at(-1)).toEqual({ type: "done" });
+  });
+
+  it("keeps the inspected resume source visible for a short diagnosis reply", async () => {
+    vi.stubEnv("DEEPSEEK_API_KEY", "test-key");
+    const requests: Record<string, unknown>[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url, init) => {
+      requests.push(JSON.parse(String(init?.body || "{}")));
+      return new Response('data: {"choices":[{"delta":{"content":"当前简历缺少量化成果，请补齐 Agent 评估项目的基线和结果。"}}]}\n\ndata: [DONE]\n\n', { status: 200 });
+    }));
+    const { agentLoopServer } = await import("@/lib/agent/loop/server-runner");
+    const options = {
+      systemPrompt: "简历助手",
+      messages: [
+        { role: "user", content: "帮我看", images: ["data:image/png;base64,current-resume"] },
+        { role: "assistant", content: "你要诊断还是提取内容？" },
+        { role: "user", content: "诊断" },
+      ],
+      taskContract: createAgentTaskContract({ taskType: "resume_diagnosis", target: "诊断" }),
+      attachmentMaterial: {
+        id: "current-resume", userId: "owner", runId: "run-resume", sourceHash: "resume-hash",
+        sourceImages: ["data:image/png;base64,current-resume"], images: ["data:image/png;base64,current-resume"],
+        intake: { documentType: "resume" as const, confidence: 0.96, quality: "clear" as const, extractedText: "负责 Agent 评估项目，无量化成果数字。" },
+      },
+    };
+    const events = [];
+    for await (const event of agentLoopServer(options)) events.push(event);
+    expect(JSON.stringify(requests[0].messages)).toContain("data:image/png;base64,current-resume");
+    expect(executeToolMock).not.toHaveBeenCalled();
+    expect(events.some((event) => event.type === "text" && event.content.includes("量化成果"))).toBe(true);
   });
 
   it("does not blame an unreadable screenshot for a provider connection failure", async () => {

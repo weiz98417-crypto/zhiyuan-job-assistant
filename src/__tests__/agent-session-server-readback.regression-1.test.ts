@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setBrowserOwner } from "@/lib/browser-owner";
 import {
   DurableAgentRunService,
   InMemoryAgentRunStore,
@@ -10,15 +11,30 @@ const localPutMock = vi.hoisted(() => vi.fn());
 const localUpdateMock = vi.hoisted(() => vi.fn());
 const fetchMock = vi.hoisted(() => vi.fn());
 
-vi.mock("@/lib/db", () => ({
-  default: {
+vi.mock("@/lib/db", () => {
+  const database = {
     chatSessions: {
       get: localGetMock,
       put: localPutMock,
       update: localUpdateMock,
     },
-  },
-}));
+  };
+  return { default: database, captureOwnerDatabase: () => database };
+});
+
+beforeEach(() => {
+  const entries = new Map<string, string>();
+  vi.stubGlobal("localStorage", {
+    get length() { return entries.size; },
+    key: (index: number) => Array.from(entries.keys())[index] ?? null,
+    getItem: (key: string) => entries.get(key) ?? null,
+    setItem: (key: string, value: string) => entries.set(key, value),
+    removeItem: (key: string) => entries.delete(key),
+  });
+  setBrowserOwner("session-readback-owner");
+});
+
+afterEach(() => { vi.unstubAllGlobals(); });
 
 describe("Agent server-authoritative session read-back regressions", () => {
   it("prefers the server session after a durable run reaches a terminal state", async () => {

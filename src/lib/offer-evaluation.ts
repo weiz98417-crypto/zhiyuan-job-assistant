@@ -6,8 +6,9 @@ import type {
   OfferSnapshot,
   OfferVerdict,
 } from "@/types";
+import { nullableOfferBoolean, nullableOfferNumber } from "@/lib/offer-conditions";
 
-export const OFFER_MODEL_VERSION = "cn-single-offer-v1";
+export const OFFER_MODEL_VERSION = "cn-single-offer-v2";
 
 const MODULE_WEIGHTS: Record<string, number> = {
   completeness: 8,
@@ -51,11 +52,11 @@ function normalizeMonthlySalaryK(value: unknown): number {
 
 function estimateNetIncome(offer: OfferSnapshot): OfferEvaluationReport["takeHomeEstimate"] {
   const monthlyGross = offer.monthlySalary * 1000;
-  const socialBase = offer.hasSocialInsurance ? monthlyGross : monthlyGross * 0.3;
-  const housingRate = (offer.housingFundRate || 0) / 100;
-  const socialRate = offer.hasSocialInsurance ? 0.105 : 0;
+  const socialBase = offer.socialInsuranceBaseK ? offer.socialInsuranceBaseK * 1000 : monthlyGross;
+  const housingRate = (offer.housingFundRate ?? 7) / 100;
+  const socialRate = offer.hasSocialInsurance === false ? 0 : 0.105;
   const monthlyDeduction = socialBase * (socialRate + housingRate);
-  const annualGross = monthlyGross * (offer.monthsPerYear + (offer.annualBonus || 0));
+  const annualGross = calculateOfferCash(offer).guaranteedAnnualK * 1000;
   const netMonthly = Math.max(0, monthlyGross - monthlyDeduction);
   const netAnnual = Math.max(0, annualGross - monthlyDeduction * 12);
   return {
@@ -65,7 +66,10 @@ function estimateNetIncome(offer: OfferSnapshot): OfferEvaluationReport["takeHom
     annualNetMax: Math.round(netAnnual * 0.98 / 1000) / 1,
     assumptions: [
       "按税前月薪估算到手",
-      offer.hasSocialInsurance ? "按社保公积金缴纳估算" : "按最低社保假设估算",
+      offer.hasSocialInsurance === null ? "假设缴纳社保，个人费率 10.5%；录用材料未确认" : offer.hasSocialInsurance ? "社保个人费率按 10.5% 估算" : "按明确不缴社保计算",
+      offer.housingFundRate === null ? "假设公积金个人比例 7%；录用材料未确认" : `按已提供公积金比例 ${offer.housingFundRate}% 计算`,
+      offer.socialInsuranceBaseK ? `按提供的缴纳基数 ${offer.socialInsuranceBaseK}K 估算` : "假设缴纳基数等于税前月薪；当地上下限未计入",
+      "年到手仅纳入确定现金，非保证奖金不计入",
       "未考虑专项附加扣除差异",
     ],
   };
@@ -81,12 +85,12 @@ function baseSnapshot(input: Offer | OfferSnapshot): OfferSnapshot {
     level: maybeOffer.level || "",
     monthlySalary: normalizeMonthlySalaryK(maybeOffer.monthlySalary),
     monthsPerYear: toNumber(maybeOffer.monthsPerYear, 12) || 12,
-    annualBonus: toNumber(maybeOffer.annualBonus, 0),
-    hasSocialInsurance: maybeOffer.hasSocialInsurance !== false,
+    annualBonus: nullableOfferNumber(maybeOffer.annualBonus),
+    hasSocialInsurance: nullableOfferBoolean(maybeOffer.hasSocialInsurance),
     socialInsuranceBaseType: maybeOffer.socialInsuranceBaseType || "unknown",
     socialInsuranceBaseK: toNumber(maybeOffer.socialInsuranceBaseK, 0) || undefined,
-    housingFundRate: toNumber(maybeOffer.housingFundRate, 7) || 7,
-    probationMonths: toNumber(maybeOffer.probationMonths, 3) || 3,
+    housingFundRate: nullableOfferNumber(maybeOffer.housingFundRate),
+    probationMonths: nullableOfferNumber(maybeOffer.probationMonths),
     startDate: normalizeText(maybeOffer.startDate),
     otherBenefits: normalizeText(maybeOffer.otherBenefits),
     options: normalizeText(maybeOffer.options),
@@ -108,6 +112,9 @@ function baseSnapshot(input: Offer | OfferSnapshot): OfferSnapshot {
 
 function completenessModule(snapshot: OfferSnapshot): OfferEvaluationModule {
   const missingInfo = [];
+  if (snapshot.hasSocialInsurance === null) missingInfo.push("社保缴纳情况");
+  if (snapshot.housingFundRate === null) missingInfo.push("公积金比例");
+  if (snapshot.probationMonths === null) missingInfo.push("试用期");
   if (!snapshot.location) missingInfo.push("城市/办公地点");
   if (!snapshot.employmentForm || snapshot.employmentForm === "unknown") missingInfo.push("用工形式");
   if (!snapshot.contractMonths) missingInfo.push("合同期限");
@@ -132,7 +139,8 @@ function completenessModule(snapshot: OfferSnapshot): OfferEvaluationModule {
 }
 
 function cashModule(snapshot: OfferSnapshot): OfferEvaluationModule {
-  const annual = snapshot.monthlySalary * (snapshot.monthsPerYear + (snapshot.annualBonus || 0));
+  const cash = calculateOfferCash(snapshot);
+  const annual = cash.guaranteedAnnualK;
   const score =
     annual >= 400 ? 5 :
     annual >= 300 ? 4.2 :
@@ -144,10 +152,10 @@ function cashModule(snapshot: OfferSnapshot): OfferEvaluationModule {
     score: clampScore(score),
     weight: MODULE_WEIGHTS.cash,
     confidence: 0.9,
-    evidence: [`税前月薪 ${snapshot.monthlySalary}K`, `${snapshot.monthsPerYear} 薪`, `年终 ${snapshot.annualBonus || 0} 个月`],
+    evidence: [`税前月薪 ${snapshot.monthlySalary}K`, `${snapshot.monthsPerYear} 薪`, `确定年现金 ${cash.guaranteedAnnualK}K`, snapshot.annualBonus === null ? "年终奖未明确" : snapshot.bonusGuarantee === "guaranteed" ? `保证奖金 ${snapshot.annualBonus} 个月` : `非保证奖金 ${snapshot.annualBonus} 个月（${cash.variableBonusK}K），不计确定现金`],
     risks: snapshot.annualBonus ? [] : ["总包高度依赖基础月薪"],
     missingInfo: [],
-    notes: "按税前现金包判断即时回报",
+    notes: "按确定税前现金判断即时回报，非保证奖金分列",
   };
 }
 
@@ -172,15 +180,19 @@ function inferSocialInsuranceBaseType(snapshot: OfferSnapshot): NonNullable<Offe
 
 function taxModule(snapshot: OfferSnapshot): OfferEvaluationModule {
   const baseType = inferSocialInsuranceBaseType(snapshot);
-  const fullBase = snapshot.hasSocialInsurance && baseType === "full_salary" && snapshot.housingFundRate >= 10;
+  const fullBase = snapshot.hasSocialInsurance === true && baseType === "full_salary" && (snapshot.housingFundRate ?? 0) >= 10;
   const minimumBase = snapshot.hasSocialInsurance && baseType === "minimum_base";
-  const lowFundRate = snapshot.hasSocialInsurance && snapshot.housingFundRate > 0 && snapshot.housingFundRate < 7;
+  const lowFundRate = snapshot.hasSocialInsurance === true && snapshot.housingFundRate !== null && snapshot.housingFundRate > 0 && snapshot.housingFundRate < 7;
   const risks = [];
-  if (!snapshot.hasSocialInsurance) risks.push("社保缺失或按最低基数缴纳");
+  if (snapshot.hasSocialInsurance === false) risks.push("明确不缴纳社保");
   if (minimumBase) risks.push("社保/公积金按最低基数或低基数缴纳");
   if (snapshot.hasSocialInsurance && baseType === "unknown") risks.push("社保/公积金缴纳基数未明确");
   if (lowFundRate) risks.push("公积金比例偏低");
-  const missingInfo = !snapshot.hasSocialInsurance || baseType === "unknown" ? ["社保缴纳基数"] : [];
+  const missingInfo = [
+    ...(snapshot.hasSocialInsurance === null ? ["社保缴纳情况"] : []),
+    ...(snapshot.hasSocialInsurance !== false && baseType === "unknown" ? ["社保缴纳基数"] : []),
+    ...(snapshot.housingFundRate === null ? ["公积金比例"] : []),
+  ];
   const score = fullBase ? 4.6 : minimumBase ? 3.1 : snapshot.hasSocialInsurance ? 3.6 : 2.6;
   return {
     id: "tax",
@@ -189,9 +201,9 @@ function taxModule(snapshot: OfferSnapshot): OfferEvaluationModule {
     weight: MODULE_WEIGHTS.tax,
     confidence: fullBase ? 0.84 : baseType === "unknown" ? 0.62 : 0.74,
     evidence: [
-      snapshot.hasSocialInsurance ? "缴纳五险一金" : "社保不完整",
+      snapshot.hasSocialInsurance === null ? "社保缴纳情况未明确" : snapshot.hasSocialInsurance ? "缴纳社保" : "明确不缴纳社保",
       `缴纳基数：${baseType === "full_salary" ? "按实际薪资" : baseType === "minimum_base" ? "最低/低基数" : "未明确"}`,
-      `公积金 ${snapshot.housingFundRate}%`,
+      snapshot.housingFundRate === null ? "公积金比例未明确" : `公积金 ${snapshot.housingFundRate}%`,
     ],
     risks,
     missingInfo,
@@ -220,11 +232,11 @@ function benefitsModule(snapshot: OfferSnapshot): OfferEvaluationModule {
 
 function contractModule(snapshot: OfferSnapshot): OfferEvaluationModule {
   const riskDown =
-    snapshot.probationMonths > 6 ? 1 :
-    snapshot.probationMonths > 3 ? 0.5 : 0;
+    (snapshot.probationMonths ?? 0) > 6 ? 1 :
+    (snapshot.probationMonths ?? 0) > 3 ? 0.5 : 0;
   const score = clampScore((snapshot.contractMonths ? 4.5 : 3.2) - riskDown);
   const risks = [];
-  if (snapshot.probationMonths > 3) risks.push("试用期偏长");
+  if (snapshot.probationMonths !== null && snapshot.probationMonths > 3) risks.push("试用期偏长");
   if (snapshot.contractMonths && snapshot.contractMonths < 12) risks.push("合同期限偏短");
   return {
     id: "contract",
@@ -232,9 +244,9 @@ function contractModule(snapshot: OfferSnapshot): OfferEvaluationModule {
     score,
     weight: MODULE_WEIGHTS.contract,
     confidence: 0.8,
-    evidence: [`试用期 ${snapshot.probationMonths} 个月`, snapshot.contractMonths ? `合同 ${snapshot.contractMonths} 个月` : "未提供合同期限"],
+    evidence: [snapshot.probationMonths === null ? "试用期未明确" : `试用期 ${snapshot.probationMonths} 个月`, snapshot.contractMonths ? `合同 ${snapshot.contractMonths} 个月` : "未提供合同期限"],
     risks,
-    missingInfo: snapshot.contractMonths ? [] : ["合同期限"],
+    missingInfo: [...(snapshot.contractMonths ? [] : ["合同期限"]), ...(snapshot.probationMonths === null ? ["试用期"] : [])],
     notes: "关注试用期、续签和违约条款",
   };
 }
@@ -350,6 +362,18 @@ export function normalizeOfferSnapshot(input: Offer | OfferSnapshot): OfferSnaps
   return baseSnapshot(input);
 }
 
+export function calculateOfferCash(offer: Pick<OfferSnapshot, "monthlySalary" | "monthsPerYear" | "annualBonus" | "bonusGuarantee">): {
+  guaranteedAnnualK: number;
+  variableBonusK: number | null;
+} {
+  const bonus = nullableOfferNumber(offer.annualBonus);
+  const bonusCash = bonus === null ? null : offer.monthlySalary * bonus;
+  return {
+    guaranteedAnnualK: offer.monthlySalary * offer.monthsPerYear + (offer.bonusGuarantee === "guaranteed" ? bonusCash ?? 0 : 0),
+    variableBonusK: bonusCash === null ? null : offer.bonusGuarantee === "guaranteed" ? 0 : bonusCash,
+  };
+}
+
 export function evaluateOfferSnapshot(input: Offer | OfferSnapshot): OfferEvaluationReport {
   const snapshot = baseSnapshot(input);
   const modules = [
@@ -391,12 +415,15 @@ export function evaluateOfferSnapshot(input: Offer | OfferSnapshot): OfferEvalua
 
   const hrQuestions = [
     ...(missingInfo.includes("社保缴纳基数") ? ["社保和公积金按什么基数缴纳？"] : []),
+    ...(missingInfo.includes("社保缴纳情况") ? ["是否缴纳社保？请在录用材料中明确。"] : []),
+    ...(missingInfo.includes("公积金比例") ? ["公积金个人和公司缴存比例分别是多少？"] : []),
+    ...(missingInfo.includes("试用期") ? ["试用期为多久，试用期薪资及转正条件是什么？"] : []),
     ...(missingInfo.includes("奖金兑现规则") ? ["年终奖/绩效奖金的发放规则和历史兑现情况是什么？"] : []),
     ...(missingInfo.includes("合同期限") ? ["合同期限和续签规则是怎样的？"] : []),
   ];
 
   const negotiationLevers = [
-    ...(snapshot.housingFundRate < 12 ? ["争取更高公积金比例"] : []),
+    ...(snapshot.housingFundRate !== null && snapshot.housingFundRate < 12 ? ["争取更高公积金比例"] : []),
     ...(snapshot.bonusGuarantee !== "guaranteed" ? ["争取明确奖金保底或书面确认"] : []),
     ...(snapshot.employmentForm && snapshot.employmentForm !== "direct_hire" ? ["确认主体并争取正式劳动关系"] : []),
   ];

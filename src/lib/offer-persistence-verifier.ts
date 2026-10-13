@@ -1,3 +1,5 @@
+import { nullableOfferBoolean } from "@/lib/offer-conditions";
+
 type AnyRow = Record<string, unknown>;
 
 function normalizeMonthlySalaryK(value: unknown): number {
@@ -20,10 +22,6 @@ function nullableNumberMatches(actual: unknown, expected: unknown): boolean {
 
 function textValue(value: unknown): string {
   return value === undefined || value === null ? "" : String(value);
-}
-
-function boolValue(value: unknown): boolean {
-  return value === true || value === 1 || value === "1" || value === "true";
 }
 
 function sortJson(value: unknown): unknown {
@@ -59,11 +57,11 @@ export function offerReadBackMatches(row: AnyRow | undefined, input: AnyRow, exp
     role: textValue(input.role).trim(),
     monthly_salary: normalizeMonthlySalaryK(input.monthly_salary),
     months_per_year: numberValue(input.months_per_year, 12),
-    annual_bonus: numberValue(input.annual_bonus, 0),
-    has_social_insurance: input.has_social_insurance !== false,
-    housing_fund_rate: numberValue(input.housing_fund_rate, 7),
+    annual_bonus: input.annual_bonus ?? null,
+    has_social_insurance: nullableOfferBoolean(input.has_social_insurance),
+    housing_fund_rate: input.housing_fund_rate ?? null,
     options: input.options ?? null,
-    probation_months: numberValue(input.probation_months, 3),
+    probation_months: input.probation_months ?? null,
     start_date: input.start_date ?? null,
     other_benefits: input.other_benefits ?? null,
     location: input.location ?? null,
@@ -87,11 +85,11 @@ export function offerReadBackMatches(row: AnyRow | undefined, input: AnyRow, exp
     textValue(row.role) === expected.role &&
     numberValue(row.monthly_salary) === expected.monthly_salary &&
     numberValue(row.months_per_year) === expected.months_per_year &&
-    numberValue(row.annual_bonus) === expected.annual_bonus &&
-    boolValue(row.has_social_insurance) === expected.has_social_insurance &&
-    numberValue(row.housing_fund_rate) === expected.housing_fund_rate &&
+    nullableNumberMatches(row.annual_bonus, expected.annual_bonus) &&
+    nullableOfferBoolean(row.has_social_insurance) === expected.has_social_insurance &&
+    nullableNumberMatches(row.housing_fund_rate, expected.housing_fund_rate) &&
     textValue(row.options) === textValue(expected.options) &&
-    numberValue(row.probation_months) === expected.probation_months &&
+    nullableNumberMatches(row.probation_months, expected.probation_months) &&
     textValue(row.start_date) === textValue(expected.start_date) &&
     textValue(row.other_benefits) === textValue(expected.other_benefits) &&
     textValue(row.location) === textValue(expected.location) &&

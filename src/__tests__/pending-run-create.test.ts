@@ -18,6 +18,13 @@ function memoryStorage(): Storage {
 }
 
 describe("pending Run creation", () => {
+  it("does not reuse another account's in-memory pending request", () => {
+    const accountA = memoryStorage();
+    const accountB = memoryStorage();
+    rememberPendingRunCreate(777, "相同问题", [], "A_PENDING", accountA);
+    expect(pendingRunCreateRequestId(777, "相同问题", [], accountB)).toBeNull();
+    expect(pendingRunCreateRequestId(777, "相同问题", [], accountA)).toBe("A_PENDING");
+  });
   it("reuses an uncertain request after reload for the same conversation and input", () => {
     const storage = memoryStorage();
     rememberPendingRunCreate(501, "评估这份 JD", ["data:image/png;base64,one"], "request-501", storage);

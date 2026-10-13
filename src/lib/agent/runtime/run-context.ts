@@ -4,6 +4,7 @@ import type {
 } from "@/lib/agent/runtime/durable-agent-run";
 
 export interface RunContextMessage {
+  id?: string;
   role: "system" | "user" | "assistant" | "tool";
   content: string;
   images?: string[];
@@ -87,7 +88,12 @@ export function buildRunContext(input: BuildRunContextInput): RebuiltRunContext 
       content: `[RUN_GATE tool=${gate.toolName} status=${gate.status} scope=${gate.scopeHash}]`,
     });
   }
-  messages.push(...input.pendingInputs.map(cloneMessage));
+  const seenInputIds = new Set(messages.flatMap((message) => message.id ? [message.id] : []));
+  for (const pendingInput of input.pendingInputs) {
+    if (pendingInput.id && seenInputIds.has(pendingInput.id)) continue;
+    if (pendingInput.id) seenInputIds.add(pendingInput.id);
+    messages.push(cloneMessage(pendingInput));
+  }
 
   return {
     messages,

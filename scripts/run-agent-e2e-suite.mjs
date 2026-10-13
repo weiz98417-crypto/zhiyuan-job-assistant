@@ -5,11 +5,15 @@ import { spawnSync } from "node:child_process";
 const root = process.cwd();
 const testDir = path.join(root, "src", "__tests__");
 const files = fs.readdirSync(testDir)
-  .filter((name) => name.endsWith(".test.ts"))
+  .filter((name) => /\.test\.tsx?$/.test(name))
   .sort()
   .map((name) => path.join("src", "__tests__", name));
 
 if (files.length === 0) throw new Error("No Agent E2E tests found");
+if (process.argv.includes("--list")) {
+  console.log(JSON.stringify(files));
+  process.exit(0);
+}
 console.log(`Running Agent E2E suite: ${files.length} test files`);
 const command = process.execPath;
 const result = spawnSync(command, [path.join(root, "node_modules", "vitest", "vitest.mjs"), "run", "--no-file-parallelism", ...files], {

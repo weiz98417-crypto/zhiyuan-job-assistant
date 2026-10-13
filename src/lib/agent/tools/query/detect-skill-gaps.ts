@@ -1,5 +1,6 @@
 import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
 import { fetchAgentMemoryContext } from "../memory-helpers";
+import { ownerLocalStorage } from "@/lib/browser-owner";
 import { getSkillGapContextForUser } from "@/lib/server/agent-insight-service";
 
 interface SkillGapParams {
@@ -73,7 +74,7 @@ async function handler(
   let cv = cv_text || "";
   if (!cv && typeof localStorage !== "undefined") {
     try {
-      const cvRaw = localStorage.getItem("zhiyuan-cv");
+      const cvRaw = ownerLocalStorage().getItem("zhiyuan-cv");
       if (cvRaw) cv = extractCVText(JSON.parse(cvRaw));
     } catch {
       /* use API fallback */

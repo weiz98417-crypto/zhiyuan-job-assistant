@@ -6,6 +6,7 @@ import {
   projectSessionRowForUser,
 } from "@/lib/agent/surface-projection";
 import { readSessionRowsWithDurableMessages } from "@/lib/agent/runtime/session-api-readback";
+import { browserSessionMutationError, hasDurableInterviewCheckpoint } from "@/lib/server/browser-session-mutation";
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -44,6 +45,15 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         { success: false, error: "messages 由 Agent Worker 独占写入；客户端请通过 durable Run 提交内容。" },
         { status: 422 },
       );
+    }
+    const mutationError = browserSessionMutationError(raw);
+    if (mutationError) return NextResponse.json({ success: false, error: mutationError }, { status: 422 });
+    if ("interviewState" in raw || "agentState" in raw) {
+      const row = await getDataRepositories().sessions.get(Number(id), user.userId);
+      if (!row) return NextResponse.json({ success: false, error: "Session not found" }, { status: 404 });
+      if (hasDurableInterviewCheckpoint(row.interview_state_json)) {
+        return NextResponse.json({ success: false, error: "本场面试已经开始，状态与执行凭据只由面试引擎维护。" }, { status: 422 });
+      }
     }
     const body = projectSessionMutationForPersistence(raw);
     const ok = await getDataRepositories().sessions.update(Number(id), user.userId, body);

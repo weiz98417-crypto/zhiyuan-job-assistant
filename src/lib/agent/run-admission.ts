@@ -15,9 +15,10 @@ import {
   isDraftOnlyResumeIntent,
 } from "@/lib/agent/task-routing";
 import type { ArtifactKind } from "@/lib/agent/task-journey";
-import { getTaskContractPolicy, listToolNamesForTask } from "@/lib/agent/tool-governance";
+import { evaluateToolGovernance, getTaskContractPolicy, listToolNamesForTask } from "@/lib/agent/tool-governance";
 import type { AgentRunSnapshot, DurableRunInput } from "@/lib/agent/runtime/durable-agent-run";
 import type { IntentEnvelopeResolution } from "@/lib/agent/intent-envelope";
+import { deriveIntentConstraints, type IntentConstraints } from "@/lib/agent/intent-constraints";
 import { inferJDResumeMatchingDirective } from "@/lib/agent/jd-resume-scope-intent";
 
 export type AgentRunAdmissionKind =
@@ -174,7 +175,7 @@ export function admitAgentRun(input: AgentRunAdmissionInput): AgentRunAdmissionD
   }
 
   const agentId = taskAgentId(taskType);
-  const contract = createServerOwnedContract(taskType, content, boundedRoute, input.entryHints?.journeyArtifacts);
+  const contract = createServerOwnedContract(taskType, content, boundedRoute, input.entryHints?.journeyArtifacts, input.envelope?.envelope.constraints);
   const primaryGoal = taskLabelZh(taskType);
   const constraints = boundedRoute.requiresClarification
     ? ["clarification_required"]
@@ -254,6 +255,7 @@ export function createServerOwnedContract(
   target: string,
   route: AgentTaskRouteDecision,
   journeyArtifacts?: AgentRunEntryHints["journeyArtifacts"],
+  intentConstraints: IntentConstraints = deriveIntentConstraints(target),
 ): AgentTaskContract {
   route = specializeResumeEditRoute(route, target);
   const requiresClarification = route.requiresClarification;
@@ -268,7 +270,7 @@ export function createServerOwnedContract(
     }));
   const resumeEditMode = taskType === "resume_edit" ? (route.resumeEditMode || "propose") : undefined;
   const draftOnly = resumeEditMode === "draft_only";
-  return createAgentTaskContract({
+  const contract = createAgentTaskContract({
     taskType,
     target,
     requiresUserApproval: draftOnly ? false : undefined,
@@ -295,11 +297,42 @@ export function createServerOwnedContract(
         ? { jdMatchResume: inferJDResumeMatchingDirective(target) }
         : {}),
       ...(resumeEditMode ? { resumeEditMode } : {}),
+      intentConstraints,
     },
     journey: validArtifacts.length > 0
       ? { graphVersion: "task-journey/v1", artifacts: validArtifacts }
       : undefined,
   });
+  return constrainTaskContract(contract, intentConstraints);
+}
+
+export function constrainTaskContract(contract: AgentTaskContract, constraints: IntentConstraints): AgentTaskContract {
+  const previous = contract.routing?.intentConstraints;
+  const combined: IntentConstraints = {
+    writePolicy: previous?.writePolicy === "forbidden" || constraints.writePolicy === "forbidden"
+      ? "forbidden"
+      : previous?.writePolicy === "proposal_only" || constraints.writePolicy === "proposal_only"
+        ? "proposal_only"
+        : "allowed",
+    noProfileWrite: previous?.noProfileWrite === true || constraints.noProfileWrite,
+    noResumeWrite: previous?.noResumeWrite === true || constraints.noResumeWrite,
+    noReferenceResumeWrite: previous?.noReferenceResumeWrite === true || constraints.noReferenceResumeWrite,
+  };
+  if (!previous && combined.writePolicy === "allowed"
+    && !combined.noProfileWrite && !combined.noResumeWrite && !combined.noReferenceResumeWrite) return contract;
+  const boundedContract: AgentTaskContract = {
+    ...contract,
+    routing: { ...contract.routing, intentConstraints: combined },
+  };
+  const allowedTools = boundedContract.routing?.allowedTools || listToolNamesForTask(contract.taskType);
+  boundedContract.routing!.allowedTools = allowedTools.filter((toolName) => (
+    evaluateToolGovernance({
+      toolName,
+      taskContract: { ...boundedContract, routing: { ...boundedContract.routing, requiresClarification: false } },
+      params: toolName === "mine_profile" ? { action: "start" } : undefined,
+    }).allowed
+  ));
+  return boundedContract;
 }
 
 
@@ -309,6 +342,7 @@ export function buildContractForTask(
   taskType: AgentTaskType,
   target: string,
   journeyArtifacts?: AgentRunEntryHints["journeyArtifacts"],
+  intentConstraints?: IntentConstraints,
 ): AgentTaskContract {
   return createServerOwnedContract(taskType, target, {
     taskType,
@@ -317,7 +351,7 @@ export function buildContractForTask(
     memoryTask: mapAgentTaskToMemoryTask(taskType),
     requiresClarification: false,
     auditSummary: "envelope_redirect",
-  }, journeyArtifacts);
+  }, journeyArtifacts, intentConstraints);
 }
 
 function admissionEvidence(entryHints: AgentRunEntryHints | undefined): string[] {

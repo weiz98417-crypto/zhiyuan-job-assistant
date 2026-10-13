@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   FileText,
@@ -34,7 +34,8 @@ import {
   PaperCard,
 } from "@/components/design";
 import { AlertDialog, AlertDialogContent, AlertDialogTitle, AlertDialogDescription } from "@/components/ui/overlay";
-import db from "@/lib/db";
+import { captureOwnerDatabase } from "@/lib/db";
+import { ownerLocalStorage } from "@/lib/browser-owner";
 import {
   loadCVData,
   loadCVDataFromServer,
@@ -143,6 +144,7 @@ function referenceStatusClass(value?: string): string {
 }
 
 export default function CVPage() {
+  const db = useMemo(() => captureOwnerDatabase(), []);
   const [sections, setSections] = useState<CVSection[]>([]);
   const [savedHash, setSavedHash] = useState("");
   const [cvData, setCVData] = useState(() => createDefaultCVData());
@@ -229,7 +231,7 @@ export default function CVPage() {
       if (data.data?.persisted?.cvData) {
         const persisted = data.data.persisted.cvData;
         setCVData(persisted);
-        localStorage.setItem("zhiyuan-cv", JSON.stringify(persisted));
+        ownerLocalStorage().setItem("zhiyuan-cv", JSON.stringify(persisted));
         if (data.data.persisted.status === "pending") {
           setPendingImport({
             versionId: String(data.data.persisted.versionId),
@@ -674,7 +676,7 @@ export default function CVPage() {
   const downloadPDF = async () => {
     setPdfLoading(true);
     try {
-      const stored = localStorage.getItem("zhiyuan-profile");
+      const stored = ownerLocalStorage().getItem("zhiyuan-profile");
       const profile = stored ? JSON.parse(stored) : {};
 
       const res = await fetch("/api/generate-cv-pdf", {

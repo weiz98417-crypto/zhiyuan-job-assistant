@@ -4,11 +4,13 @@
  */
 
 import { saveProfile, loadProfile } from "@/lib/profile-storage";
+import { assertBrowserOwner, requireBrowserOwner } from "@/lib/browser-owner";
 import type { ZhiyuanProfile } from "@/types";
 
 /** Trigger a server-side profile analysis. Runs in background, never throws. */
 export async function triggerProfileUpdate(options?: { force?: boolean }): Promise<void> {
   try {
+    const owner = requireBrowserOwner();
     const res = await fetch("/api/profile/analyze", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -16,6 +18,7 @@ export async function triggerProfileUpdate(options?: { force?: boolean }): Promi
     });
 
     const json = await res.json();
+    assertBrowserOwner(owner);
     if (!json.success || !json.data) return;
 
     // Sync to DexieDB cache
@@ -33,6 +36,7 @@ export async function syncProfileToCache(serverProfile: {
   lastUpdated?: string;
 }): Promise<void> {
   try {
+    const owner = requireBrowserOwner();
     const existing = await loadProfile();
     const profile: ZhiyuanProfile = {
       skills: (serverProfile.data?.skills as ZhiyuanProfile["skills"]) || existing?.skills || [],
@@ -52,6 +56,7 @@ export async function syncProfileToCache(serverProfile: {
       lastUpdated: serverProfile.lastUpdated || new Date().toISOString(),
     };
 
+    assertBrowserOwner(owner);
     await saveProfile(profile);
   } catch {
     // Silent — cache sync is best-effort

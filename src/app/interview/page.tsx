@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import {
   Target,
   Sparkles,
@@ -15,7 +15,7 @@ import {
 import { HandwritingTitle, WarmButton, PaperCard } from "@/components/design";
 import { PageHeading } from "@/components/ui/workbench-primitives";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/overlay";
-import db from "@/lib/db";
+import { captureOwnerDatabase } from "@/lib/db";
 import InterviewLaunchPanel from "./InterviewLaunchPanel";
 import PracticeRecords from "./PracticeRecords";
 import AgentInterviewHistory from "./AgentInterviewHistory";
@@ -126,6 +126,7 @@ function SurfaceHeader({
 /* ── Main page ── */
 
 export default function InterviewPage() {
+  const db = useMemo(() => captureOwnerDatabase(), []);
   const [mounted, setMounted] = useState(false);
   const [practiceRecords, setPracticeRecords] = useState<PracticeRecord[]>([]);
   const [stories, setStories] = useState<StarStory[]>([]);

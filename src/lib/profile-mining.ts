@@ -1,4 +1,5 @@
-import db from "@/lib/db";
+import { captureOwnerDatabase } from "@/lib/db";
+import { assertBrowserOwner, requireBrowserOwner } from "@/lib/browser-owner";
 import { isFivePointScore } from "@/lib/score-scale";
 import type {
   ZhiyuanProfile,
@@ -21,6 +22,7 @@ interface MiningStats {
 }
 
 async function computeStats(): Promise<MiningStats> {
+  const db = captureOwnerDatabase();
   const apps = await db.applications.toArray();
   const reports = await db.reports.toArray();
   const practices = await db.practiceRecords.toArray();
@@ -84,7 +86,9 @@ async function computeStats(): Promise<MiningStats> {
 export async function generateProfile(options?: {
   force?: boolean;
 }): Promise<ZhiyuanProfile> {
+  const owner = requireBrowserOwner();
   const { syncProfileToCache } = await import("@/lib/profile-update");
+  assertBrowserOwner(owner);
 
   try {
     const res = await fetch("/api/profile/analyze", {
@@ -94,6 +98,7 @@ export async function generateProfile(options?: {
     });
 
     const json = await res.json();
+    assertBrowserOwner(owner);
     if (json.success && json.data) {
       await syncProfileToCache(json.data);
       const cached = await import("@/lib/profile-storage").then((m) => m.loadProfile());
@@ -104,6 +109,7 @@ export async function generateProfile(options?: {
   }
 
   // Fallback: local stats-only profile
+  assertBrowserOwner(owner);
   const stats = await computeStats();
   return buildFallbackProfile(stats);
 }

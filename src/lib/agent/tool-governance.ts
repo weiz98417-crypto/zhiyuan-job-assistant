@@ -817,6 +817,36 @@ export function evaluateToolGovernance(input: {
   const contract = input.taskContract || null;
   const policy = contract ? getTaskContractPolicy(contract.taskType) : undefined;
 
+  const constraints = contract?.routing?.intentConstraints;
+  const hasWriteEffect = effect === "write" || effect === "high_risk_write" || effect === "export" || effect === "admin";
+  const forbiddenDomain = hasWriteEffect && governance?.documentTypes?.some((type) => (
+    (type === "profile" && constraints?.noProfileWrite)
+    || (type === "resume" && constraints?.noResumeWrite && input.toolName !== "create_resume_edit_proposal")
+    || (input.toolName === "save_reference_resume" && constraints?.noReferenceResumeWrite)
+  ));
+  if ((constraints?.writePolicy === "forbidden" && hasWriteEffect) || forbiddenDomain) {
+    return {
+      allowed: false,
+      effect,
+      contractPolicy: policy,
+      governance,
+      reason: "本轮用户明确禁止该写入，不能调用 " + input.toolName + "。",
+    };
+  }
+  if (
+    constraints?.writePolicy === "proposal_only"
+    && hasWriteEffect
+    && input.toolName !== "create_resume_edit_proposal"
+  ) {
+    return {
+      allowed: false,
+      effect,
+      contractPolicy: policy,
+      governance,
+      reason: "本轮仅允许创建待审核提案，不能调用 " + input.toolName + " 修改正式数据。",
+    };
+  }
+
   if (!governance) {
     const compatibility = getLegacyToolGovernanceCompatibility(input.toolName);
     const defaultDenied = compatibility.defaultDenied || Boolean(contract);

@@ -96,4 +96,22 @@ describe("durable interview session persistence regression", () => {
     expect(update.interviewState.questionGraph.at(-1)?.question).toContain("模型质量阈值");
     expect(update.interviewState.currentQuestionId).toBe(update.interviewState.questionGraph.at(-1)?.id);
   });
+
+  it("keeps the durable engine as sole writer when its state arrives as serialized JSON", async () => {
+    const durable = {
+      id: "iv-77", company: "甲公司", role: "AI 产品经理", phase: "tech", questionIndex: 0,
+      questions: [{ id: "q1", phase: "tech", text: "请介绍真实贡献", type: "tech" }],
+      answers: [], currentQuestion: { id: "q1", phase: "tech", text: "请介绍真实贡献", type: "tech" },
+      currentFollowups: [], checkpointVersion: 1,
+    };
+    boundaries.get.mockResolvedValue({ id: 77, interview_state_json: JSON.stringify(durable) });
+    const { saveExecutionConversation } = await import("@/lib/agent/runtime/execution-session-service");
+    await saveExecutionConversation({ userId: "user-1" }, 77, [
+      { role: "user", content: "暂停面试" },
+      { role: "assistant", content: "异常提示：你可以重新开始？" },
+    ]);
+    const update = boundaries.update.mock.calls.at(-1)?.[2];
+    expect(update?.interviewState).toBeUndefined();
+    expect(boundaries.get.mock.results.length).toBeGreaterThan(0);
+  });
 });

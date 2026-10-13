@@ -3,6 +3,7 @@ import path from "path";
 import fs from "fs";
 import { getDatabaseDriver } from "@/lib/postgres";
 import { normalizeApplicationStatus } from "@/lib/application-status";
+import { migrateSqliteOfferUnknownTerms } from "@/lib/server/offer-schema-migration";
 
 const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), "data");
 const DB_PATH = path.join(DATA_DIR, "zhiyuan.db");
@@ -328,6 +329,7 @@ export function getDb(): Database.Database {
     for (const [name, sql] of offerMigrations) {
       if (!offerCols.some((c) => c.name === name)) _db.exec(sql);
     }
+    migrateSqliteOfferUnknownTerms(_db);
     _db.exec("CREATE INDEX IF NOT EXISTS idx_offers_user ON offers(user_id, updated_at)");
 
     const offerReportCols = _db.prepare("PRAGMA table_info(offer_reports)").all() as { name: string }[];

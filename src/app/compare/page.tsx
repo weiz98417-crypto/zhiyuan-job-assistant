@@ -6,7 +6,9 @@ import { HandwritingTitle, PaperCard, ScoreBadge, WarmButton } from "@/component
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/overlay";
 import { createSession } from "@/lib/agent/sessions";
 import { formatFivePointScore } from "@/lib/score-scale";
-import type { Offer, OfferEvaluationModule, OfferVerdict } from "@/types";
+import { calculateOfferCash } from "@/lib/offer-evaluation";
+import { nullableOfferBoolean, nullableOfferNumber } from "@/lib/offer-conditions";
+import type { Offer, OfferEvaluationModule, OfferEvaluationReport, OfferVerdict } from "@/types";
 
 type OfferReportRow = {
   id: number;
@@ -45,8 +47,7 @@ function cleanText(value: unknown, fallback = ""): string {
 }
 
 function totalAnnualComp(offer: Offer): number {
-  const monthly = Number(offer.monthlySalary || 0);
-  return monthly * ((offer.monthsPerYear || 12) + (offer.annualBonus || 0));
+  return calculateOfferCash(offer).guaranteedAnnualK;
 }
 
 function normalizeMonthlySalaryK(value: unknown): number {
@@ -77,10 +78,10 @@ function rowToOffer(row: Record<string, unknown>): Offer {
     level: cleanText(row.level),
     monthlySalary: normalizeMonthlySalaryK(row.monthly_salary),
     monthsPerYear: Number(row.months_per_year || 12),
-    annualBonus: Number(row.annual_bonus || 0),
-    hasSocialInsurance: row.has_social_insurance !== 0,
-    housingFundRate: Number(row.housing_fund_rate || 7),
-    probationMonths: Number(row.probation_months || 3),
+    annualBonus: nullableOfferNumber(row.annual_bonus),
+    hasSocialInsurance: nullableOfferBoolean(row.has_social_insurance),
+    housingFundRate: nullableOfferNumber(row.housing_fund_rate),
+    probationMonths: nullableOfferNumber(row.probation_months),
     startDate: cleanText(row.start_date) || undefined,
     options: cleanText(row.options) || undefined,
     otherBenefits: cleanText(row.other_benefits) || undefined,
@@ -133,10 +134,10 @@ function syntheticOfferFromReport(report: OfferReportRow): Offer | null {
     level: cleanText(snapshot.level),
     monthlySalary: normalizeMonthlySalaryK(snapshot.monthlySalary),
     monthsPerYear: Number(snapshot.monthsPerYear || 12),
-    annualBonus: Number(snapshot.annualBonus || 0),
-    hasSocialInsurance: snapshot.hasSocialInsurance !== false,
-    housingFundRate: Number(snapshot.housingFundRate || 7),
-    probationMonths: Number(snapshot.probationMonths || 3),
+    annualBonus: nullableOfferNumber(snapshot.annualBonus),
+    hasSocialInsurance: nullableOfferBoolean(snapshot.hasSocialInsurance),
+    housingFundRate: nullableOfferNumber(snapshot.housingFundRate),
+    probationMonths: nullableOfferNumber(snapshot.probationMonths),
     startDate: cleanText(snapshot.startDate) || undefined,
     options: cleanText(snapshot.options) || undefined,
     otherBenefits: cleanText(snapshot.otherBenefits) || undefined,
@@ -174,7 +175,7 @@ function mergeOffersWithReports(offers: Offer[], reports: OfferReportRow[]): Off
       role: cleanText(existing.role) === "未命名岗位" ? synthetic.role : existing.role,
       monthlySalary: existing.monthlySalary || synthetic.monthlySalary,
       monthsPerYear: existing.monthsPerYear || synthetic.monthsPerYear,
-      annualBonus: existing.annualBonus || synthetic.annualBonus,
+      annualBonus: existing.annualBonus,
       latestReportId: existing.latestReportId || report.id,
     });
   }
@@ -197,10 +198,11 @@ function offerForComparison(offer: Offer, reports: OfferReportRow[]): Offer {
     location: cleanText(snapshot.location, offer.location || "") || offer.location,
     monthlySalary: normalizeMonthlySalaryK(snapshot.monthlySalary) || offer.monthlySalary,
     monthsPerYear: Number(snapshot.monthsPerYear || offer.monthsPerYear || 12),
-    annualBonus: Number(snapshot.annualBonus || offer.annualBonus || 0),
-    hasSocialInsurance: snapshot.hasSocialInsurance !== undefined ? snapshot.hasSocialInsurance !== false : offer.hasSocialInsurance,
-    housingFundRate: Number(snapshot.housingFundRate || offer.housingFundRate || 7),
-    probationMonths: Number(snapshot.probationMonths || offer.probationMonths || 3),
+    annualBonus: Object.hasOwn(snapshot, "annualBonus") ? nullableOfferNumber(snapshot.annualBonus) : offer.annualBonus,
+    hasSocialInsurance: Object.hasOwn(snapshot, "hasSocialInsurance") ? nullableOfferBoolean(snapshot.hasSocialInsurance) : offer.hasSocialInsurance,
+    housingFundRate: Object.hasOwn(snapshot, "housingFundRate") ? nullableOfferNumber(snapshot.housingFundRate) : offer.housingFundRate,
+    probationMonths: Object.hasOwn(snapshot, "probationMonths") ? nullableOfferNumber(snapshot.probationMonths) : offer.probationMonths,
+    bonusGuarantee: Object.hasOwn(snapshot, "bonusGuarantee") ? snapshot.bonusGuarantee as Offer["bonusGuarantee"] : offer.bonusGuarantee,
   };
 }
 
@@ -237,14 +239,14 @@ export default function ComparePage() {
     role: "",
     monthlySalary: "",
     monthsPerYear: "12",
-    annualBonus: "0",
+    annualBonus: "",
     location: "",
     otherBenefits: "",
   });
 
   const resetForm = () => {
     setEditingOfferId(null);
-    setForm({ company: "", role: "", monthlySalary: "", monthsPerYear: "12", annualBonus: "0", location: "", otherBenefits: "" });
+    setForm({ company: "", role: "", monthlySalary: "", monthsPerYear: "12", annualBonus: "", location: "", otherBenefits: "" });
   };
 
   async function loadData() {
@@ -285,6 +287,7 @@ export default function ComparePage() {
   const selectedMissing = selectedReport ? parseJson<string[]>(selectedReport.missing_info_json, []) : [];
   const selectedLevers = selectedReport ? parseJson<string[]>(selectedReport.negotiation_levers_json, []) : [];
   const selectedQuestions = selectedReport ? parseJson<string[]>(selectedReport.hr_questions_json, []) : [];
+  const selectedEstimate = selectedReport ? parseJson<OfferEvaluationReport["takeHomeEstimate"]>(selectedReport.take_home_json, undefined) : undefined;
 
   const stats = useMemo(() => {
     const evaluated = offers.filter((offer) => statusForOffer(offer, reports) === "evaluated").length;
@@ -353,7 +356,7 @@ export default function ComparePage() {
       role: offer.role || "",
       monthlySalary: offer.monthlySalary ? String(offer.monthlySalary) : "",
       monthsPerYear: String(offer.monthsPerYear || 12),
-      annualBonus: String(offer.annualBonus || 0),
+      annualBonus: offer.annualBonus === null || offer.annualBonus === undefined ? "" : String(offer.annualBonus),
       location: offer.location || "",
       otherBenefits: offer.otherBenefits || "",
     });
@@ -406,10 +409,9 @@ export default function ComparePage() {
         role: form.role.trim(),
         monthly_salary: Number(form.monthlySalary || 0),
         months_per_year: Number(form.monthsPerYear || 12),
-        annual_bonus: Number(form.annualBonus || 0),
+        annual_bonus: nullableOfferNumber(form.annualBonus),
         location: form.location.trim(),
         other_benefits: form.otherBenefits.trim(),
-        benefits: {},
       }),
     });
     const json = await res.json();
@@ -504,7 +506,10 @@ export default function ComparePage() {
                   ["岗位", (o: Offer) => o.role],
                   ["城市", (o: Offer) => o.location || "未录入"],
                   ["税前月薪", (o: Offer) => o.monthlySalary ? `${o.monthlySalary}K` : "未录入"],
-                  ["年总包", (o: Offer) => o.monthlySalary ? `${totalAnnualComp(o)}K` : "未录入"],
+                  ["确定年现金", (o: Offer) => o.monthlySalary ? `${totalAnnualComp(o)}K` : "未录入"],
+                  ["非保证奖金", (o: Offer) => { const bonus = calculateOfferCash(o).variableBonusK; return bonus === null ? "未明确" : `${bonus}K`; }],
+                  ["社保", (o: Offer) => o.hasSocialInsurance === null ? "未明确" : o.hasSocialInsurance ? "有" : "无"],
+                  ["公积金", (o: Offer) => o.housingFundRate === null ? "未明确" : `${o.housingFundRate}%`],
                   ["评估分", (o: Offer) => {
                     const report = reportForOffer(o, reports);
                     return report?.overall_score ? formatFivePointScore(report.overall_score) : "未评估";
@@ -555,7 +560,7 @@ export default function ComparePage() {
                           </div>
                           <p className="mt-1 text-sm text-[var(--color-muted)]">{offer.role}</p>
                           <p className="mt-2 text-sm text-[var(--color-text-soft)]">
-                            {offer.monthlySalary ? `${offer.monthlySalary}K x ${offer.monthsPerYear || 12} | 年包 ${totalAnnualComp(offer)}K` : "薪资未录入"}
+                            {offer.monthlySalary ? `${offer.monthlySalary}K x ${offer.monthsPerYear || 12} | 确定年现金 ${totalAnnualComp(offer)}K` : "薪资未录入"}
                           </p>
                         </button>
                         <label className="flex items-center gap-1.5 text-xs text-[var(--color-muted)]">
@@ -645,10 +650,12 @@ export default function ComparePage() {
                       <div>级别：{selectedOffer.level || "未录入"}</div>
                       <div>税前月薪：{formatMoney(selectedOffer.monthlySalary)}</div>
                       <div>发薪月数：{selectedOffer.monthsPerYear || 12}</div>
-                      <div>年终奖：{selectedOffer.annualBonus ?? 0} 个月</div>
-                      <div>社保：{selectedOffer.hasSocialInsurance ? "有" : "无"}</div>
-                      <div>公积金：{selectedOffer.housingFundRate}%</div>
-                      <div>试用期：{selectedOffer.probationMonths} 个月</div>
+                      <div>年终奖：{selectedOffer.annualBonus === null || selectedOffer.annualBonus === undefined ? "未明确" : `${selectedOffer.annualBonus} 个月`}</div>
+                      <div>确定年现金：{totalAnnualComp(selectedOffer)}K</div>
+                      <div>非保证奖金：{calculateOfferCash(selectedOffer).variableBonusK === null ? "未明确" : `${calculateOfferCash(selectedOffer).variableBonusK}K`}</div>
+                      <div>社保：{selectedOffer.hasSocialInsurance === null ? "未明确" : selectedOffer.hasSocialInsurance ? "有" : "无"}</div>
+                      <div>公积金：{selectedOffer.housingFundRate === null ? "未明确" : `${selectedOffer.housingFundRate}%`}</div>
+                      <div>试用期：{selectedOffer.probationMonths === null ? "未明确" : `${selectedOffer.probationMonths} 个月`}</div>
                       <div>聘用形式：{selectedOffer.employmentForm || "unknown"}</div>
                       <div>用工主体：{selectedOffer.employerName || "未录入"}</div>
                       <div>合同月数：{selectedOffer.contractMonths || "未录入"}</div>
@@ -680,6 +687,16 @@ export default function ComparePage() {
                         <p className="mb-2 text-sm font-medium text-[var(--color-text)]">报告摘要</p>
                         <p className="text-sm leading-6 text-[var(--color-text-soft)]">{selectedReport.summary || "暂无摘要"}</p>
                       </PaperCard>
+
+                      {selectedEstimate && (
+                        <PaperCard padding="sm">
+                          <p className="mb-2 text-sm font-medium text-[var(--color-text)]">税后估算与计算假设</p>
+                          <p className="text-sm text-[var(--color-text-soft)]">月到手约 {selectedEstimate.monthlyNetMin}–{selectedEstimate.monthlyNetMax}K，确定现金年到手约 {selectedEstimate.annualNetMin}–{selectedEstimate.annualNetMax}K。</p>
+                          <ul className="mt-2 space-y-1 text-xs text-[var(--color-muted)]">
+                            {(selectedEstimate.assumptions || []).map((assumption) => <li key={assumption}>{assumption}</li>)}
+                          </ul>
+                        </PaperCard>
+                      )}
 
                       {selectedModules.length > 0 && (
                         <PaperCard padding="sm">

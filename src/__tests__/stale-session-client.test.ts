@@ -27,10 +27,20 @@ describe('browser stale-session recovery', () => {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
     }) as unknown as typeof fetch;
     const replace = installBrowser(originalFetch, '/admin/agent-runs');
+    const entries = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      get length() { return entries.size; },
+      key: (index: number) => Array.from(entries.keys())[index] ?? null,
+      getItem: (key: string) => entries.get(key) ?? null,
+      setItem: (key: string, value: string) => entries.set(key, value),
+      removeItem: (key: string) => entries.delete(key),
+    });
+    const { setBrowserOwner } = await import('@/lib/browser-owner');
+    setBrowserOwner('stale-account');
     const { installCsrfFetch } = await import('@/lib/security/csrf-fetch');
 
     installCsrfFetch();
-    const response = await window.fetch('/api/users/me');
+    const response = await window.fetch('/api/data/profile');
 
     expect(response.status).toBe(401);
     expect(originalFetch).toHaveBeenCalledWith('/api/auth/logout', expect.objectContaining({

@@ -7,12 +7,26 @@
  */
 
 export type InterviewPhase = "intro" | "tech" | "behavioral" | "reverse" | "summary" | "done";
+export type InterviewControl = "pause" | "resume" | "skip" | "finish" | "cancel" | "help" | "format";
+
+export function classifyInterviewControl(content: string): InterviewControl | undefined {
+  const text = content.trim().toLowerCase().replace(/[\s，,。.!！?？：:]+/g, "");
+  if (/^(?:请|帮我|先)?(?:暂停|暂停一下|暂停面试|暂停模拟面试|停止出题|pause)(?:先到这里|稍后继续|不要继续出题)?$/.test(text)) return "pause";
+  if (/^(?:请|帮我)?(?:恢复|恢复面试|继续|继续面试|继续模拟面试|开始面试|开始模拟面试|resume|continue)$/.test(text)) return "resume";
+  if (/^(?:请|帮我)?(?:跳过|跳过这题|跳过这一题|下一题|下一个|换一题|skip|next)$/.test(text)) return "skip";
+  if (/^(?:请|帮我)?(?:结束|结束面试|结束模拟面试|结束模拟|复盘|总结|做个复盘|面试复盘|finish|recap|summary)$/.test(text)) return "finish";
+  if (/^(?:请|帮我)?(?:取消|取消面试|取消模拟面试|放弃面试|cancel)$/.test(text)) return "cancel";
+  if (/^(?:请|帮我)?(?:提示|给个提示|给我提示|示范|给个示范|给我示范|给个示例|给我示例|给个示范答案|换个问法|换问法|那你给|你给|hint|help)$/.test(text)) return "help";
+  if (/^(?:以后|接下来|后面|请)?(?:只问问题|只问一题|只出一道题|格式短一点|格式简短一点|不要解释|不要这些格式|问题简短一点)$/.test(text)) return "format";
+  return undefined;
+}
 
 export interface InterviewQuestion {
   id: string;
   phase: InterviewPhase;
   text: string;
   type: "tech" | "behavioral" | "reverse";
+  createdAt?: string;
 }
 
 export interface InterviewAnswer {
@@ -22,6 +36,9 @@ export interface InterviewAnswer {
   score?: number;
   feedback?: string;
   followups: { question: string; answer: string }[];
+  answerTurnId?: string;
+  primaryAnswer?: string;
+  createdAt?: string;
   /** Spec 30 / WP1：rubric 细节（来自 scoreSessionAnswer 的 rubric 透传）——复盘页档位/证据/三态渲染源。 */
   rubric?: {
     bands: Record<string, number>;
@@ -39,7 +56,8 @@ export interface InterviewSession {
   sourceBinding?: {
     jdId?: number;
     reportNum?: number;
-    resumeId?: number;
+    resumeId?: number | string;
+    resumeTitle?: string;
     jdText?: string;
     cvText?: string;
     memoryContext?: string;
@@ -50,6 +68,14 @@ export interface InterviewSession {
   answers: InterviewAnswer[];
   currentQuestion?: InterviewQuestion;
   currentFollowups: string[];
+  status?: "active" | "paused" | "completed" | "abandoned";
+  createdAt?: string;
+  snapshotId?: string;
+  mode?: string;
+  difficulty?: "normal" | "hard" | "pressure" | "junior" | "mid" | "senior" | "staff";
+  focus?: string;
+  focusAreas?: string[];
+  allowFollowUps?: boolean;
 }
 
 const PHASE_ORDER: InterviewPhase[] = ["intro", "tech", "behavioral", "reverse"];
@@ -58,7 +84,7 @@ const PHASE_QUESTION_COUNTS: Record<string, number> = { intro: 1, tech: 3, behav
 /** Create a new interview session */
 export function createSession(company: string, role: string, sourceBinding?: InterviewSession["sourceBinding"]): InterviewSession {
   return {
-    id: `iv_${Date.now()}`,
+    id: `iv_${globalThis.crypto.randomUUID()}`,
     company,
     role,
     sourceBinding,
@@ -67,6 +93,8 @@ export function createSession(company: string, role: string, sourceBinding?: Int
     questions: [],
     answers: [],
     currentFollowups: [],
+    status: "active",
+    createdAt: new Date().toISOString(),
   };
 }
 
@@ -95,10 +123,13 @@ export function nextAction(
 
 /** Advance to next phase/question */
 export function advance(session: InterviewSession): InterviewSession {
+  if (session.phase === "done") return session;
   const currentPhaseIdx = PHASE_ORDER.indexOf(session.phase);
 
   // Check if more questions in current phase
   const phaseCount = PHASE_QUESTION_COUNTS[session.phase] || 1;
+  session.currentFollowups = [];
+  session.currentQuestion = undefined;
   if (session.questionIndex + 1 < phaseCount) {
     session.questionIndex++;
     return session;
@@ -108,6 +139,7 @@ export function advance(session: InterviewSession): InterviewSession {
   const nextPhaseIdx = currentPhaseIdx + 1;
   if (nextPhaseIdx >= PHASE_ORDER.length) {
     session.phase = "done";
+    session.status = "completed";
   } else {
     session.phase = PHASE_ORDER[nextPhaseIdx];
     session.questionIndex = 0;

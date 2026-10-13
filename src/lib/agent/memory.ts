@@ -1,4 +1,5 @@
-import db from "@/lib/db";
+import db, { captureOwnerDatabase } from "@/lib/db";
+import { assertBrowserOwner, requireBrowserOwner } from "@/lib/browser-owner";
 import type {
   AgentInteraction,
   AgentDecision,
@@ -136,6 +137,7 @@ export async function loadPreferences(): Promise<AgentPreferenceModel> {
 export async function savePreferences(
   model: AgentPreferenceModel,
 ): Promise<void> {
+  const db = captureOwnerDatabase();
   model.lastUpdated = new Date().toISOString();
   const existing = await db.agentPreferences.where("id").equals(1 as never).first();
   if (existing) {
@@ -179,6 +181,7 @@ export async function updateRolePreference(
   scoreDelta: number,
   source: RolePreference["source"] = "learned",
 ): Promise<void> {
+  const owner = requireBrowserOwner();
   const prefs = await loadPreferences();
 
   // Apply decay first
@@ -212,6 +215,7 @@ export async function updateRolePreference(
     }
   }
 
+  assertBrowserOwner(owner);
   await savePreferences(prefs);
 }
 
@@ -219,6 +223,7 @@ export async function updateCompanyPreference(
   company: string,
   action: "like" | "dislike",
 ): Promise<void> {
+  const owner = requireBrowserOwner();
   const prefs = await loadPreferences();
 
   if (action === "dislike") {
@@ -242,6 +247,7 @@ export async function updateCompanyPreference(
       prefs.companyPreferences.disliked.filter((c) => c !== company);
   }
 
+  assertBrowserOwner(owner);
   await savePreferences(prefs);
 }
 

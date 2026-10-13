@@ -53,6 +53,96 @@ afterEach(() => {
 });
 
 describe("offer persistence verified writes", () => {
+  it("preserves unknown terms separately from explicit zero and false through POST and GET", async () => {
+    const { offersRoute } = await loadRouteHarness();
+    const create = async (body: Record<string, unknown>) => {
+      const response = await offersRoute.POST(new Request("http://localhost/api/offers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }));
+      expect(response.status).toBe(201);
+      expect((await response.json()).data.readBackVerified).toBe(true);
+    };
+    await create({ company: "Unknown Terms", role: "PM", monthly_salary: 20 });
+    await create({ company: "Explicit Zero", role: "PM", monthly_salary: 20,
+      has_social_insurance: false, housing_fund_rate: 0, probation_months: 0, annual_bonus: 0 });
+    const json = await (await offersRoute.GET()).json();
+    expect(json.data.find((row: Record<string, unknown>) => row.company === "Unknown Terms")).toMatchObject({
+      has_social_insurance: null, housing_fund_rate: null, probation_months: null, annual_bonus: null,
+    });
+    expect(json.data.find((row: Record<string, unknown>) => row.company === "Explicit Zero")).toMatchObject({
+      has_social_insurance: 0, housing_fund_rate: 0, probation_months: 0, annual_bonus: 0,
+    });
+  });
+
+  it("persists parsed server-agent terms and binds the report to the same unknown or explicit facts", async () => {
+    const { offersRoute, offerReportsRoute } = await loadRouteHarness();
+    const { evaluateOfferForAgent } = await import("@/lib/server/offer-agent-service");
+    const { getDataRepositories } = await import("@/lib/data-repositories");
+    const adapters = {
+      repositories: getDataRepositories(),
+      inspectImages: async () => ({ offerText: "", structured: {}, errors: [] }),
+      getMemoryContext: async () => ({ structuredFacts: [], semanticSnippets: [], warnings: [] }),
+    };
+    const unknown = await evaluateOfferForAgent({ userId: TEST_USER_ID }, {
+      offerText: "公司：服务端未知\n岗位：产品经理\n月薪20K，12薪，年终奖4个月不保证",
+    }, { adapters });
+    const zero = await evaluateOfferForAgent({ userId: TEST_USER_ID }, {
+      company: "服务端零值", role: "产品经理", monthlySalary: 20, annualBonus: 0,
+      hasSocialInsurance: false, housingFundRate: 0, probationMonths: 0,
+    }, { adapters });
+    expect(unknown.offerSnapshot).toMatchObject({ hasSocialInsurance: null, housingFundRate: null,
+      probationMonths: null, annualBonus: 4, bonusGuarantee: "uncertain" });
+    expect(zero.offerSnapshot).toMatchObject({ hasSocialInsurance: false, housingFundRate: 0, probationMonths: 0, annualBonus: 0 });
+    const offers = (await (await offersRoute.GET()).json()).data;
+    expect(offers.find((row: Record<string, unknown>) => row.id === unknown.offerId)).toMatchObject({
+      has_social_insurance: null, housing_fund_rate: null, probation_months: null,
+      annual_bonus: 4, bonus_guarantee: "uncertain", latest_report_id: unknown.id,
+    });
+    const reports = (await (await offerReportsRoute.GET()).json()).data;
+    const savedReport = reports.find((row: Record<string, unknown>) => row.id === unknown.id);
+    expect(JSON.parse(savedReport.offer_snapshot_json)).toMatchObject({
+      company: "服务端未知", monthlySalary: 20, monthsPerYear: 12, hasSocialInsurance: null,
+      housingFundRate: null, probationMonths: null, annualBonus: 4, bonusGuarantee: "uncertain",
+    });
+    expect(JSON.parse(savedReport.modules_json).find((module: { id: string }) => module.id === "cash").evidence).toContain("确定年现金 240K");
+  });
+
+  it("retains known terms and benefits when only editable cash fields change", async () => {
+    const { offersRoute } = await loadRouteHarness();
+    const detailRoute = await import("@/app/api/offers/[id]/route");
+    const created = await (await offersRoute.POST(new Request("http://localhost/api/offers", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ company: "保留条件", role: "PM", monthly_salary: 20,
+        has_social_insurance: false, housing_fund_rate: 0, probation_months: 0,
+        bonus_guarantee: "guaranteed", benefits: { meal: true } }),
+    }))).json();
+    const context = { params: Promise.resolve({ id: String(created.data.id) }) };
+    const updated = await detailRoute.PUT(new Request("http://localhost/api/offers/1", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ company: "保留条件", role: "PM", monthly_salary: 25 }),
+    }), context);
+    expect(updated.status).toBe(200);
+    expect((await updated.json()).data.readBackVerified).toBe(true);
+    const reread = await (await detailRoute.GET(new Request("http://localhost/api/offers/1"), context)).json();
+    expect(reread.data).toMatchObject({ monthly_salary: 25, has_social_insurance: 0,
+      housing_fund_rate: 0, probation_months: 0, bonus_guarantee: "guaranteed" });
+    expect(JSON.parse(reread.data.benefits_json)).toEqual({ meal: true });
+    const { evaluateOfferForAgent } = await import("@/lib/server/offer-agent-service");
+    const { getDataRepositories } = await import("@/lib/data-repositories");
+    const report = await evaluateOfferForAgent({ userId: TEST_USER_ID }, { offerId: created.data.id }, {
+      adapters: {
+        repositories: getDataRepositories(),
+        inspectImages: async () => ({ offerText: "", structured: {}, errors: [] }),
+        getMemoryContext: async () => ({ structuredFacts: [], semanticSnippets: [], warnings: [] }),
+      },
+    });
+    expect(report.offerSnapshot).toMatchObject({ hasSocialInsurance: false, housingFundRate: 0, probationMonths: 0 });
+    const afterEvaluation = await (await detailRoute.GET(new Request("http://localhost/api/offers/1"), context)).json();
+    expect(JSON.parse(afterEvaluation.data.benefits_json)).toEqual({ meal: true });
+  });
+
   it("verifies an offer by reading it back before returning success", async () => {
     const { db, offersRoute } = await loadRouteHarness();
     const offerBody = {

@@ -32,6 +32,7 @@ export interface LoopState {
 }
 
 export type SSEEvent =
+  | { type: "interview_state_updated"; conversationId: number; checkpointVersion: number; questionId?: string; engineSessionId: string; turnFingerprint?: string; action: string; status: string; readBackVerified: boolean; requiresReview?: boolean }
   | { type: "phase"; phase: AgentPhase }
   | { type: "thinking_content"; content: string }
   | { type: "tool_call"; name: string; params: Record<string, unknown> }

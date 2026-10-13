@@ -27,6 +27,7 @@ function getExecutor(): GovernedToolAttemptExecutor {
 export interface GovernedRuntimeToolInput {
   principal: ExecutionPrincipal;
   runId: string;
+  conversationId?: number | null;
   workerId: string;
   fencingToken: number;
   toolName: string;
@@ -42,6 +43,7 @@ export function executeGovernedRuntimeTool(input: GovernedRuntimeToolInput): Pro
   return getExecutor().execute({
     principal: input.principal,
     runId: input.runId,
+    conversationId: input.conversationId,
     workerId: input.workerId,
     fencingToken: input.fencingToken,
     toolName: input.toolName,

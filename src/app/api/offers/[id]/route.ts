@@ -41,9 +41,12 @@ export async function PUT(request: Request, context: RouteContext) {
       return NextResponse.json({ success: false, error: "company and role are required" }, { status: 400 });
     }
 
-    const row = await getDataRepositories().offers.update(offerId, body, user.userId);
+    const repositories = getDataRepositories();
+    const current = await repositories.offers.get(offerId, user.userId);
+    if (!current) return NextResponse.json({ success: false, error: "offer not found" }, { status: 404 });
+    const row = await repositories.offers.update(offerId, body, user.userId);
     if (!row) return NextResponse.json({ success: false, error: "offer not found" }, { status: 404 });
-    const readBackVerified = offerReadBackMatches(row, body, offerId);
+    const readBackVerified = offerReadBackMatches(row, { ...current, ...body }, offerId);
     if (!readBackVerified) {
       return NextResponse.json({
         success: false,

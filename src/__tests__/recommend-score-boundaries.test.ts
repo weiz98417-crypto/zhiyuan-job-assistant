@@ -4,13 +4,21 @@ const reports = vi.hoisted(() => [
   { id: 1, reportNum: 1, company: "旧公司", role: "产品经理", date: "2026-09-26", overallScore: 70, keywords: [] },
   { id: 2, reportNum: 2, company: "纸鸢科技", role: "产品经理", date: "2026-09-27", overallScore: 4.1, keywords: [] },
 ]);
-
-vi.mock("@/lib/db", () => ({
-  default: {
-    reports: { where: () => ({ aboveOrEqual: () => ({ toArray: async () => reports }) }) },
-    applications: { toArray: async () => [] },
+const identity = vi.hoisted(() => ({ ownerId: "recommend-A", sessionKey: "session-A", generation: 1 }));
+vi.mock("@/lib/browser-owner", () => ({
+  requireBrowserOwner: () => ({ ...identity }),
+  assertBrowserOwner: (owner: typeof identity) => {
+    if (owner.ownerId !== identity.ownerId) throw new Error("账号已变更");
   },
 }));
+
+vi.mock("@/lib/db", () => {
+  const database = {
+    reports: { where: () => ({ aboveOrEqual: () => ({ toArray: async () => reports }) }) },
+    applications: { toArray: async () => [] },
+  };
+  return { default: database, captureOwnerDatabase: () => database };
+});
 vi.mock("@/lib/profile-storage", () => ({ loadProfile: async () => null }));
 vi.mock("@/lib/cv-storage", () => ({ getCVFullText: async () => "" }));
 vi.mock("@/lib/agent/memory", () => ({ loadPreferences: async () => null, getPreferenceBonus: () => 0 }));
@@ -27,5 +35,13 @@ describe("recommendation score boundaries", () => {
       matchScore: 82,
       reportId: 2,
     });
+  });
+  it("does not reuse another account's cached recommendation when IDs and scores coincide", async () => {
+    identity.ownerId = "recommend-B";
+    reports[1].company = "B_PRIVATE_COMPANY";
+    const result = await getRecommendations(3);
+    expect(result.cached).toBe(false);
+    expect(result.recommendations[0].company).toBe("B_PRIVATE_COMPANY");
+    expect(JSON.stringify(result)).not.toContain("纸鸢科技");
   });
 });

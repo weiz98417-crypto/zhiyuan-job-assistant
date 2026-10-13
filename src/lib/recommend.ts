@@ -1,4 +1,5 @@
-import db from "@/lib/db";
+import { captureOwnerDatabase } from "@/lib/db";
+import { assertBrowserOwner, requireBrowserOwner } from "@/lib/browser-owner";
 import { loadProfile } from "@/lib/profile-storage";
 import { getCVFullText } from "@/lib/cv-storage";
 import { loadPreferences, getPreferenceBonus } from "@/lib/agent/memory";
@@ -16,6 +17,7 @@ export interface RecommendResult {
 }
 
 interface CachedResult {
+  ownerKey: string;
   results: RecommendResult[];
   timestamp: number;
   jdHash: string;
@@ -36,6 +38,9 @@ export async function getRecommendations(limit = 3): Promise<{
   cached: boolean;
   message?: string;
 }> {
+  const owner = requireBrowserOwner();
+  const db = captureOwnerDatabase(owner);
+  const ownerKey = owner.ownerId + ':' + owner.sessionKey + ':' + owner.generation;
   const profile = await loadProfile();
   const reports = (await db.reports
     .where("overallScore")
@@ -44,6 +49,7 @@ export async function getRecommendations(limit = 3): Promise<{
 
   // Filter to only evaluated (not yet applied)
   const apps = await db.applications.toArray();
+  assertBrowserOwner(owner);
   const appliedReportIds = new Set(apps.map((a) => a.reportPath).filter(Boolean));
   const availableReports = reports.filter((r) => {
     const rp = `reports/${String(r.reportNum).padStart(3, "0")}-${r.company.toLowerCase().replace(/\s+/g, "-")}-${r.date}.md`;
@@ -54,6 +60,7 @@ export async function getRecommendations(limit = 3): Promise<{
   const hash = jdHash(availableReports);
   if (
     cache &&
+    cache.ownerKey === ownerKey &&
     Date.now() - cache.timestamp < CACHE_TTL &&
     cache.jdHash === hash
   ) {
@@ -71,12 +78,13 @@ export async function getRecommendations(limit = 3): Promise<{
   if (!profile || profile.skills.length === 0) {
     // Fallback: keyword matching based on goals
     const results = fallbackRecommend(availableReports, profile?.goals, limit);
-    cache = { results, timestamp: Date.now(), jdHash: hash };
+    cache = { ownerKey, results, timestamp: Date.now(), jdHash: hash };
     return { recommendations: results, cached: false };
   }
 
   // Full recommendation: compute scores + LLM reasons
   const prefs = await loadPreferences();
+  assertBrowserOwner(owner);
   const scored = availableReports.map((report) => {
     // Spec 29：真实投递反馈替换写死的 prefFit=50（样本 <5 时保持 50 并标注数据不足）
     const outcome = computeOutcomeSignal(apps, report);
@@ -93,6 +101,7 @@ export async function getRecommendations(limit = 3): Promise<{
     topN.map((s) => s.report),
     profile,
   );
+  assertBrowserOwner(owner);
 
   const results: RecommendResult[] = topN.map((s) => {
     const reasons = reasonsMap.get(s.report.id ?? 0) ?? [];
@@ -107,7 +116,7 @@ export async function getRecommendations(limit = 3): Promise<{
     };
   });
 
-  cache = { results, timestamp: Date.now(), jdHash: hash };
+  cache = { ownerKey, results, timestamp: Date.now(), jdHash: hash };
   return { recommendations: results, cached: false };
 }
 

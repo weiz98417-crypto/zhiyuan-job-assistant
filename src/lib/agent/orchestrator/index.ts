@@ -22,6 +22,7 @@ import type { ExecutionPrincipal } from "@/lib/agent/runtime/durable-agent-run";
 import type { AgentTaskContract } from "@/lib/agent/task-contract";
 import { injectKnowledge, type AgentScenario } from "@/lib/agent/knowledge";
 import type { ModelRecoveryPolicy } from "@/lib/agent/loop/types";
+import type { RunAttachmentMaterial } from "@/lib/agent/runtime/run-attachment-material";
 
 // ── Types ──
 
@@ -36,12 +37,14 @@ export interface OrchestratorContext {
   preferredDocumentType?: ImageDocumentType;
   principal?: ExecutionPrincipal;
   runId?: string;
+  requestId?: string;
   workerId?: string;
   fencingToken?: number;
   taskContract?: AgentTaskContract | null;
   durable?: boolean;
   modelRecovery?: ModelRecoveryPolicy;
   frozenToolCall?: { name: string; args: Record<string, unknown> };
+  attachmentMaterial?: RunAttachmentMaterial | null;
   /** M1 gap closure: server-derived interview state for the loop's tool policy. */
   interviewState?: InterviewSessionState;
   interviewRebindAction?: InterviewRebindAction;
@@ -236,12 +239,15 @@ export async function* orchestrateGen(
     taskContract: ctx.taskContract,
     modelRecovery: ctx.modelRecovery,
     frozenToolCall: ctx.frozenToolCall,
+    attachmentMaterial: ctx.attachmentMaterial,
     interviewState: ctx.interviewState,
     interviewRebindAction: ctx.interviewRebindAction,
     executionContext: ctx.principal && ctx.runId
       ? {
           principal: ctx.principal,
           runId: ctx.runId,
+          conversationId: ctx.sessionId,
+          requestId: ctx.requestId,
           allowlist: effectiveToolNames,
           signal: ctx.signal,
           workerId: ctx.workerId,

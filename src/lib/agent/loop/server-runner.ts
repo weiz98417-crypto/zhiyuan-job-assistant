@@ -7,6 +7,7 @@
  * Quality-gated loop logic ported from client-runner.ts.
  */
 import type { LoopConfig, LoopState, SSEEvent, AgentPhase, ResultQuality, ModelRecoveryPolicy } from "./types";
+import { createHash } from "node:crypto";
 import { DEFAULT_LOOP_CONFIG } from "./types";
 import { isGarbledText } from "./text-quality";
 import { executeTool, formatToolResult, getTool, registry } from "@/lib/agent/tools";
@@ -23,6 +24,7 @@ import { createTaskProgramStopGuard } from "@/lib/agent/task-program";
 import { enforceToolGovernance } from "@/lib/agent/tool-governance";
 import { executeGovernedRuntimeTool } from "@/lib/agent/runtime/governed-tool-runtime";
 import { extractDsmlToolCalls } from "@/lib/agent/loop/dsml-tool-calls";
+import type { RunAttachmentMaterial } from "@/lib/agent/runtime/run-attachment-material";
 
 /* ── Context cap (per-tool) ── */
 const DEFAULT_TOOL_CTX_CAP = 800;
@@ -333,10 +335,34 @@ export async function* agentLoopServer(opts: {
   executionContext?: ToolExecutionContext;
   modelRecovery?: ModelRecoveryPolicy;
   frozenToolCall?: { name: string; args: Record<string, unknown> };
+  attachmentMaterial?: RunAttachmentMaterial | null;
   /** Spec 18: receives one report per model call (metadata only, no content). */
   onModelUsage?: (report: ModelUsageReport) => void;
 }): AsyncGenerator<SSEEvent> {
   const { systemPrompt, messages, config = DEFAULT_LOOP_CONFIG, signal, interviewState, interviewRebindAction, taskContract, executionContext, modelRecovery, onModelUsage } = opts;
+  if (
+    taskContract?.taskType === "interview_coaching"
+    && executionContext?.conversationId
+    && !opts.frozenToolCall
+  ) {
+    const content = messages.findLast((message) => message.role === "user")?.content || "";
+    const { continueDurableInterviewForAgent } = await import("@/lib/server/interview-analysis-service");
+    const result = await continueDurableInterviewForAgent(executionContext.principal, {
+      conversationId: executionContext.conversationId, content,
+      requestKey: executionContext.requestId || `${executionContext.runId}:interview-turn:${createHash("sha256").update(content).digest("hex")}`,
+      materialAction: interviewRebindAction,
+    }, { signal });
+    if (result) {
+      const text = result.message || [
+        result.previousFeedback ? `反馈：${result.previousFeedback}` : "",
+        result.summary || result.question || "",
+      ].filter(Boolean).join("\n\n");
+      if (result.evidence) yield { type: "interview_state_updated", ...result.evidence };
+      yield { type: "text", content: text };
+      yield { type: "done" };
+      return;
+    }
+  }
   // M4: agent identity is mutable — transfer_to_agent hands responsibility to
   // another specialist mid-run (handoff swaps prompt context and tool table).
   let agent = opts.agent;
@@ -361,8 +387,11 @@ export async function* agentLoopServer(opts: {
     toolWhitelist = toolWhitelist?.filter((name) => !blockedResumeTools.has(name));
   }
   const latestUserMessage = messages.findLast((message) => message.role === "user" && !message.content.trim().startsWith("<!--"));
+  const boundJD = taskContract?.taskType === "jd_evaluation" && opts.attachmentMaterial?.intake.documentType === "jd"
+    ? opts.attachmentMaterial : null;
+  const currentJDText = boundJD?.intake.extractedText.trim() || "";
   const currentJDImages = taskContract?.taskType === "jd_evaluation"
-    ? (latestUserMessage?.images || []).filter((image) => image.startsWith("data:image/")).slice(0, 5)
+    ? (boundJD?.images || latestUserMessage?.images || []).filter((image) => image.startsWith("data:image/")).slice(0, 5)
     : [];
   const prioritizeCurrentJDImage = currentJDImages.length > 0
     && !messages.some((message) => message.content.includes("[VERIFIED_TOOL_FACT tool=evaluate_jd_full]"));
@@ -378,6 +407,10 @@ export async function* agentLoopServer(opts: {
     content: message.content,
     images: message.images ? [...message.images] : undefined,
   }));
+  if (resumeDiagnosis && opts.attachmentMaterial?.intake.documentType === "resume") {
+    const latestUser = ctx.findLast((message) => message.role === "user" && !message.content.trim().startsWith("<!--"));
+    if (latestUser) latestUser.images = [...opts.attachmentMaterial.images];
+  }
   let autoRetryCount = 0;
   let forceTextOnly = false; // Set after degradeToUser: next LLM response is text-only, no tools
   const MAX_AUTO_RETRY = 2;
@@ -430,7 +463,7 @@ export async function* agentLoopServer(opts: {
         toolCalls = [{
           id: "current-jd-image",
           name: "evaluate_jd_full",
-          arguments: JSON.stringify({ images: currentJDImages }),
+          arguments: JSON.stringify(currentJDText ? { jd_text: currentJDText } : { images: currentJDImages }),
         }];
       } else {
         const resp = await callLLM(
@@ -588,14 +621,25 @@ export async function* agentLoopServer(opts: {
         }
         if (matchResume === false) delete params.cv_text;
         if (currentJDImages.length > 0 && state.iteration === 1) {
-          params.images = currentJDImages;
-          delete params.jd_text;
+          if (currentJDText) {
+            params.jd_text = currentJDText;
+            delete params.images;
+          } else {
+            params.images = currentJDImages;
+            delete params.jd_text;
+          }
           delete params.jd_url;
         }
-        const sourceJdId = inferJdIdFromMessages(ctx);
+        if (boundJD) {
+          delete params.jd_id;
+          delete params.target_company;
+          const company = boundJD.intake.structured?.company;
+          if (typeof company === "string" && company.trim()) params.target_company = company.trim();
+        }
+        const sourceJdId = boundJD ? undefined : inferJdIdFromMessages(ctx);
         if (sourceJdId && !Number.isInteger(Number(params.jd_id))) params.jd_id = sourceJdId;
       }
-      if (tc.name === "evaluate_jd_full" && typeof params.target_company !== "string") {
+      if (tc.name === "evaluate_jd_full" && !boundJD && typeof params.target_company !== "string") {
         const inferredCompany = inferCompanyFromMessages(ctx);
         if (inferredCompany) params.target_company = inferredCompany;
       }
@@ -660,6 +704,7 @@ export async function* agentLoopServer(opts: {
           const outcome = await executeGovernedRuntimeTool({
             principal: executionContext!.principal,
             runId: executionContext!.runId,
+            conversationId: executionContext!.conversationId,
             workerId: executionContext!.workerId!,
             fencingToken: executionContext!.fencingToken!,
             toolName: tc.name,

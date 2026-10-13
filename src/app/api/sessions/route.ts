@@ -6,6 +6,7 @@ import {
   projectSessionRowForUser,
 } from "@/lib/agent/surface-projection";
 import { readSessionRowsWithDurableMessages } from "@/lib/agent/runtime/session-api-readback";
+import { browserSessionMutationError } from "@/lib/server/browser-session-mutation";
 
 export async function GET() {
   try {
@@ -44,6 +45,8 @@ export async function POST(request: Request) {
         { status: 422 },
       );
     }
+    const mutationError = browserSessionMutationError(raw);
+    if (mutationError) return NextResponse.json({ success: false, error: mutationError }, { status: 422 });
     const { title, interviewState, agentState } = projectSessionMutationForPersistence(raw);
     const messages: unknown[] = [];
     const id = await getDataRepositories().sessions.create({ title, messages, interviewState, agentState }, user.userId);

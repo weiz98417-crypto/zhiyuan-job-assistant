@@ -1,5 +1,6 @@
 import type { PoolClient } from "pg";
 import { getDb } from "@/lib/server-db";
+import { nullableOfferBoolean, nullableOfferNumber } from "@/lib/offer-conditions";
 import {
   bootstrapPostgresSchema,
   getDatabaseDriver,
@@ -2779,7 +2780,15 @@ function createSqliteSessionRepository(): DataRepositories["sessions"] {
       const { sets, values } = buildSessionUpdate(updates, "sqlite");
       if (!sets.length) return false;
       values.push(id, userId);
-      return getDb().prepare(`UPDATE sessions SET ${sets.join(", ")}, updated_at = datetime('now') WHERE id = ? AND user_id = ?`).run(...values).changes > 0;
+      const expectedVersion = updates.expectedInterviewCheckpointVersion;
+      let condition = "";
+      if (expectedVersion !== undefined) {
+        values.push(expectedVersion);
+        condition = " AND COALESCE(json_extract(interview_state_json, '$.checkpointVersion'), 0) = ?";
+      } else if (updates.interviewState !== undefined || updates.agentState !== undefined) {
+        condition = " AND COALESCE(json_extract(interview_state_json, '$.checkpointVersion'), 0) = 0";
+      }
+      return getDb().prepare(`UPDATE sessions SET ${sets.join(", ")}, updated_at = datetime('now') WHERE id = ? AND user_id = ?${condition}`).run(...values).changes > 0;
     },
   };
 }
@@ -2805,7 +2814,16 @@ function createPostgresSessionRepository(): DataRepositories["sessions"] {
       const { sets, values } = buildSessionUpdate(updates, "postgres");
       if (!sets.length) return false;
       values.push(id, userId);
-      return withPostgresClient(async (client) => Boolean((await client.query(`UPDATE sessions SET ${sets.join(", ")}, updated_at = now() WHERE id = $${values.length - 1} AND user_id = $${values.length}`, values)).rowCount));
+      const ownerCondition = `id = $${values.length - 1} AND user_id = $${values.length}`;
+      const expectedVersion = updates.expectedInterviewCheckpointVersion;
+      let condition = "";
+      if (expectedVersion !== undefined) {
+        values.push(expectedVersion);
+        condition = ` AND COALESCE((interview_state_json->>'checkpointVersion')::integer, 0) = $${values.length}`;
+      } else if (updates.interviewState !== undefined || updates.agentState !== undefined) {
+        condition = " AND COALESCE((interview_state_json->>'checkpointVersion')::integer, 0) = 0";
+      }
+      return withPostgresClient(async (client) => Boolean((await client.query(`UPDATE sessions SET ${sets.join(", ")}, updated_at = now() WHERE ${ownerCondition}${condition}`, values)).rowCount));
     },
   };
 }
@@ -3186,14 +3204,15 @@ function createPostgresOfferReportRepository(): DataRepositories["offerReports"]
 }
 
 function offerValues(input: AnyRow, monthlySalaryK: number) {
+  const socialInsurance = nullableOfferBoolean(input.has_social_insurance);
   return [
     monthlySalaryK,
     input.months_per_year ?? 12,
-    input.annual_bonus ?? 0,
-    input.has_social_insurance !== false ? 1 : 0,
-    input.housing_fund_rate ?? 7,
+    nullableOfferNumber(input.annual_bonus),
+    socialInsurance === null ? null : socialInsurance ? 1 : 0,
+    nullableOfferNumber(input.housing_fund_rate),
     input.options ?? null,
-    input.probation_months ?? 3,
+    nullableOfferNumber(input.probation_months),
     input.start_date ?? null,
     input.other_benefits ?? null,
     input.location ?? null,
@@ -3208,7 +3227,7 @@ function offerValues(input: AnyRow, monthlySalaryK: number) {
     input.commute_minutes ?? null,
     input.city_cost_level ?? "unknown",
     input.job_nature ?? null,
-    JSON.stringify(input.benefits || {}),
+    jsonString(input.benefits ?? input.benefits_json, {}),
     input.application_id ?? null,
   ];
 }

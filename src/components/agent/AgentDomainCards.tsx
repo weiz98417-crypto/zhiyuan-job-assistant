@@ -1025,6 +1025,18 @@ export function normalizeAssistantMarkdown(content: string): string {
 
 export function AgentResponseRenderer({ content }: { content: string }) {
   const normalized = normalizeAssistantMarkdown(content);
+  const evidenceMarker = normalized.match(/^\*\*来源证据\*\*\s*$/m);
+  if (evidenceMarker?.index !== undefined) {
+    return (
+      <div className="space-y-3">
+        <MarkdownRenderer content={normalized.slice(0, evidenceMarker.index).trim()} className="text-sm leading-relaxed" />
+        <details className="rounded-[var(--radius-sm)] border border-[var(--color-border)] px-3 py-2">
+          <summary className="cursor-pointer text-xs text-[var(--color-muted)]">展开来源证据</summary>
+          <MarkdownRenderer content={normalized.slice(evidenceMarker.index + evidenceMarker[0].length).trim()} className="mt-2 text-xs leading-relaxed" />
+        </details>
+      </div>
+    );
+  }
 
   return (
     <MarkdownRenderer

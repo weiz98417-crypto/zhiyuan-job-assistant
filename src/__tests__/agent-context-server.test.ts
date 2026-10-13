@@ -38,10 +38,10 @@ describe("server agent context", () => {
     vi.doMock("@/lib/data-repositories", () => ({
       getDataRepositories: () => ({
         profiles: {
-          get: vi.fn(async () => ({
+          get: vi.fn(async (userId: string) => ({
             id: "profile-1",
             data_json: JSON.stringify({ skills: [], preferences: {}, marketFit: {} }),
-            goals_json: "{}",
+            goals_json: JSON.stringify({ targetRoles: [{ role: userId + "_PRIVATE_TARGET", level: "junior" }] }),
             history_json: "[]",
             last_updated: "2026-06-12T00:00:00.000Z",
           })),
@@ -72,5 +72,9 @@ describe("server agent context", () => {
     expect(context.dynamicData.preferences.rolePreferences).toEqual({});
     expect(context.dynamicData.pipelineSummary.total).toBe(0);
     expect(context.systemPrompt).toContain("tools");
+    const other = await assembleContext({ scenario: "dingwei", userId: "user-2", maxApplications: 1 });
+    expect(context.systemPrompt).toContain("user-1_PRIVATE_TARGET");
+    expect(other.systemPrompt).toContain("user-2_PRIVATE_TARGET");
+    expect(other.systemPrompt).not.toContain("user-1_PRIVATE_TARGET");
   });
 });

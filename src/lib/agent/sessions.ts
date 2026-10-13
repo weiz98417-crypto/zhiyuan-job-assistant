@@ -1,4 +1,5 @@
-import db from "@/lib/db";
+import db, { captureOwnerDatabase } from "@/lib/db";
+import { assertBrowserOwner, requireBrowserOwner } from "@/lib/browser-owner";
 import type { AgentMessage, AgentSessionState, ChatSession, InterviewSessionState } from "@/types";
 import { projectAgentMessages } from "@/lib/agent/surface-projection";
 import { projectDurableInterviewEngineState } from "@/lib/agent/interview-session-state";
@@ -75,6 +76,7 @@ export async function createSession(
   messages: AgentMessage[] = [],
   options: { title?: string; interviewState?: InterviewSessionState; agentState?: AgentSessionState } = {},
 ): Promise<number> {
+  const db = captureOwnerDatabase();
   const now = new Date().toISOString();
   const safeMessages = projectAgentMessages(messages);
   const session: ChatSession = {
@@ -106,6 +108,7 @@ export async function createSession(
 }
 
 export async function listSessions(): Promise<ChatSession[]> {
+  const db = captureOwnerDatabase();
   const res = await fetch("/api/sessions", { cache: "no-store" });
   const json = await res.json().catch(() => ({}));
   if (!res.ok || !json.success || !Array.isArray(json.data)) {
@@ -120,6 +123,7 @@ export async function getSession(
   id: number,
   options: { preferServer?: boolean } = {},
 ): Promise<ChatSession | undefined> {
+  const db = captureOwnerDatabase();
   const readLocal = async () => {
     const local = await db.chatSessions.get(id);
     if (!local) return undefined;
@@ -151,10 +155,13 @@ export async function getSession(
 }
 
 export async function updateSession(id: number, updates: Partial<ChatSession>): Promise<void> {
+  const owner = requireBrowserOwner();
+  const db = captureOwnerDatabase(owner);
   const safeMessages = updates.messages ? projectAgentMessages(updates.messages) : undefined;
   // Transcript content is a local optimistic projection only. The durable
   // worker is the sole server-side transcript writer (ADR-0036).
   await db.chatSessions.update(id, { ...updates, ...(safeMessages ? { messages: safeMessages } : {}), updatedAt: new Date().toISOString() });
+  assertBrowserOwner(owner);
   const res = await fetch(`/api/sessions/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
@@ -175,8 +182,11 @@ export async function updateSession(id: number, updates: Partial<ChatSession>): 
 }
 
 export async function softDeleteSession(id: number): Promise<void> {
+  const owner = requireBrowserOwner();
+  const db = captureOwnerDatabase(owner);
   const now = new Date().toISOString();
   await db.chatSessions.update(id, { deletedAt: now, updatedAt: now });
+  assertBrowserOwner(owner);
   fetch(`/api/sessions/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
@@ -184,10 +194,10 @@ export async function softDeleteSession(id: number): Promise<void> {
   }).catch(() => {});
 
   setTimeout(async () => {
-    const session = await db.chatSessions.get(id);
-    if (session?.deletedAt) {
-      await db.chatSessions.delete(id);
-    }
+    try {
+      const session = await db.chatSessions.get(id);
+      if (session?.deletedAt) await db.chatSessions.delete(id);
+    } catch {}
   }, 5000);
 }
 
@@ -216,7 +226,9 @@ export async function searchSessions(query: string): Promise<ChatSession[]> {
 }
 
 export async function ensureDefaultSession(): Promise<number> {
+  const owner = requireBrowserOwner();
   const sessions = await listSessions();
+  assertBrowserOwner(owner);
   if (sessions.length === 0) {
     return createSession();
   }

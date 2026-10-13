@@ -1,6 +1,7 @@
 /* ── localStorage → DexieDB migration ── */
 
-import db from "@/lib/db";
+import { captureOwnerDatabase } from "@/lib/db";
+import { ownerLocalStorage } from "@/lib/browser-owner";
 import type { AgentInteraction } from "@/types";
 
 const LEGACY_KEY = "zhiyuan-explore-chat";
@@ -17,6 +18,8 @@ interface LegacyData {
 }
 
 export async function migrateExploreToAgent(): Promise<boolean> {
+  const db = captureOwnerDatabase();
+  const localStorage = ownerLocalStorage();
   // Already done
   if (localStorage.getItem(MIGRATION_DONE_KEY)) return false;
 

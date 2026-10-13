@@ -1,5 +1,6 @@
 import type { ToolDefinition, ToolExecutionContext, ToolResult } from "../types";
 import { fetchAgentMemoryContext } from "../memory-helpers";
+import { ownerLocalStorage } from "@/lib/browser-owner";
 import {
   optimizeResumeSectionForAgent,
   ResumeOptimizationInputError,
@@ -103,7 +104,7 @@ async function handler(
 
   // Cache fallback is only used when the authoritative read is unavailable.
   if (!sectionContent && typeof localStorage !== "undefined") {
-    const raw = localStorage.getItem("zhiyuan-cv");
+    const raw = ownerLocalStorage().getItem("zhiyuan-cv");
     if (raw) {
       try {
         const cv = JSON.parse(raw);

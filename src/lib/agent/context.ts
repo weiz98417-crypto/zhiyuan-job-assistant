@@ -7,6 +7,7 @@ import { injectKnowledge } from "./knowledge";
 import type { AgentScenario, KnowledgeContext } from "./knowledge";
 import type { Application, AgentInteraction, AgentDecision, AgentPreferenceModel, ZhiyuanProfile } from "@/types";
 import db from "@/lib/db";
+import { assertBrowserOwner, requireBrowserOwner } from "@/lib/browser-owner";
 import { getDataRepositories } from "@/lib/data-repositories";
 
 /* ── Context types ── */
@@ -348,8 +349,8 @@ interface CacheEntry {
 const contextCache = new Map<string, CacheEntry>();
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
-function getCacheKey(scenario: string, pipelineHash: string): string {
-  return `${scenario}:${pipelineHash}`;
+function getCacheKey(ownerKey: string, scenario: string, pipelineHash: string): string {
+  return JSON.stringify([ownerKey, scenario, pipelineHash]);
 }
 
 function pipelineHash(summary: PipelineSummary): string {
@@ -360,6 +361,8 @@ function pipelineHash(summary: PipelineSummary): string {
 
 export async function assembleContext(options: AssembleOptions): Promise<AssembledContext> {
   const { scenario, knowledgeCtx, maxApplications, userId } = options;
+  const owner = userId ? null : requireBrowserOwner();
+  const ownerKey = userId ? 'server:' + userId : 'browser:' + owner!.ownerId + ':' + owner!.sessionKey + ':' + owner!.generation;
 
   // Parallel: dynamic data + knowledge + tools
   const [dynamicData, knowledge, tools] = await Promise.all([
@@ -367,10 +370,11 @@ export async function assembleContext(options: AssembleOptions): Promise<Assembl
     Promise.resolve(injectKnowledge(scenario, knowledgeCtx)),
     Promise.resolve(scenario !== "explore" ? buildToolListForLLM() : ""),
   ]);
+  if (owner) assertBrowserOwner(owner);
 
   // Check cache
   const hash = pipelineHash(dynamicData.pipelineSummary);
-  const cacheKey = getCacheKey(scenario, hash);
+  const cacheKey = getCacheKey(ownerKey, scenario, hash);
   const cached = contextCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.context;
@@ -398,6 +402,9 @@ export function clearContextCache(): void {
 }
 
 export function invalidateCachedContext(scenario: string, summary: PipelineSummary): void {
-  const key = getCacheKey(scenario, pipelineHash(summary));
-  contextCache.delete(key);
+  const hash = pipelineHash(summary);
+  for (const key of contextCache.keys()) {
+    const [, cachedScenario, cachedHash] = JSON.parse(key) as string[];
+    if (cachedScenario === scenario && cachedHash === hash) contextCache.delete(key);
+  }
 }

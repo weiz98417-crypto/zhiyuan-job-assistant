@@ -1,6 +1,7 @@
 import { stableContentHash, type VerifiedActionResult } from "@/lib/agent/verified-action";
 import type { AgentArtifactRef } from "@/lib/agent/task-journey";
 import { bindTaskProgram, getTaskProgram, type TaskProgramBinding } from "@/lib/agent/task-program";
+import type { IntentConstraints } from "@/lib/agent/intent-constraints";
 
 export type AgentTaskType =
   | "general_chat"
@@ -46,6 +47,7 @@ export interface AgentTaskContract {
     routeLocked?: boolean;
     jdMatchResume?: boolean;
     resumeEditMode?: ResumeEditMode;
+    intentConstraints?: IntentConstraints;
   };
   journey?: {
     graphVersion: string;

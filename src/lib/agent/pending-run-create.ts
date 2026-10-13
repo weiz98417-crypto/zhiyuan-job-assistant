@@ -7,6 +7,17 @@ interface PendingRunCreate {
 const STORAGE_PREFIX = "zhiyuan:pending-run-create:";
 const MAX_AGE_MS = 60 * 60 * 1000;
 const fallback = new Map<string, PendingRunCreate>();
+const scopedFallbacks = new WeakMap<Storage, Map<string, PendingRunCreate>>();
+
+function fallbackFor(storage: Storage | null): Map<string, PendingRunCreate> {
+  if (!storage) return fallback;
+  let scoped = scopedFallbacks.get(storage);
+  if (!scoped) {
+    scoped = new Map();
+    scopedFallbacks.set(storage, scoped);
+  }
+  return scoped;
+}
 
 function storageKey(conversationId: number | null): string {
   return `${STORAGE_PREFIX}${conversationId ?? "new"}`;
@@ -29,7 +40,7 @@ function fingerprint(content: string, images: string[]): string {
 }
 
 function read(key: string, storage: Storage | null): PendingRunCreate | null {
-  let stored: PendingRunCreate | null = fallback.get(key) || null;
+  let stored: PendingRunCreate | null = fallbackFor(storage).get(key) || null;
   try {
     const raw = storage?.getItem(key);
     if (raw) stored = JSON.parse(raw) as PendingRunCreate;
@@ -60,7 +71,7 @@ export function rememberPendingRunCreate(
 ): void {
   const key = storageKey(conversationId);
   const pending = { requestId, fingerprint: fingerprint(content, images), createdAt: Date.now() };
-  fallback.set(key, pending);
+  fallbackFor(storage).set(key, pending);
   try {
     storage?.setItem(key, JSON.stringify(pending));
   } catch {}
@@ -73,7 +84,7 @@ export function clearPendingRunCreate(
 ): void {
   const key = storageKey(conversationId);
   if (read(key, storage)?.requestId !== requestId) return;
-  fallback.delete(key);
+  fallbackFor(storage).delete(key);
   try {
     storage?.removeItem(key);
   } catch {}

@@ -5,6 +5,7 @@
  *  故拆分形态 = 门面(生命周期)+ helpers(模块级纯函数)+ ui-state(界面状态)。 */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderHook, cleanup } from "@testing-library/react";
+import { setBrowserOwner } from "@/lib/browser-owner";
 
 vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
@@ -31,6 +32,9 @@ import {
 } from "@/components/agent/use-agent-conversation-helpers";
 
 beforeEach(() => {
+  localStorage.clear();
+  sessionStorage.clear();
+  setBrowserOwner("facade-contract-owner");
   class ResizeObserverStub {
     observe() {}
     unobserve() {}

@@ -2,6 +2,7 @@ import type { ExecutionPrincipal } from "@/lib/agent/runtime/durable-agent-run";
 import { assembleAgentMemoryContext } from "@/lib/agent/memory-context";
 import { getDataRepositories, type DataRepositories } from "@/lib/data-repositories";
 import { evaluateOfferSnapshot, normalizeOfferSnapshot } from "@/lib/offer-evaluation";
+import { nullableOfferBoolean, nullableOfferNumber, offerBonusGuaranteeFromText, offerSocialInsuranceFromText } from "@/lib/offer-conditions";
 import {
   offerLatestReportMatches,
   offerReadBackMatches,
@@ -123,7 +124,7 @@ export async function evaluateOfferForAgent(
   options.signal?.throwIfAborted();
   const resolved = await resolveOfferSnapshot(principal, input, adapters);
   options.signal?.throwIfAborted();
-  const offerInput = snapshotToRow(resolved.snapshot);
+  const offerInput = resolved.offerRow || snapshotToRow(resolved.snapshot);
   const saved = resolved.snapshot.offerId
     ? { id: resolved.snapshot.offerId }
     : await adapters.repositories.offers.upsert(offerInput, principal.userId);
@@ -210,12 +211,12 @@ async function resolveOfferSnapshot(
   principal: ExecutionPrincipal,
   input: OfferAgentEvaluationInput,
   adapters: OfferAgentAdapters,
-): Promise<{ snapshot: OfferSnapshot; offerText: string }> {
+): Promise<{ snapshot: OfferSnapshot; offerText: string; offerRow?: Record<string, unknown> }> {
   const offerId = numberValue(input.offerId);
   if (offerId > 0) {
     const row = await adapters.repositories.offers.get(offerId, principal.userId);
     if (!row) throw new OfferAgentInputError(`未找到 Offer #${offerId}`);
-    return { snapshot: rowToSnapshot(row), offerText: "" };
+    return { snapshot: rowToSnapshot(row), offerText: "", offerRow: row };
   }
 
   let offerText = stringValue(input.offerText);
@@ -318,14 +319,15 @@ function parseOfferText(text: string, params: Record<string, unknown>): OfferSna
     location: stringValue(params.location) || text.match(/(?:地点|城市|base)[:：]\s*([^\n，,]+)/i)?.[1]?.trim() || "",
     monthlySalary: numberValue(params.monthlySalary, salaryMatch ? Number(salaryMatch[1]) : salaryWanMatch ? Number(salaryWanMatch[1]) * 10 : 0),
     monthsPerYear: numberValue(params.monthsPerYear, salaryMatch?.[2] ? Number(salaryMatch[2]) : monthsMatch ? Number(monthsMatch[1]) : 12),
-    annualBonus: numberValue(params.annualBonus, bonusMatch ? Number(bonusMatch[1]) : 0),
-    housingFundRate: numberValue(params.housingFundRate, fundMatch ? Number(fundMatch[1]) : 7),
-    probationMonths: numberValue(params.probationMonths, probationMatch ? Number(probationMatch[1]) : 3),
+    annualBonus: nullableOfferNumber(params.annualBonus ?? bonusMatch?.[1]),
+    hasSocialInsurance: offerSocialInsuranceFromText(text, params.hasSocialInsurance),
+    housingFundRate: nullableOfferNumber(params.housingFundRate ?? fundMatch?.[1]),
+    probationMonths: nullableOfferNumber(params.probationMonths ?? probationMatch?.[1]),
     otherBenefits: stringValue(params.otherBenefits) || text.slice(0, 1000),
     options: stringValue(params.options) || text.match(/(?:期权|RSU|股票)[:：]?\s*([^\n]+)/i)?.[1]?.trim() || "",
     employmentForm: enumValue(params.employmentForm, ["direct_hire", "dispatch", "outsourcing", "intern", "contractor", "unknown"], /外包/.test(text) ? "outsourcing" : /派遣/.test(text) ? "dispatch" : "unknown") as OfferSnapshot["employmentForm"],
     overtimePolicy: enumValue(params.overtimePolicy, ["none", "occasional", "common", "intense", "unknown"], /大小周|996|高强度/.test(text) ? "intense" : "unknown") as OfferSnapshot["overtimePolicy"],
-    bonusGuarantee: enumValue(params.bonusGuarantee, ["guaranteed", "partial", "uncertain", "none", "unknown"], /保底|保证/.test(text) ? "guaranteed" : "unknown") as OfferSnapshot["bonusGuarantee"],
+    bonusGuarantee: enumValue(params.bonusGuarantee, ["guaranteed", "partial", "uncertain", "none", "unknown"], offerBonusGuaranteeFromText(text)) as OfferSnapshot["bonusGuarantee"],
   });
 }
 
@@ -337,12 +339,12 @@ function paramsToSnapshot(params: Record<string, unknown>): OfferSnapshot {
     level: stringValue(params.level),
     monthlySalary: numberValue(params.monthlySalary),
     monthsPerYear: numberValue(params.monthsPerYear, 12),
-    annualBonus: numberValue(params.annualBonus),
-    hasSocialInsurance: params.hasSocialInsurance !== false,
+    annualBonus: nullableOfferNumber(params.annualBonus),
+    hasSocialInsurance: nullableOfferBoolean(params.hasSocialInsurance),
     socialInsuranceBaseType: enumValue(params.socialInsuranceBaseType, ["full_salary", "minimum_base", "unknown"], "unknown") as OfferSnapshot["socialInsuranceBaseType"],
     socialInsuranceBaseK: optionalNumber(params.socialInsuranceBaseK),
-    housingFundRate: numberValue(params.housingFundRate, 7),
-    probationMonths: numberValue(params.probationMonths, 3),
+    housingFundRate: nullableOfferNumber(params.housingFundRate),
+    probationMonths: nullableOfferNumber(params.probationMonths),
     otherBenefits: stringValue(params.otherBenefits),
     options: stringValue(params.options),
     employmentForm: enumValue(params.employmentForm, ["direct_hire", "dispatch", "outsourcing", "intern", "contractor", "unknown"], "unknown") as OfferSnapshot["employmentForm"],
@@ -368,10 +370,10 @@ function rowToSnapshot(row: Record<string, unknown>): OfferSnapshot {
     level: stringValue(row.level),
     monthlySalary: numberValue(row.monthly_salary),
     monthsPerYear: numberValue(row.months_per_year, 12),
-    annualBonus: numberValue(row.annual_bonus),
-    hasSocialInsurance: row.has_social_insurance !== 0 && row.has_social_insurance !== false,
-    housingFundRate: numberValue(row.housing_fund_rate, 7),
-    probationMonths: numberValue(row.probation_months, 3),
+    annualBonus: nullableOfferNumber(row.annual_bonus),
+    hasSocialInsurance: nullableOfferBoolean(row.has_social_insurance),
+    housingFundRate: nullableOfferNumber(row.housing_fund_rate),
+    probationMonths: nullableOfferNumber(row.probation_months),
     startDate: stringValue(row.start_date),
     otherBenefits: stringValue(row.other_benefits),
     options: stringValue(row.options),
@@ -395,7 +397,7 @@ function snapshotToRow(snapshot: OfferSnapshot): Record<string, unknown> {
     role: snapshot.role,
     monthly_salary: snapshot.monthlySalary,
     months_per_year: snapshot.monthsPerYear,
-    annual_bonus: snapshot.annualBonus || 0,
+    annual_bonus: snapshot.annualBonus,
     has_social_insurance: snapshot.hasSocialInsurance,
     housing_fund_rate: snapshot.housingFundRate,
     options: snapshot.options || null,

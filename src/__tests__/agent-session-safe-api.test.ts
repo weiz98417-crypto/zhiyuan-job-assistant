@@ -85,4 +85,52 @@ describe("session user API safe projection", () => {
     expect(patchRes.status).toBe(422);
     expect(boundaries.update.mock.calls).toHaveLength(0);
   });
+
+  it.each([
+    { expectedInterviewCheckpointVersion: 2, interviewState: { checkpointVersion: 3 } },
+    { interviewState: JSON.stringify({ checkpointVersion: 3, phase: "tech" }) },
+    { agentState: { durableInterview: true, checkpointStateHash: "forged", lastTurnResult: { readBackVerified: true } } },
+  ])("refuses forged internal interview receipts at both browser mutation boundaries", async (body) => {
+    const createRoute = await import("@/app/api/sessions/route");
+    const detailRoute = await import("@/app/api/sessions/[id]/route");
+    const created = await createRoute.POST(new Request("http://localhost/api/sessions", {
+      method: "POST", body: JSON.stringify(body),
+    }));
+    const updated = await detailRoute.PATCH(new Request("http://localhost/api/sessions/7", {
+      method: "PATCH", body: JSON.stringify(body),
+    }), { params: Promise.resolve({ id: "7" }) });
+    expect(created.status).toBe(422);
+    expect(updated.status).toBe(422);
+    expect(boundaries.create).not.toHaveBeenCalled();
+    expect(boundaries.update).not.toHaveBeenCalled();
+  });
+
+  it("allows empty preparation state but refuses browser changes after a durable checkpoint exists", async () => {
+    const state = {
+      planSnapshot: { snapshotId: "prepared-1", jdSnapshot: { company: "甲公司", role: "AI 产品经理", body: "JD-A" } },
+      status: "active", questionGraph: [], transcript: [], scoreArtifacts: [], rebindHistory: [],
+    };
+    const createRoute = await import("@/app/api/sessions/route");
+    const created = await createRoute.POST(new Request("http://localhost/api/sessions", {
+      method: "POST", body: JSON.stringify({ title: "准备面试", interviewState: state }),
+    }));
+    expect(created.status).toBe(201);
+    expect(boundaries.create).toHaveBeenCalledWith(expect.objectContaining({ interviewState: state }), "user-1");
+
+    boundaries.get.mockResolvedValue({ ...legacyRow, interview_state_json: JSON.stringify({ checkpointVersion: 2 }) });
+    const detailRoute = await import("@/app/api/sessions/[id]/route");
+    for (const body of [{ interviewState: state }, { agentState: { guidedSession: { status: "completed" } } }]) {
+      const updated = await detailRoute.PATCH(new Request("http://localhost/api/sessions/7", {
+        method: "PATCH", body: JSON.stringify(body),
+      }), { params: Promise.resolve({ id: "7" }) });
+      expect(updated.status).toBe(422);
+    }
+    expect(boundaries.update).not.toHaveBeenCalled();
+
+    const metadata = await detailRoute.PATCH(new Request("http://localhost/api/sessions/7", {
+      method: "PATCH", body: JSON.stringify({ title: "修改标题", pinned: true }),
+    }), { params: Promise.resolve({ id: "7" }) });
+    expect(metadata.status).toBe(200);
+    expect(boundaries.update).toHaveBeenCalledWith(7, "user-1", { title: "修改标题", pinned: true });
+  });
 });

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { saveCVData } from "@/lib/cv-storage";
 import { stableContentHash } from "@/lib/agent/verified-action";
 import type { CVData } from "@/types";
+import { setBrowserOwner } from "@/lib/browser-owner";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -27,7 +28,17 @@ describe("CV browser persistence", () => {
     const persisted: CVData = JSON.parse(JSON.stringify(updated));
     persisted.versions.v3.label = "服务端读回版本";
     const setItem = vi.fn();
-    vi.stubGlobal("localStorage", { getItem: vi.fn(), setItem });
+    const values = new Map<string, string>();
+    setItem.mockImplementation((key: string, value: string) => values.set(key, value));
+    vi.stubGlobal("localStorage", {
+      get length() { return values.size; },
+      key: (index: number) => Array.from(values.keys())[index] ?? null,
+      getItem: (key: string) => values.get(key) ?? null,
+      removeItem: (key: string) => values.delete(key),
+      setItem,
+    });
+    setBrowserOwner("cv-owner");
+    setItem.mockClear();
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, data: updated }), {
         status: 200,

@@ -1,9 +1,10 @@
-import db from "@/lib/db";
+import db, { captureOwnerDatabase, type ZhiyuanDB } from "@/lib/db";
 import type { ZhiyuanProfile, ProfileHistoryEntry } from "@/types";
 
 const MAX_SNAPSHOTS = 10;
 
 export async function saveProfile(profile: ZhiyuanProfile): Promise<void> {
+  const db = captureOwnerDatabase();
   profile.lastUpdated = new Date().toISOString();
   const existing = await db.profiles.where("id").equals(1 as never).first();
   if (existing) {
@@ -11,7 +12,7 @@ export async function saveProfile(profile: ZhiyuanProfile): Promise<void> {
   } else {
     await db.profiles.put({ ...profile, id: 1 } as ZhiyuanProfile);
   }
-  await pruneSnapshots();
+  await pruneSnapshots(db);
 }
 
 export async function loadProfile(): Promise<ZhiyuanProfile | null> {
@@ -24,7 +25,7 @@ export async function getProfileHistory(): Promise<ProfileHistoryEntry[]> {
   return profile?.history ?? [];
 }
 
-async function pruneSnapshots(): Promise<void> {
+async function pruneSnapshots(db: ZhiyuanDB): Promise<void> {
   const all = await db.profiles.toArray();
   const snapshots = all.filter((p) => p.id !== 1);
   if (snapshots.length > MAX_SNAPSHOTS) {

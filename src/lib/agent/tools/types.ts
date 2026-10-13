@@ -41,6 +41,7 @@ export interface ToolCapability {
 export interface ToolExecutionContext {
   principal: ExecutionPrincipal;
   runId: string;
+  conversationId?: number | null;
   allowlist: readonly string[];
   signal?: AbortSignal;
   requestId?: string;

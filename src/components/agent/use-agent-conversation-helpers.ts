@@ -5,12 +5,13 @@
  * 全部无 React 依赖;生命周期与 sendMessage 因 0.12 源码契约测试的路径锁定留在门面。
  */
 import type { AgentMessage } from "@/types";
+import { ownerSessionStorage } from "@/lib/browser-owner";
 import type { AgentRunSnapshot } from "@/lib/agent/runtime/durable-agent-run";
 import { DurableRunRequestError, DurableRunOwnershipUnknownError } from "@/lib/agent/runtime/durable-run-client";
 import type { AgentArtifactRef } from "@/lib/agent/task-journey";
-import type { VerifiedActionResult } from "@/lib/agent/verified-action";
+import { stableContentHash, type VerifiedActionResult } from "@/lib/agent/verified-action";
 import type { GuidedSessionState } from "@/lib/agent/guided-session-state";
-import type { CareerPositioningArtifact } from "@/lib/agent/career-positioning-result";
+import { isCareerPositioningArtifact, type CareerPositioningArtifact } from "@/lib/agent/career-positioning-result";
 import type { InterviewMaterialRecord } from "@/lib/agent/interview-rebind-policy";
 
 /* ── Agent phase ── */
@@ -90,7 +91,7 @@ export const HANDOFF_CONSUMED_STORAGE_KEY = "agent:consumed-handoffs:v1";
 export function readConsumedHandoffKeys(): Set<string> {
   if (typeof window === "undefined") return new Set();
   try {
-    const raw = window.sessionStorage.getItem(HANDOFF_CONSUMED_STORAGE_KEY);
+    const raw = ownerSessionStorage().getItem(HANDOFF_CONSUMED_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
     return new Set(Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : []);
   } catch {
@@ -108,7 +109,7 @@ export function markHandoffConsumed(key: string): void {
   keys.add(key);
   const latest = Array.from(keys).slice(-80);
   try {
-    window.sessionStorage.setItem(HANDOFF_CONSUMED_STORAGE_KEY, JSON.stringify(latest));
+    ownerSessionStorage().setItem(HANDOFF_CONSUMED_STORAGE_KEY, JSON.stringify(latest));
   } catch {
     // Storage may be unavailable in private modes; the in-memory ref still guards this mount.
   }
@@ -153,6 +154,9 @@ export async function persistCareerPositioningArtifact(
   artifact: CareerPositioningArtifact,
   sessionId?: number | null,
 ): Promise<{ role: string; readBackVerified: boolean }> {
+  if (!isCareerPositioningArtifact(artifact)) {
+    throw new Error("定位结果缺少有效来源证据，请重新核对用户陈述后再保存");
+  }
   const profileRes = await fetch("/api/data/profile", { cache: "no-store" });
   const profileJson = await profileRes.json().catch(() => ({}));
   if (!profileRes.ok || !profileJson.success) {
@@ -165,29 +169,15 @@ export async function persistCareerPositioningArtifact(
     history?: unknown[];
   };
   const currentGoals = current.goals && typeof current.goals === "object" ? current.goals : {};
-  const currentCompanyPrefs = currentGoals.companyPrefs && typeof currentGoals.companyPrefs === "object"
-    ? currentGoals.companyPrefs as Record<string, unknown>
-    : {};
-  const currentIndustries = Array.isArray(currentCompanyPrefs.industry)
-    ? currentCompanyPrefs.industry.filter((item): item is string => typeof item === "string")
-    : [];
   const goals = {
     ...currentGoals,
     targetRoles: artifact.targetRoles,
     positioningSummary: artifact.positioningSummary,
     positioningEvidence: artifact.evidence,
+    positioningSourceEvidence: artifact.sourceEvidence,
     positioningScenario: artifact.targetScenario,
     positioningMvp: artifact.mvp,
     nextActions: artifact.nextActions,
-    companyPrefs: {
-      ...currentCompanyPrefs,
-      industry: Array.from(new Set([
-        ...currentIndustries,
-        "餐饮培训",
-        "智能餐饮设备",
-        "AI 产品",
-      ])),
-    },
   };
   const history = [
     ...(Array.isArray(current.history) ? current.history : []),
@@ -220,6 +210,8 @@ export async function persistCareerPositioningArtifact(
         reason: artifact.roleSignal.reason,
         evidence: artifact.roleSignal.evidence,
         confidence: artifact.roleSignal.confidence,
+        sourceEvidence: artifact.sourceEvidence,
+        provenanceCategory: "hypothesis",
         status: "confirmed",
       },
     }),
@@ -231,17 +223,15 @@ export async function persistCareerPositioningArtifact(
 
   const verifyRes = await fetch("/api/data/profile", { cache: "no-store" });
   const verifyJson = await verifyRes.json().catch(() => ({}));
-  const readBackRoles = verifyJson.data?.goals?.targetRoles;
   const role = artifact.targetRoles[0]?.role || artifact.roleSignal.role;
   const readBackVerified =
     verifyRes.ok &&
     verifyJson.success &&
-    Array.isArray(readBackRoles) &&
-    readBackRoles.some((item: unknown) =>
-      item && typeof item === "object" && (item as { role?: unknown }).role === role
-    );
+    stableContentHash(verifyJson.data?.goals) === stableContentHash(goals) &&
+    stableContentHash(verifyJson.data?.data) === stableContentHash(current.data || {}) &&
+    stableContentHash(verifyJson.data?.history) === stableContentHash(history);
   if (!readBackVerified) {
-    throw new Error("画像写入后读回校验失败，未在 goals.targetRoles 中读到确认方向");
+    throw new Error("画像写入后读回校验失败，定位结论、来源证据或原有画像不一致");
   }
 
   return { role, readBackVerified };
@@ -397,5 +387,3 @@ export const WELCOME: AgentMessage = {
     "直接告诉我你需要什么，或者随便聊聊吧。",
   timestamp: new Date().toISOString(),
 };
-
-

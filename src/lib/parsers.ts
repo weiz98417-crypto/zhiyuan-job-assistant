@@ -6,8 +6,19 @@ import { STATUS_ORDER } from "@/types";
 
 /** Parse applications.md markdown table into Application[] */
 export function parseApplicationsMD(markdown: string): Application[] {
+  return parseApplicationsMDWithDiagnostics(markdown).applications;
+}
+
+export interface ApplicationsMDParseDiagnostics {
+  applications: Application[];
+  invalidRows: number;
+  headerFound: boolean;
+}
+
+export function parseApplicationsMDWithDiagnostics(markdown: string): ApplicationsMDParseDiagnostics {
   const lines = markdown.trim().split("\n");
   const applications: Application[] = [];
+  let invalidRows = 0;
 
   let inTable = false;
   for (const line of lines) {
@@ -22,16 +33,22 @@ export function parseApplicationsMD(markdown: string): Application[] {
 
       const cells = trimmed
         .split("|")
-        .filter((c) => c !== "")
+        .slice(1, -1)
         .map((c) => c.trim());
 
       if (cells.length >= 8) {
         const scoreStr = cells[4].replace(/\*\*/g, "");
         const score = scoreStr === "N/A" || scoreStr === "DUP" ? 0 : parseFloat(scoreStr.split("/")[0]) || 0;
-        const status = normalizeStatus(cells[5].replace(/\*\*/g, ""));
+        const rawStatus = cells[5].replace(/\*\*/g, "");
+        const status = normalizeStatus(rawStatus);
+        const num = Number(cells[0]);
+        if (!/^\d+$/.test(cells[0]) || !Number.isSafeInteger(num) || num < 0 || !isKnownStatus(rawStatus) || !cells[1] || !cells[2] || !cells[3]) {
+          invalidRows++;
+          continue;
+        }
 
         applications.push({
-          num: parseInt(cells[0]) || 0,
+          num,
           date: cells[1],
           company: cells[2],
           role: cells[3],
@@ -43,11 +60,13 @@ export function parseApplicationsMD(markdown: string): Application[] {
           createdAt: new Date(),
           updatedAt: new Date(),
         });
+      } else {
+        invalidRows++;
       }
     }
   }
 
-  return applications;
+  return { applications, invalidRows, headerFound: inTable };
 }
 
 /** Normalize Chinese/legacy statuses to canonical status */
@@ -81,6 +100,15 @@ function normalizeStatus(raw: string): ApplicationStatus {
   if (result) return result;
   if (STATUS_ORDER.includes(cleaned as ApplicationStatus)) return cleaned as ApplicationStatus;
   return "evaluated";
+}
+
+function isKnownStatus(raw: string): boolean {
+  const cleaned = raw.trim();
+  return STATUS_ORDER.includes(cleaned as ApplicationStatus) || [
+    "已评估", "Evaluated", "已投递", "Applied", "已回复", "已沟通", "Responded",
+    "面试中", "面试", "Interview", "已获Offer", "已发Offer", "Offer", "已拒绝", "已淘汰",
+    "Rejected", "已放弃", "已关闭", "Discarded", "跳过", "SKIP", "Skip",
+  ].includes(cleaned);
 }
 
 function extractReportPath(cell: string): string | undefined {

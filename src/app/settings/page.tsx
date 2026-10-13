@@ -1,14 +1,15 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useId, useMemo } from "react";
 import { Download, Upload, Trash2, User, Target, Banknote, Loader2, Database, Sparkles, Wrench, Heart, AlertTriangle, FileText, BellRing, Plus, X, LogOut, KeyRound } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { WarmButton, PaperCard } from "@/components/design";
 import { PageHeading } from "@/components/ui/workbench-primitives";
 import Skeleton from "@/components/design/Skeleton";
-import db from "@/lib/db";
+import { captureOwnerDatabase, clearLocalBusinessData } from "@/lib/db";
+import { assertBrowserOwner, ownerLocalStorage, requireBrowserOwner } from "@/lib/browser-owner";
 import { exportApplicationsMD, downloadAsFile } from "@/lib/exporters";
-import { parseApplicationsMD } from "@/lib/parsers";
+import { importApplicationsMarkdown } from "@/lib/application-import";
 import type { UserProfile, ApplicationStatus, EvaluationScores } from "@/types";
 
 const DEFAULT_PROFILE: UserProfile = {
@@ -25,13 +26,17 @@ export default function SettingsPage() {
   const [importStatus, setImportStatus] = useState<string | null>(null);
   const [cliImporting, setCliImporting] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [profileError, setProfileError] = useState("");
+  const [clearing, setClearing] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const browserStorage = useMemo(() => ownerLocalStorage(), []);
+  const db = useMemo(() => captureOwnerDatabase(), []);
 
   useEffect(() => {
-    const stored = localStorage.getItem("zhiyuan-profile");
+    const stored = browserStorage.getItem("zhiyuan-profile");
     if (stored) { try { setProfile(JSON.parse(stored)); } catch { /* ignore */ } }
     setMounted(true);
-  }, []);
+  }, [browserStorage]);
 
   /* ── News Settings ── */
   const [targetCompanies, setTargetCompanies] = useState<string[]>([]);
@@ -41,7 +46,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     // Load news settings from localStorage
-    const stored = localStorage.getItem("zhiyuan-news-settings");
+    const stored = browserStorage.getItem("zhiyuan-news-settings");
     if (stored) {
       try {
         const parsed = JSON.parse(stored);
@@ -49,13 +54,13 @@ export default function SettingsPage() {
         setRefreshInterval(parsed.refreshInterval || "6h");
       } catch { /* ignore */ }
     }
-  }, []);
+  }, [browserStorage]);
 
   const saveNewsSettings = async (companies: string[], interval: string) => {
     setTargetCompanies(companies);
     setRefreshInterval(interval);
     const settings = { targetCompanies: companies, refreshInterval: interval };
-    localStorage.setItem("zhiyuan-news-settings", JSON.stringify(settings));
+    browserStorage.setItem("zhiyuan-news-settings", JSON.stringify(settings));
 
     // Also persist to server profiles API
     setNewsSaving(true);
@@ -88,11 +93,18 @@ export default function SettingsPage() {
 
   const saveProfile = (p: UserProfile) => {
     setProfile(p);
-    localStorage.setItem("zhiyuan-profile", JSON.stringify(p));
+    if (!Number.isFinite(p.salaryMinK) || !Number.isFinite(p.salaryMaxK) || p.salaryMinK < 0 || p.salaryMaxK < 0 || p.salaryMinK > p.salaryMaxK) {
+      setProfileError("薪资区间须为非负数，且最低薪资不能高于最高薪资；无效值未保存。");
+      return;
+    }
+    setProfileError("");
+    browserStorage.setItem("zhiyuan-profile", JSON.stringify(p));
   };
 
   const exportAllData = async () => {
+    const owner = requireBrowserOwner();
     const apps = await db.applications.toArray();
+    assertBrowserOwner(owner);
     downloadAsFile(exportApplicationsMD(apps), "applications.md");
   };
 
@@ -100,16 +112,16 @@ export default function SettingsPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
+      const owner = requireBrowserOwner();
       const text = await file.text();
+      assertBrowserOwner(owner);
       if (file.name.endsWith(".md")) {
-        const apps = parseApplicationsMD(text);
-        for (const app of apps) {
-          const exists = await db.applications.where({ company: app.company, role: app.role }).first();
-          if (!exists) await db.applications.add(app);
-        }
-        setImportStatus(`成功导入 ${apps.length} 条投递记录`);
+        const { added, duplicated, invalid } = await importApplicationsMarkdown(text);
+        setImportStatus("新增 " + added + " 条，重复 " + duplicated + " 条，无效 " + invalid + " 条投递记录");
+      } else {
+        setImportStatus("暂不支持此文件格式，请使用 applications.md；没有写入数据。");
       }
-    } catch { setImportStatus("文件解析失败，请检查格式"); }
+    } catch (failure) { setImportStatus(failure instanceof Error ? failure.message : "导入失败，没有写入数据。"); }
     setTimeout(() => setImportStatus(null), 3000);
     if (fileRef.current) fileRef.current.value = "";
   };
@@ -181,7 +193,7 @@ export default function SettingsPage() {
 
       // Import profile from CLI if available and not already set locally
       if (cliProfile && Object.keys(cliProfile).length > 0) {
-        const stored = localStorage.getItem("zhiyuan-profile");
+        const stored = browserStorage.getItem("zhiyuan-profile");
         if (!stored) {
           const mapped: UserProfile = {
             ...DEFAULT_PROFILE,
@@ -225,12 +237,20 @@ export default function SettingsPage() {
     }
   };
 
-  const clearAll = () => {
-    if (!confirm("确定清除所有数据？建议先导出备份。")) return;
-    db.applications.clear(); db.reports.clear(); db.offers.clear();
-    db.stories.clear(); db.interviews.clear();
-    localStorage.removeItem("zhiyuan-profile");
-    setProfile(DEFAULT_PROFILE);
+  const clearAll = async () => {
+    if (clearing || !confirm("确定清除当前账号的全部浏览器本地资料？云端资料和隔离保留的旧缓存不会删除。建议先导出备份。")) return;
+    setClearing(true);
+    try {
+      await clearLocalBusinessData();
+      setProfile(DEFAULT_PROFILE);
+      setTargetCompanies([]);
+      setRefreshInterval("6h");
+      setImportStatus("当前账号的本地资料已清除，云端资料保持不变。");
+    } catch (failure) {
+      setImportStatus(failure instanceof Error ? failure.message : "本地资料清除失败，请重试");
+    } finally {
+      setClearing(false);
+    }
   };
 
   if (!mounted) return <div className="py-8"><Skeleton lines={5} /></div>;
@@ -238,6 +258,7 @@ export default function SettingsPage() {
   return (
     <div className="max-w-2xl mx-auto space-y-8">
       <PageHeading meta="" title="个人设置" />
+      {profileError && <p role="alert" className="text-sm text-red-600">{profileError}</p>}
 
       {/* Zhiyuan Profile Card — from explore summary */}
       {(profile.archetype || profile.narrative) && (
@@ -489,7 +510,7 @@ export default function SettingsPage() {
             </WarmButton>
             <WarmButton variant="ghost" size="sm" onClick={async () => {
               await fetch('/api/auth/logout', { method: 'POST' });
-              router.push('/login');
+              window.location.assign('/login');
             }}>
               <LogOut size={16} className="mr-1.5" />退出登录
             </WarmButton>
@@ -509,10 +530,10 @@ export default function SettingsPage() {
               {cliImporting ? <Loader2 size={16} className="mr-1.5 animate-spin" /> : <Database size={16} className="mr-1.5" />}
               {cliImporting ? "导入中..." : "从 CLI 导入"}
             </WarmButton>
-            <WarmButton variant="ghost" size="sm" onClick={clearAll}><Trash2 size={16} className="mr-1.5" />清除数据</WarmButton>
+            <WarmButton variant="ghost" size="sm" onClick={clearAll} disabled={clearing}><Trash2 size={16} className="mr-1.5" />{clearing ? "清除中…" : "清除本地数据"}</WarmButton>
           </div>
           {importStatus && <p className="text-xs mt-3 bg-[var(--color-primary-muted)] px-3 py-2 rounded-[var(--radius-sm)]">{importStatus}</p>}
-          <p className="text-xs text-[var(--color-muted)] mt-3">数据存储在浏览器本地。「从 CLI 导入」可一键读取 CLI 系统中的 applications.md、报告和配置。支持文件导入。建议定期备份。</p>
+          <p className="text-xs text-[var(--color-muted)] mt-3">浏览器本地资料按账号隔离。清除仅作用于当前账号，云端数据保留。无归属旧缓存已隔离保留，需证明归属后恢复。「从 CLI 导入」读取当前账号可访问的资料；文件导入支持 applications.md。</p>
         </PaperCard>
       </section>
     </div>
@@ -520,10 +541,11 @@ export default function SettingsPage() {
 }
 
 function Field({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string }) {
+  const fieldId = useId();
   return (
     <div>
-      <label className="block text-xs text-[var(--color-muted)] mb-1">{label}</label>
-      <input type="text" value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
+      <label htmlFor={fieldId} className="block text-xs text-[var(--color-muted)] mb-1">{label}</label>
+      <input id={fieldId} type="text" value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
         className="w-full p-2 bg-[var(--color-bg)] border border-[var(--color-border)] rounded-[var(--radius-sm)] text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]" />
     </div>
   );

@@ -7,6 +7,13 @@ export function projectDurableUiEvent(
   event: Record<string, unknown> & { type: string },
 ): Record<string, unknown> & { type: string } {
   const type = String(event.type || "unknown");
+  if (type === "interview_state_updated") return {
+    type, conversationId: safeCount(event.conversationId), checkpointVersion: safeCount(event.checkpointVersion),
+    questionId: safeIdentifier(event.questionId), engineSessionId: safeIdentifier(event.engineSessionId),
+    turnFingerprint: safeIdentifier(event.turnFingerprint), action: safeIdentifier(event.action),
+    status: safeIdentifier(event.status), readBackVerified: event.readBackVerified === true,
+    requiresReview: event.requiresReview === true,
+  };
   if (type === "phase") return { type, phase: safeIdentifier(event.phase) };
   if (type === "tool_call") return { type, name: safeIdentifier(event.name) };
   if (type === "tool_result") {

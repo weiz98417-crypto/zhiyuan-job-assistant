@@ -399,6 +399,9 @@ export function updateInterviewStateWithToolResult(
  * 返回 undefined 表示输入不是 durable 引擎形状（旧投影会话照走原路径）。
  */
 export function projectDurableInterviewEngineState(value: unknown): InterviewSessionState | undefined {
+  if (typeof value === "string") {
+    try { value = JSON.parse(value); } catch { return undefined; }
+  }
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const durable = value as Record<string, unknown>;
   const company = typeof durable.company === "string" ? durable.company : "";
@@ -407,138 +410,106 @@ export function projectDurableInterviewEngineState(value: unknown): InterviewSes
   if (!company || !role || !["intro", "tech", "behavioral", "reverse", "summary", "done"].includes(phase)) {
     return undefined;
   }
+  const source = objectRecord(durable.sourceBinding) || {};
+  const sessionKey = String(durable.id || `${company}:${role}`);
+  const createdAt = String(durable.createdAt || "1970-01-01T00:00:00.000Z");
   const planSnapshot: InterviewPlanSnapshot = {
-    snapshotId: makeId("plan"),
-    source: { resumeId: "durable-engine" },
-    jdSnapshot: { company, role, body: "" },
-    mode: "realistic",
-    difficulty: "normal",
-    focusAreas: [],
-    allowFollowUps: true,
-    createdAt: new Date().toISOString(),
+    snapshotId: String(durable.snapshotId || `plan_${sessionKey}`),
+    source: {
+      jdId: typeof source.jdId === "number" ? source.jdId : undefined,
+      resumeId: source.resumeId !== undefined ? String(source.resumeId) : "durable-engine",
+    },
+    jdSnapshot: { company, role, body: String(source.jdText || "") },
+    resumeSnapshot: source.cvText ? { title: String(source.resumeTitle || "本场简历快照"), body: String(source.cvText) } : undefined,
+    mode: String(durable.mode || "realistic"),
+    difficulty: ["normal", "hard", "pressure"].includes(String(durable.difficulty))
+      ? durable.difficulty as InterviewPlanSnapshot["difficulty"]
+      : ["senior", "staff"].includes(String(durable.difficulty)) ? "hard" : "normal",
+    focusAreas: Array.isArray(durable.focusAreas) ? durable.focusAreas.map(String) : [],
+    allowFollowUps: durable.allowFollowUps !== false,
+    createdAt,
   };
-
-  const questions = Array.isArray(durable.questions) ? durable.questions as Array<Record<string, unknown>> : [];
-  const answers = Array.isArray(durable.answers) ? durable.answers as Array<Record<string, unknown>> : [];
-
+  const answers = Array.isArray(durable.answers) ? durable.answers.map(objectRecord).filter((answer): answer is Record<string, unknown> => !!answer) : [];
+  const questions = Array.isArray(durable.questions) ? durable.questions.map(objectRecord).filter((question): question is Record<string, unknown> => !!question) : [];
+  for (const answer of answers) {
+    if (!questions.some((question) => question.id === answer.questionId || question.text === answer.question)) {
+      questions.push({ id: answer.questionId, text: answer.question, createdAt: answer.createdAt });
+    }
+  }
+  const current = objectRecord(durable.currentQuestion);
+  if (current?.text && !questions.some((question) => question.id === current.id)) questions.push(current);
   const transcript: InterviewTurn[] = [];
   const questionGraph: InterviewQuestionNode[] = [];
-  const scoreArtifacts: NonNullable<InterviewSessionState["scoreArtifacts"]> = [];
-  const answerByQuestionText = new Map<string, Record<string, unknown>>();
-  for (const answer of answers) {
-    if (typeof answer.question === "string") answerByQuestionText.set(answer.question, answer);
-  }
-
-  for (const question of questions) {
-    const text = typeof question.text === "string" ? question.text : "";
-    if (!text) continue;
-    const nodeId = makeId("q");
+  const scoreArtifacts: InterviewScoreArtifact[] = [];
+  let currentQuestionId: string | undefined;
+  for (const [index, question] of questions.entries()) {
+    const questionText = String(question.text || "");
+    if (!questionText) continue;
+    const nodeId = String(question.id || `q_${sessionKey}_${index}`);
     const node: InterviewQuestionNode = {
       id: nodeId,
-      kind: "main",
+      kind: question.phase === "reverse" || question.type === "reverse" ? "reverse_question" : "main",
       reason: `durable 引擎阶段：${String(question.phase || "tech")}`,
-      question: text,
-      answerTurnIds: [],
-      createdAt: String(question.createdAt || new Date().toISOString()),
+      question: questionText, answerTurnIds: [], createdAt: String(question.createdAt || createdAt),
     };
-    const answer = answerByQuestionText.get(text);
-    if (answer) {
-      const turn: InterviewTurn = {
-        id: makeId("turn_user"),
-        role: "user",
-        content: String(answer.answer || ""),
-        questionNodeId: nodeId,
-        createdAt: node.createdAt,
-      };
-      node.answerTurnIds = [turn.id];
-      transcript.push(turn);
-      if (answer.score !== undefined && answer.score !== null) {
-        scoreArtifacts.push({
-          questionNodeId: nodeId,
-          // Spec 30 / E4：统一 .score 包装层（与工具路径 artifact 形状一致——复盘页消费单一形状）
-          score: {
-            overall: Number(answer.score),
-            // Spec 30 / WP1：rubric 细节投影（复盘页档位/证据/三态渲染源）
-            ...(answer.rubric && typeof answer.rubric === "object"
-              ? { rubric: answer.rubric as Record<string, unknown> }
-              : {}),
-          },
-          feedback: String(answer.feedback || ""),
-          createdAt: node.createdAt,
-        } as unknown as NonNullable<InterviewSessionState["scoreArtifacts"]>[number]);
-      }
-      // 追问归属原主问题（durable answers.followups），不推断、不建多层链
-      const followups = Array.isArray(answer.followups) ? answer.followups as Array<Record<string, unknown>> : [];
-      for (const followup of followups) {
-        const followupText = typeof followup.question === "string" ? followup.question : "";
-        if (!followupText) continue;
-        const followupNodeId = makeId("q");
-        questionGraph.push({
-          id: followupNodeId,
-          kind: "follow_up",
-          parentId: nodeId,
-          reason: "durable 引擎追问记录",
-          question: followupText,
-          answerTurnIds: typeof followup.answer === "string" && followup.answer
-            ? [(() => {
-                const fuTurn: InterviewTurn = {
-                  id: makeId("turn_user"),
-                  role: "user",
-                  content: String(followup.answer),
-                  questionNodeId: followupNodeId,
-                  createdAt: node.createdAt,
-                };
-                transcript.push(fuTurn);
-                return fuTurn.id;
-              })()]
-            : [],
-          createdAt: node.createdAt,
-        });
-      }
-    }
     questionGraph.push(node);
+    transcript.push({ id: `turn_assistant_${nodeId}`, role: "assistant", content: questionText, questionNodeId: nodeId, createdAt: node.createdAt });
+    const answer = answers.find((item) => item.questionId === nodeId)
+      || answers.find((item) => !item.questionId && item.question === questionText);
+    const isCurrent = !!current && (current.id === question.id || (!current.id && current.text === questionText));
+    const answerText = answer ? String(answer.primaryAnswer || answer.answer || "") : isCurrent ? String(durable.pendingAnswer || "") : "";
+    if (answerText) {
+      const turnId = String(answer?.answerTurnId || `turn_user_${nodeId}`);
+      node.answerTurnIds.push(turnId);
+      transcript.push({ id: turnId, role: "user", content: answerText, questionNodeId: nodeId, createdAt: String(answer?.createdAt || node.createdAt) });
+    }
+    const followups = answer && Array.isArray(answer.followups)
+      ? answer.followups.map(objectRecord)
+      : isCurrent && Array.isArray(durable.currentFollowups)
+        ? durable.currentFollowups.map((text, followupIndex) => ({
+          question: text,
+          answer: Array.isArray(durable.pendingFollowupAnswers) ? durable.pendingFollowupAnswers[followupIndex] : undefined,
+        }))
+        : [];
+    if (isCurrent) currentQuestionId = nodeId;
+    const scoreAnswerTurnIds = [...node.answerTurnIds];
+    for (const [followupIndex, followup] of followups.entries()) {
+      if (!followup?.question) continue;
+      const followupNodeId = `${nodeId}_followup_${followupIndex + 1}`;
+      const followupNode: InterviewQuestionNode = {
+        id: followupNodeId, kind: "follow_up", parentId: nodeId, reason: "durable 引擎追问记录",
+        question: String(followup.question), answerTurnIds: [], createdAt: node.createdAt,
+      };
+      questionGraph.push(followupNode);
+      transcript.push({ id: `turn_assistant_${followupNodeId}`, role: "assistant", content: followupNode.question, questionNodeId: followupNodeId, createdAt: node.createdAt });
+      if (typeof followup.answer === "string" && followup.answer) {
+        const followupTurnId = `turn_user_${followupNodeId}`;
+        followupNode.answerTurnIds.push(followupTurnId);
+        scoreAnswerTurnIds.push(followupTurnId);
+        transcript.push({ id: followupTurnId, role: "user", content: followup.answer, questionNodeId: followupNodeId, createdAt: node.createdAt });
+      }
+      if (isCurrent) currentQuestionId = followupNodeId;
+    }
+    if (answer?.score !== undefined && answer.score !== null && Number.isFinite(Number(answer.score)) && scoreAnswerTurnIds.length) {
+      const rubric = objectRecord(answer.rubric);
+      const score: InterviewScore = {
+        overall: Number(answer.score) / 2,
+        feedback: String(answer.feedback || ""),
+        ...(rubric ? {
+          bands: rubric.bands as InterviewScore["bands"], overallBand: Number(rubric.overallBand),
+          evidence: rubric.evidence as InterviewScore["evidence"], states: rubric.states as InterviewScore["states"],
+          review: rubric.review as InterviewScore["review"], scoringVersion: typeof rubric.scoringVersion === "string" ? rubric.scoringVersion : undefined,
+        } : {}),
+      };
+      node.score = score;
+      scoreArtifacts.push({ id: `score_${nodeId}`, questionNodeId: nodeId, answerTurnIds: scoreAnswerTurnIds, score, sourceTool: "durable_interview_engine", createdAt: node.createdAt });
+    }
   }
-
-  // currentQuestion / currentFollowups（进行中、尚未进入 answers 的部分）
-  const current = durable.currentQuestion as Record<string, unknown> | undefined;
-  const currentText = current && typeof current.text === "string" ? current.text : "";
-  const currentPhase = current && typeof current.phase === "string" ? current.phase : phase;
-  if (currentText && !questionGraph.some((node) => node.question === currentText)) {
-    const nodeId = makeId("q");
-    questionGraph.push({
-      id: nodeId,
-      kind: "main",
-      reason: `durable 引擎当前题（阶段：${currentPhase}）`,
-      question: currentText,
-      answerTurnIds: [],
-      createdAt: new Date().toISOString(),
-    });
-  }
-  const currentFollowups = Array.isArray(durable.currentFollowups) ? durable.currentFollowups as string[] : [];
-  const lastMainId = [...questionGraph].reverse().find((node) => node.kind === "main")?.id;
-  for (const followupText of currentFollowups) {
-    if (!followupText || questionGraph.some((node) => node.question === followupText)) continue;
-    questionGraph.push({
-      id: makeId("q"),
-      kind: "follow_up",
-      parentId: lastMainId,
-      reason: "durable 引擎进行中追问",
-      question: followupText,
-      answerTurnIds: [],
-      createdAt: new Date().toISOString(),
-    });
-  }
-
-  return {
-    planSnapshot,
-    status: "active",
-    rebindHistory: [],
-    currentQuestionId: [...questionGraph].reverse().find((node) => node.kind === "main" && node.answerTurnIds.length === 0)?.id
-      || [...questionGraph].reverse().find((node) => node.kind === "main")?.id,
-    questionGraph,
-    transcript,
-    scoreArtifacts,
-  };
+  const status = ["active", "paused", "completed", "abandoned"].includes(String(durable.status))
+    ? durable.status as InterviewSessionState["status"] : phase === "done" ? "completed" : "active";
+  const projected: InterviewSessionState = { planSnapshot, status, rebindHistory: [], currentQuestionId, questionGraph, transcript, scoreArtifacts };
+  if (status === "completed") projected.recap = { ...buildInterviewRecapFromState(projected), generatedAt: String(durable.updatedAt || createdAt) };
+  return projected;
 }
 
 export function rebuildInterviewStateFromMessages(

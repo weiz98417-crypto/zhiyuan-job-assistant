@@ -1,5 +1,6 @@
 import type { OfferEvaluationReport, OfferSnapshot } from "@/types";
 import { evaluateOfferSnapshot, normalizeOfferSnapshot } from "@/lib/offer-evaluation";
+import { nullableOfferBoolean, nullableOfferNumber } from "@/lib/offer-conditions";
 import {
   compareOffersForAgent,
   OfferAgentInputError,
@@ -18,10 +19,11 @@ interface OfferData {
   benefits?: string;
   monthlySalary?: number;
   monthsPerYear?: number;
-  annualBonus?: number;
-  hasSocialInsurance?: boolean;
-  housingFundRate?: number;
-  probationMonths?: number;
+  annualBonus?: number | null;
+  hasSocialInsurance?: boolean | null;
+  housingFundRate?: number | null;
+  probationMonths?: number | null;
+  bonusGuarantee?: OfferSnapshot["bonusGuarantee"];
 }
 
 function apiPath(path: string): string {
@@ -42,10 +44,10 @@ function rowToSnapshot(row: Record<string, unknown>): OfferSnapshot {
     level: String(row.level || ""),
     monthlySalary: numberParam(row.monthly_salary),
     monthsPerYear: numberParam(row.months_per_year, 12),
-    annualBonus: numberParam(row.annual_bonus),
-    hasSocialInsurance: row.has_social_insurance !== 0,
-    housingFundRate: numberParam(row.housing_fund_rate, 7),
-    probationMonths: numberParam(row.probation_months, 3),
+    annualBonus: nullableOfferNumber(row.annual_bonus),
+    hasSocialInsurance: nullableOfferBoolean(row.has_social_insurance),
+    housingFundRate: nullableOfferNumber(row.housing_fund_rate),
+    probationMonths: nullableOfferNumber(row.probation_months),
     otherBenefits: String(row.other_benefits || ""),
     options: String(row.options || ""),
     employmentForm: String(row.employment_form || "unknown") as OfferSnapshot["employmentForm"],
@@ -64,10 +66,11 @@ function offerToSnapshot(o: OfferData): OfferSnapshot {
     level: o.level || "",
     monthlySalary: o.monthlySalary || 0,
     monthsPerYear: o.monthsPerYear || 12,
-    annualBonus: o.annualBonus || 0,
-    hasSocialInsurance: o.hasSocialInsurance !== false,
-    housingFundRate: o.housingFundRate || 7,
-    probationMonths: o.probationMonths || 3,
+    annualBonus: nullableOfferNumber(o.annualBonus),
+    hasSocialInsurance: nullableOfferBoolean(o.hasSocialInsurance),
+    housingFundRate: nullableOfferNumber(o.housingFundRate),
+    probationMonths: nullableOfferNumber(o.probationMonths),
+    bonusGuarantee: o.bonusGuarantee || "unknown",
     otherBenefits: o.benefits || "",
     options: o.equity || "",
   });

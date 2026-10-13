@@ -1,5 +1,7 @@
 "use client";
 
+import { ownerLocalStorage } from "@/lib/browser-owner";
+
 import { Suspense, useEffect, useRef, useState, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -869,7 +871,7 @@ export function useAgentConversation() {
       const requestImages = [...(images || [])];
       const pendingStorage = (() => {
         try {
-          return typeof window === "undefined" ? null : window.localStorage;
+          return typeof window === "undefined" ? null : ownerLocalStorage();
         } catch {
           return null;
         }

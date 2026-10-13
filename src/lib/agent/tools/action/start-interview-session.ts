@@ -18,6 +18,9 @@ async function handler(
         difficulty: typeof params.difficulty === "string" ? params.difficulty : undefined,
         focus: typeof params.focus === "string" ? params.focus : undefined,
         requestKey: context.requestId || `${context.runId}:start_interview_session`,
+        conversationId: context.conversationId ?? undefined,
+        jdText: typeof params.jdText === "string" ? params.jdText : undefined,
+        cvText: typeof params.cvText === "string" ? params.cvText : undefined,
       }, { signal: context.signal });
       return { success: true, data: result, errorCategory: "ok", rawData: result };
     } catch (error) {
@@ -61,6 +64,8 @@ export const startInterviewSession: ToolDefinition = {
     role: { type: "string", required: true, description: "目标岗位，如'AI产品经理'" },
     difficulty: { type: "string", required: false, description: "难度: junior/mid/senior/staff，默认 mid" },
     focus: { type: "string", required: false, description: "聚焦: technical/behavioral/case/all，默认 all" },
+    jdText: { type: "string", required: false, description: "本场绑定的 JD 正文" },
+    cvText: { type: "string", required: false, description: "本场绑定的简历正文" },
   },
   category: "action",
   handler,

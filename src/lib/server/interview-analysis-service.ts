@@ -3,6 +3,7 @@ import type { ExecutionPrincipal } from "@/lib/agent/runtime/durable-agent-run";
 import { assembleAgentMemoryContext, type AgentMemoryContext } from "@/lib/agent/memory-context";
 import {
   advance,
+  classifyInterviewControl,
   createSession as createInterviewSession,
   getPhasePrompt,
   type InterviewPhase,
@@ -16,6 +17,7 @@ import { recordWeaknessEvent, sessionSurrogateFor } from "@/lib/server/interview
 import { composeInterview, familyForRole, type QuestionBankStore } from "@/lib/server/question-bank";
 import { getPostgresPool } from "@/lib/postgres";
 import { COACH_MODES, type AnswerScore, type CoachMode, type InterviewQuestion } from "@/types";
+import type { InterviewRebindAction } from "@/lib/agent/interview-rebind-policy";
 
 /** Spec 26：评分器/题库的测试注入点（与生产默认实现同形）。 */
 export interface InterviewServiceOverrides {
@@ -68,6 +70,9 @@ export interface StartInterviewSessionInput {
   difficulty?: string;
   focus?: string;
   requestKey: string;
+  conversationId?: number;
+  jdText?: string;
+  cvText?: string;
 }
 
 export interface InterviewSessionTurnInput {
@@ -81,6 +86,10 @@ export interface InterviewSessionTurnInput {
   jdText?: string;
   cvText?: string;
   requestKey?: string;
+  conversationId?: number;
+  materialAction?: InterviewRebindAction;
+  difficulty?: string;
+  focus?: string;
 }
 
 export class InterviewSessionNotFoundError extends Error {
@@ -90,13 +99,29 @@ export class InterviewSessionNotFoundError extends Error {
   }
 }
 
+export class InterviewCheckpointConflictError extends Error {
+  constructor() {
+    super("本场面试状态已被另一条消息更新，请刷新当前会话后继续");
+    this.name = "InterviewCheckpointConflictError";
+  }
+}
+
 type DurableInterviewSession = InterviewSession & {
   checkpointVersion?: number;
   pendingAnswer?: string;
+  pendingFollowupAnswers?: string[];
+  legacyRecovery?: { requiresReview: boolean; originalState: Record<string, unknown>; reason: string };
+  pendingMaterialChange?: { requiresReview: boolean; action: InterviewRebindAction };
 };
 
+const INTERVIEW_CHECKPOINT_FIELDS = [
+  "phase", "status", "questionIndex", "questions", "answers", "sourceBinding", "currentQuestion",
+  "currentFollowups", "pendingAnswer", "pendingFollowupAnswers", "snapshotId", "legacyRecovery", "pendingMaterialChange",
+  "mode", "difficulty", "focus", "focusAreas", "allowFollowUps",
+] as const;
+
 type InterviewSessionTurnResult = {
-  action?: "followup" | "next" | "done";
+  action?: "followup" | "next" | "done" | "paused" | "resumed" | "cancelled" | "help" | "format" | "material_context";
   sessionId: string;
   phase?: InterviewPhase;
   question?: string;
@@ -108,6 +133,12 @@ type InterviewSessionTurnResult = {
   answers?: Array<{ question: string; answer: string; score?: number; feedback?: string }>;
   readBackVerified: true;
   recovered?: boolean;
+  status?: InterviewSession["status"];
+  message?: string;
+  evidence?: {
+    conversationId: number; checkpointVersion: number; questionId?: string; engineSessionId: string;
+    turnFingerprint?: string; action: string; status: string; readBackVerified: boolean; requiresReview?: boolean;
+  };
 };
 
 export async function generateInterviewQuestionsForAgent(
@@ -291,7 +322,7 @@ export async function decideFollowUp(
 export async function scoreInterviewAnswerForAgent(
   principal: ExecutionPrincipal,
   input: ScoreInterviewAnswerInput,
-  options: { signal?: AbortSignal } = {},
+  options: { signal?: AbortSignal; deferTrendWriteback?: boolean } = {},
 ): Promise<{
   score: AnswerScore;
   memoryContext: AgentMemoryContext;
@@ -338,18 +369,9 @@ export async function scoreInterviewAnswerForAgent(
     // 弱项趋势：档位 ≤1 的维度记录事件（topic=岗位族，维度×岗位族粒度）；
     // 跨 ≥3 场提炼候选事实（单场不入账本）。surrogate 前缀区分真实会话（sess:）与
     // 独立评分指纹（fp:）——ADR-0042 的「≥3 场」只数真实会话（eng review S1-5）。
-    const sessionSurrogate = sessionSurrogateFor(stringValue(input.sessionId), question, answer);
-    const family = stringValue(input.family) || "general";
-    for (const dimension of ["structure", "specificity", "highlight", "timing"] as const) {
-      try {
-        await recordWeaknessEvent({
-          userId: principal.userId,
-          sessionSurrogate,
-          dimension,
-          band: rubricResult.bands[dimension],
-          topic: family,
-        });
-      } catch (error) { console.warn("[interview-trend] 弱项事件记录失败（不阻塞评分）:", error instanceof Error ? error.message : error); }
+    if (!options.deferTrendWriteback) {
+      const sessionSurrogate = sessionSurrogateFor(input.sessionId === undefined ? "" : String(input.sessionId), question, answer);
+      await persistInterviewWeaknessEvents(principal, rubricResult.bands, sessionSurrogate, stringValue(input.family) || "general");
     }
   }
 
@@ -391,8 +413,29 @@ export async function handleInterviewSessionTurnForAgent(
   const repositories = getDataRepositories();
   const requestedSessionId = stringValue(input.sessionId);
   if (!requestedSessionId) {
-    const company = stringValue(input.company);
-    const role = stringValue(input.role);
+    const targetConversation = input.conversationId !== undefined
+      ? await repositories.sessions.get(input.conversationId, principal.userId)
+      : undefined;
+    if (input.conversationId !== undefined && !targetConversation) throw new InterviewSessionNotFoundError();
+    const previousAgentState = parseJsonUnknownObject(targetConversation?.agent_state_json);
+    const existingSession = parseInterviewSession(targetConversation?.interview_state_json);
+    if (existingSession) {
+      if (stringValue(previousAgentState.requestKey) === stringValue(input.requestKey)) {
+        await verifyInterviewCheckpoint(principal, input.conversationId!, existingSession.checkpointVersion || 0, existingSession);
+        return {
+          sessionId: String(input.conversationId), phase: existingSession.phase,
+          question: existingSession.currentFollowups.at(-1) || existingSession.currentQuestion?.text,
+          questionIndex: existingSession.questionIndex, sourceBinding: existingSession.sourceBinding,
+          readBackVerified: true, recovered: true,
+          evidence: interviewStateEvidence(input.conversationId!, existingSession, "started"),
+        };
+      }
+      throw new Error("当前会话已有面试记录，请继续当前面试或新建会话");
+    }
+    const sourceSnapshot = parseJsonUnknownObject(parseJsonUnknownObject(targetConversation?.interview_state_json).planSnapshot);
+    const preparedJd = parseJsonUnknownObject(sourceSnapshot.jdSnapshot);
+    const company = stringValue(preparedJd.company) || stringValue(input.company);
+    const role = stringValue(preparedJd.role) || stringValue(input.role);
     if (!company || !role) throw new Error("请提供公司和岗位");
     const memory = await assembleAgentMemoryContext({
       userId: principal.userId,
@@ -410,26 +453,62 @@ export async function handleInterviewSessionTurnForAgent(
       cvText: stringValue(input.cvText).slice(0, 4000) || undefined,
       memoryContext: memory.llmSummary,
     }) as DurableInterviewSession;
+    session.difficulty = ["normal", "hard", "pressure", "junior", "mid", "senior", "staff"].includes(stringValue(input.difficulty))
+      ? input.difficulty as InterviewSession["difficulty"] : "mid";
+    session.focus = stringValue(input.focus) || "all";
+    session.focusAreas = session.focus === "all" ? [] : [session.focus];
+    session.allowFollowUps = true;
+    if (sourceSnapshot.snapshotId) {
+      session.snapshotId = stringValue(sourceSnapshot.snapshotId);
+      session.createdAt = stringValue(sourceSnapshot.createdAt) || session.createdAt;
+      session.mode = stringValue(sourceSnapshot.mode);
+      session.difficulty = ["normal", "hard", "pressure"].includes(stringValue(sourceSnapshot.difficulty))
+        ? sourceSnapshot.difficulty as InterviewSession["difficulty"] : "normal";
+      session.focusAreas = arrayValue(sourceSnapshot.focusAreas).map(String);
+      session.allowFollowUps = sourceSnapshot.allowFollowUps !== false;
+      const sourceResume = parseJsonUnknownObject(sourceSnapshot.resumeSnapshot);
+      const sourceJD = parseJsonUnknownObject(sourceSnapshot.jdSnapshot);
+      const sourceIds = parseJsonUnknownObject(sourceSnapshot.source);
+      session.sourceBinding!.jdId = numericValue(sourceIds.jdId) || session.sourceBinding?.jdId;
+      session.sourceBinding!.resumeTitle = stringValue(sourceResume.title);
+      session.sourceBinding!.resumeId = stringValue(sourceIds.resumeId) || session.sourceBinding?.resumeId;
+      session.sourceBinding!.jdText = stringValue(sourceJD.body) || session.sourceBinding?.jdText;
+      session.sourceBinding!.cvText = stringValue(sourceResume.body) || session.sourceBinding?.cvText;
+    }
     const question = await generateSessionQuestion(principal, session, options.signal);
     session.currentQuestion = {
       id: createQuestionId(session),
       phase: session.phase,
       text: question,
       type: questionTypeForPhase(session.phase),
+      createdAt: session.createdAt,
     };
+    session.questions.push(session.currentQuestion);
     session.checkpointVersion = 1;
-    const sessionId = await repositories.sessions.create({
+    const sessionFields = {
       title: `${company} ${role} 模拟面试`,
-      messages: [assistantInterviewMessage(question)],
       interviewState: session,
       agentState: {
+        ...previousAgentState,
         durableInterview: true,
         requestKey: stringValue(input.requestKey) || undefined,
         checkpointVersion: session.checkpointVersion,
+        checkpointStateHash: interviewCheckpointHash(session),
       },
       memoryDigest: memory.llmSummary.slice(0, 300),
-    }, principal.userId);
-    await verifyInterviewCheckpoint(principal, sessionId, session.checkpointVersion);
+    };
+    let sessionId: number;
+    if (targetConversation && input.conversationId !== undefined) {
+      sessionId = input.conversationId;
+      const updated = await repositories.sessions.update(sessionId, principal.userId, {
+        ...sessionFields,
+        expectedInterviewCheckpointVersion: 0,
+      });
+      if (!updated) throw new InterviewCheckpointConflictError();
+    } else {
+      sessionId = await repositories.sessions.create({ ...sessionFields, messages: [] }, principal.userId);
+    }
+    await verifyInterviewCheckpoint(principal, sessionId, session.checkpointVersion, session);
     return {
       sessionId: String(sessionId),
       phase: session.phase,
@@ -437,6 +516,7 @@ export async function handleInterviewSessionTurnForAgent(
       questionIndex: session.questionIndex,
       sourceBinding: session.sourceBinding,
       readBackVerified: true,
+      evidence: interviewStateEvidence(sessionId, session, "started"),
     };
   }
 
@@ -449,7 +529,6 @@ export async function handleInterviewSessionTurnForAgent(
   const answer = stringValue(input.answer);
   if (!answer) throw new Error("请提供面试回答");
   const agentState = parseJsonUnknownObject(row.agent_state_json);
-  const messages = parseMessages(row.messages_json);
   const turnFingerprint = createHash("sha256")
     .update(stringValue(input.requestKey)
       ? `${sessionId}\u0000request\u0000${stringValue(input.requestKey)}`
@@ -458,19 +537,104 @@ export async function handleInterviewSessionTurnForAgent(
   if (stringValue(agentState.lastTurnFingerprint) === turnFingerprint) {
     const cached = parseJsonUnknownObject(agentState.lastTurnResult) as InterviewSessionTurnResult;
     if (stringValue(cached.sessionId) === String(sessionId)) {
+      await verifyInterviewCheckpoint(principal, sessionId, session.checkpointVersion || 0, session);
       return { ...cached, readBackVerified: true, recovered: true };
     }
   }
 
+  const control = classifyInterviewControl(answer);
+  if (input.materialAction && input.materialAction !== "continue_current_session") {
+    const supporting = input.materialAction === "use_as_supporting_context" || input.materialAction === "keep_current_binding";
+    if (!supporting) {
+      session.status = "paused";
+      session.pendingMaterialChange = { action: input.materialAction, requiresReview: true };
+    }
+    const message = supporting
+      ? `已收到补充材料指令。正式绑定仍为 ${session.company} ${session.role}，这条材料指令不会计入回答。请继续回答当前题：${session.currentFollowups.at(-1) || session.currentQuestion?.text || ""}`
+      : "材料切换请求已保留，本场面试已暂停。切换需要单独确认目标材料和新场边界，当前 JD、简历、已回答题目和评分保持原绑定。";
+    const result: InterviewSessionTurnResult = {
+      sessionId: String(sessionId), action: supporting ? "material_context" : "paused",
+      status: session.status, phase: session.phase, question: session.currentFollowups.at(-1) || session.currentQuestion?.text,
+      sourceBinding: session.sourceBinding, message, readBackVerified: true,
+    };
+    await persistInterviewCheckpoint(principal, sessionId, session, agentState, turnFingerprint, result);
+    return result;
+  }
+  if (session.legacyRecovery?.requiresReview || session.pendingMaterialChange?.requiresReview) {
+    const message = session.legacyRecovery?.requiresReview
+      ? "本场历史面试记录需要复核，已暂停自动出题与评分。原题、材料和历史记录已隔离保留；复核完成前不会把这条消息当作面试答案。"
+      : "本场材料切换需要单独确认目标材料和新场边界，面试保持暂停。当前消息不会计入回答或评分，原材料绑定保持不变。";
+    const result: InterviewSessionTurnResult = {
+      sessionId: String(sessionId), action: "paused", status: "paused", phase: session.phase,
+      question: session.currentQuestion?.text, sourceBinding: session.sourceBinding, message, readBackVerified: true,
+    };
+    await persistInterviewCheckpoint(principal, sessionId, session, agentState, turnFingerprint, result);
+    return result;
+  }
+  if (control && control !== "skip") {
+    let action: InterviewSessionTurnResult["action"];
+    let message: string;
+    if (session.phase === "done" || session.status === "completed" || session.status === "abandoned") {
+      action = session.status === "abandoned" ? "cancelled" : "done";
+      message = "本场面试已经结束，已保存的回答保持不变。开始新的面试请新建会话。";
+    } else if (control === "pause") {
+      session.status = "paused";
+      action = "paused";
+      message = "面试已暂停，当前题目和已记录的回答已保存。发送“继续面试”即可恢复。";
+    } else if (control === "resume") {
+      session.status = "active";
+      action = "resumed";
+      message = `继续当前题目：${session.currentFollowups.at(-1) || session.currentQuestion?.text || "当前暂无题目"}`;
+    } else if (control === "finish" || control === "cancel") {
+      if (session.pendingAnswer) {
+        session.answers.push({
+          questionId: session.currentQuestion?.id || "", question: session.currentQuestion?.text || "",
+          answer: completePendingInterviewAnswer(session), primaryAnswer: session.pendingAnswer,
+          answerTurnId: `turn_user_${session.currentQuestion?.id || ""}`, createdAt: new Date().toISOString(),
+          followups: session.currentFollowups.map((question, index) => ({ question, answer: session.pendingFollowupAnswers?.[index] || "" })),
+        });
+        session.pendingAnswer = undefined;
+        session.pendingFollowupAnswers = [];
+      }
+      session.phase = "done";
+      session.status = control === "cancel" ? "abandoned" : "completed";
+      action = control === "cancel" ? "cancelled" : "done";
+      message = control === "cancel" ? "面试已取消，已记录的回答保留，不生成新的评分或复盘。" : buildInterviewSummary(session);
+    } else {
+      action = control;
+      message = control === "format"
+        ? `后续只问一道问题，当前题目仍然是：${session.currentFollowups.at(-1) || session.currentQuestion?.text || "当前暂无题目"}`
+        : `当前题目：${session.currentFollowups.at(-1) || session.currentQuestion?.text || "当前暂无题目"}\n可以按“背景 → 你的职责和行动 → 真实结果”回答，缺少数字时直接说明，不要编造经历。`;
+    }
+    const result: InterviewSessionTurnResult = {
+      action, sessionId: String(sessionId), phase: session.phase, status: session.status,
+      question: session.currentFollowups.at(-1) || session.currentQuestion?.text,
+      questionIndex: session.questionIndex, sourceBinding: session.sourceBinding, message,
+      ...(action === "done" ? { summary: message, answers: session.answers } : {}),
+      readBackVerified: true,
+    };
+    await persistInterviewCheckpoint(principal, sessionId, session, agentState, turnFingerprint, result);
+    return result;
+  }
+  if (session.phase === "done" || session.status === "completed" || session.status === "abandoned") {
+    throw new Error("本场面试已经结束，请新建面试会话");
+  }
+  if (session.status === "paused") throw new Error("面试已暂停，请先发送“继续面试”恢复当前题目");
+
   // Spec 27：追问判定从纯长度规则升级为内容缺口判定（LLM 不可用时长度规则兜底）。
   // 硬上限（eng review S1-4）：每主问题 ≤2 次追问，reverse 阶段不追问——防无限横链。
-  const followUpAllowed = session.phase !== "reverse" && session.currentFollowups.length < 2;
-  const gapDecision = await decideFollowUp(answer, session.currentQuestion?.text || "", {
-    completion: overrides.followUpCompletion,
-    signal: options.signal,
-  });
-  if (gapDecision.followUp && followUpAllowed) {
+  const followUpAllowed = control !== "skip" && session.allowFollowUps !== false && session.phase !== "reverse" && session.currentFollowups.length < 2;
+  if (control !== "skip") {
     if (!session.pendingAnswer) session.pendingAnswer = answer;
+    else session.pendingFollowupAnswers = [...(session.pendingFollowupAnswers || []), answer];
+  }
+  const gapDecision = followUpAllowed
+    ? await decideFollowUp(answer, session.currentFollowups.at(-1) || session.currentQuestion?.text || "", {
+      completion: overrides.followUpCompletion,
+      signal: options.signal,
+    })
+    : { followUp: false, gap: undefined, usedFallback: false };
+  if (gapDecision.followUp && followUpAllowed) {
     const question = await generateFollowUpQuestion(principal, session, answer, gapDecision.gap, options.signal);
     session.currentFollowups.push(question);
     const result: InterviewSessionTurnResult = {
@@ -482,43 +646,32 @@ export async function handleInterviewSessionTurnForAgent(
       sourceBinding: session.sourceBinding,
       readBackVerified: true,
     };
-    await persistInterviewCheckpoint(principal, sessionId, session, agentState, turnFingerprint, result, [
-      ...messages,
-      userInterviewMessage(answer),
-      assistantInterviewMessage(question),
-    ]);
+    await persistInterviewCheckpoint(principal, sessionId, session, agentState, turnFingerprint, result);
     return result;
   }
 
-  const completeAnswer = session.pendingAnswer
-    ? `${session.pendingAnswer}\n\n追问回答：${answer}`
-    : answer;
-  const scored = await scoreSessionAnswer(principal, session, completeAnswer, options.signal, sessionId);
-  session.answers.push({
+  const completeAnswer = completePendingInterviewAnswer(session);
+  const scored = control === "skip"
+    ? { score: null, feedback: "本题已跳过，跳过指令不计入回答或评分。" }
+    : await scoreSessionAnswer(principal, session, completeAnswer, options.signal, sessionId);
+  if (completeAnswer) session.answers.push({
     questionId: session.currentQuestion?.id || "",
     question: session.currentQuestion?.text || "",
     answer: completeAnswer,
+    primaryAnswer: session.pendingAnswer,
+    answerTurnId: `turn_user_${session.currentQuestion?.id || ""}`,
+    createdAt: new Date().toISOString(),
     score: scored.score ?? undefined,
     feedback: scored.feedback,
     ...(scored.rubric ? { rubric: scored.rubric } : {}),
-    followups: session.currentFollowups.map((question) => ({ question, answer })),
+    followups: session.currentFollowups.map((question, index) => ({ question, answer: session.pendingFollowupAnswers?.[index] || "" })),
   });
   session.pendingAnswer = undefined;
-  advance(session);
+  session.pendingFollowupAnswers = [];
+  const advancedSession = advance(session);
 
-  if (session.phase === "done") {
+  if (advancedSession.phase === "done") {
     const summary = buildInterviewSummary(session);
-    // Spec 29：复盘有效证据 → 经历故事册候选（用户确认后激活；失败不阻塞复盘）。
-    // item.score 是 /10 刻度（overall 1-5 ×2）：band = round(score/2) - 1，即 overall≥4 才算 band≥3。
-    try {
-      const { recordStoryCandidates } = await import("@/lib/server/interview-story-bank");
-      await recordStoryCandidates(principal, session.answers.map((item) => ({
-        question: item.question,
-        answer: item.answer,
-        scoreBand: Math.max(0, Math.round((item.score || 0) / 2) - 1),
-        topic: item.question.slice(0, 120),
-      })));
-    } catch (error) { console.warn("[interview-story] 故事册沉淀失败（不阻塞复盘）:", error instanceof Error ? error.message : error); }
     const result: InterviewSessionTurnResult = {
       action: "done",
       sessionId: String(sessionId),
@@ -535,11 +688,15 @@ export async function handleInterviewSessionTurnForAgent(
       previousFeedback: scored.feedback,
       readBackVerified: true,
     };
-    await persistInterviewCheckpoint(principal, sessionId, session, agentState, turnFingerprint, result, [
-      ...messages,
-      userInterviewMessage(answer),
-      assistantInterviewMessage(summary),
-    ]);
+    await persistInterviewCheckpoint(principal, sessionId, session, agentState, turnFingerprint, result);
+    if (control !== "skip") await persistVerifiedInterviewWeakness(principal, sessionId, session);
+    try {
+      const { recordStoryCandidates } = await import("@/lib/server/interview-story-bank");
+      await recordStoryCandidates(principal, session.answers.map((item) => ({
+        question: item.question, answer: item.answer,
+        scoreBand: Math.max(0, Math.round((item.score || 0) / 2) - 1), topic: item.question.slice(0, 120),
+      })));
+    } catch (error) { console.warn("[interview-story] 故事册沉淀失败（不阻塞复盘）:", error instanceof Error ? error.message : error); }
     return result;
   }
 
@@ -549,7 +706,9 @@ export async function handleInterviewSessionTurnForAgent(
     phase: session.phase,
     text: question,
     type: questionTypeForPhase(session.phase),
+    createdAt: new Date().toISOString(),
   };
+  session.questions.push(session.currentQuestion);
   const result: InterviewSessionTurnResult = {
     action: "next",
     sessionId: String(sessionId),
@@ -561,11 +720,8 @@ export async function handleInterviewSessionTurnForAgent(
     sourceBinding: session.sourceBinding,
     readBackVerified: true,
   };
-  await persistInterviewCheckpoint(principal, sessionId, session, agentState, turnFingerprint, result, [
-    ...messages,
-    userInterviewMessage(answer),
-    assistantInterviewMessage(question),
-  ]);
+  await persistInterviewCheckpoint(principal, sessionId, session, agentState, turnFingerprint, result);
+  if (control !== "skip") await persistVerifiedInterviewWeakness(principal, sessionId, session);
   return result;
 }
 
@@ -573,58 +729,86 @@ export async function startInterviewSessionForAgent(
   principal: ExecutionPrincipal,
   input: StartInterviewSessionInput,
   options: { signal?: AbortSignal } = {},
-): Promise<{ sessionId: string; phase: "intro"; question: string; readBackVerified: true }> {
+): Promise<{ sessionId: string; phase: InterviewPhase; question: string; readBackVerified: true }> {
   const company = stringValue(input.company);
   const role = stringValue(input.role);
   if (!company || !role) throw new Error("请提供公司和岗位");
   const repositories = getDataRepositories();
   const existing = (await repositories.sessions.list(principal.userId)).find((row) => {
     const agentState = parseJsonUnknownObject(row.agent_state_json);
-    return stringValue(agentState.requestKey) === input.requestKey;
+    return stringValue(agentState.requestKey) === input.requestKey
+      && (input.conversationId === undefined || Number(row.id) === input.conversationId);
   });
   if (existing) {
-    const interviewState = parseJsonUnknownObject(existing.interview_state_json);
-    const question = stringValue(interviewState.question);
-    if (question) {
-      return { sessionId: String(existing.id), phase: "intro", question, readBackVerified: true };
+    const persisted = await repositories.sessions.get(Number(existing.id), principal.userId);
+    const interviewState = parseInterviewSession(persisted?.interview_state_json);
+    if (interviewState?.checkpointVersion) {
+      await verifyInterviewCheckpoint(principal, Number(existing.id), interviewState.checkpointVersion, interviewState);
+      return {
+        sessionId: String(existing.id), phase: interviewState.phase,
+        question: interviewState.currentFollowups.at(-1) || interviewState.currentQuestion?.text || "", readBackVerified: true,
+      };
     }
   }
 
-  const generated = await generateInterviewQuestionsForAgent(principal, {
-    company,
-    role,
-    mode: "behavioral",
-    count: 1,
+  const result = await handleInterviewSessionTurnForAgent(principal, {
+    company, role, requestKey: input.requestKey, conversationId: input.conversationId,
+    jdText: input.jdText, cvText: input.cvText,
+    difficulty: input.difficulty, focus: input.focus,
   }, options);
-  const question = generated.questions[0].question;
-  const interviewState = {
-    phase: "intro",
-    question,
-    questionIndex: 0,
-    company,
-    role,
-    difficulty: stringValue(input.difficulty) || "mid",
-    focus: stringValue(input.focus) || "all",
-    planSnapshot: { company, role, mode: generated.mode },
-  };
-  const sessionId = await repositories.sessions.create({
-    title: `${company} ${role} 模拟面试`,
-    messages: [{ role: "assistant", content: question, agent_id: "interview", timestamp: new Date().toISOString() }],
-    interviewState,
-    agentState: { requestKey: input.requestKey, durable: true },
-    memoryDigest: generated.memoryContext.llmSummary.slice(0, 300),
-  }, principal.userId);
-  const readBack = await repositories.sessions.get(sessionId, principal.userId);
-  const readBackState = parseJsonUnknownObject(readBack?.interview_state_json);
-  const readBackAgentState = parseJsonUnknownObject(readBack?.agent_state_json);
-  if (
-    Number(readBack?.id) !== sessionId
-    || stringValue(readBackState.question) !== question
-    || stringValue(readBackAgentState.requestKey) !== input.requestKey
-  ) {
-    throw new Error("模拟面试会话持久化后读回校验失败");
+  return { sessionId: result.sessionId, phase: result.phase || "intro", question: result.question || "", readBackVerified: true };
+}
+
+export async function continueDurableInterviewForAgent(
+  principal: ExecutionPrincipal,
+  input: { conversationId: number; content: string; requestKey: string; materialAction?: InterviewRebindAction },
+  options: { signal?: AbortSignal } = {},
+): Promise<InterviewSessionTurnResult | undefined> {
+  const row = await getDataRepositories().sessions.get(input.conversationId, principal.userId);
+  if (!row) return undefined;
+  if (parseInterviewSession(row.interview_state_json)) {
+    return handleInterviewSessionTurnForAgent(principal, {
+      sessionId: String(input.conversationId), answer: input.content, requestKey: input.requestKey,
+      materialAction: input.materialAction,
+    }, options);
   }
-  return { sessionId: String(sessionId), phase: "intro", question, readBackVerified: true };
+  const state = parseJsonUnknownObject(row.interview_state_json);
+  const snapshot = parseJsonUnknownObject(state.planSnapshot);
+  const jd = parseJsonUnknownObject(snapshot.jdSnapshot);
+  const resume = parseJsonUnknownObject(snapshot.resumeSnapshot);
+  if (!snapshot.snapshotId) return undefined;
+  if (arrayValue(state.questionGraph).length || arrayValue(state.transcript).length) {
+    const session = createInterviewSession(stringValue(jd.company) || "目标公司", stringValue(jd.role) || "目标岗位", {
+      jdId: numericValue(parseJsonUnknownObject(snapshot.source).jdId), jdText: stringValue(jd.body), cvText: stringValue(resume.body),
+      resumeTitle: stringValue(resume.title), resumeId: stringValue(parseJsonUnknownObject(snapshot.source).resumeId),
+    }) as DurableInterviewSession;
+    session.status = "paused";
+    session.snapshotId = stringValue(snapshot.snapshotId);
+    session.legacyRecovery = {
+      requiresReview: true, originalState: state,
+      reason: "Legacy questionGraph was inferred from messages and cannot establish verified question/answer provenance.",
+    };
+    const current = arrayValue(state.questionGraph).map(objectValue).find((question) => question.id === state.currentQuestionId);
+    if (current?.question) {
+      session.currentQuestion = { id: stringValue(current.id), phase: "intro", text: stringValue(current.question), type: "tech" };
+      session.questions = [session.currentQuestion];
+    }
+    const result: InterviewSessionTurnResult = {
+      action: "paused", sessionId: String(input.conversationId), status: "paused", phase: session.phase,
+      question: session.currentQuestion?.text, sourceBinding: session.sourceBinding,
+      message: "本场历史面试记录需要复核，已暂停自动出题与评分。原题、材料和历史记录已隔离保留，未迁移为新的评分事实。",
+      readBackVerified: true,
+    };
+    const fingerprint = createHash("sha256").update(input.requestKey).digest("hex");
+    await persistInterviewCheckpoint(principal, input.conversationId, session, parseJsonUnknownObject(row.agent_state_json), fingerprint, result);
+    return result;
+  }
+  const result = await handleInterviewSessionTurnForAgent(principal, {
+    conversationId: input.conversationId, company: stringValue(jd.company) || "目标公司",
+    role: stringValue(jd.role) || "目标岗位", jdText: stringValue(jd.body), cvText: stringValue(resume.body),
+    jdId: numericValue(parseJsonUnknownObject(snapshot.source).jdId), requestKey: input.requestKey,
+  }, options);
+  return result;
 }
 
 async function generateSessionQuestion(
@@ -655,6 +839,13 @@ async function generateSessionQuestion(
     if (signal?.aborted) throw error;
     return fallbackSessionQuestion(session.phase);
   }
+}
+
+function completePendingInterviewAnswer(session: DurableInterviewSession): string {
+  return [
+    session.pendingAnswer || "",
+    ...(session.pendingFollowupAnswers || []).map((followupAnswer, index) => `追问：${session.currentFollowups[index] || ""}\n回答：${followupAnswer}`),
+  ].filter(Boolean).join("\n\n");
 }
 
 async function generateFollowUpQuestion(
@@ -700,7 +891,7 @@ async function scoreSessionAnswer(
       context: formatSessionBinding(session),
       sessionId,
       family: familyForRole(session.role),
-    }, { signal });
+    }, { signal, deferTrendWriteback: true });
     // Spec 26 复盘固定格式：三态判定/主要缺口/更好结构优先于泛泛建议
     const rubric = result.score as AnswerScore & { review?: RubricScoredAnswer["review"] };
     const reviewParts = rubric.review
@@ -721,7 +912,7 @@ async function scoreSessionAnswer(
         }
       : undefined;
     return {
-      score: Math.round(result.score.overall * 20) / 10,
+      score: rubricData ? Math.round(result.score.overall * 20) / 10 : null,
       feedback,
       rubric: rubricData,
     };
@@ -741,35 +932,82 @@ async function persistInterviewCheckpoint(
   previousAgentState: Record<string, unknown>,
   turnFingerprint: string,
   result: InterviewSessionTurnResult,
-  messages: Array<Record<string, unknown>>,
 ): Promise<void> {
+  const expectedVersion = Math.max(0, Number(session.checkpointVersion) || 0);
   session.checkpointVersion = Math.max(0, Number(session.checkpointVersion) || 0) + 1;
+  result.evidence = interviewStateEvidence(sessionId, session, result.action || "started", turnFingerprint);
   const updated = await getDataRepositories().sessions.update(sessionId, principal.userId, {
-    messages,
     interviewState: session,
+    expectedInterviewCheckpointVersion: expectedVersion,
     agentState: {
       ...previousAgentState,
       durableInterview: true,
       checkpointVersion: session.checkpointVersion,
+      checkpointStateHash: interviewCheckpointHash(session),
       lastTurnFingerprint: turnFingerprint,
       lastTurnResult: result,
     },
     memoryDigest: result.summary?.slice(0, 300),
   });
-  if (!updated) throw new InterviewSessionNotFoundError();
-  await verifyInterviewCheckpoint(principal, sessionId, session.checkpointVersion);
+  if (!updated) throw new InterviewCheckpointConflictError();
+  await verifyInterviewCheckpoint(principal, sessionId, session.checkpointVersion, session);
+}
+
+async function persistVerifiedInterviewWeakness(principal: ExecutionPrincipal, sessionId: number, session: DurableInterviewSession): Promise<void> {
+  const answer = session.answers.at(-1);
+  if (!answer?.rubric) return;
+  await persistInterviewWeaknessEvents(principal, answer.rubric.bands, sessionSurrogateFor(String(sessionId), answer.question, answer.answer), familyForRole(session.role));
+}
+
+async function persistInterviewWeaknessEvents(principal: ExecutionPrincipal, bands: Record<string, number>, sessionSurrogate: string, family: string): Promise<void> {
+  for (const dimension of ["structure", "specificity", "highlight", "timing"] as const) {
+    try {
+      await recordWeaknessEvent({ userId: principal.userId, sessionSurrogate, dimension, band: bands[dimension], topic: family });
+    } catch (error) { console.warn("[interview-trend] 弱项事件记录失败（不阻塞评分）:", error instanceof Error ? error.message : error); }
+  }
 }
 
 async function verifyInterviewCheckpoint(
   principal: ExecutionPrincipal,
   sessionId: number,
   checkpointVersion: number,
+  expected?: DurableInterviewSession,
 ): Promise<void> {
   const readBack = await getDataRepositories().sessions.get(sessionId, principal.userId);
   const state = parseJsonUnknownObject(readBack?.interview_state_json);
+  const agentState = parseJsonUnknownObject(readBack?.agent_state_json);
   if (!readBack || Number(state.checkpointVersion) !== checkpointVersion) {
     throw new Error("模拟面试会话持久化后读回校验失败");
   }
+  if (agentState.checkpointStateHash && stringValue(agentState.checkpointStateHash) !== interviewCheckpointHash(state)) {
+    throw new Error("模拟面试会话持久化后读回内容不一致");
+  }
+  if (expected && INTERVIEW_CHECKPOINT_FIELDS.some((field) => canonicalInterviewValue(state[field]) !== canonicalInterviewValue((expected as unknown as Record<string, unknown>)[field]))) {
+    throw new Error("模拟面试会话持久化后读回内容不一致");
+  }
+}
+
+function canonicalInterviewValue(value: unknown): string | undefined {
+  return JSON.stringify(value, (_key, item) => item && typeof item === "object" && !Array.isArray(item)
+    ? Object.fromEntries(Object.entries(item).sort(([first], [second]) => first.localeCompare(second)))
+    : item);
+}
+
+function interviewCheckpointHash(value: DurableInterviewSession | Record<string, unknown>): string {
+  const state = value as unknown as Record<string, unknown>;
+  return createHash("sha256").update(canonicalInterviewValue(Object.fromEntries(
+    INTERVIEW_CHECKPOINT_FIELDS.map((field) => [field, state[field]]),
+  )) || "").digest("hex");
+}
+
+function interviewStateEvidence(sessionId: number, session: DurableInterviewSession, action: string, turnFingerprint?: string) {
+  return {
+    conversationId: sessionId, checkpointVersion: session.checkpointVersion || 0,
+    questionId: session.currentFollowups.length
+      ? `${session.currentQuestion?.id}_followup_${session.currentFollowups.length}` : session.currentQuestion?.id,
+    engineSessionId: session.id, turnFingerprint, action, status: session.status || "active", readBackVerified: true,
+    requiresReview: session.legacyRecovery?.requiresReview === true || session.pendingMaterialChange?.requiresReview === true,
+  };
 }
 
 function parseInterviewSession(value: unknown): DurableInterviewSession | null {
@@ -795,24 +1033,22 @@ function parseInterviewSession(value: unknown): DurableInterviewSession | null {
     currentFollowups: arrayValue(parsed.currentFollowups).map(String),
     checkpointVersion: Math.max(0, Number(parsed.checkpointVersion) || 0),
     pendingAnswer: stringValue(parsed.pendingAnswer) || undefined,
+    pendingFollowupAnswers: parsed.pendingFollowupAnswers === undefined ? undefined : arrayValue(parsed.pendingFollowupAnswers).map(String),
+    status: ["active", "paused", "completed", "abandoned"].includes(stringValue(parsed.status))
+      ? stringValue(parsed.status) as InterviewSession["status"]
+      : phase === "done" ? "completed" : "active",
+    createdAt: stringValue(parsed.createdAt) || undefined,
+    snapshotId: stringValue(parsed.snapshotId) || undefined,
+    mode: stringValue(parsed.mode) || undefined,
+    difficulty: parsed.difficulty as InterviewSession["difficulty"],
+    focus: stringValue(parsed.focus) || undefined,
+    focusAreas: arrayValue(parsed.focusAreas).map(String),
+    allowFollowUps: parsed.allowFollowUps !== false,
+    legacyRecovery: Object.keys(parseJsonUnknownObject(parsed.legacyRecovery)).length
+      ? parseJsonUnknownObject(parsed.legacyRecovery) as DurableInterviewSession["legacyRecovery"] : undefined,
+    pendingMaterialChange: Object.keys(parseJsonUnknownObject(parsed.pendingMaterialChange)).length
+      ? parseJsonUnknownObject(parsed.pendingMaterialChange) as DurableInterviewSession["pendingMaterialChange"] : undefined,
   };
-}
-
-function parseMessages(value: unknown): Array<Record<string, unknown>> {
-  try {
-    const parsed = typeof value === "string" ? JSON.parse(value) : value;
-    return Array.isArray(parsed) ? parsed.filter((item) => item && typeof item === "object") as Array<Record<string, unknown>> : [];
-  } catch {
-    return [];
-  }
-}
-
-function assistantInterviewMessage(content: string): Record<string, unknown> {
-  return { role: "assistant", content, mode: "interview-coach", agent_id: "interview", timestamp: new Date().toISOString() };
-}
-
-function userInterviewMessage(content: string): Record<string, unknown> {
-  return { role: "user", content, mode: "interview-coach", agent_id: "interview", timestamp: new Date().toISOString() };
 }
 
 function createQuestionId(session: DurableInterviewSession): string {
@@ -926,4 +1162,3 @@ function numericValue(value: unknown): number | undefined {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
-

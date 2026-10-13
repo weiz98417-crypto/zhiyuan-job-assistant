@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   Target, Star, History, Compass, MapPin, Pencil, Lock, Download,
   RefreshCw, Trash2, Check, AlertTriangle, TrendingUp, Shield,
@@ -9,7 +9,7 @@ import {
 import { PaperCard } from "@/components/design";
 import { PageHeading, EmptyState } from "@/components/ui/workbench-primitives";
 import { loadProfile } from "@/lib/profile-storage";
-import db from "@/lib/db";
+import { captureOwnerDatabase } from "@/lib/db";
 import { syncProfileToCache } from "@/lib/profile-update";
 import { useLockedFields } from "@/lib/useLockedFields";
 import Link from "next/link";
@@ -73,6 +73,7 @@ interface SkillCandidateSignal {
 }
 
 export default function ProfilePage() {
+  const db = useMemo(() => captureOwnerDatabase(), []);
   const [profile, setProfile] = useState<ZhiyuanProfile | null>(null);
   const [reportCount, setReportCount] = useState(0);
   const [goalsOpen, setGoalsOpen] = useState(false);

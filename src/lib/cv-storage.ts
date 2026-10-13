@@ -1,5 +1,6 @@
 import type { CVSection, CVData } from "@/types";
 import { stableContentHash } from "@/lib/agent/verified-action";
+import { ownerLocalStorage } from "@/lib/browser-owner";
 
 const STORAGE_KEY = "zhiyuan-cv";
 
@@ -59,14 +60,15 @@ export function normalizeCVData(data: unknown): CVData {
 
 export function loadCVData(): CVData {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const storage = ownerLocalStorage();
+    const raw = storage.getItem(STORAGE_KEY);
     if (!raw) return createDefaultCVData();
 
     const parsed = JSON.parse(raw);
 
     if (isLegacyFormat(parsed)) {
       const migrated = normalizeCVData(parsed);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
+      storage.setItem(STORAGE_KEY, JSON.stringify(migrated));
       return migrated;
     }
 
@@ -78,12 +80,13 @@ export function loadCVData(): CVData {
 
 export async function loadCVDataFromServer(): Promise<CVData | null> {
   try {
+    const storage = ownerLocalStorage();
     const res = await fetch("/api/cv/data", { cache: "no-store" });
     if (!res.ok) return null;
     const json = await res.json();
     if (!json.success) return null;
     const data = normalizeCVData(json.data);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    storage.setItem(STORAGE_KEY, JSON.stringify(data));
     return data;
   } catch {
     return null;
@@ -91,6 +94,7 @@ export async function loadCVDataFromServer(): Promise<CVData | null> {
 }
 
 export async function saveCVData(data: CVData, baseData?: CVData): Promise<CVData> {
+  const storage = ownerLocalStorage();
   const baseVersion = baseData?.activeVersion || "";
   const baseHash = baseVersion ? stableContentHash(baseData?.versions[baseVersion] || null) : "";
   const response = await fetch("/api/cv/data", {
@@ -108,7 +112,7 @@ export async function saveCVData(data: CVData, baseData?: CVData): Promise<CVDat
   const readBack = await readBackResponse.json().catch(() => ({}));
   if (!readBackResponse.ok || !readBack.success || !readBack.data) throw new Error(readBack.error || "简历保存后读回失败");
   const persisted = normalizeCVData(readBack.data);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(persisted));
+  storage.setItem(STORAGE_KEY, JSON.stringify(persisted));
   return persisted;
 }
 

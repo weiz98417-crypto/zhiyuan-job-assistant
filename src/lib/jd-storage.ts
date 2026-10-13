@@ -1,4 +1,4 @@
-import db from "@/lib/db";
+import db, { captureOwnerDatabase } from "@/lib/db";
 import type { JDRecord, JDSourceType } from "@/types";
 
 export interface CreateJDDTO {
@@ -12,6 +12,7 @@ export interface CreateJDDTO {
 }
 
 export async function createJD(data: CreateJDDTO): Promise<number> {
+  const db = captureOwnerDatabase();
   const res = await fetch("/api/data/jds", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -26,6 +27,7 @@ export async function createJD(data: CreateJDDTO): Promise<number> {
 }
 
 export async function updateJD(id: number, data: Partial<CreateJDDTO>): Promise<void> {
+  const db = captureOwnerDatabase();
   const res = await fetch("/api/data/jds", {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },

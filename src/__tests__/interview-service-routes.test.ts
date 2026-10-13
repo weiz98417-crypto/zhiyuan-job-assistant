@@ -5,12 +5,16 @@ const boundaries = vi.hoisted(() => ({
   generateInterviewQuestionsForAgent: vi.fn(),
   handleInterviewSessionTurnForAgent: vi.fn(),
   scoreInterviewAnswerForAgent: vi.fn(),
+  InterviewCheckpointConflictError: class InterviewCheckpointConflictError extends Error {},
+  InterviewSessionNotFoundError: class InterviewSessionNotFoundError extends Error {},
 }));
 
 vi.mock("@/lib/auth", () => ({ getCurrentUser: boundaries.getCurrentUser }));
 vi.mock("@/lib/server/interview-analysis-service", () => ({
   generateInterviewQuestionsForAgent: boundaries.generateInterviewQuestionsForAgent,
   handleInterviewSessionTurnForAgent: boundaries.handleInterviewSessionTurnForAgent,
+  InterviewCheckpointConflictError: boundaries.InterviewCheckpointConflictError,
+  InterviewSessionNotFoundError: boundaries.InterviewSessionNotFoundError,
   scoreInterviewAnswerForAgent: boundaries.scoreInterviewAnswerForAgent,
 }));
 
@@ -77,7 +81,7 @@ describe("interview service routes", () => {
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
-  it("persists each interview session turn through the shared service", async () => {
+  it("rejects browser interview mutations so only the durable Worker advances the session", async () => {
     boundaries.handleInterviewSessionTurnForAgent.mockResolvedValue({
       sessionId: "42",
       phase: "intro",
@@ -95,13 +99,19 @@ describe("interview service routes", () => {
     const response = await handleSession(request);
     const body = await response.json();
 
-    expect(response.status).toBe(200);
-    expect(body).toMatchObject({ success: true, data: { sessionId: "42", readBackVerified: true } });
-    expect(boundaries.handleInterviewSessionTurnForAgent).toHaveBeenCalledWith(
-      { userId: "user-1" },
-      expect.objectContaining({ company: "甲公司", role: "AI 产品经理", jdId: 7 }),
-      { signal: request.signal },
-    );
+    expect(response.status).toBe(422);
+    expect(body).toMatchObject({ success: false, error: expect.stringContaining("/api/agent/runs") });
+    expect(boundaries.handleInterviewSessionTurnForAgent).not.toHaveBeenCalled();
     expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it("rejects browser answers and controls without invoking the checkpoint writer", async () => {
+    const response = await handleSession(new Request("http://localhost/api/agent/coach/session", {
+      method: "POST", headers: { "Idempotency-Key": "stale-turn" },
+      body: JSON.stringify({ sessionId: "42", answer: "下一题" }),
+    }));
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({ success: false, error: expect.stringContaining("Agent Worker") });
+    expect(boundaries.handleInterviewSessionTurnForAgent).not.toHaveBeenCalled();
   });
 });

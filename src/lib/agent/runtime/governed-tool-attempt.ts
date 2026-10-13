@@ -77,6 +77,7 @@ export interface ToolAttemptStore {
 export interface ExecuteGovernedToolAttemptInput {
   principal: ExecutionPrincipal;
   runId: string;
+  conversationId?: number | null;
   workerId: string;
   fencingToken: number;
   toolName: string;
@@ -321,6 +322,7 @@ export class GovernedToolAttemptExecutor {
     const result = await this.registry.execute(input.toolName, input.args, {
       principal: input.principal,
       runId: input.runId,
+      conversationId: input.conversationId,
       allowlist: input.allowlist,
       signal: input.signal,
       requestId: idempotencyKey,
@@ -374,9 +376,10 @@ export class GovernedToolAttemptExecutor {
     input: ExecuteGovernedToolAttemptInput,
     attemptRecord: ToolAttemptRecord,
   ): Promise<GovernedToolAttemptOutcome> {
-      const reconciled = await this.registry.reconcile(input.toolName, input.args, {
+        const reconciled = await this.registry.reconcile(input.toolName, input.args, {
         principal: input.principal,
-        runId: input.runId,
+          runId: input.runId,
+          conversationId: input.conversationId,
         allowlist: input.allowlist,
         signal: input.signal,
         requestId: input.idempotencyKey || attemptRecord.idempotencyKey,

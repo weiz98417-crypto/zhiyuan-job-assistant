@@ -15,6 +15,7 @@ import { AgentRuntimeMaintenanceService } from "@/lib/agent/runtime/runtime-main
 import registry from "@/lib/agent/tools";
 import { createBackgroundToolHandlers } from "@/lib/agent/runtime/background-tool-handlers";
 import { PostgresRunContextSource } from "@/lib/agent/runtime/postgres-run-context-source";
+import { inspectDocumentImages } from "@/lib/server-image-intake";
 import { reconcileGovernedRuntimeTools } from "@/lib/agent/runtime/governed-tool-runtime";
 import { purgeExpiredTraces } from "@/lib/agent/runtime/agent-trace-store";
 import { reconcileFinishedDigestRuns, triggerDueScheduledRuns } from "@/lib/agent/runtime/scheduled-runs";
@@ -36,6 +37,7 @@ const worker = new AgentWorker({
   engine: new DurableOrchestratorExecutionEngine({
     runtime,
     contextSource: new PostgresRunContextSource(),
+    inspectImages: inspectDocumentImages,
   }),
   attemptDeadlineMs: positiveInteger(process.env.AGENT_WORKER_ATTEMPT_DEADLINE_MS, 180_000),
   reconcileOutstanding: reconcileGovernedRuntimeTools,
