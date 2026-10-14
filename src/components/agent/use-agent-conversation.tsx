@@ -105,7 +105,6 @@ import {
 import { sanitizeUnsupportedResumeSaveClaim } from "@/lib/agent/resume-save-guard";
 import {
   buildGuidedSessionRuntimeDirective,
-  finishGuidedSession,
   inferRequestedTaskFromText,
   isConfirmedGuidedTaskSwitch,
   isExplicitGuidedTaskCancel,
@@ -123,8 +122,6 @@ import { createBrowserRequestId } from "@/lib/browser-request-id";
 import {
   buildCareerPositioningArtifact,
   buildCareerPositioningFallback,
-  isCareerPositioningConfirmation,
-  parseCareerPositioningArtifact,
   type CareerPositioningArtifact,
 } from "@/lib/agent/career-positioning-result";
 import type { AgentMessage, AgentInteraction, ChatSession } from "@/types";
@@ -133,7 +130,6 @@ import {
   buildSavedJDEvaluationPrompt,
   extractReadOnlyPdfContext,
   loadInterviewMaterialRecords,
-  persistCareerPositioningArtifact,
   CONTEXT_COMPRESSION_STATUS_MS,
   hasConsumedHandoff,
   IMAGE_INTAKE_TIMEOUT_MS,
@@ -1207,80 +1203,6 @@ export function useAgentConversation() {
             clearCreateRequest();
             earlyCreatedRun = null;
           }
-        }
-        const pendingCareerPositioningArtifact =
-          activeGuidedSession?.taskType === "career_positioning_guidance" &&
-          activeGuidedSession.phase === "awaiting_positioning_confirmation"
-            ? parseCareerPositioningArtifact(activeGuidedSession.sourceText)
-            : null;
-        if (
-          pendingCareerPositioningArtifact &&
-          isCareerPositioningConfirmation(content) &&
-          currentSessionId &&
-          currentSessionForRun
-        ) {
-          setPhase("executing");
-          setExecutingTool("save_career_positioning");
-          let finalAssistantContent = "";
-          let nextGuidedSession: GuidedSessionState | undefined = activeGuidedSession || undefined;
-          try {
-            const saved = await persistCareerPositioningArtifact(pendingCareerPositioningArtifact, currentSessionId);
-            if (!isCurrentTurn()) return;
-            nextGuidedSession = finishGuidedSession(
-              activeGuidedSession,
-              "completed",
-              `自我定位已写入画像：${saved.role}`,
-            );
-            finalAssistantContent = [
-              `已把这次自我定位写入求职画像：${saved.role}。`,
-              "",
-              "我也记录了一条已确认的定位信号，后续 JD 评估、简历优化和推荐方向都会优先参考它。",
-            ].join("\n");
-            triggerProfileUpdate({ force: true }).catch(() => {});
-          } catch (err) {
-            if (!isCurrentTurn()) return;
-            finalAssistantContent = `这次定位结果没有写入画像：${err instanceof Error ? err.message : "未知错误"}。我没有把任务标记为完成，你可以再回复“确认”重试，或告诉我要调整哪里。`;
-          }
-
-          const finalAssistant: AgentMessage = {
-            ...assistantMsg,
-            content: finalAssistantContent,
-            agent_id: "profile",
-          };
-          streamContentRef.current = finalAssistantContent;
-          setStreamText(finalAssistantContent);
-          setPhase(null);
-          setExecutingTool(undefined);
-          setStreaming(false);
-          setEvalProgress([]);
-          setMessages((prev) => {
-            const copy = [...prev];
-            const last = copy[copy.length - 1];
-            if (last && last.role === "assistant" && last.content === "") copy[copy.length - 1] = finalAssistant;
-            else copy.push(finalAssistant);
-            return copy;
-          });
-
-          const fullMessages = [...currentSessionForRun.messages];
-          if (!hideUserMessage) fullMessages.push({ ...userMsg, agent_id: "profile" });
-          fullMessages.push(finalAssistant);
-          const nextMemoryDigest = await generateMemoryDigestWithStatus(
-            fullMessages,
-            currentSessionForRun.memoryDigest,
-          );
-          if (!isCurrentTurn()) return;
-          await updateSession(currentSessionId, {
-            messages: fullMessages,
-            memoryDigest: nextMemoryDigest,
-            interviewState: currentSessionForRun.interviewState,
-            agentState: {
-              ...(agentState || {}),
-              guidedSession: nextGuidedSession,
-            },
-          });
-          const refreshedSessions = await listSessions();
-          if (isCurrentTurn()) setSessions(refreshedSessions);
-          return;
         }
         const requestedTaskForSwitch = inferRequestedTaskFromText(content);
         const confirmedGuidedSwitch =

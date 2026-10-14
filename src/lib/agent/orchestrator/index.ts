@@ -15,7 +15,7 @@ import { classifyIntentLLM, isValidAgent } from "@/lib/agent/classify-intent-llm
 import type { AgentDefinition, AgentPromptContext } from "@/lib/agent/registry/types";
 import type { SSEEvent } from "@/lib/agent/loop/types";
 import type { InterviewSessionState } from "@/types";
-import type { InterviewRebindAction } from "@/lib/agent/interview-rebind-policy";
+import type { InterviewRebindAction, InterviewRebindResolution } from "@/lib/agent/interview-rebind-policy";
 import registry from "@/lib/agent/tools";
 import { resolveImageIntakeAgentId, type ImageDocumentType, type ImageIntakeResult } from "@/lib/agent/image-intake";
 import type { ExecutionPrincipal } from "@/lib/agent/runtime/durable-agent-run";
@@ -48,6 +48,7 @@ export interface OrchestratorContext {
   /** M1 gap closure: server-derived interview state for the loop's tool policy. */
   interviewState?: InterviewSessionState;
   interviewRebindAction?: InterviewRebindAction;
+  interviewRebindResolution?: InterviewRebindResolution;
   /** M1 gap closure: server-rebuilt prompt sections (interview/rebind/guided). */
   promptContextInjection?: string;
 }
@@ -242,6 +243,7 @@ export async function* orchestrateGen(
     attachmentMaterial: ctx.attachmentMaterial,
     interviewState: ctx.interviewState,
     interviewRebindAction: ctx.interviewRebindAction,
+    interviewRebindResolution: ctx.interviewRebindResolution,
     executionContext: ctx.principal && ctx.runId
       ? {
           principal: ctx.principal,

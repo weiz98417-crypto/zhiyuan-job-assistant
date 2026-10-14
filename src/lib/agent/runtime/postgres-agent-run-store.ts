@@ -284,6 +284,9 @@ export class PostgresAgentRunStore implements AgentRunStore {
           SET snapshot_version = snapshot_version + 1,
               event_sequence = event_sequence + 1,
               budgets_json = $4::jsonb,
+              task_type = COALESCE($5::text, task_type),
+              agent_id = COALESCE($6::text, agent_id),
+              contract_json = COALESCE($7::jsonb, contract_json),
               updated_at = now()
           WHERE id = $1
             AND fencing_token = $3
@@ -292,7 +295,9 @@ export class PostgresAgentRunStore implements AgentRunStore {
               OR (status = 'waiting_user' AND owner_id IS NULL)
             )
           RETURNING *
-        `, [command.runId, command.workerId, command.fencingToken, json(command.budgets)]);
+        `, [command.runId, command.workerId, command.fencingToken, json(command.budgets),
+          command.effectiveTask?.contract.taskType || null, command.effectiveTask?.agentId || null,
+          command.effectiveTask ? json(command.effectiveTask.contract) : null]);
         if (!updated.rows[0]) throw new Error("Stale Agent Run owner");
         const run = normalizeRun(updated.rows[0]);
         const inserted = await client.query(`

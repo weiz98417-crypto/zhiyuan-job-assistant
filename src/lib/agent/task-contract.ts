@@ -48,6 +48,7 @@ export interface AgentTaskContract {
     jdMatchResume?: boolean;
     resumeEditMode?: ResumeEditMode;
     intentConstraints?: IntentConstraints;
+    completionMode?: "read_only_facts";
   };
   journey?: {
     graphVersion: string;
@@ -493,6 +494,9 @@ export function buildContractUnmetAssistantMessage(
     return "这份参考简历的保存状态暂时无法确认。请先不要重复提交；你可以继续在这里提问，我会先核对现有记录。";
   }
   if (contract.taskType === "offer_evaluation") {
+    if (contract.routing?.completionMode === "read_only_facts") {
+      return "请补充这份 Offer 的文字或清晰截图。我会仅整理原文事实，未知条件保持未明确，不保存报告或更新业务数据。";
+    }
     return unmetCriteria.includes("offer content extracted or fetched")
       ? "我暂时没能读出这份 Offer。请发清晰截图或粘贴文字，我会在这里继续分析。"
       : "这次 Offer 分析还无法确认完成。你可以继续在这里提问或补充内容，我会先核对现有结果再继续。";
@@ -513,6 +517,7 @@ export function shouldAwaitUserAfterContractUnmet(
     return unmet.has("source content extracted or fetched") || completed.has("report persisted");
   }
   if (contract.taskType === "offer_evaluation") {
+    if (contract.routing?.completionMode === "read_only_facts") return unmet.has("source material bound");
     return unmet.has("offer content extracted or fetched") || completed.has("offer/report persisted");
   }
   if (contract.taskType === "reference_resume_save") {

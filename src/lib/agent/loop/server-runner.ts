@@ -17,7 +17,7 @@ import type { AgentDefinition } from "@/lib/agent/registry/types";
 import { enforceToolPolicy, inferCompanyFromMessages, isToolAllowedInMode } from "./tool-policy";
 import { ModelGatewayError, getDefaultModelChain, parseToolCallStream, streamChat, type GatewayMessage } from "@/lib/ai/model-gateway";
 import type { InterviewSessionState } from "@/types";
-import type { InterviewRebindAction } from "@/lib/agent/interview-rebind-policy";
+import type { InterviewRebindAction, InterviewRebindResolution } from "@/lib/agent/interview-rebind-policy";
 import { requiresReadBackVerification } from "@/lib/agent/tools/readback-verification";
 import { inferCompletedCriteriaFromToolResult, type AgentTaskContract } from "@/lib/agent/task-contract";
 import { createTaskProgramStopGuard } from "@/lib/agent/task-program";
@@ -331,6 +331,7 @@ export async function* agentLoopServer(opts: {
   signal?: AbortSignal;
   interviewState?: InterviewSessionState;
   interviewRebindAction?: InterviewRebindAction;
+  interviewRebindResolution?: InterviewRebindResolution;
   taskContract?: AgentTaskContract | null;
   executionContext?: ToolExecutionContext;
   modelRecovery?: ModelRecoveryPolicy;
@@ -351,6 +352,7 @@ export async function* agentLoopServer(opts: {
       conversationId: executionContext.conversationId, content,
       requestKey: executionContext.requestId || `${executionContext.runId}:interview-turn:${createHash("sha256").update(content).digest("hex")}`,
       materialAction: interviewRebindAction,
+      materialResolution: opts.interviewRebindResolution,
     }, { signal });
     if (result) {
       const text = result.message || [
@@ -420,6 +422,8 @@ export async function* agentLoopServer(opts: {
   const completedProgramCriteria = new Set<string>();
   let stopGuardNudged = false;
   let frozenToolCall = opts.frozenToolCall;
+  const positioningConfirmation = Boolean(executionContext?.workerId && opts.frozenToolCall?.name === "mine_profile"
+    && opts.frozenToolCall.args.action === "complete");
   const latestUserHasImages = Boolean([...ctx].reverse().find((item) => item.role === "user")?.images?.length);
 
   while (state.iteration < config.maxIterations) {
@@ -846,6 +850,18 @@ export async function* agentLoopServer(opts: {
         uiPayload: toolResult.uiPayload,
         verifiedAction: toolResult.verifiedAction,
       };
+      if (positioningConfirmation && tc.name === "mine_profile") {
+        const data = toolResult.data && typeof toolResult.data === "object" ? toolResult.data as Record<string, unknown> : {};
+        const verified = toolResult.success && data.done === true && data.readBackVerified === true;
+        if (verified) {
+          yield { type: "text", content: typeof data.summary === "string" ? data.summary : "定位已依据用户原始陈述保存，并完成读回核对。" };
+        } else {
+          yield { type: "text", content: toolResult.error || "定位保存尚未通过核对，请检查来源或确认后继续。" };
+          yield { type: "run_directive", directive: "wait_user", reason: "定位确认未完成" };
+        }
+        yield { type: "done" };
+        return;
+      }
 
       // ── Self-healing: yield error info so LLM can adapt ──
       if (!toolResult.success) {

@@ -1,7 +1,64 @@
 import type { AgentMessage } from "@/types";
 import { stableContentHash } from "@/lib/agent/verified-action";
 
-type PositioningMessage = Pick<AgentMessage, "role" | "content"> & Partial<Pick<AgentMessage, "itemId">>;
+export type PositioningMessage = Pick<AgentMessage, "role" | "content"> & Partial<Pick<AgentMessage, "itemId" | "toolName" | "toolResult">>;
+
+export type CareerPositioningScene = {
+  kind: "career_positioning_scene";
+  version: 1;
+  startAfterTurnId: string;
+  startAfterContent: string;
+  startAfterContentHash: string;
+};
+
+export function isCareerPositioningReset(text: string): boolean {
+  return /^(?:(?:请|帮我|我想|我要|我们)\s*)?(?:重新(?:开始|做|进行)(?:一次)?(?:职业|自我)?定位|重新定位|重置(?:职业|自我)?定位|重新开始)[。.!！\s]*$/.test(text.trim());
+}
+
+export function parseCareerPositioningScene(value: unknown): CareerPositioningScene | null {
+  if (value === undefined) return null;
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("定位场次边界损坏，请复核来源会话");
+  const scene = value as Record<string, unknown>;
+  if (scene.kind !== "career_positioning_scene" || scene.version !== 1
+    || typeof scene.startAfterTurnId !== "string" || !scene.startAfterTurnId.trim()
+    || typeof scene.startAfterContent !== "string" || !isCareerPositioningReset(scene.startAfterContent)
+    || scene.startAfterContentHash !== stableContentHash(scene.startAfterContent)) {
+    throw new Error("定位场次边界损坏，请复核来源会话");
+  }
+  return scene as CareerPositioningScene;
+}
+
+export function scopeCareerPositioningMessages<Message extends { role: string; content: string; itemId?: string; id?: string; toolName?: string; toolResult?: unknown }>(
+  messages: Message[],
+  scene: CareerPositioningScene | null,
+): Message[] {
+  const boundaryIndex = (boundaryScene: CareerPositioningScene): number => {
+    const boundaries = messages.flatMap((message, index) => (message.itemId || message.id) === boundaryScene.startAfterTurnId ? [index] : []);
+    const boundary = messages[boundaries[0]];
+    if (boundaries.length !== 1 || boundary?.role !== "user"
+      || boundary.content !== boundaryScene.startAfterContent
+      || stableContentHash(boundary.content) !== boundaryScene.startAfterContentHash) {
+      throw new Error("定位场次边界缺失或已变更，请复核来源会话");
+    }
+    return boundaries[0];
+  };
+  const activeIndex = scene ? boundaryIndex(scene) : -1;
+  const receiptIndex = messages.findLastIndex((message) => {
+    if (message.role !== "tool" || message.toolName !== "mine_profile" || !message.toolResult
+      || typeof message.toolResult !== "object" || Array.isArray(message.toolResult)) return false;
+    const result = message.toolResult as Record<string, unknown>;
+    return result.status === "success" && result.readBackVerified === true && result.careerPositioningReset !== undefined;
+  });
+  if (receiptIndex >= 0) {
+    const result = messages[receiptIndex].toolResult as Record<string, unknown>;
+    const receiptScene = parseCareerPositioningScene(result.careerPositioningReset)!;
+    const recordedIndex = boundaryIndex(receiptScene);
+    if (!scene || recordedIndex > activeIndex || recordedIndex >= receiptIndex) {
+      throw new Error("已完成重置的定位场次边界丢失或回退，请复核来源会话");
+    }
+  }
+  return scene ? messages.slice(activeIndex + 1) : messages;
+}
 
 export type CareerPositioningEvidence = {
   evidenceId: string;
@@ -138,6 +195,17 @@ export function isCareerPositioningArtifact(value: unknown): value is CareerPosi
     || typeof value.roleSignal.confidence !== "number" || !Number.isFinite(value.roleSignal.confidence)
     || value.roleSignal.confidence < 0 || value.roleSignal.confidence > 1) return false;
   return isRecord(value.historyEntry) && isText(value.historyEntry.timestamp) && isText(value.historyEntry.event) && isTextList(value.historyEntry.changes);
+}
+
+export function verifyCareerPositioningSources(value: unknown, messages: PositioningMessage[]): CareerPositioningArtifact {
+  if (!isCareerPositioningArtifact(value)) throw new Error("定位结果缺少有效来源证据");
+  const expected = buildCareerPositioningArtifact(messages);
+  if (!expected || !expected.sourceEvidence.length) throw new Error("定位结果没有可验证的用户来源");
+  const fields = ["targetRoles", "positioningSummary", "evidence", "sourceEvidence", "targetScenario", "mvp", "nextActions", "roleSignal"] as const;
+  if (fields.some((field) => JSON.stringify(value[field]) !== JSON.stringify(expected[field]))) {
+    throw new Error("定位结果与服务端用户来源不一致，请根据当前原文重新生成");
+  }
+  return expected;
 }
 
 export function buildCareerPositioningArtifact(
@@ -302,8 +370,10 @@ export function buildCareerPositioningFallback(params: {
   ) {
     return buildCareerPositioningOpeningQuestion();
   }
-  if (!shouldForceCareerPositioningClose(params.messages) && !isGenericCareerPositioningCompletion(params.assistantText || "")) return null;
+  const modelClaimsPersonalFacts = /(?:你|您的|你的|个人|核心优势|职业定位|定位结论|候选方向).{0,30}(?:精通|熟练|掌握|擅长|拥有|具备|经验|能力|优势|胜任|适合|工程师|经理)|(?:核心优势|定位结论|定位假设|目标方向)\s*[：:]/.test(params.assistantText || "");
+  if (!modelClaimsPersonalFacts && !shouldForceCareerPositioningClose(params.messages) && !isGenericCareerPositioningCompletion(params.assistantText || "")) return null;
   const artifact = buildCareerPositioningArtifact(params.messages);
+  if (!artifact && modelClaimsPersonalFacts) return "当前个人经历证据不足，不能确认能力、职级或行业经验。请补充本人真实经历，并区分已掌握、正在学习和计划；示例和第三方材料不计入个人事实。";
   if (!artifact && !isDoneToolResult(params.toolResult)) return null;
   if (!artifact) return null;
 
@@ -324,7 +394,7 @@ export function buildCareerPositioningFallback(params: {
     "",
     "**来源证据**",
     ...artifact.sourceEvidence.flatMap((item) => [
-      `- ${item.evidenceId} · 用户陈述 · ${item.claim}`,
+      `- ${item.evidenceId} · 用户陈述${item.sourceTurnId ? ` · ${item.sourceTurnId}` : ""} · ${item.claim}`,
       `  > ${compact(item.sourceQuote)}`,
       ...(item.contextQuote ? [`  > 选项上下文：${compact(item.contextQuote)}`] : []),
     ]),

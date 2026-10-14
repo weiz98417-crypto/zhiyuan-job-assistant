@@ -27,6 +27,7 @@ export interface InterviewQuestion {
   text: string;
   type: "tech" | "behavioral" | "reverse";
   createdAt?: string;
+  reviewedSource?: { legacyQuestionId: string; legacyTurnIds: string[]; confirmationId: string };
 }
 
 export interface InterviewAnswer {
@@ -49,6 +50,35 @@ export interface InterviewAnswer {
   };
 }
 
+export interface InterviewSupportingMaterial {
+  sourceId: string;
+  sourceType: "jd" | "reference_resume";
+  title: string;
+  body: string;
+  contentHash: string;
+  addedAt: string;
+  sourceRequestId: string;
+  company?: string;
+  role?: string;
+}
+
+export interface ArchivedInterview {
+  engineSessionId: string;
+  archivedAt: string;
+  reason: "material_rebind" | "legacy_review";
+  state: Record<string, unknown>;
+}
+
+export interface InterviewRebindRecord {
+  from?: { jdId?: number; resumeId?: string };
+  to?: { jdId?: number; resumeId?: string };
+  reason: string;
+  createdAt: string;
+  fromEngineSessionId: string;
+  toEngineSessionId: string;
+  confirmationId: string;
+}
+
 export interface InterviewSession {
   id: string;
   company: string;
@@ -58,6 +88,8 @@ export interface InterviewSession {
     reportNum?: number;
     resumeId?: number | string;
     resumeTitle?: string;
+    resumeVersion?: string;
+    resumeContentHash?: string;
     jdText?: string;
     cvText?: string;
     memoryContext?: string;
@@ -76,6 +108,10 @@ export interface InterviewSession {
   focus?: string;
   focusAreas?: string[];
   allowFollowUps?: boolean;
+  responseStyle?: "coached" | "question_only";
+  supportingMaterials?: InterviewSupportingMaterial[];
+  archivedInterviews?: ArchivedInterview[];
+  rebindHistory?: InterviewRebindRecord[];
 }
 
 const PHASE_ORDER: InterviewPhase[] = ["intro", "tech", "behavioral", "reverse"];

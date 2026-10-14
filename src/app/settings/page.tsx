@@ -5,6 +5,7 @@ import { Download, Upload, Trash2, User, Target, Banknote, Loader2, Database, Sp
 import { useRouter } from "next/navigation";
 import { WarmButton, PaperCard } from "@/components/design";
 import { PageHeading } from "@/components/ui/workbench-primitives";
+import LegacyBrowserRecovery from "@/components/settings/LegacyBrowserRecovery";
 import Skeleton from "@/components/design/Skeleton";
 import { captureOwnerDatabase, clearLocalBusinessData } from "@/lib/db";
 import { assertBrowserOwner, ownerLocalStorage, requireBrowserOwner } from "@/lib/browser-owner";
@@ -534,6 +535,7 @@ export default function SettingsPage() {
           </div>
           {importStatus && <p className="text-xs mt-3 bg-[var(--color-primary-muted)] px-3 py-2 rounded-[var(--radius-sm)]">{importStatus}</p>}
           <p className="text-xs text-[var(--color-muted)] mt-3">浏览器本地资料按账号隔离。清除仅作用于当前账号，云端数据保留。无归属旧缓存已隔离保留，需证明归属后恢复。「从 CLI 导入」读取当前账号可访问的资料；文件导入支持 applications.md。</p>
+          <LegacyBrowserRecovery />
         </PaperCard>
       </section>
     </div>

@@ -10,6 +10,7 @@ import { deriveIntentConstraints } from "@/lib/agent/intent-constraints";
 import type { IntentEnvelopeResolution } from "@/lib/agent/intent-envelope";
 import type { ExecutionConversationMessage } from "@/lib/agent/runtime/execution-session-service";
 import type { RunContextMessage } from "@/lib/agent/runtime/run-context";
+import { requestsReadOnlyOfferFacts } from "@/lib/agent/runtime/run-read-only-offer-facts";
 
 export interface RunAttachmentMaterial {
   id: string;
@@ -74,11 +75,13 @@ export async function prepareRunAttachment(input: {
     };
   }
   if (!material) return { material: null, contextMessages: [], transcriptMessages: [] };
-  const explicitAssessment = /评估|分析|诊断|评价|测评|匹配|投不投/.test(input.latestInput);
+  const explicitAssessment = /评估|分析|诊断|评价|测评|匹配|投不投|整理|提取|梳理/.test(input.latestInput);
   const usesAttachment = Boolean(uploadedImages || selectedImage)
     || input.pendingInputs.length === 0
     || input.latestInput.trim().length <= 30 && explicitAssessment;
-  const decision = routeImageIntake(explicitAssessment ? input.latestInput : "", material.intake);
+  const decisionText = material.intake.documentType === "offer" && requestsReadOnlyOfferFacts(input.latestInput + " Offer")
+    ? input.latestInput + " Offer" : input.latestInput;
+  const decision = routeImageIntake(explicitAssessment ? decisionText : "", material.intake);
   const contextMessages: RunContextMessage[] = [{
     role: "system",
     content: "[ATTACHMENT_MATERIAL id=" + material.id + " hash=" + material.sourceHash

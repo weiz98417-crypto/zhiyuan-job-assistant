@@ -8,6 +8,29 @@ import {
 } from "@/lib/agent/career-positioning-result";
 
 describe("career positioning result fallback", () => {
+  it("replaces model claims of mastered skills with the user's exact learning evidence", () => {
+    const result = buildCareerPositioningFallback({
+      messages: [
+        { role: "user", itemId: "goal", content: "我想做AI产品" },
+        { role: "user", itemId: "learning", content: "我还在学React，不会Python" },
+        { role: "user", itemId: "followup", content: "下一步怎么做？" },
+      ],
+      assistantText: "你精通React和Python，拥有丰富餐饮经验，可以胜任高级AI产品经理。",
+    });
+    expect(result).toContain("React 正在学习");
+    expect(result).toContain("Python 尚未掌握");
+    expect(result).toContain("learning");
+    expect(result).not.toMatch(/你精通|丰富餐饮|高级AI/);
+  });
+
+  it("withholds unsupported personal conclusions even before enough positioning answers exist", () => {
+    const result = buildCareerPositioningFallback({
+      messages: [{ role: "user", content: "我正在学SQL" }],
+      assistantText: "你的优势是精通SQL，已经具备高级数据分析能力。",
+    });
+    expect(result).toContain("个人经历证据不足");
+    expect(result).not.toMatch(/精通SQL|高级数据/);
+  });
   it("does not reload legacy artifacts or artifacts with non-user evidence for confirmation", () => {
     const artifact = buildCareerPositioningArtifact([
       { role: "user", content: "我想做AI产品" },

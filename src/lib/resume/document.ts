@@ -121,6 +121,18 @@ export function stableResumeHash(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
+export function canonicalResumeSectionsJson(sections: unknown[]): string {
+  const fieldOrder = new Map([["id", 0], ["title", 1], ["content", 2]]);
+  const normalize = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(normalize);
+    if (!value || typeof value !== "object") return value;
+    return Object.fromEntries(Object.entries(value).sort(([left], [right]) =>
+      (fieldOrder.get(left) ?? 3) - (fieldOrder.get(right) ?? 3) || (left < right ? -1 : left > right ? 1 : 0),
+    ).map(([key, item]) => [key, normalize(item)]));
+  };
+  return JSON.stringify(normalize(sections));
+}
+
 export function emptyResumeSections(): ResumeSections {
   return { summary: "", experience: "", projects: "", education: "", skills: "" };
 }
@@ -269,8 +281,8 @@ export function createResumeIntake(input: {
     status: activate ? "active" : "pending",
     source_type: input.sourceType,
     source_artifact_id: artifactId,
-    content_hash: stableResumeHash(JSON.stringify(version.sections)),
-    sections_json: JSON.stringify(version.sections),
+    content_hash: stableResumeHash(canonicalResumeSectionsJson(version.sections)),
+    sections_json: canonicalResumeSectionsJson(version.sections),
     integrity_json: JSON.stringify(input.integrity),
     activated_at: activate ? now : null,
   };
@@ -306,7 +318,7 @@ export function resumeDocumentProjectionFromCvData(value: unknown): ResumeDocume
     : {};
   const sections = versionId && Array.isArray(versions[versionId]?.sections) ? versions[versionId].sections! : null;
   if (!versionId || !sections) return null;
-  const sectionsJson = JSON.stringify(sections);
+  const sectionsJson = canonicalResumeSectionsJson(sections);
   return { versionId, sectionsJson, contentHash: stableResumeHash(sectionsJson) };
 }
 

@@ -6,6 +6,7 @@ import {
   type AgentRunStatus,
 } from "@/lib/agent/runtime/types";
 import type { AgentRuntimeObservation } from "@/lib/agent/runtime/observation";
+import type { AgentTaskContract } from "@/lib/agent/task-contract";
 
 export interface ExecutionPrincipal {
   userId: string;
@@ -129,6 +130,7 @@ export interface SaveAgentRunCheckpointCommand {
   plan: Record<string, unknown>;
   budgets: Record<string, unknown>;
   factRefs: AgentRunFactReference[];
+  effectiveTask?: { contract: AgentTaskContract; agentId: string };
 }
 
 export interface AgentRunCheckpoint {
@@ -558,6 +560,11 @@ export class InMemoryAgentRunStore implements AgentRunStore {
 
     run.snapshotVersion += 1;
     run.budgets = { ...command.budgets };
+    if (command.effectiveTask) {
+      run.taskType = command.effectiveTask.contract.taskType;
+      run.agentId = command.effectiveTask.agentId;
+      run.contract = command.effectiveTask.contract;
+    }
     const checkpoint: AgentRunCheckpoint = {
       id: ++this.checkpointSequence,
       runId: run.id,

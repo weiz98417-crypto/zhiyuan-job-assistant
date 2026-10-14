@@ -6,6 +6,7 @@ import {
   invalidateResumeIntegrityEvidence,
   mergeParsedResumeChunks,
   normalizeResumeSections,
+  resumeDocumentProjectionFromCvData,
   type ParsedResumeChunk,
 } from "@/lib/resume/document";
 import {
@@ -15,6 +16,17 @@ import {
 } from "@/lib/resume/sectioning";
 
 describe("resume document intake primitives", () => {
+  it("projects a key-order-independent section hash while preserving content and every stored field", () => {
+    const project = (section: Record<string, unknown>) => resumeDocumentProjectionFromCvData({
+      activeVersion: "v2", versions: { v2: { sections: [section] } },
+    })!;
+    const standard = project({ id: "projects", title: "项目", content: "本人SQL周报从5小时降至2小时" });
+    const reordered = project({ content: "本人SQL周报从5小时降至2小时", title: "项目", id: "projects" });
+    expect(reordered).toEqual(standard);
+    expect(project({ content: "伪造结果", title: "项目", id: "projects" }).contentHash).not.toBe(standard.contentHash);
+    expect(project({ id: "projects", title: "项目", content: "本人SQL周报从5小时降至2小时", extraEvidence: "不可丢弃" }).contentHash).not.toBe(standard.contentHash);
+  });
+
   it("chunks long source without dropping the tail", () => {
     const source = `${"前段经历。".repeat(4200)}\n\n尾部唯一项目成果：TAIL-RESUME-20000`;
     const chunks = chunkResumeText(source, 2400, 120);

@@ -22,6 +22,7 @@ import {
   type GuidedSessionState,
 } from "@/lib/agent/guided-session-state";
 import { countAnsweredInterviewRounds, projectDurableInterviewEngineState } from "@/lib/agent/interview-session-state";
+import { parseCareerPositioningScene, type CareerPositioningScene } from "@/lib/agent/career-positioning-result";
 
 function countAnsweredRounds(state: InterviewSessionState): number {
   try {
@@ -116,6 +117,7 @@ export interface ServerRunContextDirectives {
   interviewState: InterviewSessionState | undefined;
   interviewRebindAction: InterviewRebindResolution | null;
   activeGuidedSession: GuidedSessionState | null;
+  positioningScene: CareerPositioningScene | null;
 }
 
 export async function buildServerRunContextDirectives(input: {
@@ -123,11 +125,13 @@ export async function buildServerRunContextDirectives(input: {
   conversationId: number | null;
   content: string;
   agentState?: Record<string, unknown>;
+  includePositioningScene?: boolean;
   /** Client-advertised bypass (explicit forced agent); mirrors shouldBypassConversationLocks. */
   bypassConversationLocks?: boolean;
 }): Promise<ServerRunContextDirectives> {
   const interviewState = await loadInterviewState(input.principal, input.conversationId);
   const sessionAgentState = await loadSessionAgentState(input.principal, input.conversationId);
+  const positioningScene = input.includePositioningScene === false ? null : parseCareerPositioningScene(sessionAgentState?.careerPositioningScene);
   const activeGuidedSession = resolveActiveGuidedSession({
     agentState: (input.agentState || sessionAgentState || undefined) as Parameters<typeof resolveActiveGuidedSession>[0]["agentState"],
     interviewState,
@@ -162,6 +166,7 @@ export async function buildServerRunContextDirectives(input: {
     interviewState: input.bypassConversationLocks ? undefined : interviewState,
     interviewRebindAction,
     activeGuidedSession,
+    positioningScene,
   };
 }
 
@@ -192,17 +197,17 @@ async function loadSessionAgentState(
   conversationId: number | null,
 ): Promise<Record<string, unknown> | undefined> {
   if (conversationId === null) return undefined;
+  let row;
   try {
-    const row = await getDataRepositories().sessions.get(conversationId, principal.userId);
-    if (!row) return undefined;
-    const raw = (row as Record<string, unknown>).agent_state_json
-      ?? (row as Record<string, unknown>).agentState;
-    if (!raw) return undefined;
-    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : undefined;
+    row = await getDataRepositories().sessions.get(conversationId, principal.userId);
   } catch {
     return undefined;
   }
+  if (!row) return undefined;
+  const raw = (row as Record<string, unknown>).agent_state_json
+    ?? (row as Record<string, unknown>).agentState;
+  if (!raw) return undefined;
+  const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("会话状态损坏，请复核来源会话");
+  return parsed as Record<string, unknown>;
 }

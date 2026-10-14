@@ -69,7 +69,8 @@
     "eval:rubric-calibration:full": "node scripts/run-rubric-calibration.mjs",
     "verify:capability-2026-10b": "npm run check:knowledge-drift && npm run check:prompt-hygiene && npm run eval:capability-2026-10b",
     "verify:resume-visual": "node scripts/verify-resume-visual.mjs",
-    "smoke:voice": "node scripts/smoke-voice-mimo.mjs"
+    "smoke:voice": "node scripts/smoke-voice-mimo.mjs",
+    "test:e2e:spec40": "e2e run --config e2e.spec40.config.ts"
   },
   "dependencies": {
     "@assistant-ui/react": "^0.15.22",
@@ -132,6 +133,8 @@
     "typescript": "^5",
     "vite": "^7.3.7",
     "vitest": "^4.1.6",
-    "@types/better-sqlite3": "^7.6.13"
+    "@types/better-sqlite3": "^7.6.13",
+    "@e2e-dev/web": "0.14.0",
+    "e2e": "0.19.0"
   }
 }

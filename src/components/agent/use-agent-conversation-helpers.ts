@@ -9,9 +9,8 @@ import { ownerSessionStorage } from "@/lib/browser-owner";
 import type { AgentRunSnapshot } from "@/lib/agent/runtime/durable-agent-run";
 import { DurableRunRequestError, DurableRunOwnershipUnknownError } from "@/lib/agent/runtime/durable-run-client";
 import type { AgentArtifactRef } from "@/lib/agent/task-journey";
-import { stableContentHash, type VerifiedActionResult } from "@/lib/agent/verified-action";
+import type { VerifiedActionResult } from "@/lib/agent/verified-action";
 import type { GuidedSessionState } from "@/lib/agent/guided-session-state";
-import { isCareerPositioningArtifact, type CareerPositioningArtifact } from "@/lib/agent/career-positioning-result";
 import type { InterviewMaterialRecord } from "@/lib/agent/interview-rebind-policy";
 
 /* ── Agent phase ── */
@@ -149,94 +148,6 @@ export function summarizeLedgerParams(params: Record<string, unknown> | undefine
   }
   return truncateLedgerText(safe);
 }
-
-export async function persistCareerPositioningArtifact(
-  artifact: CareerPositioningArtifact,
-  sessionId?: number | null,
-): Promise<{ role: string; readBackVerified: boolean }> {
-  if (!isCareerPositioningArtifact(artifact)) {
-    throw new Error("定位结果缺少有效来源证据，请重新核对用户陈述后再保存");
-  }
-  const profileRes = await fetch("/api/data/profile", { cache: "no-store" });
-  const profileJson = await profileRes.json().catch(() => ({}));
-  if (!profileRes.ok || !profileJson.success) {
-    throw new Error(profileJson.error || `读取画像失败 HTTP ${profileRes.status}`);
-  }
-
-  const current = (profileJson.data || {}) as {
-    data?: Record<string, unknown>;
-    goals?: Record<string, unknown>;
-    history?: unknown[];
-  };
-  const currentGoals = current.goals && typeof current.goals === "object" ? current.goals : {};
-  const goals = {
-    ...currentGoals,
-    targetRoles: artifact.targetRoles,
-    positioningSummary: artifact.positioningSummary,
-    positioningEvidence: artifact.evidence,
-    positioningSourceEvidence: artifact.sourceEvidence,
-    positioningScenario: artifact.targetScenario,
-    positioningMvp: artifact.mvp,
-    nextActions: artifact.nextActions,
-  };
-  const history = [
-    ...(Array.isArray(current.history) ? current.history : []),
-    artifact.historyEntry,
-  ];
-
-  const saveRes = await fetch("/api/data/profile", {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      data: current.data || {},
-      goals,
-      history,
-    }),
-  });
-  const saveJson = await saveRes.json().catch(() => ({}));
-  if (!saveRes.ok || !saveJson.success) {
-    throw new Error(saveJson.error || `写入画像失败 HTTP ${saveRes.status}`);
-  }
-
-  const signalRes = await fetch("/api/data/signals", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      source: "dingwei",
-      signal_type: "role_preference",
-      session_id: sessionId ? String(sessionId) : undefined,
-      content_json: {
-        role: artifact.roleSignal.role,
-        reason: artifact.roleSignal.reason,
-        evidence: artifact.roleSignal.evidence,
-        confidence: artifact.roleSignal.confidence,
-        sourceEvidence: artifact.sourceEvidence,
-        provenanceCategory: "hypothesis",
-        status: "confirmed",
-      },
-    }),
-  });
-  const signalJson = await signalRes.json().catch(() => ({}));
-  if (!signalRes.ok || !signalJson.success || signalJson.data?.readBackVerified !== true) {
-    throw new Error(signalJson.error || `画像信号写入校验失败 HTTP ${signalRes.status}`);
-  }
-
-  const verifyRes = await fetch("/api/data/profile", { cache: "no-store" });
-  const verifyJson = await verifyRes.json().catch(() => ({}));
-  const role = artifact.targetRoles[0]?.role || artifact.roleSignal.role;
-  const readBackVerified =
-    verifyRes.ok &&
-    verifyJson.success &&
-    stableContentHash(verifyJson.data?.goals) === stableContentHash(goals) &&
-    stableContentHash(verifyJson.data?.data) === stableContentHash(current.data || {}) &&
-    stableContentHash(verifyJson.data?.history) === stableContentHash(history);
-  if (!readBackVerified) {
-    throw new Error("画像写入后读回校验失败，定位结论、来源证据或原有画像不一致");
-  }
-
-  return { role, readBackVerified };
-}
-
 
 export function activeNoticeFromRun(run: AgentRunSnapshot): ActiveRunNotice {
   const contract = run.contract && typeof run.contract === "object" && !Array.isArray(run.contract)

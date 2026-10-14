@@ -146,3 +146,4 @@ screenshots/
 .e2e/logs/
 .e2e/videos/
 /.e2e/production/
+/.e2e/spec40/

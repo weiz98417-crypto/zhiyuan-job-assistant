@@ -9,6 +9,7 @@
  */
 import { loadRegistryText } from "@/lib/agent/knowledge/registry/loader";
 import { getPostgresPool } from "@/lib/postgres";
+import { COACH_MODES, type CoachMode } from "@/types";
 import type { Pool } from "pg";
 
 export interface QuestionCard extends ComposedQuestion {
@@ -59,6 +60,8 @@ export interface ComposeInterviewInput {
   jdText?: string;
   cvText?: string;
   memorySummary?: string;
+  mode?: CoachMode;
+  additionalContext?: string;
   recentQuestions?: string[];
   signal?: AbortSignal;
 }
@@ -187,9 +190,11 @@ export async function composeInterview(
   });
   if (candidates.length === 0) return { questions: [], bankUsed: 0, bankUnavailable: "bank_empty" };
 
+  const mode = input.mode && input.mode in COACH_MODES ? input.mode : "behavioral";
+  const modeInfo = COACH_MODES[mode];
   const systemPrompt = loadRegistryText("prompt.interview-question-generation")
-    .replace("{{MODE_LABEL}}", "模拟面试")
-    .replace("{{MODE_STRUCTURE}}", "题目 → 追问 → 评分")
+    .replace("{{MODE_LABEL}}", modeInfo.label)
+    .replace("{{MODE_STRUCTURE}}", modeInfo.structure.join(" → "))
     .replace("{{COUNT}}", String(input.count || 1))
     .replace("{{CATEGORY_RULE}}", "")
     .replace("{{BANK_SECTION}}", buildBankSection(candidates));
@@ -200,6 +205,7 @@ export async function composeInterview(
     input.jdText ? `JD：${input.jdText.slice(0, 2000)}` : "",
     input.cvText ? `简历：${input.cvText.slice(0, 1500)}` : "",
     input.memorySummary ? `长期记忆：${input.memorySummary}` : "",
+    input.additionalContext ? `本场配置与上下文：${input.additionalContext}` : "",
     input.recentQuestions?.length ? `已出题目（勿重复）：\n${input.recentQuestions.slice(-6).join("\n")}` : "",
   ].filter(Boolean).join("\n\n");
 

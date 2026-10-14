@@ -20,6 +20,7 @@ import type { AgentRunSnapshot, DurableRunInput } from "@/lib/agent/runtime/dura
 import type { IntentEnvelopeResolution } from "@/lib/agent/intent-envelope";
 import { deriveIntentConstraints, type IntentConstraints } from "@/lib/agent/intent-constraints";
 import { inferJDResumeMatchingDirective } from "@/lib/agent/jd-resume-scope-intent";
+import { requestsReadOnlyOfferFacts } from "@/lib/agent/runtime/run-read-only-offer-facts";
 
 export type AgentRunAdmissionKind =
   | "continue_current_run"
@@ -306,7 +307,7 @@ export function createServerOwnedContract(
   return constrainTaskContract(contract, intentConstraints);
 }
 
-export function constrainTaskContract(contract: AgentTaskContract, constraints: IntentConstraints): AgentTaskContract {
+export function constrainTaskContract(contract: AgentTaskContract, constraints: IntentConstraints, intentText = contract.target): AgentTaskContract {
   const previous = contract.routing?.intentConstraints;
   const combined: IntentConstraints = {
     writePolicy: previous?.writePolicy === "forbidden" || constraints.writePolicy === "forbidden"
@@ -324,6 +325,13 @@ export function constrainTaskContract(contract: AgentTaskContract, constraints: 
     ...contract,
     routing: { ...contract.routing, intentConstraints: combined },
   };
+  if (contract.taskType === "offer_evaluation" && combined.writePolicy === "forbidden"
+    && (contract.routing?.completionMode === "read_only_facts" || requestsReadOnlyOfferFacts(intentText))) {
+    boundedContract.requiresUserApproval = false;
+    boundedContract.successCriteria = ["source material bound", "read-only facts generated"];
+    boundedContract.validators = ["owner_bound_source", "source_hash", "unknown_conditions_preserved"];
+    boundedContract.routing!.completionMode = "read_only_facts";
+  }
   const allowedTools = boundedContract.routing?.allowedTools || listToolNamesForTask(contract.taskType);
   boundedContract.routing!.allowedTools = allowedTools.filter((toolName) => (
     evaluateToolGovernance({

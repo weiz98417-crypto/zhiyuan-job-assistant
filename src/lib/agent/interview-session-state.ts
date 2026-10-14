@@ -507,7 +507,10 @@ export function projectDurableInterviewEngineState(value: unknown): InterviewSes
   }
   const status = ["active", "paused", "completed", "abandoned"].includes(String(durable.status))
     ? durable.status as InterviewSessionState["status"] : phase === "done" ? "completed" : "active";
-  const projected: InterviewSessionState = { planSnapshot, status, rebindHistory: [], currentQuestionId, questionGraph, transcript, scoreArtifacts };
+  const projected: InterviewSessionState = {
+    planSnapshot, status, rebindHistory: Array.isArray(durable.rebindHistory) ? durable.rebindHistory as InterviewSessionState["rebindHistory"] : [],
+    currentQuestionId, questionGraph, transcript, scoreArtifacts,
+  };
   if (status === "completed") projected.recap = { ...buildInterviewRecapFromState(projected), generatedAt: String(durable.updatedAt || createdAt) };
   return projected;
 }

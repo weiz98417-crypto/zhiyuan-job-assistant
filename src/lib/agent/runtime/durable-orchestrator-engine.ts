@@ -28,7 +28,8 @@ import {
   resolveTaskContractRunOutcome,
   type AgentTaskContract,
 } from "@/lib/agent/task-contract";
-import { buildCareerPositioningFallback } from "@/lib/agent/career-positioning-result";
+import { buildCareerPositioningArtifact, buildCareerPositioningFallback, isCareerPositioningConfirmation, parseCareerPositioningScene, scopeCareerPositioningMessages, type PositioningMessage } from "@/lib/agent/career-positioning-result";
+import { loadCareerPositioningScene } from "@/lib/server/career-positioning-service";
 import { buildServerRunContextDirectives } from "@/lib/agent/runtime/server-run-context-directives";
 import { buildContractForTask, constrainTaskContract } from "@/lib/agent/run-admission";
 import { taskAgentId } from "@/lib/agent/guided-session-state";
@@ -43,6 +44,7 @@ import {
   type RunContextMessage,
 } from "@/lib/agent/runtime/run-context";
 import { prepareRunAttachment, type InspectRunImages, type RunAttachmentMaterial } from "@/lib/agent/runtime/run-attachment-material";
+import { projectReadOnlyOfferFacts, renderReadOnlyOfferFacts } from "@/lib/agent/runtime/run-read-only-offer-facts";
 
 type Orchestrate = (input: {
   content: string;
@@ -154,7 +156,7 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
     });
     const storedContract = asTaskContract(input.checkpoint?.context.taskContract) || asTaskContract(input.run.contract);
     const originalContract = storedContract
-      ? constrainTaskContract(storedContract, deriveIntentConstraints(storedContract.target + "\n" + durableMessages.map((message) => message.content).join("\n")))
+      ? constrainTaskContract(storedContract, deriveIntentConstraints(storedContract.target + "\n" + durableMessages.map((message) => message.content).join("\n")), storedContract.target + "\n" + durableMessages.map((message) => message.content).join("\n"))
       : null;
     const checkpointMatchingScope = typeof input.checkpoint?.context.jdMatchResume === "boolean"
       ? input.checkpoint.context.jdMatchResume
@@ -315,6 +317,7 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
       success: true;
       data?: unknown;
     } | null = null;
+    let positioningResetInLoop = false;
     const completedCriteria = new Set<string>();
     let contract = asTaskContract(rebuiltContext.contract);
     // 0.11.0-A: the intent envelope is the first worker step. It may redirect
@@ -323,11 +326,14 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
     // events so the UI and the audit trail see the same decision.
     let effectiveAgentId = contract ? taskAgentId(contract.taskType) : input.run.agentId;
     let clarificationQuestion: string | null = null;
-    const sessionDirectives = await buildServerRunContextDirectives({
+    const needsPositioningScope = contract?.taskType === "career_positioning_guidance"
+      || (isCareerPositioningConfirmation(latestInput) && Boolean(conversationMessages.findLast((message) => message.role === "assistant")?.content.includes("来源证据")));
+    let sessionDirectives = await buildServerRunContextDirectives({
       principal,
       conversationId: input.run.conversationId,
       content: latestInput,
-    }).catch(() => undefined);
+      includePositioningScene: needsPositioningScope,
+    });
     try {
       const { resolveIntentEnvelope } = await import("@/lib/agent/intent-envelope");
       const { taskAgentId: envelopeTaskAgentId } = await import("@/lib/agent/guided-session-state");
@@ -339,7 +345,9 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
         interviewContext: sessionDirectives?.interviewContext,
       }).catch(() => undefined);
       if (envelope) {
-        if (contract) contract = constrainTaskContract(contract, envelope.envelope.constraints);
+        const contractIntent = attachment.material?.intake.documentType === "offer" && envelope.envelope.primaryTask === "offer_evaluation"
+          ? latestInput + "\nOffer附件" : latestInput;
+        if (contract) contract = constrainTaskContract(contract, envelope.envelope.constraints, contractIntent);
         await this.options.runtime.recordEvent({
           runId: input.run.id,
           workerId: input.run.ownerId!,
@@ -370,7 +378,7 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
             || contract?.successCriteria.includes("clarification question asked"))
           && envelope.envelope.confidence !== "low"
         ) {
-          contract = buildContractForTask(envelope.envelope.primaryTask, latestInput, undefined, contract?.routing?.intentConstraints || envelope.envelope.constraints);
+          contract = buildContractForTask(envelope.envelope.primaryTask, contractIntent, undefined, contract?.routing?.intentConstraints || envelope.envelope.constraints);
           effectiveAgentId = envelopeTaskAgentId(envelope.envelope.primaryTask);
           await this.options.runtime.recordEvent({
             runId: input.run.id,
@@ -389,6 +397,40 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
     } catch {
       // Envelope failures must never block execution — the admitted contract stands.
     }
+    if (!needsPositioningScope && contract?.taskType === "career_positioning_guidance") sessionDirectives = await buildServerRunContextDirectives({
+      principal, conversationId: input.run.conversationId, content: latestInput, includePositioningScene: true,
+    });
+    const positioningMessages: PositioningMessage[] = needsPositioningScope || contract?.taskType === "career_positioning_guidance"
+      ? scopeCareerPositioningMessages(conversationMessages.flatMap<PositioningMessage>((message) => (
+      message.role === "user" || message.role === "assistant" || message.role === "tool"
+        ? [{ role: message.role, content: message.content, itemId: message.itemId || message.id, toolName: message.toolName, toolResult: message.toolResult }]
+        : []
+    )), sessionDirectives.positioningScene) : [];
+    const positioningArtifact = isCareerPositioningConfirmation(latestInput)
+      ? buildCareerPositioningArtifact(positioningMessages) : null;
+    const displayedPositioning = positioningMessages.findLast((message) => message.role === "assistant")?.content || "";
+    const positioningConfirmation = Boolean(positioningArtifact?.sourceEvidence.length
+      && positioningArtifact.sourceEvidence.every((evidence) => displayedPositioning.includes(evidence.evidenceId))
+      && displayedPositioning.includes("来源证据"));
+    if (positioningConfirmation) {
+      contract = buildContractForTask("profile_update", latestInput, undefined, contract?.routing?.intentConstraints);
+      effectiveAgentId = taskAgentId("profile_update");
+    }
+    const legacyMigration = asRecord(input.checkpoint?.context.legacyMigration);
+    const legacyChecks = Array.isArray(legacyMigration.requiredChecks) ? legacyMigration.requiredChecks
+      : Array.isArray(input.checkpoint?.plan.legacyRequiredChecks) ? input.checkpoint.plan.legacyRequiredChecks : [];
+    const renewedLegacyEvidence = pendingInputs.some((item) => (
+      item.content.images?.length || /重新(?:核对|验证|校验|读取|评估)|确认(?:继续|重新)|新(?:的)?(?:材料|JD|简历|Offer)|月薪|岗位职责|工作经历/i.test(item.content.content)
+    ));
+    if (input.checkpoint?.plan.legacyRevalidationRequired === true
+      && (!renewedLegacyEvidence || legacyChecks.includes("task_binding_review") || legacyChecks.includes("conversation_owner_review"))) {
+      clarificationQuestion = typeof legacyMigration.explanation === "string" ? legacyMigration.explanation
+        : typeof input.checkpoint.plan.legacyExplanation === "string" ? input.checkpoint.plan.legacyExplanation
+          : "旧任务需要重新核对来源与完成状态。请补充原始材料或明确确认重新核对后继续。";
+    } else if (input.checkpoint?.plan.legacyRevalidationRequired === true && renewedLegacyEvidence) {
+      rebuiltContext.plan.legacyRevalidationRequired = false;
+      rebuiltContext.plan.legacyRenewedInputIds = pendingInputs.map((item) => item.id);
+    }
     if (contract) {
       const contractMessage = executionContext.messages.find((message) => (
         message.role === "system" && message.content.startsWith("Durable Run Contract:")
@@ -400,6 +442,7 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
       workerId: input.run.ownerId!,
       fencingToken: input.run.fencingToken,
       boundary: "intent_resolved",
+      effectiveTask: contract ? { contract, agentId: effectiveAgentId } : undefined,
       context: {
         messages: executionContext.messages,
         conversationMessages,
@@ -417,11 +460,21 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
       budgets: input.checkpoint?.budgets || input.run.budgets,
       factRefs: rebuiltContext.factRefs,
     });
-    if (clarificationQuestion && contract) {
+    const readOnlyFactsMode = contract?.taskType === "offer_evaluation" && contract.routing?.completionMode === "read_only_facts";
+    const readOnlyFacts = readOnlyFactsMode && !clarificationQuestion
+      ? projectReadOnlyOfferFacts({ run: input.run, messages: conversationMessages, attachment: attachment.material })
+      : null;
+    if ((clarificationQuestion || readOnlyFactsMode) && contract) {
+      const directResponse = clarificationQuestion || (readOnlyFacts
+        ? renderReadOnlyOfferFacts(readOnlyFacts)
+        : "请补充这份 Offer 的文字或清晰截图。我会仅整理原文事实，未知条件保持未明确，不保存报告或更新业务数据。");
+      const directFactRefs = readOnlyFacts
+        ? [...rebuiltContext.factRefs, { type: "read_only_offer_facts", id: readOnlyFacts.sourceId, version: "v1", hash: readOnlyFacts.sourceHash }]
+        : rebuiltContext.factRefs;
       const timestamp = new Date().toISOString();
       const assistantMessage: ExecutionConversationMessage = {
         role: "assistant",
-        content: clarificationQuestion,
+        content: directResponse,
         timestamp,
       };
       const completedConversationMessages = [...conversationMessages, assistantMessage];
@@ -431,15 +484,15 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
       );
       const contractOutcome = resolveTaskContractRunOutcome(
         contract,
-        ["clarification question asked"],
-        { requiresClarification: true, hasAssistantResponse: true },
+        clarificationQuestion ? ["clarification question asked"] : readOnlyFacts ? ["source material bound", "read-only facts generated"] : [],
+        { requiresClarification: Boolean(clarificationQuestion || !readOnlyFacts), hasAssistantResponse: true },
       );
       const completion: StoredModelCompletion = {
         id: randomUUID(),
         outcome: contractOutcome.status,
-        charCount: clarificationQuestion.length,
+        charCount: directResponse.length,
         toolResultCount: 0,
-        assistantText: clarificationQuestion,
+        assistantText: directResponse,
         contractEvaluation: {
           canClaimSuccess: contractOutcome.gate.canClaimSuccess,
           completedCriteria: contractOutcome.gate.completedCriteria,
@@ -452,6 +505,7 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
         workerId: input.run.ownerId!,
         fencingToken: input.run.fencingToken,
         boundary: "after_model",
+        effectiveTask: { contract, agentId: effectiveAgentId },
         context: {
           messages: completedRunContext.messages,
           conversationMessages: completedConversationMessages,
@@ -462,10 +516,11 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
           omittedMessageCount: completedRunContext.omittedCount,
           modelCompletion: completion,
           taskContract: contract,
+          ...(readOnlyFacts ? { readOnlyFacts } : {}),
         },
         plan: rebuiltContext.plan,
         budgets: input.checkpoint?.budgets || input.run.budgets,
-        factRefs: rebuiltContext.factRefs,
+        factRefs: directFactRefs,
       });
       return this.finalizeStoredCompletion(input, completion, completedConversationMessages);
     }
@@ -500,7 +555,7 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
       promptContextInjection: directives
         ? `${directives.interviewContext}${directives.rebindContext}${directives.guidedDirective}`
         : undefined,
-      frozenToolCall: latestApprovedGate
+      frozenToolCall: positioningConfirmation ? { name: "mine_profile", args: { action: "complete" } } : latestApprovedGate
         ? {
             name: String(latestApprovedGate.request?.toolName || latestApprovedGate.toolName),
             args: latestApprovedGate.request?.args as Record<string, unknown>,
@@ -592,6 +647,17 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
               success: true,
               data: event.data,
             };
+            const positioningData = asRecord(latestSuccessfulToolResult.data);
+            if (latestSuccessfulToolResult.name === "mine_profile" && positioningData.reset === true && positioningData.readBackVerified === true) {
+              const resetScene = parseCareerPositioningScene(positioningData.careerPositioningScene);
+              if (!resetScene) throw new Error("成功的定位重置缺少来源场次边界");
+              positioningResetInLoop = true;
+              projectedMessages.push({
+                id: `${input.run.id}:positioning-reset:${recordedEvent?.sequence}`, role: "tool", content: "", toolName: "mine_profile",
+                toolResult: { kind: "silent", status: "success", readBackVerified: true, careerPositioningReset: resetScene, durableRunId: input.run.id },
+                timestamp: new Date().toISOString(),
+              });
+            }
           }
           if (contract) {
             const data = event.data && typeof event.data === "object" ? event.data as Record<string, unknown> : {};
@@ -671,13 +737,15 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
       }).catch(() => undefined);
       throw error;
     }
+    const positioningScene = positioningResetInLoop
+      ? await loadCareerPositioningScene(principal, input.run.conversationId) : sessionDirectives.positioningScene;
     const careerPositioningFallback = contract?.taskType === "career_positioning_guidance"
       ? buildCareerPositioningFallback({
-          messages: conversationMessages.flatMap((message) => (
+          messages: scopeCareerPositioningMessages([...conversationMessages, ...projectedMessages].flatMap<PositioningMessage>((message) => (
             message.role === "user" || message.role === "assistant" || message.role === "tool"
-              ? [{ role: message.role, content: message.content, itemId: message.itemId || message.id }]
+              ? [{ role: message.role, content: message.content, itemId: message.itemId || message.id, toolName: message.toolName, toolResult: message.toolResult }]
               : []
-          )),
+          )), positioningScene),
           assistantText,
           toolResult: latestSuccessfulToolResult,
         })
@@ -800,6 +868,7 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
       workerId: input.run.ownerId!,
       fencingToken: input.run.fencingToken,
       boundary: "after_model",
+      effectiveTask: contract ? { contract, agentId: effectiveAgentId } : undefined,
       context: {
         messages: completedRunContext.messages,
         conversationMessages: completedConversationMessages,
@@ -841,6 +910,7 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
       workerId: input.input.run.ownerId!,
       fencingToken: input.input.run.fencingToken,
       boundary: "model_interrupted",
+      effectiveTask: input.taskContract ? { contract: input.taskContract, agentId: taskAgentId(input.taskContract.taskType) } : undefined,
       context: {
         messages: input.executionMessages,
         conversationMessages: input.conversationMessages,
@@ -1211,6 +1281,7 @@ function defaultOrchestrate(input: Parameters<Orchestrate>[0]): AsyncIterable<SS
     forcedAgentId: input.agentId,
     interviewState: input.interviewState,
     interviewRebindAction: input.interviewRebindAction?.action,
+    interviewRebindResolution: input.interviewRebindAction,
     promptContextInjection: input.promptContextInjection,
   });
 }

@@ -1,173 +1,101 @@
 import type { ExecutionPrincipal } from "@/lib/agent/runtime/durable-agent-run";
+import { loadExecutionConversation } from "@/lib/agent/runtime/execution-session-service";
+import { buildCareerPositioningArtifact, isCareerPositioningConfirmation, isCareerPositioningReset, parseCareerPositioningScene, scopeCareerPositioningMessages, type CareerPositioningScene, type PositioningMessage } from "@/lib/agent/career-positioning-result";
 import { getStagePrompt, type SOPState } from "@/lib/agent/profile-sop";
 import { getDataRepositories } from "@/lib/data-repositories";
-
-const SOP_FIELD = "_agentPositioningSop";
-const SOP_TTL_MS = 24 * 60 * 60 * 1000;
+import { confirmCareerPositioning } from "@/lib/server/career-positioning-service";
+import { stableContentHash } from "@/lib/agent/verified-action";
 
 export interface ProfileSopInput {
   action: string;
   answer?: string;
+  conversationId?: number | null;
 }
 
 export async function runProfileSop(
   principal: ExecutionPrincipal,
   input: ProfileSopInput,
-): Promise<Record<string, unknown> & { readBackVerified: true }> {
+): Promise<Record<string, unknown>> {
+  const conversationId = input.conversationId;
+  if (!Number.isSafeInteger(conversationId) || Number(conversationId) <= 0) {
+    throw new Error("请提供当前定位来源会话");
+  }
   const repositories = getDataRepositories();
-  const existing = await repositories.profiles.get(principal.userId);
-  const goals = parseObject(existing?.goals_json);
-  let state = parseSop(goals[SOP_FIELD]);
-  if (state && Date.now() - new Date(state.updatedAt).getTime() > SOP_TTL_MS) state = null;
+  const conversation = await repositories.sessions.get(conversationId!, principal.userId);
+  if (!conversation) {
+    throw new Error("定位来源会话不存在或不属于当前账号");
+  }
+  const stored = await loadExecutionConversation(principal, conversationId!);
+  const allMessages: PositioningMessage[] = stored.flatMap((message) =>
+    message.role === "user" || message.role === "assistant" || message.role === "tool"
+      ? [{ role: message.role, content: message.content, itemId: message.itemId || message.id, toolName: message.toolName, toolResult: message.toolResult }] : []);
+  const agentState = parseState(conversation.agent_state_json ?? conversation.agentState);
+  const scene = parseCareerPositioningScene(agentState.careerPositioningScene);
+  const messages = scopeCareerPositioningMessages(allMessages, scene);
   const action = input.action || "start";
-
-  if (action === "start" || action === "stage_prompt") {
-    const alreadyStarted = Boolean(state);
-    state ||= newSopState();
-    goals[SOP_FIELD] = state;
-    await persistProfileState(principal, goals, existing);
-    return {
-      stage: state.stage,
-      branch: state.branch || null,
-      prompt: getStagePrompt(state.stage, state.branch),
-      isResume: alreadyStarted && state.stage > 0,
-      alreadyStarted,
-      collected: state.collected,
-      hasGoals: Object.keys(goals).some((key) => key !== SOP_FIELD),
-      readBackVerified: true,
-    };
-  }
-
-  if (action === "answer") {
-    const answer = String(input.answer || "").trim();
-    if (!answer) throw new Error("请提供你的回答");
-    state ||= newSopState();
-    advanceSop(state, answer);
-    if (state.stage === 5) {
-      delete goals[SOP_FIELD];
-      goals.positioningResponses = state.collected;
-      goals.confirmedAt = new Date().toISOString();
-      await persistProfileState(principal, goals, existing);
-      return {
-        stage: 5,
-        done: true,
-        summary: "画像已生成！可在 /profile 页面查看求职画像和进化轨迹。",
-        readBackVerified: true,
-      };
+  if (action === "reset") {
+    const resetTurn = allMessages.findLast((message) => message.role === "user");
+    if (!resetTurn?.itemId || !isCareerPositioningReset(resetTurn.content)) {
+      throw new Error("请在当前会话明确提出重置或重新开始定位");
     }
-    goals[SOP_FIELD] = state;
-    await persistProfileState(principal, goals, existing);
-    return {
-      stage: state.stage,
-      branch: state.branch || null,
-      prompt: getStagePrompt(state.stage, state.branch),
-      collected: state.collected,
-      readBackVerified: true,
+    const nextScene: CareerPositioningScene = {
+      kind: "career_positioning_scene", version: 1,
+      startAfterTurnId: resetTurn.itemId, startAfterContent: resetTurn.content,
+      startAfterContentHash: stableContentHash(resetTurn.content),
     };
+    const nextState = { ...agentState, careerPositioningScene: nextScene };
+    if (canonical(scene) !== canonical(nextScene)) {
+      const interviewState = parseState(conversation.interview_state_json ?? conversation.interviewState);
+      const updated = await repositories.sessions.update(conversationId!, principal.userId, {
+        agentState: nextState,
+        expectedInterviewCheckpointVersion: Number(interviewState.checkpointVersion) || 0,
+      });
+      if (!updated) throw new Error("定位重置写入冲突，请刷新后重试");
+    }
+    const readBack = await repositories.sessions.get(conversationId!, principal.userId);
+    if (!readBack || canonical(parseState(readBack.agent_state_json ?? readBack.agentState)) !== canonical(nextState)) {
+      throw new Error("定位场次重置读回校验失败");
+    }
+    scopeCareerPositioningMessages(await loadExecutionConversation(principal, conversationId!), nextScene);
+    return { stage: 0, reset: true, done: false, prompt: getStagePrompt(0), collected: {}, readBackVerified: true, careerPositioningScene: nextScene };
   }
+  const lastUserIndex = messages.findLastIndex((message) => message.role === "user");
+  const latest = messages[lastUserIndex]?.content.trim() || "";
 
   if (action === "complete") {
-    if (state) {
-      delete goals[SOP_FIELD];
-      goals.positioningResponses = state.collected;
-      goals.confirmedAt = new Date().toISOString();
-      await persistProfileState(principal, goals, existing);
-      const prior = await repositories.signals.query({
-        source: "dingwei",
-        signal_type: "role_preference",
-        limit: 50,
-      }, principal.userId);
-      const alreadyRecorded = prior.some((row) => parseObject(row.content_json).sopStartedAt === state?.startedAt);
-      if (!alreadyRecorded) {
-        await repositories.signals.insert({
-          source: "dingwei",
-          signal_type: "role_preference",
-          content_json: JSON.stringify({ data: state.collected, branch: state.branch, sopStartedAt: state.startedAt }),
-          session_id: undefined,
-        }, principal.userId);
-      }
-    } else {
-      await persistProfileState(principal, goals, existing);
-    }
-    return { done: true, summary: "定位已保存！画像已更新。可在 /profile 页面查看。", readBackVerified: true };
+    if (!isCareerPositioningConfirmation(latest)) throw new Error("请明确确认已展示的定位结果后再保存");
+    const artifact = buildCareerPositioningArtifact(messages.slice(0, lastUserIndex));
+    if (!artifact?.sourceEvidence.length) throw new Error("定位结果缺少有效来源证据，请补充本人真实经历");
+    const saved = await confirmCareerPositioning(principal, { conversationId: conversationId!, artifact, confirmation: latest });
+    return { ...saved, stage: 5, done: true, summary: `定位假设已保存：${saved.role}。原始来源已独立读回，可在 /profile 页面查看。` };
   }
-
-  if (action === "reset") {
-    delete goals[SOP_FIELD];
-    await persistProfileState(principal, goals, existing);
-    return { reset: true, readBackVerified: true };
+  if (action === "answer" && (!latest || input.answer?.trim() !== latest)) {
+    throw new Error("请提供当前用户原文，不能改写回答或补造确认");
   }
+  if (!["start", "stage_prompt", "answer"].includes(action)) throw new Error(`Unknown action: ${action}`);
 
-  throw new Error(`Unknown action: ${action}`);
-}
-
-async function persistProfileState(
-  principal: ExecutionPrincipal,
-  goals: Record<string, unknown>,
-  existing: { data_json: string; history_json: string } | undefined,
-): Promise<void> {
-  const repositories = getDataRepositories();
-  await repositories.profiles.upsert(
-    principal.userId,
-    existing?.data_json || "{}",
-    existing?.history_json || "[]",
-    JSON.stringify(goals),
-  );
-  const readBack = await repositories.profiles.get(principal.userId);
-  if (canonicalJson(parseObject(readBack?.goals_json)) !== canonicalJson(goals)) {
-    throw new Error("画像 SOP 持久化后读回校验失败");
-  }
-}
-
-function advanceSop(state: SOPState, answer: string): void {
-  if (state.stage === 0) {
-    if (/A|在找|投简历|在投/.test(answer)) state.branch = "A";
-    else if (/C|应届|在校|完全没方向|没方向/.test(answer)) state.branch = "C";
-    else if (/D|纠结|几个方向|比较/.test(answer)) state.branch = "D";
-    else state.branch = "B";
-  }
-  if (state.stage === 4) {
-    if (/确认|可以|没问题|是的|^对$|^行$|^好$/.test(answer)) state.stage = 5;
-  } else {
-    state.collected[`stage_${state.stage}`] = answer;
-    if (state.stage < 4) state.stage += 1;
-  }
-  state.updatedAt = new Date().toISOString();
-}
-
-function newSopState(): SOPState {
-  const now = new Date().toISOString();
-  return { stage: 0, collected: {}, startedAt: now, updatedAt: now };
-}
-
-function parseSop(value: unknown): SOPState | null {
-  const state = parseObject(value);
-  const stage = Number(state.stage);
-  if (!Number.isInteger(stage) || stage < 0 || stage > 5) return null;
+  const userMessages = messages.filter((message) => message.role === "user" && message.content.trim()
+    && !isCareerPositioningConfirmation(message.content));
+  const answers = scene ? userMessages : userMessages.slice(1);
+  const firstAnswer = answers[0]?.content.trim() || "";
+  const branch: SOPState["branch"] = /^(?:A[.、：:\s]|A$)|在找|投简历|在投/.test(firstAnswer) ? "A"
+    : /^(?:C[.、：:\s]|C$)|应届|在校|完全没方向|没方向/.test(firstAnswer) ? "C"
+      : /^(?:D[.、：:\s]|D$)|纠结|几个方向|比较/.test(firstAnswer) ? "D" : "B";
+  const stage = Math.min(answers.length, 4);
   return {
-    stage,
-    branch: ["A", "B", "C", "D"].includes(String(state.branch)) ? state.branch as SOPState["branch"] : undefined,
-    collected: Object.fromEntries(Object.entries(parseObject(state.collected)).map(([key, item]) => [key, String(item)])),
-    startedAt: String(state.startedAt || new Date().toISOString()),
-    updatedAt: String(state.updatedAt || new Date().toISOString()),
+    stage, branch, done: false, prompt: getStagePrompt(stage, branch),
+    collected: Object.fromEntries(answers.map((message, index) => [`stage_${index}`, message.content])),
+    isResume: stage > 0, alreadyStarted: stage > 0,
+    sourceAuthority: "persistent_conversation",
   };
 }
 
-function parseObject(value: unknown): Record<string, unknown> {
-  try {
-    const parsed = typeof value === "string" ? JSON.parse(value) : value;
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
-  } catch {
-    return {};
-  }
+function parseState(value: unknown): Record<string, unknown> {
+  const parsed = typeof value === "string" ? JSON.parse(value) : value;
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
 }
 
-function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return JSON.stringify(value.map((item) => JSON.parse(canonicalJson(item))));
-  if (!value || typeof value !== "object") return JSON.stringify(value);
-  const sorted = Object.keys(value as Record<string, unknown>).sort().reduce<Record<string, unknown>>((result, key) => {
-    result[key] = JSON.parse(canonicalJson((value as Record<string, unknown>)[key]));
-    return result;
-  }, {});
-  return JSON.stringify(sorted);
+function canonical(value: unknown): string {
+  return JSON.stringify(value, (_key, item) => item && typeof item === "object" && !Array.isArray(item)
+    ? Object.fromEntries(Object.entries(item).sort(([first], [second]) => first.localeCompare(second))) : item);
 }

@@ -8,6 +8,7 @@ import {
   getPhasePrompt,
   type InterviewPhase,
   type InterviewSession,
+  type InterviewSupportingMaterial,
 } from "@/lib/agent/interview/engine";
 import { getDataRepositories } from "@/lib/data-repositories";
 import { llmRetry } from "@/lib/llm-retry";
@@ -16,8 +17,9 @@ import { scoreAnswerWithRubric, type RubricCompletion, type RubricScoredAnswer, 
 import { recordWeaknessEvent, sessionSurrogateFor } from "@/lib/server/interview-trend";
 import { composeInterview, familyForRole, type QuestionBankStore } from "@/lib/server/question-bank";
 import { getPostgresPool } from "@/lib/postgres";
+import { canonicalResumeSectionsJson, stableResumeHash } from "@/lib/resume/document";
 import { COACH_MODES, type AnswerScore, type CoachMode, type InterviewQuestion } from "@/types";
-import type { InterviewRebindAction } from "@/lib/agent/interview-rebind-policy";
+import type { InterviewRebindAction, InterviewRebindResolution } from "@/lib/agent/interview-rebind-policy";
 
 /** Spec 26：评分器/题库的测试注入点（与生产默认实现同形）。 */
 export interface InterviewServiceOverrides {
@@ -51,6 +53,7 @@ export interface GenerateInterviewQuestionsInput {
   additionalContext?: string;
   /** Spec 27 同场去重：本场已问过的题干（主问题+追问），题库召回时排除。 */
   recentQuestions?: string[];
+  difficulty?: string;
 }
 
 export interface ScoreInterviewAnswerInput {
@@ -88,6 +91,7 @@ export interface InterviewSessionTurnInput {
   requestKey?: string;
   conversationId?: number;
   materialAction?: InterviewRebindAction;
+  materialResolution?: InterviewRebindResolution;
   difficulty?: string;
   focus?: string;
 }
@@ -110,14 +114,31 @@ type DurableInterviewSession = InterviewSession & {
   checkpointVersion?: number;
   pendingAnswer?: string;
   pendingFollowupAnswers?: string[];
-  legacyRecovery?: { requiresReview: boolean; originalState: Record<string, unknown>; reason: string };
-  pendingMaterialChange?: { requiresReview: boolean; action: InterviewRebindAction };
+  legacyRecovery?: {
+    requiresReview: boolean; originalState: Record<string, unknown>; reason: string;
+    review?: {
+      confirmationId: string; originalStateHash: string;
+      questions: Array<{ legacyQuestionId: string; text: string; legacyTurnIds: string[] }>;
+    };
+  };
+  pendingMaterialChange?: {
+    requiresReview: boolean; action: InterviewRebindAction; confirmationId?: string;
+    proposedMaterial?: InterviewSupportingMaterial; previousStatus?: InterviewSession["status"];
+    proposedResume?: VerifiedInterviewResume; resumeRequested?: boolean; jdRequested?: boolean;
+  };
+};
+
+type VerifiedInterviewResume = {
+  sourceId: string; versionId: string; title: string; body: string; contentHash: string;
 };
 
 const INTERVIEW_CHECKPOINT_FIELDS = [
   "phase", "status", "questionIndex", "questions", "answers", "sourceBinding", "currentQuestion",
   "currentFollowups", "pendingAnswer", "pendingFollowupAnswers", "snapshotId", "legacyRecovery", "pendingMaterialChange",
   "mode", "difficulty", "focus", "focusAreas", "allowFollowUps",
+  "responseStyle",
+  "supportingMaterials",
+  "archivedInterviews", "rebindHistory",
 ] as const;
 
 type InterviewSessionTurnResult = {
@@ -186,6 +207,9 @@ export async function generateInterviewQuestionsForAgent(
       memorySummary: memoryContext.llmSummary,
       count,
       recentQuestions: arrayValue(input.recentQuestions).map(String).filter(Boolean),
+      difficulty: input.difficulty,
+      mode,
+      additionalContext,
       // Spec 27 同场去重：本场已问的主问题与进行中追问不重复出题
       signal: options.signal,
     }, {
@@ -543,15 +567,134 @@ export async function handleInterviewSessionTurnForAgent(
   }
 
   const control = classifyInterviewControl(answer);
-  if (input.materialAction && input.materialAction !== "continue_current_session") {
-    const supporting = input.materialAction === "use_as_supporting_context" || input.materialAction === "keep_current_binding";
-    if (!supporting) {
-      session.status = "paused";
-      session.pendingMaterialChange = { action: input.materialAction, requiresReview: true };
+  if (session.legacyRecovery?.requiresReview) {
+    const review = session.legacyRecovery.review;
+    const confirmLegacy = answer.trim().match(/^确认(?:恢复题目|从头面试)\s+([a-f0-9]{12})(?:\s+(\d+))?$/);
+    if (confirmLegacy && review?.confirmationId === confirmLegacy[1] && review.originalStateHash === legacyInterviewHash(session.legacyRecovery.originalState)) {
+      const selected = confirmLegacy[2] ? review.questions[Number(confirmLegacy[2]) - 1] : undefined;
+      const restart = answer.trim().startsWith("确认从头面试");
+      if (restart || selected) {
+        const next = await startReviewedInterviewScene(principal, session, session.sourceBinding, "legacy_review", review.confirmationId, options.signal, session.company, session.role, selected);
+        const result: InterviewSessionTurnResult = {
+          action: "next", sessionId: String(sessionId), phase: next.phase, status: "active", question: next.currentQuestion?.text,
+          questionIndex: 0, sourceBinding: next.sourceBinding, readBackVerified: true,
+          message: `已按你的复核确认${selected ? "恢复所选题目" : "从头开始"}。旧记录隔离保留；旧推断评分和答案未转成新事实，本场从零计数。\n\n${next.currentQuestion?.text || ""}`,
+        };
+        await persistInterviewCheckpoint(principal, sessionId, next, agentState, turnFingerprint, result);
+        return result;
+      }
     }
+    if (/^(?:查看历史面试复核|复核历史面试|复核面试记录)$/.test(answer.trim())) {
+      const original = session.legacyRecovery.originalState;
+      const transcript = arrayValue(original.transcript).map(objectValue);
+      const questions = arrayValue(original.questionGraph).map(objectValue).flatMap((question) => {
+        const text = stringValue(question.question);
+        const sourceTurns = transcript.filter((turn) => turn.role === "assistant" && stringValue(turn.content).includes(text));
+        if (!text || !sourceTurns.length || /^(?:系统|模型|面试引擎)?(?:错误|异常|请求失败|服务不可用)|<\/?(?:think|tool)|DSML/i.test(text)) return [];
+        return [{ legacyQuestionId: stringValue(question.id), text, legacyTurnIds: sourceTurns.map((turn) => stringValue(turn.id)).filter(Boolean) }];
+      });
+      const confirmationId = createHash("sha256").update(`${turnFingerprint}:legacy-review`).digest("hex").slice(0, 12);
+      session.legacyRecovery.review = { confirmationId, originalStateHash: legacyInterviewHash(original), questions };
+      const rows = questions.map((question, index) => {
+        const answers = transcript.filter((turn) => turn.role === "user" && turn.questionNodeId === question.legacyQuestionId)
+          .map((turn) => stringValue(turn.content).slice(0, 300)).join("；");
+        return `${index + 1}. 原题：${question.text}\n旧回答（仅供核对，未迁移）：${answers || "暂无可靠关联回答"}\n恢复这道题请发送“确认恢复题目 ${confirmationId} ${index + 1}”。`;
+      });
+      const result: InterviewSessionTurnResult = {
+        action: "paused", sessionId: String(sessionId), phase: session.phase, status: "paused", sourceBinding: session.sourceBinding,
+        message: [
+          "历史记录仍在隔离区。请逐项核对原题与旧回答；旧评分不自动恢复，恢复后需要重新作答。",
+          rows.join("\n\n") || "未找到有原始助手记录支持的题目，不能自动恢复旧题。",
+          `也可发送“确认从头面试 ${confirmationId}”，保留旧记录并用原材料开始新一场。`,
+        ].join("\n\n"), readBackVerified: true,
+      };
+      await persistInterviewCheckpoint(principal, sessionId, session, agentState, turnFingerprint, result);
+      return result;
+    }
+  }
+  const pendingMaterial = session.pendingMaterialChange;
+  const confirmRebind = answer.trim().match(/^确认换绑\s+([a-f0-9]{12})$/);
+  if (confirmRebind && pendingMaterial?.confirmationId === confirmRebind[1] && (pendingMaterial.proposedMaterial || pendingMaterial.proposedResume)) {
+    const proposed = pendingMaterial.proposedMaterial;
+    const fresh = proposed ? await readVerifiedInterviewMaterial(principal, {
+      action: pendingMaterial.action, materialKind: proposed.sourceType === "jd" ? "jd" : "resume", reason: "确认时重新读取",
+      match: {
+        confidence: "high", score: 100, matchedBy: ["confirmed_id"],
+        record: { id: proposed.sourceId, kind: proposed.sourceType === "jd" ? "jd" : "resume", body: proposed.body },
+      },
+    }, input.requestKey || turnFingerprint) : undefined;
+    const freshResume = pendingMaterial.proposedResume
+      ? await readVerifiedOwnInterviewResume(principal, pendingMaterial.proposedResume.sourceId) : undefined;
+    const jdMatches = (!pendingMaterial.jdRequested && !proposed) || (proposed && fresh?.sourceType === "jd" && fresh.contentHash === proposed.contentHash && fresh.company === proposed.company && fresh.role === proposed.role);
+    const resumeMatches = !pendingMaterial.resumeRequested || (freshResume && freshResume.contentHash === pendingMaterial.proposedResume?.contentHash && freshResume.versionId === pendingMaterial.proposedResume?.versionId);
+    if (jdMatches && resumeMatches) {
+      const next = await startReviewedInterviewScene(principal, session, {
+        ...session.sourceBinding,
+        ...(fresh ? { jdId: Number(fresh.sourceId), jdText: fresh.body } : {}),
+        ...(freshResume ? {
+          resumeId: freshResume.sourceId, resumeTitle: freshResume.title, resumeVersion: freshResume.versionId,
+          resumeContentHash: freshResume.contentHash, cvText: freshResume.body,
+        } : {}),
+      }, "material_rebind", confirmRebind[1], options.signal, fresh?.company || session.company, fresh?.role || session.role);
+      const result: InterviewSessionTurnResult = {
+        action: "next", sessionId: String(sessionId), phase: next.phase, status: "active", question: next.currentQuestion?.text,
+        questionIndex: 0, sourceBinding: next.sourceBinding, readBackVerified: true,
+        message: `已按确认切换到 ${next.company} ${next.role} 并开始新一场面试。旧题目、回答和评分已保留，不计入本场。\n\n${next.currentQuestion?.text || ""}`,
+      };
+      await persistInterviewCheckpoint(principal, sessionId, next, agentState, turnFingerprint, result);
+      return result;
+    }
+    const result: InterviewSessionTurnResult = {
+      action: "paused", sessionId: String(sessionId), phase: session.phase, status: "paused", sourceBinding: session.sourceBinding,
+      message: "目标材料已变化或无法读取，未切换本场绑定。请重新选择材料并确认。", readBackVerified: true,
+    };
+    await persistInterviewCheckpoint(principal, sessionId, session, agentState, turnFingerprint, result);
+    return result;
+  }
+  if (/^(?:保留原材料|取消换绑|不要换绑)$/.test(answer.trim()) && pendingMaterial && !session.legacyRecovery?.requiresReview) {
+    session.status = pendingMaterial.previousStatus || "active";
+    session.pendingMaterialChange = undefined;
+    const result: InterviewSessionTurnResult = {
+      action: session.status === "paused" ? "paused" : "resumed", sessionId: String(sessionId), phase: session.phase,
+      status: session.status, question: session.currentFollowups.at(-1) || session.currentQuestion?.text, sourceBinding: session.sourceBinding,
+      message: "已保留原材料，当前题目和已答记录保持不变。", readBackVerified: true,
+    };
+    await persistInterviewCheckpoint(principal, sessionId, session, agentState, turnFingerprint, result);
+    return result;
+  }
+  const ownResumeReference = answer.match(/(?:CV|简历|resume)[\s-_]*(v\d+)\b/i);
+  const directOwnResumeChange = !!ownResumeReference && /切换|换成|改用|用|从头|重开|重新开始/i.test(answer);
+  const materialAction = directOwnResumeChange && !input.materialResolution
+    ? "auto_restart_interview" : input.materialResolution?.action || input.materialAction;
+  if (materialAction && materialAction !== "continue_current_session") {
+    const supporting = materialAction === "use_as_supporting_context" || materialAction === "keep_current_binding";
+    const supportingMaterial = input.materialResolution
+      ? await readVerifiedInterviewMaterial(principal, input.materialResolution, input.requestKey || turnFingerprint) : undefined;
+    const proposedResume = !supporting && ownResumeReference
+      ? await findVerifiedOwnInterviewResume(principal, ownResumeReference[1]) : undefined;
+    if (supporting && supportingMaterial) {
+      session.supportingMaterials = [
+        ...(session.supportingMaterials || []).filter((material) => !(material.sourceType === supportingMaterial.sourceType && material.sourceId === supportingMaterial.sourceId && material.contentHash === supportingMaterial.contentHash)),
+        supportingMaterial,
+      ];
+    }
+    if (!supporting || (materialAction === "use_as_supporting_context" && !supportingMaterial)) {
+      const previousStatus = session.pendingMaterialChange?.previousStatus || session.status;
+      session.status = "paused";
+      session.pendingMaterialChange = {
+        action: materialAction, requiresReview: true, previousStatus,
+        confirmationId: createHash("sha256").update(turnFingerprint).digest("hex").slice(0, 12),
+        proposedMaterial: supportingMaterial?.sourceType === "jd" && input.materialResolution?.match?.confidence === "high" ? supportingMaterial : undefined,
+        proposedResume, resumeRequested: !supporting && !!ownResumeReference,
+        jdRequested: !supporting && (input.materialResolution?.materialKind === "jd" || /\bJD|岗位描述|职位描述/i.test(answer)),
+      };
+    }
+    const pending = session.pendingMaterialChange;
     const message = supporting
-      ? `已收到补充材料指令。正式绑定仍为 ${session.company} ${session.role}，这条材料指令不会计入回答。请继续回答当前题：${session.currentFollowups.at(-1) || session.currentQuestion?.text || ""}`
-      : "材料切换请求已保留，本场面试已暂停。切换需要单独确认目标材料和新场边界，当前 JD、简历、已回答题目和评分保持原绑定。";
+      ? `${supportingMaterial ? `已保存补充参考“${supportingMaterial.title}”及来源快照。` : "尚未找到可核验的补充材料，未写入参考资料。"}正式绑定仍为 ${session.company} ${session.role}，这条材料指令不会计入回答。请继续回答当前题：${session.currentFollowups.at(-1) || session.currentQuestion?.text || ""}`
+      : (pending?.proposedMaterial || pending?.proposedResume) && (!pending.resumeRequested || pending.proposedResume) && (!pending.jdRequested || pending.proposedMaterial)
+        ? `已找到“${[pending.proposedMaterial?.title, pending.proposedResume ? `${pending.proposedResume.title} ${pending.proposedResume.versionId}` : undefined].filter(Boolean).join(" + ")}”。切换需要单独确认，并开始新一场面试，旧题目、回答和评分保留。发送“确认换绑 ${pending.confirmationId}”执行，或“保留原材料”继续本场。`
+        : "材料目标尚不能唯一核验，本场已暂停。请提供具体材料名称或编号；第三方参考简历不能作为本人简历绑定。原材料和题目保持不变，可发送“保留原材料”继续。";
     const result: InterviewSessionTurnResult = {
       sessionId: String(sessionId), action: supporting ? "material_context" : "paused",
       status: session.status, phase: session.phase, question: session.currentFollowups.at(-1) || session.currentQuestion?.text,
@@ -562,7 +705,7 @@ export async function handleInterviewSessionTurnForAgent(
   }
   if (session.legacyRecovery?.requiresReview || session.pendingMaterialChange?.requiresReview) {
     const message = session.legacyRecovery?.requiresReview
-      ? "本场历史面试记录需要复核，已暂停自动出题与评分。原题、材料和历史记录已隔离保留；复核完成前不会把这条消息当作面试答案。"
+      ? "本场历史面试记录需要复核，已暂停自动出题与评分。发送“查看历史面试复核”可核对原题和回答并选择恢复。原记录隔离保留，这条消息不会作为面试答案。"
       : "本场材料切换需要单独确认目标材料和新场边界，面试保持暂停。当前消息不会计入回答或评分，原材料绑定保持不变。";
     const result: InterviewSessionTurnResult = {
       sessionId: String(sessionId), action: "paused", status: "paused", phase: session.phase,
@@ -602,6 +745,7 @@ export async function handleInterviewSessionTurnForAgent(
       message = control === "cancel" ? "面试已取消，已记录的回答保留，不生成新的评分或复盘。" : buildInterviewSummary(session);
     } else {
       action = control;
+      if (control === "format") session.responseStyle = "question_only";
       message = control === "format"
         ? `后续只问一道问题，当前题目仍然是：${session.currentFollowups.at(-1) || session.currentQuestion?.text || "当前暂无题目"}`
         : `当前题目：${session.currentFollowups.at(-1) || session.currentQuestion?.text || "当前暂无题目"}\n可以按“背景 → 你的职责和行动 → 真实结果”回答，缺少数字时直接说明，不要编造经历。`;
@@ -761,7 +905,7 @@ export async function startInterviewSessionForAgent(
 
 export async function continueDurableInterviewForAgent(
   principal: ExecutionPrincipal,
-  input: { conversationId: number; content: string; requestKey: string; materialAction?: InterviewRebindAction },
+  input: { conversationId: number; content: string; requestKey: string; materialAction?: InterviewRebindAction; materialResolution?: InterviewRebindResolution },
   options: { signal?: AbortSignal } = {},
 ): Promise<InterviewSessionTurnResult | undefined> {
   const row = await getDataRepositories().sessions.get(input.conversationId, principal.userId);
@@ -770,6 +914,7 @@ export async function continueDurableInterviewForAgent(
     return handleInterviewSessionTurnForAgent(principal, {
       sessionId: String(input.conversationId), answer: input.content, requestKey: input.requestKey,
       materialAction: input.materialAction,
+      materialResolution: input.materialResolution,
     }, options);
   }
   const state = parseJsonUnknownObject(row.interview_state_json);
@@ -784,19 +929,20 @@ export async function continueDurableInterviewForAgent(
     }) as DurableInterviewSession;
     session.status = "paused";
     session.snapshotId = stringValue(snapshot.snapshotId);
+    session.createdAt = stringValue(snapshot.createdAt) || session.createdAt;
+    session.mode = stringValue(snapshot.mode);
+    session.difficulty = ["normal", "hard", "pressure"].includes(stringValue(snapshot.difficulty))
+      ? snapshot.difficulty as InterviewSession["difficulty"] : "normal";
+    session.focusAreas = arrayValue(snapshot.focusAreas).map(String);
+    session.allowFollowUps = snapshot.allowFollowUps !== false;
     session.legacyRecovery = {
       requiresReview: true, originalState: state,
       reason: "Legacy questionGraph was inferred from messages and cannot establish verified question/answer provenance.",
     };
-    const current = arrayValue(state.questionGraph).map(objectValue).find((question) => question.id === state.currentQuestionId);
-    if (current?.question) {
-      session.currentQuestion = { id: stringValue(current.id), phase: "intro", text: stringValue(current.question), type: "tech" };
-      session.questions = [session.currentQuestion];
-    }
     const result: InterviewSessionTurnResult = {
       action: "paused", sessionId: String(input.conversationId), status: "paused", phase: session.phase,
       question: session.currentQuestion?.text, sourceBinding: session.sourceBinding,
-      message: "本场历史面试记录需要复核，已暂停自动出题与评分。原题、材料和历史记录已隔离保留，未迁移为新的评分事实。",
+      message: "本场历史面试记录需要复核，已暂停自动出题与评分。发送“查看历史面试复核”可逐项核对并恢复；原题、材料和历史记录隔离保留，未迁移为新的评分事实。",
       readBackVerified: true,
     };
     const fingerprint = createHash("sha256").update(input.requestKey).digest("hex");
@@ -822,6 +968,8 @@ async function generateSessionQuestion(
       role: session.role,
       jdText: session.sourceBinding?.jdText,
       cvText: session.sourceBinding?.cvText,
+      mode: sessionCoachMode(session),
+      difficulty: sessionBankDifficulty(session),
       count: 1,
       categories: categoriesForPhase(session.phase),
       recentQuestions: [
@@ -830,6 +978,8 @@ async function generateSessionQuestion(
       ],
       additionalContext: [
         getPhasePrompt(session),
+        formatInterviewConfiguration(session),
+        formatSupportingInterviewMaterials(session),
         session.sourceBinding?.memoryContext ? `长期记忆：${session.sourceBinding.memoryContext}` : "",
         session.answers.slice(-3).map((item) => `Q: ${item.question}\nA: ${item.answer}\n评分: ${item.score ?? "未评分"}`).join("\n\n"),
       ].filter(Boolean).join("\n\n"),
@@ -861,9 +1011,14 @@ async function generateFollowUpQuestion(
       role: session.role,
       jdText: session.sourceBinding?.jdText,
       cvText: session.sourceBinding?.cvText,
+      mode: sessionCoachMode(session),
+      difficulty: sessionBankDifficulty(session),
       count: 1,
       categories: categoriesForPhase(session.phase),
-      additionalContext: `原题：${session.currentQuestion?.text || ""}\n候选人回答：${answer}${gap ? `\n内容缺口：${gap}` : ""}\n只提出一个针对该缺口补充事实、数字或结果的追问。`,
+      additionalContext: [
+        formatInterviewConfiguration(session), formatSupportingInterviewMaterials(session),
+        `原题：${session.currentQuestion?.text || ""}\n候选人回答：${answer}${gap ? `\n内容缺口：${gap}` : ""}\n只提出一个针对该缺口补充事实、数字或结果的追问。`,
+      ].filter(Boolean).join("\n\n"),
     }, { signal });
     return generated.questions[0]?.question || "能否结合一个具体项目，把你的行动和结果再展开一下？";
   } catch (error) {
@@ -887,7 +1042,7 @@ async function scoreSessionAnswer(
     const result = await scoreInterviewAnswerForAgent(principal, {
       question: session.currentQuestion?.text || "模拟面试回答",
       answer,
-      mode: session.phase === "behavioral" ? "behavioral" : "structured-sme",
+      mode: sessionCoachMode(session),
       context: formatSessionBinding(session),
       sessionId,
       family: familyForRole(session.role),
@@ -935,6 +1090,9 @@ async function persistInterviewCheckpoint(
 ): Promise<void> {
   const expectedVersion = Math.max(0, Number(session.checkpointVersion) || 0);
   session.checkpointVersion = Math.max(0, Number(session.checkpointVersion) || 0) + 1;
+  if (session.responseStyle === "question_only" && ["next", "followup", "resumed"].includes(result.action || "") && result.question) {
+    result.message = result.question;
+  }
   result.evidence = interviewStateEvidence(sessionId, session, result.action || "started", turnFingerprint);
   const updated = await getDataRepositories().sessions.update(sessionId, principal.userId, {
     interviewState: session,
@@ -957,6 +1115,101 @@ async function persistVerifiedInterviewWeakness(principal: ExecutionPrincipal, s
   const answer = session.answers.at(-1);
   if (!answer?.rubric) return;
   await persistInterviewWeaknessEvents(principal, answer.rubric.bands, sessionSurrogateFor(String(sessionId), answer.question, answer.answer), familyForRole(session.role));
+}
+
+async function readVerifiedInterviewMaterial(
+  principal: ExecutionPrincipal,
+  resolution: InterviewRebindResolution,
+  sourceRequestId: string,
+): Promise<InterviewSupportingMaterial | undefined> {
+  const record = resolution.match?.record;
+  const id = numericValue(record?.id);
+  if (!record || !id || resolution.match?.confidence !== "high") return undefined;
+  const repositories = getDataRepositories();
+  const row = record.kind === "jd"
+    ? await repositories.jds.get(id, principal.userId)
+    : await repositories.referenceResumes.get(id, principal.userId);
+  if (!row) return undefined;
+  const value = row as unknown as Record<string, unknown>;
+  const body = record.kind === "jd" ? stringValue(value.body) : stringValue(value.raw_text);
+  if (!body || (record.kind === "jd" && record.body && record.body.trim() !== body)) return undefined;
+  return {
+    sourceId: String(id), sourceType: record.kind === "jd" ? "jd" : "reference_resume",
+    title: record.kind === "jd" ? `${stringValue(value.company)} ${stringValue(value.role)} JD`.trim() : stringValue(value.name) || "参考简历",
+    body, contentHash: createHash("sha256").update(body).digest("hex"), addedAt: new Date().toISOString(), sourceRequestId,
+    company: record.kind === "jd" ? stringValue(value.company) : undefined,
+    role: record.kind === "jd" ? stringValue(value.role) : undefined,
+  };
+}
+
+function formatSupportingInterviewMaterials(session: DurableInterviewSession): string {
+  return (session.supportingMaterials || []).map((material) =>
+    `补充参考，不是候选人经历；不替换正式材料绑定 [${material.sourceType} #${material.sourceId}] ${material.title}\n${material.body.slice(0, 1000)}`,
+  ).join("\n\n");
+}
+
+async function findVerifiedOwnInterviewResume(principal: ExecutionPrincipal, versionId: string): Promise<VerifiedInterviewResume | undefined> {
+  const candidates = (await getDataRepositories().resumeDocuments.list(principal.userId))
+    .filter((document) => document.version_id.toLowerCase() === versionId.toLowerCase());
+  if (candidates.length !== 1) return undefined;
+  return readVerifiedOwnInterviewResume(principal, candidates[0].id);
+}
+
+async function readVerifiedOwnInterviewResume(principal: ExecutionPrincipal, id: string): Promise<VerifiedInterviewResume | undefined> {
+  const document = await getDataRepositories().resumeDocuments.get(id, principal.userId);
+  if (!document || (document.user_id && document.user_id !== principal.userId) || parseJsonUnknownObject(document.integrity_json).status !== "valid") return undefined;
+  const sections = typeof document.sections_json === "string" ? document.sections_json : JSON.stringify(document.sections_json);
+  let parsed: unknown;
+  try { parsed = JSON.parse(sections); } catch { return undefined; }
+  if (!Array.isArray(parsed)) return undefined;
+  if (stableResumeHash(canonicalResumeSectionsJson(parsed)) !== document.content_hash && stableResumeHash(sections) !== document.content_hash) return undefined;
+  const body = arrayValue(parsed).map(objectValue).filter((section) => stringValue(section.content))
+    .map((section) => `【${stringValue(section.title) || stringValue(section.id)}】\n${stringValue(section.content)}`).join("\n\n");
+  if (!body) return undefined;
+  return { sourceId: document.id, versionId: document.version_id, title: document.label, body, contentHash: document.content_hash };
+}
+
+async function startReviewedInterviewScene(
+  principal: ExecutionPrincipal,
+  previous: DurableInterviewSession,
+  sourceBinding: InterviewSession["sourceBinding"],
+  reason: "material_rebind" | "legacy_review",
+  confirmationId: string,
+  signal?: AbortSignal,
+  company = previous.company,
+  role = previous.role,
+  reviewedQuestion?: { legacyQuestionId: string; text: string; legacyTurnIds: string[] },
+): Promise<DurableInterviewSession> {
+  const archivedState = structuredClone(previous) as unknown as Record<string, unknown>;
+  delete archivedState.archivedInterviews;
+  const next = createInterviewSession(company, role, sourceBinding) as DurableInterviewSession;
+  next.checkpointVersion = previous.checkpointVersion;
+  next.snapshotId = `plan_${globalThis.crypto.randomUUID()}`;
+  next.mode = previous.mode;
+  next.difficulty = previous.difficulty;
+  next.focus = previous.focus;
+  next.focusAreas = previous.focusAreas;
+  next.allowFollowUps = previous.allowFollowUps;
+  next.responseStyle = previous.responseStyle;
+  next.archivedInterviews = [...(previous.archivedInterviews || []), {
+    engineSessionId: previous.id, archivedAt: new Date().toISOString(), reason, state: archivedState,
+  }];
+  next.rebindHistory = [...(previous.rebindHistory || []), {
+    from: { jdId: previous.sourceBinding?.jdId, resumeId: previous.sourceBinding?.resumeId === undefined ? undefined : String(previous.sourceBinding.resumeId) },
+    to: { jdId: sourceBinding?.jdId, resumeId: sourceBinding?.resumeId === undefined ? undefined : String(sourceBinding.resumeId) },
+    reason, createdAt: new Date().toISOString(), fromEngineSessionId: previous.id, toEngineSessionId: next.id, confirmationId,
+  }];
+  const question = reviewedQuestion?.text || await generateSessionQuestion(principal, next, signal);
+  next.currentQuestion = {
+    id: createQuestionId(next), phase: "intro", text: question, type: "tech", createdAt: next.createdAt,
+    ...(reviewedQuestion ? { reviewedSource: { legacyQuestionId: reviewedQuestion.legacyQuestionId, legacyTurnIds: reviewedQuestion.legacyTurnIds, confirmationId } } : {}),
+  };
+  next.questions = [next.currentQuestion];
+  return next;
+}
+
+function legacyInterviewHash(value: Record<string, unknown>): string {
+  return createHash("sha256").update(canonicalInterviewValue(value) || "").digest("hex");
 }
 
 async function persistInterviewWeaknessEvents(principal: ExecutionPrincipal, bands: Record<string, number>, sessionSurrogate: string, family: string): Promise<void> {
@@ -1044,6 +1297,10 @@ function parseInterviewSession(value: unknown): DurableInterviewSession | null {
     focus: stringValue(parsed.focus) || undefined,
     focusAreas: arrayValue(parsed.focusAreas).map(String),
     allowFollowUps: parsed.allowFollowUps !== false,
+    responseStyle: parsed.responseStyle === "question_only" ? "question_only" : undefined,
+    supportingMaterials: parsed.supportingMaterials === undefined ? undefined : arrayValue(parsed.supportingMaterials) as InterviewSupportingMaterial[],
+    archivedInterviews: parsed.archivedInterviews === undefined ? undefined : arrayValue(parsed.archivedInterviews) as InterviewSession["archivedInterviews"],
+    rebindHistory: parsed.rebindHistory === undefined ? undefined : arrayValue(parsed.rebindHistory) as InterviewSession["rebindHistory"],
     legacyRecovery: Object.keys(parseJsonUnknownObject(parsed.legacyRecovery)).length
       ? parseJsonUnknownObject(parsed.legacyRecovery) as DurableInterviewSession["legacyRecovery"] : undefined,
     pendingMaterialChange: Object.keys(parseJsonUnknownObject(parsed.pendingMaterialChange)).length
@@ -1074,13 +1331,37 @@ function fallbackSessionQuestion(phase: InterviewPhase): string {
   return "请选择一个最相关的项目，说明你的判断、行动和可量化结果。";
 }
 
+function sessionCoachMode(session: DurableInterviewSession): CoachMode {
+  if (session.mode && session.mode in COACH_MODES) return session.mode as CoachMode;
+  return session.phase === "behavioral" ? "behavioral" : "structured-sme";
+}
+
+function sessionBankDifficulty(session: DurableInterviewSession): string {
+  if (session.difficulty === "staff" || session.difficulty === "junior") return session.difficulty;
+  return ["hard", "pressure", "senior"].includes(session.difficulty || "") ? "senior" : "mid";
+}
+
+function formatInterviewConfiguration(session: DurableInterviewSession): string {
+  return [
+    `冻结模式：${COACH_MODES[sessionCoachMode(session)].label}`,
+    `冻结难度：${session.difficulty || "normal"}`,
+    `练习重点：${[session.focus, ...(session.focusAreas || [])].filter(Boolean).join("、") || "岗位相关能力"}`,
+    `允许追问：${session.allowFollowUps === false ? "否" : "是"}`,
+    session.responseStyle === "question_only" ? "交互格式：每轮只输出一道问题" : "",
+    session.difficulty === "pressure" ? "压力模式：提高取舍、风险与证据追问强度，保持尊重；不得用羞辱或编造经历制造压力。" : "",
+    "评分仍按原锚定量表和回答中的真实证据判定，练习配置不能放宽事实或评分门禁。",
+  ].filter(Boolean).join("\n");
+}
+
 function formatSessionBinding(session: DurableInterviewSession): string {
   return [
     `公司：${session.company}`,
     `岗位：${session.role}`,
+    formatInterviewConfiguration(session),
     session.sourceBinding?.jdText ? `JD：${session.sourceBinding.jdText.slice(0, 1800)}` : "",
     session.sourceBinding?.cvText ? `简历：${session.sourceBinding.cvText.slice(0, 1800)}` : "",
     session.sourceBinding?.memoryContext ? `长期记忆：${session.sourceBinding.memoryContext.slice(0, 1200)}` : "",
+    formatSupportingInterviewMaterials(session),
   ].filter(Boolean).join("\n");
 }
 
