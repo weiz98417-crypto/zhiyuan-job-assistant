@@ -15,7 +15,7 @@ import type { ExecutionPrincipal } from "@/lib/agent/runtime/durable-agent-run";
 import { getDataRepositories } from "@/lib/data-repositories";
 import { getPostgresPool, withPostgresClient } from "@/lib/postgres";
 import { assertMemoryExtractionGateOpen, assertMemoryGateOpen, assertMemoryWriteGateOpen } from "@/lib/memory/runtime-gates";
-import { memoryFactSuppressionSql } from "@/lib/memory/erasure-sql";
+import { memoryFactSuppressionSql, memorySourcePresenceSql } from "@/lib/memory/erasure-sql";
 
 export type FactDecision = "ADD" | "UPDATE" | "DELETE" | "NOOP";
 
@@ -507,7 +507,7 @@ export async function listFactProvenance(
      FROM memory_facts f
      LEFT JOIN memory_episodes e ON e.id = f.source_episode_id AND e.user_id = f.user_id
      LEFT JOIN memory_entity_facts mef ON mef.fact_id = f.id
-     LEFT JOIN memory_entities me ON me.id = mef.entity_id AND me.user_id = f.user_id
+     LEFT JOIN memory_entities me ON me.id = mef.entity_id AND me.user_id = f.user_id AND me.partition = f.partition
      WHERE f.id = $1 AND f.user_id = $2 AND f.partition = ANY($3::text[])
        AND NOT ${memoryFactSuppressionSql("f", "e")}
      GROUP BY f.id, e.source_type, e.source_id`,
@@ -551,16 +551,11 @@ export async function listFactsByEpisode(
      FROM memory_facts f
      JOIN memory_episodes e ON e.id = f.source_episode_id AND e.user_id = f.user_id
      LEFT JOIN memory_entity_facts mef ON mef.fact_id = f.id
-     LEFT JOIN memory_entities me ON me.id = mef.entity_id AND me.user_id = f.user_id
+     LEFT JOIN memory_entities me ON me.id = mef.entity_id AND me.user_id = f.user_id AND me.partition = f.partition
      WHERE f.source_episode_id = $1 AND f.user_id = $2
        AND f.partition = ANY($3::text[])
-       AND NOT EXISTS (
-         SELECT 1
-         FROM memory_erasure_suppressions s
-         JOIN memory_erasure_requests r ON r.id = s.request_id AND r.user_id = s.user_id
-         WHERE s.user_id = f.user_id AND s.lifted_at IS NULL
-           AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(r.scope_json->'factIds') AS erased_fact(value) WHERE erased_fact.value = f.id::text)
-       )
+       AND ${memorySourcePresenceSql("e")}
+       AND NOT ${memoryFactSuppressionSql("f", "e")}
      GROUP BY f.id, e.source_type, e.source_id
      ORDER BY f.created_at, f.id`,
     [episodeId, principal.userId, readablePartitions],
@@ -647,7 +642,7 @@ export async function searchFactsHybrid(
               ) DESC) AS rank
        FROM memory_entity_facts mef
        JOIN memory_entities me ON me.id = mef.entity_id AND me.user_id = $2
-       JOIN governed_facts ef ON ef.id = mef.fact_id
+       JOIN governed_facts ef ON ef.id = mef.fact_id AND ef.partition = me.partition
        WHERE to_tsvector('simple', COALESCE(me.entity_key, '') || ' ' || COALESCE(me.summary, ''))
            @@ plainto_tsquery('simple', $3)
      ),

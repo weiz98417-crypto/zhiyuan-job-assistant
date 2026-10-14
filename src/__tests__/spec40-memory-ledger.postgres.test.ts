@@ -2,10 +2,10 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { Pool } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { admitMemory, resolveMemoryCandidate, type MemoryAdmissionInput } from "@/lib/memory/admission";
+import { admitMemory, listActiveMemoryFacts, resolveMemoryCandidate, type MemoryAdmissionInput } from "@/lib/memory/admission";
 import { correctMemoryFact } from "@/lib/memory/correction";
 import { getPostgresPool } from "@/lib/postgres";
-import { getReadableMemoryPartitions, getProfileBlocks, listOpenFacts, listFactProvenance, searchFactsHybrid, recordEpisode, recordFact, upsertProfileBlock } from "@/lib/memory/fact-ledger";
+import { getReadableMemoryPartitions, getProfileBlocks, listOpenFacts, listFactsByEpisode, listFactProvenance, searchFactsHybrid, recordEpisode, recordFact, upsertProfileBlock } from "@/lib/memory/fact-ledger";
 import { memoryContentHash, memoryTargetKey } from "@/lib/memory/erasure";
 
 const connectionString = process.env.SPEC40_MEMORY_DATABASE_URL;
@@ -246,6 +246,72 @@ describe.skipIf(!connectionString)("Spec 40 memory ledger with independent Postg
   it("does not retrieve legacy facts lacking an attributable source episode", async () => {
     await independent.query("INSERT INTO memory_facts (user_id,partition,subject,predicate,object_json,canonical_text) VALUES ($1,'private','job_search','salary_floor','{\"salary_floor\":30000}','未知来源薪资底线')", [userId]);
     expect(await searchFactsHybrid({ userId }, { queryText: "薪资底线", queryEmbedding: null, agentId: "profile" })).toEqual([]);
+  });
+
+  it.each(["content", "source_target"])("keeps %s suppressed facts out of the management list and episode history without changing stored evidence", async (suppression) => {
+    const text = "我现在只考虑上海岗位";
+    const sourceId = randomUUID();
+    const episodeId = await recordEpisode({ userId }, { sourceType: "user_explicit_memory", sourceId, content: { fact: text } });
+    const factId = (await recordFact({ userId }, { partition: "private", subject: "job_search", predicate: "target_city",
+      object: { city: "上海" }, canonicalText: text, confidence: 1, importance: 0.8 },
+    { episodeId, agentId: "profile", useLlmDecision: false }))[0].factId;
+    expect((await listActiveMemoryFacts(userId)).map(fact => fact.id)).toEqual([factId]);
+    expect((await listFactsByEpisode({ userId }, episodeId)).map(fact => fact.factId)).toEqual([factId]);
+    const request = (await independent.query("INSERT INTO memory_erasure_requests(user_id,target_type,target_id,target_hash,status,scope_json) VALUES($1,'fact',$2,'fixture','confirmed','{}'::jsonb) RETURNING id", [userId, String(factId)])).rows[0];
+    await independent.query("INSERT INTO memory_erasure_suppressions(user_id,target_hash,target_key,source_type,source_id,request_id) VALUES($1,$2,$3,'user_explicit_memory',$4,$5)",
+      [userId, suppression === "content" ? memoryContentHash(text) : "unrelated", suppression === "source_target" ? memoryTargetKey("job_search", "target_city") : null, sourceId, request.id]);
+    const stored = await state();
+    expect(await listActiveMemoryFacts(userId)).toEqual([]);
+    expect(await listFactsByEpisode({ userId }, episodeId)).toEqual([]);
+    expect(await state()).toEqual(stored);
+  });
+
+  it("never exposes foreign or unattributable source episodes as owned active facts and preserves legitimate invalid history", async () => {
+    const candidate = await propose("我希望建议简短");
+    const original = (await resolveMemoryCandidate(userId, candidate.id, "confirm")).candidate.factId!;
+    const oldEpisode = Number((await independent.query("SELECT source_episode_id FROM memory_facts WHERE id=$1", [original])).rows[0].source_episode_id);
+    const replacement = (await correctMemoryFact({ userId }, { targetFactId: original, canonicalText: "我希望建议详细", sourceText: "更正偏好" }))[0].factId;
+    const foreignOwner = "foreign-source-" + randomUUID();
+    owners.push(foreignOwner);
+    await independent.query("INSERT INTO users(id,username,password_hash,display_name,status) VALUES($1,$1,'fixture','Synthetic foreign source','active')", [foreignOwner]);
+    const foreignEpisode = (await independent.query("INSERT INTO memory_episodes(user_id,source_type,source_id,content_json) VALUES($1,'user_explicit_memory','FOREIGN_ONLY_SOURCE','{}'::jsonb) RETURNING id", [foreignOwner])).rows[0].id;
+    await independent.query("INSERT INTO memory_facts(user_id,partition,subject,predicate,object_json,canonical_text,source_episode_id) VALUES($1,'private','job_search','foreign_source','{}'::jsonb,'FOREIGN_ONLY_SOURCE',$2),($1,'private','job_search','missing_source','{}'::jsonb,'ORPHAN_ONLY_SOURCE',NULL)", [userId, foreignEpisode]);
+    const stable = await state();
+    expect((await listActiveMemoryFacts(userId)).map(fact => fact.id)).toEqual([replacement]);
+    expect(await listFactsByEpisode({ userId }, Number(foreignEpisode))).toEqual([]);
+    const history = await listFactsByEpisode({ userId }, oldEpisode);
+    expect(history).toHaveLength(1);
+    expect(history[0]).toMatchObject({ factId: original, canonicalText: "我希望建议简短", supersededBy: replacement });
+    expect(history[0].invalidAt).toBeInstanceOf(Date);
+    await independent.query("UPDATE memory_partitions SET readable_agents=ARRAY['profile'] WHERE user_id=$1", [userId]);
+    expect(await listActiveMemoryFacts(userId)).toEqual([]);
+    expect(await listFactsByEpisode({ userId }, oldEpisode)).toEqual([]);
+    expect((await state()).filter(entry => entry.table !== "memory_partitions")).toEqual(stable.filter(entry => entry.table !== "memory_partitions"));
+  });
+
+  it.each(["source_type", "source_id"])("rejects legacy %s containing only JavaScript whitespace at management and history reads", async (column) => {
+    const candidate = await propose("我希望建议简短");
+    const factId = (await resolveMemoryCandidate(userId, candidate.id, "confirm")).candidate.factId!;
+    const episodeId = Number((await independent.query("SELECT source_episode_id FROM memory_facts WHERE id=$1", [factId])).rows[0].source_episode_id);
+    await independent.query("UPDATE memory_episodes SET " + column + "=$2 WHERE id=$1 AND user_id=$3", [episodeId, "\t\n\u00a0\u2003\ufeff", userId]);
+    const stable = await state();
+    expect(await listActiveMemoryFacts(userId)).toEqual([]);
+    expect(await listFactsByEpisode({ userId }, episodeId)).toEqual([]);
+    expect(await state()).toEqual(stable);
+  });
+
+  it("keeps private entity keys and ranking signals out of a readable core fact with a corrupt cross-partition link", async () => {
+    const candidate = await propose("我希望建议简短");
+    const factId = (await resolveMemoryCandidate(userId, candidate.id, "confirm")).candidate.factId!;
+    const episodeId = Number((await independent.query("SELECT source_episode_id FROM memory_facts WHERE id=$1", [factId])).rows[0].source_episode_id);
+    const entity = (await independent.query("INSERT INTO memory_entities(user_id,partition,entity_key,summary) VALUES($1,'private','PRIVATE_ONLY_KEY','PRIVATE_ONLY_KEY') RETURNING id", [userId])).rows[0];
+    await independent.query("INSERT INTO memory_entity_facts(entity_id,fact_id) VALUES($1,$2)", [entity.id, factId]);
+    await independent.query("UPDATE memory_partitions SET readable_agents=ARRAY['user','profile','evaluate'] WHERE user_id=$1 AND partition='core'", [userId]);
+    const stable = await state();
+    expect((await listFactsByEpisode({ userId }, episodeId, "evaluate"))[0].entityKeys).not.toContain("PRIVATE_ONLY_KEY");
+    expect((await listFactProvenance({ userId }, factId, "evaluate"))!.entityKeys).not.toContain("PRIVATE_ONLY_KEY");
+    expect(await searchFactsHybrid({ userId }, { queryText: "PRIVATE_ONLY_KEY", queryEmbedding: null, agentId: "evaluate" })).toEqual([]);
+    expect(await state()).toEqual(stable);
   });
 
   it("retrieves Chinese salary facts without embeddings while preserving source, partition, owner and erasure boundaries", async () => {

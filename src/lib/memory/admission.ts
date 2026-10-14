@@ -2,6 +2,7 @@ import { getPostgresPool } from "@/lib/postgres";
 import { getReadableMemoryPartitions, recordEpisode, recordFact, type FactCandidate, type RecordedFact } from "@/lib/memory/fact-ledger";
 import { hasExplicitMemoryErasureIntent, isMemorySuppressed, liftMemorySuppression } from "@/lib/memory/erasure";
 import { assertMemoryExtractionGateOpen, assertMemoryGateOpen } from "@/lib/memory/runtime-gates";
+import { memoryFactSuppressionSql, memorySourcePresenceSql } from "@/lib/memory/erasure-sql";
 
 export { hasExplicitMemoryErasureIntent } from "@/lib/memory/erasure";
 
@@ -262,16 +263,11 @@ export async function listActiveMemoryFacts(userId: string, agentId = "user"): P
             f.confidence, f.importance, f.valid_at,
             e.source_type, e.source_id
      FROM memory_facts f
-     LEFT JOIN memory_episodes e ON e.id = f.source_episode_id
+     JOIN memory_episodes e ON e.id = f.source_episode_id AND e.user_id = f.user_id
      WHERE f.user_id = $1 AND f.invalid_at IS NULL
        AND f.partition = ANY($2::text[])
-       AND NOT EXISTS (
-         SELECT 1
-         FROM memory_erasure_suppressions s
-         JOIN memory_erasure_requests r ON r.id = s.request_id AND r.user_id = s.user_id
-         WHERE s.user_id = f.user_id AND s.lifted_at IS NULL
-           AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(r.scope_json->'factIds') AS erased_fact(value) WHERE erased_fact.value = f.id::text)
-       )
+       AND ${memorySourcePresenceSql("e")}
+       AND NOT ${memoryFactSuppressionSql("f", "e")}
      ORDER BY f.valid_at DESC, f.importance DESC`,
     [userId, readablePartitions],
   );

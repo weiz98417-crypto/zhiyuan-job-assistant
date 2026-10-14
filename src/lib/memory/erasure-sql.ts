@@ -1,5 +1,10 @@
 const MEMORY_TRIM_CHARACTERS = "U&'\\0009\\000A\\000B\\000C\\000D\\0020\\00A0\\1680\\2000\\2001\\2002\\2003\\2004\\2005\\2006\\2007\\2008\\2009\\200A\\2028\\2029\\202F\\205F\\3000\\FEFF'";
 
+export function memorySourcePresenceSql(episodeAlias: "e" | "pe"): string {
+  return `length(btrim(${episodeAlias}.source_type, ${MEMORY_TRIM_CHARACTERS})) > 0
+    AND length(btrim(${episodeAlias}.source_id, ${MEMORY_TRIM_CHARACTERS})) > 0`;
+}
+
 export function memoryFactSuppressionSql(factAlias: "f" | "pf", episodeAlias: "e" | "pe"): string {
   const normalizedText = `btrim(${factAlias}.canonical_text, ${MEMORY_TRIM_CHARACTERS})`;
   const normalizedSubject = `lower(btrim(${factAlias}.subject, ${MEMORY_TRIM_CHARACTERS}) COLLATE "und-x-icu")`;

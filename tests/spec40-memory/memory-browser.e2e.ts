@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import pg from "pg";
 import { test, type Browser } from "@e2e-dev/web";
 import { credentials, expect, type Screen } from "e2e";
@@ -269,4 +269,39 @@ test("BROWSER-MOCK unavailable memory is explicit, blocks writes and real retry 
   }
   expect(await independentReadback(user, "unavailable-real-retry")).toEqual(baseline);
   writeImmutableInterviewEvidence(path.join(evidenceDirectory, "complete-" + randomUUID() + ".json"), { recovered: true, pending: 2, active: 7, realRetryStatus: 200 });
+});
+
+test("FAULT real memory page excludes erased targets and a foreign source while preserving four unrelated facts and both candidates", async ({ app, screen, browser }) => {
+  const user = fixture.users.suppression as FixtureUser;
+  await login(app, screen, browser, "suppression");
+  verifyBaselineSources(user, await independentReadback(user, "suppression-before"));
+  const client = new pg.Client({ connectionString: fixture.connectionString });
+  await client.connect();
+  try {
+    for (const [index, mode] of [[0, "content"], [1, "source_target"]] as const) {
+      const fact = user.facts[index];
+      const request = (await client.query("INSERT INTO memory_erasure_requests(user_id,target_type,target_id,target_hash,status,scope_json) VALUES($1,'fact',$2,'fixture','confirmed','{}'::jsonb) RETURNING id", [user.id, String(fact.id)])).rows[0];
+      const targetKey = createHash("sha256").update(JSON.stringify(["job_search", fact.predicate])).digest("hex");
+      await client.query("INSERT INTO memory_erasure_suppressions(user_id,target_hash,target_key,source_type,source_id,request_id) VALUES($1,$2,$3,'user_explicit_memory',$4,$5)",
+        [user.id, mode === "content" ? memoryFixtureTextDigest(fact.canonicalText) : "unrelated-hash", mode === "source_target" ? targetKey : null, fact.sourceId, request.id]);
+    }
+    const foreign = fixture.users.correction as FixtureUser;
+    const foreignEpisode = (await client.query("SELECT source_episode_id FROM memory_facts WHERE id=$1 AND user_id=$2", [foreign.facts[1].id, foreign.id])).rows[0].source_episode_id;
+    await client.query("UPDATE memory_facts SET source_episode_id=$3 WHERE id=$1 AND user_id=$2", [user.facts[2].id, user.id, foreignEpisode]);
+  } finally { await client.end(); }
+  const injected = await independentReadback(user, "suppression-injected");
+  writeImmutableInterviewEvidence(path.join(evidenceDirectory, "suppression-injection.json"), {
+    level: "FAULT", contentFactId: user.facts[0].id, sourceTargetFactId: user.facts[1].id,
+    foreignEpisodeFactId: user.facts[2].id, scope: "synthetic PostgreSQL rows only; no model, HTTP, or erasure flow mock",
+  });
+  await browser.reload();
+  await expect(screen.getByRole("heading", "已生效事实（4）")).toBeVisible();
+  await expect(screen.getByRole("heading", "待确认候选（2）")).toBeVisible();
+  for (const fact of user.facts.slice(0, 3)) await expect(screen.getByRole("article").filter({ hasText: fact.canonicalText })).toHaveCount(0);
+  for (const fact of user.facts.slice(3)) await expect(screen.getByRole("article").filter({ hasText: fact.canonicalText })).toContainText("来源：user_explicit_memory / " + fact.sourceId);
+  const restored = await request<{ success: boolean; data: { facts: Array<{ id: number }>; candidates: Array<{ id: number }> } }>(browser, "/api/memory/candidates");
+  expect(restored.status).toBe(200);
+  expect(restored.body.data.facts.map(fact => fact.id).sort((left, right) => left - right)).toEqual(user.facts.slice(3).map(fact => fact.id).sort((left, right) => left - right));
+  expect(restored.body.data.candidates.map(candidate => candidate.id).sort((left, right) => left - right)).toEqual(user.candidates.map(candidate => candidate.id).sort((left, right) => left - right));
+  expect(await independentReadback(user, "suppression-after-read")).toEqual(injected);
 });

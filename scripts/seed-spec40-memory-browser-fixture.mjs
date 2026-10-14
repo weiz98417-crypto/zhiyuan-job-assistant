@@ -67,7 +67,7 @@ try {
   await client.query("UPDATE memory_runtime_gates SET state='open',reason='isolated synthetic browser fixture',updated_at=NOW() WHERE gate_name IN ('read','write','extract')");
   const gates = await client.query("SELECT gate_name,state FROM memory_runtime_gates ORDER BY gate_name");
   if (gates.rowCount !== 3 || gates.rows.some((gate) => gate.state !== "open")) throw new Error("Synthetic memory fixture gates are not open");
-  for (const key of ["correction", "candidate", "unavailable"]) {
+  for (const key of ["correction", "candidate", "unavailable", "suppression"]) {
     const user = { id: "spec40-memory-browser-" + key + "-" + fixtureIdentity,
       username: "spec40Memory" + key + fixtureIdentity, password, facts: [], candidates: [] };
     users[key] = user;
@@ -92,7 +92,7 @@ try {
       const stored = (await client.query("SELECT canonical_text FROM memory_facts WHERE id=$1 AND user_id=$2", [fact.id, user.id])).rows[0];
       if (memoryFixtureTextDigest(stored.canonical_text) !== memoryFixtureTextDigest(canonicalText)) throw new Error("Seeded fact source digest mismatch");
       user.facts.push({ id: Number(fact.id), canonicalText, partition, predicate, sourceId,
-        semanticId: "MEMORY-" + key + "-FACT-" + index + "-v2", fixtureVersion: 2, ownerAlias: key,
+        semanticId: "MEMORY-" + key + "-FACT-" + index + "-v3", fixtureVersion: 3, ownerAlias: key,
         sourceText: canonicalText, sourceSha256: memoryFixtureTextDigest(canonicalText), createdAt, clock, caseIds });
     }
     for (const [index, canonicalText, sensitivity] of [[0, "我期望30K到40K", "job_sensitive"], [1, "SYNTHETIC_CANDIDATE：我希望每周复盘求职计划", "none"]]) {
@@ -104,7 +104,7 @@ try {
       const stored = (await client.query("SELECT evidence_json FROM memory_admission_candidates WHERE id=$1 AND user_id=$2", [candidate.id, user.id])).rows[0];
       if (memoryFixtureTextDigest(stored.evidence_json.quote) !== memoryFixtureTextDigest(canonicalText)) throw new Error("Seeded candidate source digest mismatch");
       user.candidates.push({ id: Number(candidate.id), canonicalText, sourceId, sensitivity,
-        semanticId: "MEMORY-" + key + "-CANDIDATE-" + index + "-v2", fixtureVersion: 2, ownerAlias: key,
+        semanticId: "MEMORY-" + key + "-CANDIDATE-" + index + "-v3", fixtureVersion: 3, ownerAlias: key,
         sourceText: canonicalText, sourceSha256: memoryFixtureTextDigest(canonicalText), createdAt, expiresAt, clock, caseIds });
     }
   }
@@ -141,7 +141,7 @@ const buildId = fs.readFileSync(path.join(appDirectory, ".next/BUILD_ID"), "utf8
 const buildHash = productionBuildDigest(appDirectory);
 fs.writeFileSync(path.join(privateDirectory, "fixture-" + fixtureIdentity + ".json"), JSON.stringify({
   connectionString, redisUrl, jwtSecret, users, appDirectory, sourceHash, buildHash, buildId, createdAt, clock, caseIds,
-  sourceVersion: "spec40-memory-browser-v2", fixtureIdentity,
+  sourceVersion: "spec40-memory-browser-v3", fixtureIdentity,
 }, null, 2), { mode: 0o600, flag: "wx" });
 fs.writeFileSync(path.join(privateDirectory, "fixture-pointer.json"), JSON.stringify({ fixtureIdentity }));
 console.log("Synthetic memory fixture and isolated production build ready; identity=" + fixtureIdentity + "; sourceHash=" + sourceHash + "; buildHash=" + buildHash);
