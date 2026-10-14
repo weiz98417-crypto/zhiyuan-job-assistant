@@ -102,8 +102,11 @@ if (connectionString) {
     `);
     if (!userFk.rowCount) fail("memory_fact_chunks.user_id must reference users(id)");
     if (report.tables.memory_erasure_requests) {
-      const failedErasures = await pool.query("SELECT COUNT(*)::int AS count FROM memory_erasure_requests WHERE status='failed' OR (status='completed' AND COALESCE(completed_layers_json->>'restoreReplay','false') <> 'true')");
-      if (Number(failedErasures.rows[0]?.count || 0) > 0) fail(`${failedErasures.rows[0].count} erasure request(s) are failed or lack restore replay evidence`);
+      const failedErasures = await pool.query(`SELECT COUNT(*)::int AS count FROM memory_erasure_requests
+        WHERE status='failed' OR (status='completed' AND (
+          COALESCE(completed_layers_json->>'session','false') <> 'true'
+          OR COALESCE(completed_layers_json->>'postgres','false') <> 'true'))`);
+      if (Number(failedErasures.rows[0]?.count || 0) > 0) fail(`${failedErasures.rows[0].count} erasure request(s) are failed or lack required layer completion`);
     }
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));

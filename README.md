@@ -2,7 +2,7 @@
 
 [简体中文](README.cn.md) · [Documentation](docs/README.md) · [Release history](src/app/changelog/release-notes.ts)
 
-![Version](https://img.shields.io/badge/release-0.13.2-b74432)
+![Version](https://img.shields.io/badge/release-0.13.3-b74432)
 ![Next.js](https://img.shields.io/badge/Next.js-16-black)
 ![React](https://img.shields.io/badge/React-19-61dafb)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-pgvector-4169e1)
@@ -12,12 +12,15 @@ Zhiyuan is a self-hosted AI job search workspace for the Chinese market. It conn
 
 Start with the daily journal to turn saved opportunities into today's next action: prepare for an interview, follow up on an application, or act on an evaluated JD.
 
-## Current release: 0.13.2
+## Current release: 0.13.3
 
-The production release published on **October 7, 2026 (Asia/Shanghai)** is `0.13.2`. The default GitHub branch is `master`; `VERSION` and `package.json` record the application version. Pushing a branch and deploying production are separate operations.
+The October 14, 2026 release (Asia/Shanghai) is `0.13.3`. The default GitHub branch is `master`; `VERSION` and `package.json` record the application version. Pushing a branch and deploying production are separate operations; the deployment receipt records the actual production switch.
+
+This patch delivers verified slices of the E2E remediation: account isolation, conversation recovery, governed Agent collaboration, interview evidence, career positioning, personal memory, and unknown Offer terms. The full 67-issue / 392-case acceptance program remains in progress; these changes do not establish complete acceptance. Real historical user records require evidence and confirmation before repair.
 
 | Release | Highlights |
 | --- | --- |
+| 0.13.3 | Account isolation, context recovery, governed handoffs, interview evidence, memory consent/source checks, and unknown Offer conditions. |
 | 0.13.2 | Daily journal visual update: dark kite artwork, two notebook illustrations, and a stage-node opportunity journey. |
 | 0.13.1 | Today focus, prioritized action queue, progress summary, responsive layouts, and loading/error/empty states. |
 | 0.13.0 | MiMo voice input/playback, resume factuality checks, interview rubric and question bank, salary evidence, and Agent trace visibility. |

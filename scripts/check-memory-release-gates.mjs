@@ -81,10 +81,26 @@ function validateRestoreEvidence(filePath, backupPath) {
   const restore = readJsonEvidence(filePath);
   if (restore.format !== "zhiyuan-postgres-restore-evidence-v1" || restore.readBack !== true || !restore.verifiedAt) throw new Error("restore evidence did not prove a read-back verification");
   if (!Number.isInteger(Number(restore.replayedErasures)) || Number(restore.replayedErasures) < 0) throw new Error("restore evidence has no erasure replay count");
-  if (restore.sourceBackup && String(restore.sourceBackup) !== String(backupPath)) throw new Error("restore evidence references a different backup");
+  if (!restore.sourceBackup || String(restore.sourceBackup) !== String(backupPath)) throw new Error("restore evidence references a different backup");
+  const backupContent = fs.readFileSync(backupPath);
+  const backupSha256 = crypto.createHash("sha256").update(backupContent).digest("hex");
+  if (restore.backupSha256 !== backupSha256) throw new Error("restore evidence does not match the backup content hash");
+  const backup = JSON.parse(backupContent.toString("utf8"));
+  const requestRows = backup.tables?.find((table) => table.name === "memory_erasure_requests")?.rows;
+  if (!Array.isArray(requestRows)) throw new Error("backup has no erasure request inventory");
+  const completedRequests = requestRows.filter((request) => request.status === "completed");
+  if (Number(restore.replayedErasures) !== completedRequests.length || !Array.isArray(restore.erasures)
+    || restore.erasures.length !== completedRequests.length) throw new Error("restore evidence has incomplete completed-erasure coverage");
+  const expected = new Set(completedRequests.map((request) => JSON.stringify([String(request.id), String(request.user_id), String(request.target_hash)])));
+  const verified = new Set();
+  for (const erasure of restore.erasures) {
+    const identity = JSON.stringify([String(erasure.id), String(erasure.userId), String(erasure.targetHash)]);
+    if (erasure.readBack !== true || !expected.has(identity) || verified.has(identity)) throw new Error("restore evidence has invalid erasure read-back identities");
+    verified.add(identity);
+  }
   const ageDays = (Date.now() - Date.parse(restore.verifiedAt)) / 86400000;
   if (!Number.isFinite(ageDays) || ageDays < -1 || ageDays > 30) throw new Error("restore evidence is older than the 30-day target");
-  return { path: filePath, verifiedAt: restore.verifiedAt, replayedErasures: Number(restore.replayedErasures), ageDays: Number(ageDays.toFixed(2)) };
+  return { path: filePath, verifiedAt: restore.verifiedAt, backupSha256, replayedErasures: Number(restore.replayedErasures), ageDays: Number(ageDays.toFixed(2)) };
 }
 
 async function checkDatabase(client, report) {
@@ -125,9 +141,12 @@ async function checkDatabase(client, report) {
     }
   }
   if (presentTables.has("memory_erasure_requests")) {
-    const failed = await client.query("SELECT COUNT(*)::int AS count FROM memory_erasure_requests WHERE status='failed' OR (status='completed' AND COALESCE(completed_layers_json->>'restoreReplay','false') <> 'true')");
-    if (Number(failed.rows[0]?.count || 0) === 0) pass(report.gates, "erasureReplay");
-    else fail(report.gates, "erasureReplay", `${failed.rows[0].count} erasure request(s) failed or lack restore replay evidence`);
+    const failed = await client.query(`SELECT COUNT(*)::int AS count FROM memory_erasure_requests
+      WHERE status='failed' OR (status='completed' AND (
+        COALESCE(completed_layers_json->>'session','false') <> 'true'
+        OR COALESCE(completed_layers_json->>'postgres','false') <> 'true'))`);
+    if (Number(failed.rows[0]?.count || 0) === 0) pass(report.gates, "erasureCompletion");
+    else fail(report.gates, "erasureCompletion", `${failed.rows[0].count} erasure request(s) failed or lack required layer completion`);
     const orphanSuppression = await client.query("SELECT COUNT(*)::int AS count FROM memory_erasure_suppressions s LEFT JOIN memory_erasure_requests r ON r.id=s.request_id WHERE r.id IS NULL");
     if (Number(orphanSuppression.rows[0]?.count || 0) === 0) pass(report.gates, "suppressionIntegrity");
     else fail(report.gates, "suppressionIntegrity", `${orphanSuppression.rows[0].count} suppression row(s) have no request`);

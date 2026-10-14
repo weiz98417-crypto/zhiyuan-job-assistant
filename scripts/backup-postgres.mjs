@@ -80,6 +80,7 @@ async function main() {
   const pool = new Pool({ connectionString: args.databaseUrl, max: 1 });
   const client = await pool.connect();
   try {
+    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
     const tables = await listTables(client);
     const backup = {
       format: "zhiyuan-postgres-json-backup-v1",
@@ -99,13 +100,17 @@ async function main() {
         rows: result.rows,
       });
     }
+    await client.query("COMMIT");
 
     fs.mkdirSync(path.dirname(args.output), { recursive: true });
-    fs.writeFileSync(args.output, JSON.stringify(backup, null, 2), "utf-8");
+    fs.writeFileSync(args.output, JSON.stringify(backup, null, 2), { encoding: "utf-8", mode: 0o600, flag: "wx" });
     console.log(`PostgreSQL backup written: ${args.output}`);
     for (const table of backup.tables) {
       console.log(`- ${table.name}: ${table.rowCount} rows`);
     }
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
   } finally {
     client.release();
     await pool.end();

@@ -2,7 +2,7 @@
 
 [English](README.md) · [文档目录](docs/README.md) · [版本记录](src/app/changelog/release-notes.ts)
 
-![Version](https://img.shields.io/badge/release-0.13.2-b74432)
+![Version](https://img.shields.io/badge/release-0.13.3-b74432)
 ![Next.js](https://img.shields.io/badge/Next.js-16-black)
 ![React](https://img.shields.io/badge/React-19-61dafb)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-pgvector-4169e1)
@@ -12,12 +12,15 @@
 
 从“今日手账”开始，把已保存的机会转化为当天的行动：准备面试、跟进投递，或推进已经评估的 JD。
 
-## 当前发布：0.13.2
+## 当前发布：0.13.3
 
-**2026 年 10 月 7 日（北京时间）**上线的生产版本为 `0.13.2`。GitHub 默认主干是 `master`，应用版本以 `VERSION` 和 `package.json` 为准。推送代码与生产部署是两个独立操作。
+**2026 年 10 月 14 日（北京时间）**发布版本为 `0.13.3`。GitHub 默认主干是 `master`，应用版本以 `VERSION` 和 `package.json` 为准。推送代码与生产部署是两个独立操作，实际生产切换以部署回执为准。
+
+本补丁交付 E2E 整改中已验证的账号隔离、上下文恢复、Agent 协作、面试证据、职业定位、个人记忆和 Offer 未知条件切片。67 项问题与完整 392 项验收仍在继续，不能据此认定全量通过；历史真实用户记录按证据清单确认后处理。
 
 | 版本 | 主要变化 |
 | --- | --- |
+| 0.13.3 | 账号隔离、上下文恢复、受控交接、面试证据、记忆用途确认与来源核验、Offer 未知条件。 |
 | 0.13.2 | 今日手账视觉升级：深色纸鸢舞台、两张手账插画、节点式机会旅程。 |
 | 0.13.1 | 今日焦点、按优先级排列的行动队列、求职进展摘要、响应式布局，以及加载、错误与空态。 |
 | 0.13.0 | MiMo 语音输入与朗读、简历事实门禁、面试评分锚定与题库、薪资证据、Agent 运行追踪。 |

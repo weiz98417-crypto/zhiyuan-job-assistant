@@ -37,6 +37,8 @@ bash deploy/agent-runtime/release.sh /root/zhiyuan-job-assistant /root/zhiyuan-j
 
 The release command installs dependencies, builds Web and the standalone Worker, backs up PostgreSQL with owner-only file permissions, verifies the Worker artifact, complete Runtime schema, mode, and writable shared artifact directory, atomically switches `current`, reloads PM2 with updated environment, and checks the local Web health endpoint. Values in the shared production environment take precedence over values inherited from the deployment shell.
 
+Runtime preflight checks that completed live erasures have both `session` and `postgres` completion evidence. A normal erasure does not require a `restoreReplay` marker: that marker is written only after an actual database restore. The strict memory release gate separately requires a verified backup retention policy and a recent read-back restore receipt bound to that backup's SHA-256, covering every completed erasure by request, owner and target identity. A restore keeps memory gates closed until completed erasures have been replayed and verified; never set replay markers on live records to satisfy a release check.
+
 Do not run the preflight against a developer `.env.local` when it points at live PostgreSQL. Database integration and fault-injection tests require a dedicated disposable database.
 
 ## Rollback

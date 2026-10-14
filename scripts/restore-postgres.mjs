@@ -2,8 +2,10 @@
 
 import fs from "fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import dotenv from "dotenv";
 import { Pool } from "pg";
+import { bindErasureWitnesses, memoryRestoreContentHash, readErasureWitnesses } from "./lib/memory-restore-erasure-witnesses.mjs";
 
 dotenv.config({ path: ".env.local" });
 dotenv.config();
@@ -65,6 +67,7 @@ function parseArgs(argv) {
     apply: false,
     allowOverwrite: false,
     evidence: process.env.POSTGRES_RESTORE_EVIDENCE || "",
+    erasureWitnesses: "",
     schemaPath: "src/lib/postgres-schema.sql",
   };
 
@@ -76,6 +79,7 @@ function parseArgs(argv) {
     else if (arg === "--apply") args.apply = true;
     else if (arg === "--allow-overwrite") args.allowOverwrite = true;
     else if (arg === "--evidence") args.evidence = readValue(argv, ++index, arg);
+    else if (arg === "--erasure-witnesses") args.erasureWitnesses = readValue(argv, ++index, arg);
     else if (arg === "--help" || arg === "-h") {
       printHelp();
       process.exit(0);
@@ -102,16 +106,18 @@ Options:
   --apply                Actually restore rows. Without this flag the script only prints a dry-run.
   --allow-overwrite      Allow truncating existing target rows before restore. Requires --apply.
   --evidence <path>      Write a read-back recovery evidence JSON after a successful restore.
+  --erasure-witnesses <path>  Supply hash-bound targets for erasures already absent from the backup.
 `);
 }
 
 function readBackup(inputPath) {
   if (!inputPath) throw new Error("--input is required.");
-  const backup = JSON.parse(fs.readFileSync(inputPath, "utf-8"));
+  const content = fs.readFileSync(inputPath);
+  const backup = JSON.parse(content.toString("utf8"));
   if (backup.format !== "zhiyuan-postgres-json-backup-v1" || !Array.isArray(backup.tables)) {
     throw new Error("Unsupported backup format.");
   }
-  return backup;
+  return { backup, backupSha256: crypto.createHash("sha256").update(content).digest("hex") };
 }
 
 function sortTablesForRestore(tables) {
@@ -189,6 +195,29 @@ async function resetSequences(client, tables) {
   }
 }
 
+const jsonColumnsByClient = new WeakMap();
+
+async function jsonColumnsForTable(client, tableName) {
+  let tables = jsonColumnsByClient.get(client);
+  if (!tables) {
+    tables = new Map();
+    jsonColumnsByClient.set(client, tables);
+  }
+  if (!tables.has(tableName)) {
+    const result = await client.query(
+      "SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name=$1 AND data_type IN ('json','jsonb')",
+      [tableName],
+    );
+    tables.set(tableName, new Set(result.rows.map((row) => String(row.column_name))));
+  }
+  return tables.get(tableName);
+}
+
+async function restoreColumnValues(client, tableName, row, columns) {
+  const jsonColumns = await jsonColumnsForTable(client, tableName);
+  return columns.map((column) => row[column] == null || !jsonColumns.has(column) ? row[column] : JSON.stringify(row[column]));
+}
+
 async function insertRows(client, table) {
   let inserted = 0;
   for (const row of table.rows || []) {
@@ -198,7 +227,7 @@ async function insertRows(client, table) {
     const columnSql = columns.map((column) => `"${column.replace(/"/g, '""')}"`).join(", ");
     await client.query(
       `INSERT INTO "${table.name.replace(/"/g, '""')}" (${columnSql}) VALUES (${placeholders}) ON CONFLICT DO NOTHING`,
-      columns.map((column) => row[column]),
+      await restoreColumnValues(client, table.name, row, columns),
     );
     inserted += 1;
   }
@@ -212,7 +241,7 @@ async function insertRow(client, tableName, row, omitColumns = []) {
   const columnSql = columns.map((column) => `"${column.replace(/"/g, '""')}"`).join(", ");
   await client.query(
     `INSERT INTO "${tableName.replace(/"/g, '""')}" (${columnSql}) VALUES (${placeholders}) ON CONFLICT DO NOTHING`,
-    columns.map((column) => row[column]),
+    await restoreColumnValues(client, tableName, row, columns),
   );
   return true;
 }
@@ -302,6 +331,34 @@ async function redactRawSessionMessages(client, userId, targetText) {
   }
 }
 
+async function mastraVectorTables(client) {
+  const result = await client.query("SELECT tablename FROM pg_tables WHERE schemaname='public' AND (tablename='memory_messages' OR tablename LIKE 'memory_messages_%')");
+  return result.rows.map((row) => String(row.tablename));
+}
+
+async function eraseMastraMessageCopies(client, userId, targetText, vectorTables) {
+  if (await tableExists(client, "mastra_messages")) {
+    const conflict = await client.query(`SELECT 1 FROM mastra_messages m JOIN mastra_threads t ON t.id=m.thread_id
+      WHERE (m."resourceId"=$1 OR t."resourceId"=$1) AND m."resourceId" IS NOT NULL
+      AND m."resourceId"<>t."resourceId" AND strpos(m.content,$2)>0 LIMIT 1`, [userId, targetText]);
+    if (conflict.rowCount) throw new Error("Restore erasure encountered conflicting Mastra message ownership");
+    await client.query(`DELETE FROM mastra_messages WHERE
+      ("resourceId"=$1 OR thread_id IN (SELECT id FROM mastra_threads WHERE "resourceId"=$1))
+      AND strpos(content,$2)>0`, [userId, targetText]);
+  }
+  for (const tableName of vectorTables) {
+    const conflict = await client.query(`SELECT 1 FROM "${tableName.replace(/"/g, '""')}" v
+      JOIN mastra_threads t ON t.id=v.metadata->>'thread_id'
+      WHERE (v.metadata->>'resource_id'=$1 OR t."resourceId"=$1)
+      AND v.metadata->>'resource_id' IS NOT NULL AND v.metadata->>'resource_id'<>t."resourceId"
+      AND strpos(COALESCE(v.metadata->>'content',''),$2)>0 LIMIT 1`, [userId, targetText]);
+    if (conflict.rowCount) throw new Error("Restore erasure encountered conflicting Mastra vector ownership");
+    await client.query(`DELETE FROM "${tableName.replace(/"/g, '""')}"
+      WHERE (metadata->>'resource_id'=$1 OR metadata->>'thread_id' IN (SELECT id FROM mastra_threads WHERE "resourceId"=$1))
+      AND strpos(COALESCE(metadata->>'content',''),$2)>0`, [userId, targetText]);
+  }
+}
+
 function parseScope(value) {
   let scope = value;
   try { scope = typeof value === "string" ? JSON.parse(value) : value; } catch { scope = {}; }
@@ -314,15 +371,17 @@ function parseScope(value) {
   };
 }
 
-async function replayCompletedErasures(client) {
+async function replayCompletedErasures(client, witnesses) {
   const requests = await client.query(`
     SELECT id, user_id, target_hash, scope_json
     FROM memory_erasure_requests
     WHERE status='completed'
     ORDER BY id
   `);
+  const boundWitnesses = bindErasureWitnesses(witnesses, requests.rows);
   let replayed = 0;
   const evidence = [];
+  const vectorTables = await mastraVectorTables(client);
   const optionalTables = new Map();
   for (const tableName of ["sessions", "mastra_messages", "mastra_observational_memory", "mastra_resources", "mastra_threads", "mastra_thread_state", "memory_items", "memory_evidence", "memory_chunks", "session_memory"]) {
     optionalTables.set(tableName, await tableExists(client, tableName));
@@ -337,8 +396,13 @@ async function replayCompletedErasures(client) {
       ? (await client.query("SELECT id, canonical_text FROM memory_items WHERE user_id=$1 AND id=ANY($2::bigint[])", [userId, scope.itemIds])).rows
       : [];
     const targetTexts = Array.from(new Set([...factRows, ...itemRows].map((row) => String(row.canonical_text || "")).filter(Boolean)));
+    const witnessedText = boundWitnesses.get(Number(request.id));
+    if (witnessedText && !targetTexts.includes(witnessedText)) targetTexts.push(witnessedText);
+    if (targetTexts.some((textValue) => memoryRestoreContentHash(textValue) !== String(request.target_hash))) {
+      throw new Error(`restore erasure replay target hash differs for request ${request.id}`);
+    }
     const episodeIds = Array.from(new Set([...scope.episodeIds, ...factRows.map((row) => Number(row.source_episode_id))].filter((id) => Number.isInteger(id) && id > 0)));
-    if ((scope.factIds.length || scope.itemIds.length) && targetTexts.length === 0) {
+    if (targetTexts.length === 0) {
       throw new Error(`restore erasure replay cannot recover target text for request ${request.id}; refusing to claim replay`);
     }
     if (scope.factIds.length) {
@@ -367,6 +431,7 @@ async function replayCompletedErasures(client) {
         await client.query("UPDATE session_memory SET content=replace(content,$1,'[已清除]') WHERE user_id=$2 AND summary_type <> 'execution_conversation' AND strpos(content, $1) > 0", [textValue, userId]);
       }
       if (optionalTables.get("sessions")) await redactRawSessionMessages(client, userId, textValue);
+      await eraseMastraMessageCopies(client, userId, textValue, vectorTables);
       if (optionalTables.get("memory_chunks")) await client.query("DELETE FROM memory_chunks WHERE user_id=$1 AND strpos(chunk_text, $2) > 0", [userId, textValue]);
       await client.query("DELETE FROM memory_admission_candidates WHERE user_id=$1 AND canonical_text=$2", [userId, textValue]);
       if (optionalTables.get("memory_evidence")) await client.query("DELETE FROM memory_evidence WHERE user_id=$1 AND memory_item_id IN (SELECT id FROM memory_items WHERE user_id=$1 AND canonical_text=$2)", [userId, textValue]);
@@ -383,7 +448,6 @@ async function replayCompletedErasures(client) {
       if (optionalTables.get("memory_chunks")) await client.query("DELETE FROM memory_chunks WHERE user_id=$1 AND source_type=$2 AND source_id=$3", [userId, sourceType, sourceId]);
       if (sourceType === "session" && optionalTables.get("session_memory")) await client.query("DELETE FROM session_memory WHERE user_id=$1 AND session_id=$2 AND summary_type <> 'execution_conversation'", [userId, Number(sourceId)]);
     }
-    if (episodeIds.length && optionalTables.get("session_memory")) await client.query("DELETE FROM session_memory WHERE user_id=$1 AND session_id=ANY($2::bigint[]) AND summary_type <> 'execution_conversation'", [userId, episodeIds]);
     const suppressionRefs = scope.sourceRefs.length ? scope.sourceRefs : [{ sourceType: "", sourceId: "" }];
     for (const source of suppressionRefs) {
       if (!source || typeof source !== "object") continue;
@@ -391,14 +455,14 @@ async function replayCompletedErasures(client) {
       const sourceId = String(source.sourceId || "");
       await client.query("INSERT INTO memory_erasure_suppressions (user_id,target_hash,target_key,source_type,source_id,request_id) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (user_id,target_hash,source_type,source_id) DO UPDATE SET lifted_at=NULL,request_id=EXCLUDED.request_id", [userId, String(request.target_hash || ""), scope.targetKey || null, sourceType, sourceId, request.id]);
     }
-    await client.query("UPDATE memory_erasure_requests SET completed_layers_json=jsonb_set(COALESCE(completed_layers_json,'{}'::jsonb), '{restoreReplay}', 'true'::jsonb, true), last_error=NULL WHERE id=$1 AND user_id=$2", [request.id, userId]);
-    evidence.push({ id: Number(request.id), userId, targetHash: String(request.target_hash || ""), factIds: scope.factIds, itemIds: scope.itemIds, episodeIds, sourceRefs: scope.sourceRefs, targetTexts });
+    evidence.push({ id: Number(request.id), userId, targetHash: String(request.target_hash || ""), factIds: scope.factIds, itemIds: scope.itemIds, episodeIds, sourceRefs: scope.sourceRefs, targetKey: scope.targetKey, targetTexts, witnessUsed: Boolean(witnessedText) });
     replayed += 1;
   }
   return { count: replayed, evidence };
 }
 
 async function verifyReplay(client, replay) {
+  const vectorTables = await mastraVectorTables(client);
   const optionalTables = new Map();
   for (const tableName of ["sessions", "memory_items", "memory_chunks", "session_memory", "mastra_messages", "mastra_resources", "mastra_observational_memory", "mastra_thread_state"]) optionalTables.set(tableName, await tableExists(client, tableName));
   for (const item of replay.evidence) {
@@ -423,6 +487,14 @@ async function verifyReplay(client, replay) {
       if (await tableExists(client, "memory_episodes")) checks.push(await client.query("SELECT COUNT(*)::int AS count FROM memory_episodes WHERE user_id=$1 AND strpos(content_json::text, $2) > 0", [item.userId, textValue]));
       if (optionalTables.get("session_memory")) checks.push(await client.query("SELECT COUNT(*)::int AS count FROM session_memory WHERE user_id=$1 AND strpos(content, $2) > 0", [item.userId, textValue]));
       if (optionalTables.get("sessions")) checks.push(await client.query("SELECT COUNT(*)::int AS count FROM sessions WHERE user_id=$1 AND deleted_at IS NULL AND strpos(messages_json::text, $2) > 0", [item.userId, textValue]));
+      if (optionalTables.get("mastra_messages")) checks.push(await client.query(`SELECT COUNT(*)::int AS count FROM mastra_messages
+        WHERE ("resourceId"=$1 OR thread_id IN (SELECT id FROM mastra_threads WHERE "resourceId"=$1))
+        AND strpos(content,$2)>0`, [item.userId, textValue]));
+      for (const tableName of vectorTables) {
+        checks.push(await client.query(`SELECT COUNT(*)::int AS count FROM "${tableName.replace(/"/g, '""')}"
+          WHERE (metadata->>'resource_id'=$1 OR metadata->>'thread_id' IN (SELECT id FROM mastra_threads WHERE "resourceId"=$1))
+          AND strpos(COALESCE(metadata->>'content',''),$2)>0`, [item.userId, textValue]));
+      }
       if (optionalTables.get("memory_chunks")) checks.push(await client.query("SELECT COUNT(*)::int AS count FROM memory_chunks WHERE user_id=$1 AND strpos(chunk_text, $2) > 0", [item.userId, textValue]));
       if (optionalTables.get("mastra_resources")) checks.push(await client.query("SELECT COUNT(*)::int AS count FROM mastra_resources WHERE id=$1 AND strpos(COALESCE(\"workingMemory\",''), $2) > 0", [item.userId, textValue]));
       if (optionalTables.get("mastra_thread_state")) checks.push(await client.query("SELECT COUNT(*)::int AS count FROM mastra_thread_state WHERE \"threadId\" IN (SELECT id FROM mastra_threads WHERE \"resourceId\"=$1) AND strpos(value::text, $2) > 0", [item.userId, textValue]));
@@ -432,21 +504,31 @@ async function verifyReplay(client, replay) {
   }
 }
 
-function writeRecoveryEvidence(filePath, backupPath, replay) {
+function writeRecoveryEvidence(filePath, backupPath, backupSha256, replay) {
   fs.mkdirSync(path.dirname(path.resolve(filePath)), { recursive: true });
   fs.writeFileSync(filePath, JSON.stringify({
     format: "zhiyuan-postgres-restore-evidence-v1",
     verifiedAt: new Date().toISOString(),
     sourceBackup: backupPath,
+    backupSha256,
     replayedErasures: replay.count,
+    erasures: replay.evidence.map((item) => ({
+      id: item.id, userId: item.userId, targetHash: item.targetHash,
+      factIds: item.factIds, itemIds: item.itemIds, episodeIds: item.episodeIds,
+      sourceRefs: item.sourceRefs, targetKey: item.targetKey, witnessUsed: item.witnessUsed, readBack: true,
+    })),
     readBack: true,
-  }, null, 2), "utf8");
+  }, null, 2), { encoding: "utf8", flag: "wx", mode: 0o600 });
 }
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!args.databaseUrl) throw new Error("DATABASE_URL is not configured.");
-  const backup = readBackup(args.input);
+  const { backup, backupSha256 } = readBackup(args.input);
+  const witnesses = readErasureWitnesses(args.erasureWitnesses);
+  const completedRequests = backup.tables.find((table) => table.name === "memory_erasure_requests")?.rows?.filter((request) => request.status === "completed") || [];
+  bindErasureWitnesses(witnesses, completedRequests);
+  if (args.evidence && fs.existsSync(args.evidence)) throw new Error("Restore evidence already exists; refusing to overwrite");
   let tables = sortTablesForRestore(backup.tables);
 
   const totalRows = tables.reduce((sum, table) => sum + Number(table.rowCount || table.rows?.length || 0), 0);
@@ -491,10 +573,13 @@ async function main() {
       await resetSequences(client, tables);
       await client.query("COMMIT");
       transactionOpen = false;
-      const replayed = await replayCompletedErasures(client);
+      const replayed = await replayCompletedErasures(client, witnesses);
       await verifyReplay(client, replayed);
+      for (const item of replayed.evidence) {
+        await client.query("UPDATE memory_erasure_requests SET completed_layers_json=jsonb_set(COALESCE(completed_layers_json,'{}'::jsonb), '{restoreReplay}', 'true'::jsonb, true), last_error=NULL WHERE id=$1 AND user_id=$2", [item.id, item.userId]);
+      }
       await setMemoryGates(client, "open", `restore complete; replayed ${replayed.count} completed erasure request(s)`);
-      if (args.evidence) writeRecoveryEvidence(args.evidence, args.input, replayed);
+      if (args.evidence) writeRecoveryEvidence(args.evidence, args.input, backupSha256, replayed);
       console.log("PostgreSQL restore complete.");
     } catch (error) {
       if (transactionOpen) await client.query("ROLLBACK").catch(() => undefined);
