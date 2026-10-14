@@ -23,6 +23,7 @@ vi.mock("@/lib/db", () => {
 });
 
 beforeEach(() => {
+  vi.clearAllMocks();
   const entries = new Map<string, string>();
   vi.stubGlobal("localStorage", {
     get length() { return entries.size; },
@@ -37,6 +38,36 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe("Agent server-authoritative session read-back regressions", () => {
+  it.each([404, 503])("requires server confirmation despite an existing cached session after HTTP %s", async (status) => {
+    localGetMock.mockResolvedValue({
+      id: 74,
+      title: "旧缓存",
+      messages: [{ role: "assistant", content: "旧的流式内容" }],
+      createdAt: "2026-08-28T09:00:00.000Z",
+      updatedAt: "2026-08-28T09:00:00.000Z",
+    });
+    fetchMock.mockResolvedValue({ ok: false, status, json: async () => ({ success: false }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const { getSession } = await import("@/lib/agent/sessions");
+
+    await expect(getSession(74, { preferServer: true, requireServer: true })).resolves.toBeUndefined();
+    expect(localGetMock).not.toHaveBeenCalled();
+    expect(localPutMock).not.toHaveBeenCalled();
+    await expect(getSession(74, { preferServer: true })).resolves.toMatchObject({ id: 74, title: "旧缓存" });
+    expect(localGetMock).toHaveBeenCalledWith(74);
+  });
+
+  it("does not fall back to cached context when required server confirmation has a network failure", async () => {
+    localGetMock.mockResolvedValue({ id: 74, title: "旧缓存", messages: [] });
+    fetchMock.mockRejectedValue(new Error("Connection reset"));
+    vi.stubGlobal("fetch", fetchMock);
+    const { getSession } = await import("@/lib/agent/sessions");
+
+    await expect(getSession(74, { requireServer: true })).resolves.toBeUndefined();
+    expect(localGetMock).not.toHaveBeenCalled();
+    expect(localPutMock).not.toHaveBeenCalled();
+  });
+
   it("prefers the server session after a durable run reaches a terminal state", async () => {
     localPutMock.mockResolvedValue(undefined);
     localGetMock.mockResolvedValue({

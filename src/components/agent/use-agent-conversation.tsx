@@ -65,6 +65,7 @@ import {
 } from "@/lib/agent/pending-run-create";
 import { scanMessage, deduplicateSignals, maybeRawContext } from "@/lib/agent/signal-extractor";
 import type { ExtractedSignal } from "@/lib/agent/signal-extractor";
+import { permitsProfileSignalCapture } from "@/lib/agent/profile-signal-capture-policy";
 import {
   createSession,
   listSessions,
@@ -165,6 +166,7 @@ import { useAgentConversationUiState } from "./use-agent-conversation-ui-state";
  */
 export function useAgentConversation() {
   const searchParams = useSearchParams();
+  const initialRequestedSessionIdRef = useRef(searchParams.get("sessionId"));
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   // 界面状态(spec 35 第二片):同名解构,调用点文本不变
   const {
@@ -179,6 +181,7 @@ export function useAgentConversation() {
   const [activeAgent, setActiveAgent] = useState<ClientAgentDefinition | null>(null);
   const [agentSwitchedAt, setAgentSwitchedAt] = useState<number | null>(null);
   const [sessionLoadError, setSessionLoadError] = useState<string | null>(null);
+  const [sessionSelectionPending, setSessionSelectionPending] = useState(false);
   const [storedRunNotice, setActiveRunNotice] = useState<ActiveRunNotice | null>(null);
   const activeRunNotice = storedRunNotice?.conversationId === currentSessionId ? storedRunNotice : null;
   const [activeRunAction, setActiveRunAction] = useState<"resume" | "pause" | "cancel" | null>(null);
@@ -190,6 +193,7 @@ export function useAgentConversation() {
   const interviewBootstrapRef = useRef<number | null>(null);
   const seenSignalKeys = useRef<Map<string, Set<string>>>(new Map());
   const seenSignalSessionRef = useRef<string | null>(null);
+  const signalCaptureBlockedSessionsRef = useRef(new Set<number>());
   const handoffKeyRef = useRef<string>("");
   const handoffSessionCreateKeyRef = useRef<string>("");
   const createdHandoffSessionIdRef = useRef<number | null>(null);
@@ -204,6 +208,8 @@ export function useAgentConversation() {
   } | null>(null);
   const currentSessionIdRef = useRef<number | null>(null);
   const sessionSelectionRequestRef = useRef(0);
+  const sessionUrlSelectionPendingRef = useRef<number | null>(null);
+  const sessionUrlSelectionErrorRef = useRef(false);
   const sessionGenerationRef = useRef(0);
   const observerGenerationRef = useRef(0);
   const turnGenerationRef = useRef(0);
@@ -221,6 +227,9 @@ export function useAgentConversation() {
     abortRef.current = null;
     pendingRunInputRef.current = null;
     currentSessionIdRef.current = null;
+    sessionUrlSelectionPendingRef.current = null;
+    sessionUrlSelectionErrorRef.current = false;
+    setSessionSelectionPending(false);
     setStreaming(false);
     setPhase(null);
     setExecutingTool(undefined);
@@ -282,37 +291,48 @@ export function useAgentConversation() {
 
 
   useEffect(() => {
+    let cancelled = false;
     // Best-effort migration from legacy localStorage
     migrateExploreToAgent()
       .then(async () => {
         const loaded = await listSessions();
+        if (cancelled) return;
         setSessions(loaded);
 
-        if (loaded.length > 0) {
-          const latest = loaded[0];
-          currentSessionIdRef.current = latest.id!;
-          setCurrentSessionId(latest.id!);
-          setMessages(latest.messages);
-          const hydrated = await getSession(latest.id!, { preferServer: true }).catch(() => undefined);
-          if (hydrated && currentSessionIdRef.current === latest.id) {
-            setMessages(hydrated.messages);
-            setSessions((current) => current.map((item) => item.id === hydrated.id ? hydrated : item));
-          }
+        const requestedSessionId = initialRequestedSessionIdRef.current;
+        const requestedId = requestedSessionId === null ? null : Number(requestedSessionId);
+        if (requestedId !== null && (!Number.isSafeInteger(requestedId) || requestedId <= 0)) {
+          throw new Error("对话地址无效，请选择有效的对话。");
+        }
+        const targetId = requestedId ?? loaded[0]?.id;
+        if (targetId !== undefined && targetId !== null) {
+          const hydrated = await getSession(targetId, { preferServer: true, requireServer: true });
+          if (cancelled) return;
+          if (!hydrated || hydrated.deletedAt) throw new Error("无法加载该对话，请重试或选择其他对话。");
+          currentSessionIdRef.current = targetId;
+          setCurrentSessionId(targetId);
+          setMessages(hydrated.messages);
+          setSessions((current) => current.some((item) => item.id === targetId)
+            ? current.map((item) => item.id === targetId ? hydrated : item)
+            : [hydrated, ...current]);
         } else {
           // 0.11.0-C: the worker is the sole transcript writer — sessions
           // persist empty; the welcome note is render-level only.
           const id = await createSession([]);
+          if (cancelled) return;
           currentSessionIdRef.current = id;
           setCurrentSessionId(id);
           setMessages([]);
-          setSessions(await listSessions());
+          const refreshed = await listSessions();
+          if (!cancelled) setSessions(refreshed);
         }
       })
       .catch((error) => {
-        setSessionLoadError(error instanceof Error ? error.message : "Failed to load sessions");
+        if (!cancelled) setSessionLoadError(error instanceof Error ? error.message : "Failed to load sessions");
       })
-      .finally(() => setMounted(true));
+      .finally(() => { if (!cancelled) setMounted(true); });
 
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -322,9 +342,23 @@ export function useAgentConversation() {
   useEffect(() => {
     if (!mounted) return;
     const requestedSessionId = searchParams.get("sessionId");
-    if (!requestedSessionId) return;
+    if (!requestedSessionId) {
+      if (sessionUrlSelectionPendingRef.current !== null) {
+        sessionUrlSelectionPendingRef.current = null;
+        setSessionSelectionPending(false);
+      }
+      if (sessionUrlSelectionErrorRef.current) {
+        sessionUrlSelectionErrorRef.current = false;
+        setSessionLoadError(null);
+      }
+      return;
+    }
     const id = Number(requestedSessionId);
-    if (!Number.isFinite(id)) return;
+    if (!Number.isSafeInteger(id) || id <= 0) {
+      sessionUrlSelectionErrorRef.current = true;
+      setSessionLoadError("对话地址无效，请选择有效的对话。");
+      return;
+    }
     const manualTargetSessionId = manualSessionSwitchRef.current;
     if (manualTargetSessionId !== null) {
       const syncDecision = resolveAgentSessionUrlSync({
@@ -336,18 +370,47 @@ export function useAgentConversation() {
       manualSessionSwitchRef.current = null;
       if (syncDecision === "acknowledge_target_url" && currentSessionId === id) return;
     }
-    if (currentSessionId === id) return;
+    if (currentSessionId === id) {
+      if (sessionUrlSelectionPendingRef.current !== null) {
+        sessionUrlSelectionPendingRef.current = null;
+        setSessionSelectionPending(false);
+      }
+      if (sessionUrlSelectionErrorRef.current) {
+        sessionUrlSelectionErrorRef.current = false;
+        setSessionLoadError(null);
+      }
+      return;
+    }
 
     let cancelled = false;
-    getSession(id, { preferServer: true }).then((session) => {
-      if (cancelled || !session) return;
+    sessionUrlSelectionPendingRef.current = id;
+    setSessionSelectionPending(true);
+    getSession(id, { preferServer: true, requireServer: true }).then((session) => {
+      if (cancelled) return;
+      sessionUrlSelectionPendingRef.current = null;
+      setSessionSelectionPending(false);
+      if (!session || session.deletedAt) {
+        sessionUrlSelectionErrorRef.current = true;
+        setSessionLoadError("无法加载该对话，请重试或选择其他对话。");
+        return;
+      }
       clearSessionActivity();
+      setSessionLoadError(null);
       currentSessionIdRef.current = id;
       setCurrentSessionId(id);
       setMessages(session.messages);
-      setSessions((current) => current.map((item) => item.id === id ? session : item));
+      setSessions((current) => current.some((item) => item.id === id)
+        ? current.map((item) => item.id === id ? session : item)
+        : [session, ...current]);
       // 0.11.0-B: the header agent belongs to the conversation, not the app.
       setActiveAgent(null);
+    }).catch((error) => {
+      if (!cancelled) {
+        sessionUrlSelectionErrorRef.current = true;
+        sessionUrlSelectionPendingRef.current = null;
+        setSessionSelectionPending(false);
+        setSessionLoadError(error instanceof Error ? error.message : "无法加载该对话，请重试。");
+      }
     });
     return () => { cancelled = true; };
   }, [mounted, searchParams, currentSessionId, clearSessionActivity]);
@@ -855,8 +918,20 @@ export function useAgentConversation() {
     }
   }, [activeRunAction, activeRunNotice?.id, appendAssistantStatusMessage, currentSessionId]);
 
+  const requestedSessionId = searchParams.get("sessionId");
+  const conversationReady = mounted && currentSessionId !== null && currentSessionId > 0 && !sessionLoadError && !sessionSelectionPending
+    && (requestedSessionId === null || Number(requestedSessionId) === currentSessionId)
+    && (searchParams.get("newSession") !== "1" || requestedSessionId !== null
+      || !(searchParams.get("jdId") || searchParams.get("offerId") || searchParams.get("offerReportId") || searchParams.get("applicationId"))
+      || createdHandoffSessionIdRef.current === currentSessionId);
+
   const sendMessage = useCallback(
     async (content: string, images?: string[], options?: SendMessageOptions) => {
+      const liveRequestedSessionId = new URL(window.location.href).searchParams.get("sessionId");
+      if (!conversationReady || currentSessionIdRef.current !== currentSessionId
+        || (liveRequestedSessionId !== null && Number(liveRequestedSessionId) !== currentSessionId)) {
+        throw new Error(sessionLoadError || "对话尚未加载完成，请稍后重试。");
+      }
       const turnGeneration = ++turnGenerationRef.current;
       const sessionId = currentSessionId;
       const originalContent = content;
@@ -912,22 +987,28 @@ export function useAgentConversation() {
       const bucketKey = String(sesId ?? "default");
       if (!seenSignalKeys.current.has(bucketKey)) seenSignalKeys.current.set(bucketKey, new Set());
       const sessionSeen = seenSignalKeys.current.get(bucketKey)!;
-      const extracted = deduplicateSignals(scanMessage(content, sesId), sessionSeen);
+      const priorUserContent = messages.filter((message) => message.role === "user").map((message) => message.content);
+      const captureAllowed = sessionId !== null
+        && !signalCaptureBlockedSessionsRef.current.has(sessionId)
+        && permitsProfileSignalCapture(originalContent, priorUserContent);
+      if (sessionId !== null && !captureAllowed) signalCaptureBlockedSessionsRef.current.add(sessionId);
+      const extracted = captureAllowed ? scanMessage(content, sesId) : [];
 
       // If regex found few signals but message is substantial, add raw_context for LLM enrichment
-      const rawCtx = maybeRawContext(content, extracted.length, sesId);
+      const rawCtx = captureAllowed ? maybeRawContext(content, extracted.length, sesId) : null;
       if (rawCtx) {
-        const rawDeduped = deduplicateSignals([rawCtx], sessionSeen);
-        if (rawDeduped.length > 0) extracted.push(rawDeduped[0]);
+        extracted.push(rawCtx);
       }
 
-      if (extracted.length > 0) {
+      const persistProfileSignals = (runId: string, inputRequestId: string) => {
+        const admittedSignals = deduplicateSignals(extracted, sessionSeen);
+        if (admittedSignals.length === 0) return;
         fetch("/api/data/signals/batch", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ signals: extracted }),
+          body: JSON.stringify({ origin: "agent_chat", runId, requestId: inputRequestId, signals: admittedSignals }),
         }).catch(() => { /* fire-and-forget */ });
-      }
+      };
 
       // Show thinking indicator immediately
       const assistantMsg: AgentMessage = {
@@ -1041,6 +1122,7 @@ export function useAgentConversation() {
           });
           if (!isCurrentTurn()) return;
           if (!submitted) throw new Error("消息未确认写入当前任务");
+          persistProfileSignals(submitted.run.id, pendingInput.requestId);
           pendingRunInputRef.current = null;
           setActiveRunNotice(activeNoticeFromRun(submitted.run));
         } catch (error) {
@@ -1190,6 +1272,7 @@ export function useAgentConversation() {
               return;
             }
             if (earlyCreatedRun?.assignment.owner === "worker" && earlyCreatedRun.run) {
+              persistProfileSignals(earlyCreatedRun.run.id, createRequestId);
               clearCreateRequest();
               workerOwnedRun = true;
               durableRunId = earlyCreatedRun.run.id;
@@ -1434,6 +1517,7 @@ export function useAgentConversation() {
           throw new Error(`Agent runtime 返回了不支持的执行模式：${created?.assignment.owner ?? "unknown"}。请将服务端 AGENT_RUNTIME_MODE 设置为 worker_all。`);
         }
         if (createdRun) {
+          persistProfileSignals(createdRun.id, createRequestId);
           clearCreateRequest();
           workerOwnedRun = true;
           durableRunId = createdRun.id;
@@ -1516,11 +1600,11 @@ export function useAgentConversation() {
         if (abortRef.current === controller) abortRef.current = null;
       }
     },
-    [activeRunNotice, messages, currentSessionId, makeSessionTitle, renameSessionFromFirstUserMessage, generateMemoryDigestWithStatus, refreshLatestRollbackProposal],
+    [activeRunNotice, messages, currentSessionId, conversationReady, sessionLoadError, makeSessionTitle, renameSessionFromFirstUserMessage, generateMemoryDigestWithStatus, refreshLatestRollbackProposal],
   );
 
   useEffect(() => {
-    if (!mounted || streaming || !currentSessionId || messages.length > 0) return;
+    if (!mounted || !conversationReady || streaming || !currentSessionId || messages.length > 0) return;
 
     let cancelled = false;
     const bootstrapInterview = async () => {
@@ -1537,7 +1621,7 @@ export function useAgentConversation() {
     return () => {
       cancelled = true;
     };
-  }, [mounted, streaming, currentSessionId, messages.length, sendMessage]);
+  }, [mounted, conversationReady, streaming, currentSessionId, messages.length, sendMessage]);
 
   const handleStopStreaming = useCallback(async () => {
     const activeRun = activeRunNotice;
@@ -1584,6 +1668,7 @@ export function useAgentConversation() {
 
     const id = await createSession([]);
     clearSessionActivity();
+    setSessionLoadError(null);
     manualSessionSwitchRef.current = id;
     replaceUrlForSelectedSession(id);
     currentSessionIdRef.current = id;
@@ -1593,7 +1678,7 @@ export function useAgentConversation() {
   }, [clearSessionActivity, replaceUrlForSelectedSession]);
 
   useEffect(() => {
-    if (!mounted || streaming || !currentSessionId) return;
+    if (!mounted || !conversationReady || streaming || !currentSessionId) return;
     const requestedSessionId = searchParams.get("sessionId");
     if (requestedSessionId && Number(requestedSessionId) !== currentSessionId) return;
     if (searchParams.get("newSession") === "1" && !requestedSessionId && createdHandoffSessionIdRef.current !== currentSessionId) return;
@@ -1632,10 +1717,10 @@ export function useAgentConversation() {
       });
     };
     startEvaluation().catch(() => {});
-  }, [mounted, streaming, currentSessionId, searchParams, sendMessage, clearConsumedHandoffParams]);
+  }, [mounted, conversationReady, streaming, currentSessionId, searchParams, sendMessage, clearConsumedHandoffParams]);
 
   useEffect(() => {
-    if (!mounted || streaming || !currentSessionId) return;
+    if (!mounted || !conversationReady || streaming || !currentSessionId) return;
     const requestedSessionId = searchParams.get("sessionId");
     if (requestedSessionId && Number(requestedSessionId) !== currentSessionId) return;
     if (searchParams.get("newSession") === "1" && !requestedSessionId && createdHandoffSessionIdRef.current !== currentSessionId) return;
@@ -1674,10 +1759,10 @@ export function useAgentConversation() {
         { hideUserMessage: true },
       ).catch(() => {});
     });
-  }, [mounted, streaming, currentSessionId, searchParams, sendMessage, clearConsumedHandoffParams]);
+  }, [mounted, conversationReady, streaming, currentSessionId, searchParams, sendMessage, clearConsumedHandoffParams]);
 
   useEffect(() => {
-    if (!mounted || streaming || !currentSessionId) return;
+    if (!mounted || !conversationReady || streaming || !currentSessionId) return;
     const requestedSessionId = searchParams.get("sessionId");
     if (requestedSessionId && Number(requestedSessionId) !== currentSessionId) return;
     if (searchParams.get("newSession") === "1" && !requestedSessionId && createdHandoffSessionIdRef.current !== currentSessionId) return;
@@ -1718,17 +1803,20 @@ export function useAgentConversation() {
         sendMessage(`请读取并解释已保存的 Offer 报告 offerReportId=${offerReportId}。优先调用 read_offer_report，不要重新评估 Offer。`, undefined, { hideUserMessage: true, forcedAgentId: "offer" }).catch(() => {});
       });
     }
-  }, [mounted, streaming, currentSessionId, searchParams, sendMessage, clearConsumedHandoffParams]);
+  }, [mounted, conversationReady, streaming, currentSessionId, searchParams, sendMessage, clearConsumedHandoffParams]);
 
   const handleSelectSession = useCallback(async (id: number) => {
-    if (id === currentSessionIdRef.current) return;
+    if (id === currentSessionIdRef.current && !sessionLoadError) return;
     const cachedSession = sessions.find((item) => item.id === id);
     if (!cachedSession) return;
     // Trigger profile update before switching
     triggerProfileUpdate({ force: true }).catch(() => {});
 
     const requestId = ++sessionSelectionRequestRef.current;
+    sessionUrlSelectionPendingRef.current = null;
     clearSessionActivity();
+    setSessionSelectionPending(true);
+    setSessionLoadError(null);
     manualSessionSwitchRef.current = id;
     replaceUrlForSelectedSession(id);
     currentSessionIdRef.current = id;
@@ -1737,12 +1825,17 @@ export function useAgentConversation() {
     const sessionGeneration = sessionGenerationRef.current;
     const turnGeneration = turnGenerationRef.current;
 
-    const session = await getSession(id, { preferServer: true }).catch(() => undefined);
-    if (!session || requestId !== sessionSelectionRequestRef.current || currentSessionIdRef.current !== id
+    const session = await getSession(id, { preferServer: true, requireServer: true }).catch(() => undefined);
+    if (requestId !== sessionSelectionRequestRef.current || currentSessionIdRef.current !== id
       || sessionGenerationRef.current !== sessionGeneration || turnGenerationRef.current !== turnGeneration) return;
-    setMessages(session.messages);
-    setSessions((current) => current.map((item) => item.id === id ? session : item));
-  }, [clearSessionActivity, replaceUrlForSelectedSession, sessions]);
+    if (!session || session.deletedAt) {
+      setSessionLoadError("无法加载该对话，请重试或选择其他对话。");
+    } else {
+      setMessages(session.messages);
+      setSessions((current) => current.map((item) => item.id === id ? session : item));
+    }
+    setSessionSelectionPending(false);
+  }, [clearSessionActivity, replaceUrlForSelectedSession, sessionLoadError, sessions]);
 
   const handleDeleteSession = useCallback(async (id: number) => {
     const session = await getSession(id);
@@ -1834,6 +1927,7 @@ export function useAgentConversation() {
     undoToast,
     setUndoToast,
     mounted,
+    conversationReady,
     setMounted,
     activeAgent,
     setActiveAgent,

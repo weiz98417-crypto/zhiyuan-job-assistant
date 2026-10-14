@@ -43,6 +43,7 @@ function AgentPageInner() {
     undoToast,
     setUndoToast,
     mounted,
+    conversationReady,
     setMounted,
     activeAgent,
     setActiveAgent,
@@ -205,6 +206,13 @@ function AgentPageInner() {
           <AgentPhaseTrack phase={phase} streaming={streaming} criteria={programProgress} />
         </div>
 
+        {!conversationReady && (
+          <div role={sessionLoadError ? "alert" : "status"} className="py-2 text-sm text-[var(--color-muted)]">
+            {sessionLoadError || "正在加载对话…"}
+            {sessionLoadError && <button type="button" onClick={() => window.location.reload()} className="ml-3 underline">重试</button>}
+          </div>
+        )}
+
         {activeRunNotice && showActiveRunToolbar && (
           <AgentRunToolbar
             status={activeRunNotice.status}
@@ -232,6 +240,7 @@ function AgentPageInner() {
           const chatElement = (
           <AgentChat
           currentSessionId={currentSessionId}
+          conversationReady={conversationReady}
           messages={displayMessages}
           streaming={streaming}
           phase={phase}

@@ -44,6 +44,7 @@ const ACTIVITY_RUN_STATUSES = new Set([
 
 interface AgentChatProps {
   currentSessionId: number | null;
+  conversationReady?: boolean;
   /** mergeServerTranscript 合并层输出的对话投影(worker 为唯一写者)。 */
   messages: AgentMessage[];
   streaming: boolean;
@@ -83,6 +84,7 @@ const EMPTY_CHAT_DRAFT: ChatDraft = { input: "", images: [], evalPlaceholder: fa
 
 export default function AgentChat({
   currentSessionId,
+  conversationReady = true,
   messages,
   streaming,
   phase,
@@ -241,17 +243,17 @@ export default function AgentChat({
 
           {/* Input area */}
           <div className="mt-auto shrink-0">
-            <VoiceCoachBar
+            {conversationReady && <VoiceCoachBar
               key={draftKey}
               streaming={streaming}
               lastAssistantText={lastAssistantText}
               onSendTranscript={(text) => { void onSend(text); }}
-            />
+            />}
             {suggestions && !hasRealChat && !streaming && (
               <div className="mb-3">
                 <SuggestionChips
                   suggestions={suggestions}
-                  disabled={streaming}
+                  disabled={streaming || !conversationReady}
                   onSelect={(prompt, label) => handleChipSelect(prompt, label)}
                 />
               </div>
@@ -263,6 +265,7 @@ export default function AgentChat({
                 updateDraft(draftKey, (current) => ({ ...current, images: current.images.filter((item) => item.id !== id) }))
               }
               streaming={streaming}
+              disabled={!conversationReady}
               onStop={onStop}
               maxAttachments={MAX_IMAGES}
               evalPlaceholder={draft.evalPlaceholder}

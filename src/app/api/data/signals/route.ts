@@ -106,6 +106,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: "缺少 signal_type 字段" }, { status: 400 });
     }
 
+    if (body.source !== "manual") {
+      return NextResponse.json({ success: false, error: "自动画像信号必须通过绑定已接收会话输入的批量接口" }, { status: 422 });
+    }
+
     const decision = normalizeProfileSignalForStorage({
       source: body.source || "dingwei",
       signal_type: body.signal_type,

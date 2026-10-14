@@ -11,6 +11,7 @@ import {
   normalizeSkillClaim,
   shouldCaptureProfileRawContext,
 } from "@/lib/profile-skill-quality";
+import { permitsProfileSignalCapture } from "@/lib/agent/profile-signal-capture-policy";
 
 export interface ExtractedSignal {
   signal_type: "skill_claim" | "role_preference" | "dealbreaker" | "company_pref" | "salary_expectation" | "raw_context";
@@ -75,7 +76,7 @@ export function scanMessage(content: string, sessionId: string): ExtractedSignal
   const signals: ExtractedSignal[] = [];
   const text = compact(content);
 
-  if (!text || looksLikeProfileNoise(text)) return signals;
+  if (!text || looksLikeProfileNoise(text) || !permitsProfileSignalCapture(content)) return signals;
 
   for (const pattern of EXPLICIT_USER_SKILL_PATTERNS) {
     pattern.lastIndex = 0;
@@ -220,7 +221,7 @@ export function deduplicateSignals(
   return result;
 }
 
-function signalKey(s: ExtractedSignal): string {
+export function signalKey(s: ExtractedSignal): string {
   const content = s.content_json;
   switch (s.signal_type) {
     case "skill_claim": return `skill:${content.skill}`;
@@ -239,6 +240,7 @@ function signalKey(s: ExtractedSignal): string {
  */
 export function maybeRawContext(content: string, classifiedCount: number, sessionId: string): ExtractedSignal | null {
   const trimmed = compact(content);
+  if (!permitsProfileSignalCapture(content)) return null;
   if (classifiedCount >= 2) return null;
   if (!shouldCaptureProfileRawContext(trimmed)) return null;
 

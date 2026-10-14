@@ -30,6 +30,7 @@ interface AgentComposerProps {
   onRemoveAttachment: (id: string) => void;
   /** 运行中(含流尾)显示停止按钮,与旧壳一致以 streaming 为准。 */
   streaming: boolean;
+  disabled?: boolean;
   onStop?: () => void;
   maxAttachments: number;
   /** 评估JD chip 选中后的输入提示。 */
@@ -42,6 +43,7 @@ export function AgentComposer({
   onAddFiles,
   onRemoveAttachment,
   streaming,
+  disabled = false,
   onStop,
   maxAttachments,
   evalPlaceholder,
@@ -93,7 +95,7 @@ export function AgentComposer({
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          disabled={isRunning || attachments.length >= maxAttachments}
+          disabled={disabled || isRunning || attachments.length >= maxAttachments}
           className="flex-shrink-0 w-7 h-7 rounded-[var(--radius-sm)] border border-dashed flex items-center justify-center transition-all border-[var(--color-divider)] hover:border-[var(--color-primary)] disabled:opacity-30 disabled:cursor-not-allowed"
           title="上传截图或PDF简历"
         >
@@ -104,6 +106,7 @@ export function AgentComposer({
           type="file"
           accept="image/png,image/jpeg,image/webp,.pdf"
           multiple
+          disabled={disabled}
           onChange={(event) => {
             if (event.target.files) {
               onAddFiles(Array.from(event.target.files));
@@ -115,9 +118,12 @@ export function AgentComposer({
         <ComposerPrimitive.Input
           ref={textareaRef as React.Ref<HTMLTextAreaElement>}
           submitOnEnter={true}
+          disabled={disabled}
           rows={1}
           placeholder={
-            isRunning
+            disabled
+              ? "正在加载对话…"
+              : isRunning
               ? "AI 回复中..."
               : evalPlaceholder
                 ? "粘贴 JD 文本或链接..."
@@ -146,6 +152,7 @@ export function AgentComposer({
           <ComposerPrimitive.Send asChild>
             <button
               type="submit"
+              disabled={disabled}
               aria-label="发送消息"
               title="发送消息"
               className="ml-auto flex-shrink-0 w-9 h-9 rounded-xl flex items-center justify-center bg-[var(--zhusha)] text-white transition-colors hover:bg-[var(--zhusha-deep)] disabled:opacity-40"

@@ -15,7 +15,7 @@ describe("Agent session activity isolation", () => {
   });
 
   it("reloads selected conversations without overwriting worker messages", () => {
-    expect(page).toContain("getSession(id, { preferServer: true })");
+    expect(page).toContain("getSession(id, { preferServer: true, requireServer: true })");
     expect(page).not.toContain("updateSession(currentSessionId, { messages });");
   });
 

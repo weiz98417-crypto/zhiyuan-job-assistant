@@ -121,7 +121,7 @@ export async function listSessions(): Promise<ChatSession[]> {
 
 export async function getSession(
   id: number,
-  options: { preferServer?: boolean } = {},
+  options: { preferServer?: boolean; requireServer?: boolean } = {},
 ): Promise<ChatSession | undefined> {
   const db = captureOwnerDatabase();
   const readLocal = async () => {
@@ -150,6 +150,7 @@ export async function getSession(
     }
     return undefined;
   };
+  if (options.requireServer) return readServer();
   if (options.preferServer) return (await readServer()) || readLocal();
   return (await readLocal()) || readServer();
 }

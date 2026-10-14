@@ -1,4 +1,5 @@
 import type { ProfileSkill } from "@/types";
+import { permitsProfileSignalCapture } from "@/lib/agent/profile-signal-capture-policy";
 
 type SkillSource = NonNullable<ProfileSkill["source"]>;
 
@@ -398,6 +399,7 @@ function hasEvidenceOwner(text: string): boolean {
 
 export function shouldCaptureProfileRawContext(content: string): boolean {
   const text = cleanText(content);
+  if (!permitsProfileSignalCapture(content)) return false;
   if (text.length < 20 || text.length > 1200) return false;
   if (!hasSelfEvidence(text)) return false;
   if (looksLikeProfileNoise(text)) return false;
@@ -465,6 +467,9 @@ export function normalizeProfileSignalForStorage(input: ProfileSignalStorageInpu
   const category = inferCategory(signalType, content);
 
   if (!signalType) return { accepted: false, rejectedReason: "missing_signal_type" };
+  if (evidence && !permitsProfileSignalCapture(evidence)) {
+    return { accepted: false, rejectedReason: "profile_capture_forbidden_by_source" };
+  }
 
   if (signalType === "skill_claim") {
     if (sourceType === "jd") {
