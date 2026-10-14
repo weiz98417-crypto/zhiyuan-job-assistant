@@ -1,9 +1,8 @@
 import type { ExecutionPrincipal } from "@/lib/agent/runtime/durable-agent-run";
 import { getProfileBlocks, listFactProvenance, searchFactsHybrid, type FactProvenance } from "@/lib/memory/fact-ledger";
-import { createEmbeddingProvider, type MemorySnippet, type MemorySourceFilter } from "@/lib/memory/vector-memory";
-import { retrieveMemorySnippets } from "@/lib/memory/postgres-memory";
+import { createEmbeddingProvider, normalizeMemorySourceFilters, type EmbeddingProvider, type MemorySnippet, type MemorySourceFilter } from "@/lib/memory/vector-memory";
 import { assertMemoryGateOpen } from "@/lib/memory/runtime-gates";
-import { isMemorySuppressed } from "@/lib/memory/erasure";
+import { expandGovernedFactSourceTypes } from "@/lib/memory/source-policy";
 
 export interface GovernedMemoryResult {
   snippets: MemorySnippet[];
@@ -43,49 +42,41 @@ export async function retrieveGovernedMemory(input: {
   await assertMemoryReadGateOpen();
   const limit = Math.max(1, Math.min(input.limit ?? 8, 20));
   const warnings: string[] = [];
-  const provider = createEmbeddingProvider();
+  const sources = input.sourceTypes === undefined ? undefined : normalizeMemorySourceFilters(input.sourceTypes);
+  const includeProfile = sources === undefined || sources.includes("profile") || sources.includes("profile_signal");
   let embedding: number[] | null = null;
   try {
+    const provider: EmbeddingProvider = createEmbeddingProvider();
     [embedding] = await provider.embed([input.query]);
   } catch (error) {
-    warnings.push(`embedding:${error instanceof Error ? error.message : String(error)}`);
+    const message = error instanceof Error ? error.message : String(error);
+    const reason = /disabled/i.test(message) ? "disabled"
+      : /required|dimension|configuration/i.test(message) ? "configuration"
+        : /429/i.test(message) ? "rate_limited" : "provider_failure";
+    warnings.push(`embedding:${reason}`, "embedding:semantic_unavailable");
   }
-  const [legacyRows, factRows, profile] = await Promise.all([
-    embedding
-      ? retrieveMemorySnippets({ userId: input.principal.userId, queryEmbedding: embedding, sourceTypes: input.sourceTypes, limit, provider }).catch((error) => {
-      warnings.push(`legacy:${error instanceof Error ? error.message : String(error)}`);
-      return [] as MemorySnippet[];
-      })
-      : Promise.resolve([] as MemorySnippet[]),
-    embedding
-      ? searchFactsHybrid(input.principal, {
-        queryText: input.query,
-        queryEmbedding: embedding,
-        agentId: input.agentId,
-        sourceTypes: input.sourceTypes,
-        limit,
-      }).catch((error) => {
-      warnings.push(`facts:${error instanceof Error ? error.message : String(error)}`);
+  const [factRows, profile] = await Promise.all([
+    searchFactsHybrid(input.principal, {
+      queryText: input.query,
+      queryEmbedding: embedding,
+      agentId: input.agentId,
+      sourceTypes: expandGovernedFactSourceTypes(input.sourceTypes),
+      limit,
+    }).catch(() => {
+      warnings.push("facts:unavailable");
       return [] as Awaited<ReturnType<typeof searchFactsHybrid>>;
-      })
-      : Promise.resolve([] as Awaited<ReturnType<typeof searchFactsHybrid>>),
-    getProfileBlocks(input.principal, undefined, input.agentId, { includeReviewDue: true }).catch((error) => {
-      warnings.push(`profile:${error instanceof Error ? error.message : String(error)}`);
-      return [] as GovernedMemoryResult["profile"];
     }),
+    includeProfile ? getProfileBlocks(input.principal, undefined, input.agentId, { includeReviewDue: true, sourceTypes: expandGovernedFactSourceTypes(input.sourceTypes) }).catch(() => {
+      warnings.push("profile:unavailable");
+      return [] as GovernedMemoryResult["profile"];
+    }) : Promise.resolve([] as GovernedMemoryResult["profile"]),
   ]);
-  const legacy = (await Promise.all(legacyRows.map(async (snippet) => (
-    await isMemorySuppressed(input.principal.userId, snippet.snippet, {
-      sourceType: snippet.sourceType,
-      sourceId: String(snippet.sourceId),
-    }) ? null : snippet
-  )))).filter((snippet): snippet is MemorySnippet => Boolean(snippet));
   const factResults = await Promise.all(factRows.slice(0, limit * 2).map(async (row) => {
-    const provenance = await listFactProvenance(input.principal, row.factId, input.agentId).catch((error) => {
-      warnings.push(`provenance:${error instanceof Error ? error.message : String(error)}`);
+    const provenance = await listFactProvenance(input.principal, row.factId, input.agentId).catch(() => {
+      warnings.push("provenance:unavailable");
       return null;
     });
-    if (!provenance) return null;
+    if (!provenance || provenance.invalidAt) return null;
     const ranking = rankFact({
       semantic: row.score,
       entity: row.entityScore,
@@ -99,7 +90,8 @@ export async function retrieveGovernedMemory(input: {
   const facts = factResults.filter((row): row is NonNullable<typeof row> => row !== null)
     .sort((left, right) => right.score - left.score)
     .slice(0, limit);
-  return { snippets: legacy, facts, profile, warnings };
+  await assertMemoryReadGateOpen();
+  return { snippets: [], facts, profile, warnings: [...new Set(warnings)] };
 }
 
 const FACT_SOURCE_RELIABILITY: Record<string, number> = {

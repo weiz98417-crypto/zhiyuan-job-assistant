@@ -2,7 +2,6 @@ import { getDataRepositories } from "@/lib/data-repositories";
 import { getDatabaseDriver, isPostgresConfigured } from "@/lib/postgres";
 import {
   listMemoryItems,
-  retrieveMemorySnippets,
   type MemoryItemRecord,
 } from "@/lib/memory/postgres-memory";
 import {
@@ -21,6 +20,8 @@ import {
   type MemorySourceType,
 } from "@/lib/memory/vector-memory";
 import { assertMemoryReadGateOpen, retrieveGovernedMemory, type GovernedMemoryResult } from "@/lib/memory/retrieval";
+import { resolveGovernedFactSourceType } from "@/lib/memory/source-policy";
+import { containsSensitiveJobMemoryContent } from "@/lib/memory/admission";
 
 export { resolveAgentMemoryPolicy } from "@/lib/agent/memory-policy";
 
@@ -89,7 +90,7 @@ export async function assembleAgentMemoryContext(input: AssembleAgentMemoryConte
       warnings.push(...governedMemory.warnings);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      warnings.push(`governed:${message}`);
+      warnings.push("governed:unavailable");
       if (/Memory (?:reads are closed|read gate is closed)/i.test(message)) {
         return buildEmptyContext({ policy, agentId, warnings, deniedSources });
       }
@@ -99,18 +100,18 @@ export async function assembleAgentMemoryContext(input: AssembleAgentMemoryConte
   if (postgresMemoryEnabled) {
     try {
       await assertMemoryReadGateOpen();
-    } catch (error) {
-      warnings.push(`memory_gate:${error instanceof Error ? error.message : String(error)}`);
+    } catch {
+      warnings.push("memory_gate:closed");
       return buildEmptyContext({ policy, agentId, warnings, deniedSources });
     }
   }
 
   const rawStructuredFacts = await readStructuredFacts(input.userId, policy, {
-    includeLegacyProfile: !governedMemory,
-    includeLegacySessions: !governedMemory,
-    includeLegacyMemoryItems: !governedMemory,
-  }).catch((error) => {
-    warnings.push(`structured:${error instanceof Error ? error.message : String(error)}`);
+    includeLegacyProfile: !postgresMemoryEnabled,
+    includeLegacySessions: !postgresMemoryEnabled,
+    includeLegacyMemoryItems: !postgresMemoryEnabled,
+  }).catch(() => {
+    warnings.push("structured:unavailable");
     return [] as StructuredMemoryFact[];
   });
   const governedStructuredFacts = governedMemory
@@ -118,33 +119,16 @@ export async function assembleAgentMemoryContext(input: AssembleAgentMemoryConte
       ...(policy.structuredScopes.includes("profile")
         ? governedMemory.profile.filter((profile) => !profile.reviewDue).map(profileBlockToFact)
         : []),
-      ...(policy.structuredScopes.includes("memory_items") ? governedMemory.facts.map(factProvenanceToFact) : []),
+      ...(policy.structuredScopes.includes("memory_items") ? governedMemory.facts
+        .map(factProvenanceToFact).filter((fact): fact is StructuredMemoryFact => fact !== null) : []),
     ]
     : [];
   const legacyStructuredFacts = governedMemory
     ? rawStructuredFacts.filter((fact) => fact.sourceType !== "profile")
     : rawStructuredFacts;
 
-  let semanticSnippets = input.semanticSnippets || governedMemory?.snippets || [];
-  if (
-    !input.semanticSnippets
-    && !governedMemory
-    && input.query?.trim()
-    && policy.semanticTopK > 0
-    && getDatabaseDriver() === "postgres"
-    && isPostgresConfigured()
-  ) {
-    try {
-      semanticSnippets = await retrieveMemorySnippets({
-        userId: input.userId,
-        query: input.query,
-        sourceTypes: policy.allowedSourceTypes,
-        limit: Math.min(input.semanticTopK || policy.semanticTopK, policy.maxSemanticSnippets),
-      });
-    } catch (error) {
-      warnings.push(`semantic:${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
+  const semanticSnippets = postgresMemoryEnabled ? governedMemory?.snippets || [] : input.semanticSnippets || [];
+  if (postgresMemoryEnabled && input.semanticSnippets?.length) warnings.push("semantic:unverified_external_input");
 
   const enforced = enforceAgentMemoryPolicy({
     policy,
@@ -162,6 +146,7 @@ export async function assembleAgentMemoryContext(input: AssembleAgentMemoryConte
     structuredFacts: enforced.structuredFacts,
     semanticSnippets: enforced.semanticSnippets,
     budgetChars: input.budgetChars || policy.budgetChars,
+    warnings,
   });
 
   return {
@@ -184,11 +169,16 @@ export function formatAgentMemoryContext(input: {
   structuredFacts: StructuredMemoryFact[];
   semanticSnippets: MemorySnippet[];
   budgetChars: number;
+  warnings?: string[];
 }): string {
   const lines: string[] = [
     `Agent memory task=${input.task}`,
     `[policy:${input.policyId || "unknown"} sources=${input.sourceTypes.length}]`,
   ];
+  if (input.warnings?.length) {
+    lines.push("[memory-retrieval-limitation] 部分记忆检索不可用；只使用实际返回的已授权事实，未召回不能证明用户从未提供相关偏好。限制："
+      + [...new Set(input.warnings)].map(warning => warning.split(":").slice(0, 2).join(":")).join(","));
+  }
 
   for (const fact of input.structuredFacts) {
     const sourceId = fact.sourceId === undefined ? "" : `#${fact.sourceId}`;
@@ -360,26 +350,23 @@ function profileBlockToFact(profile: GovernedMemoryResult["profile"][number]): S
   };
 }
 
-function factProvenanceToFact(fact: GovernedMemoryResult["facts"][number]): StructuredMemoryFact {
+function factProvenanceToFact(fact: GovernedMemoryResult["facts"][number]): StructuredMemoryFact | null {
+  const sourceType = resolveGovernedFactSourceType(fact.sourceType);
+  if (!sourceType) return null;
+  const memoryType = sourceType === "profile_signal" && (containsSensitiveJobMemoryContent(fact.canonicalText)
+    || /^(?:salary|compensation|city|location|薪资|城市|地点)/i.test(fact.predicate || ""))
+    ? "profile_preference" : fact.predicate || sourceType;
   return {
     label: fact.sourceType || fact.partition,
-    sourceType: factSourceType(fact.sourceType),
+    sourceType,
     sourceId: fact.factId,
     text: fact.canonicalText,
     status: fact.invalidAt ? "invalid" : "active",
     visibility: fact.partition === "private" ? "private" : "team",
-    memoryType: fact.predicate || fact.sourceType || "profile_signal",
+    memoryType,
     confidence: fact.confidence,
     importance: fact.importance,
   };
-}
-
-function factSourceType(sourceType: string | null): MemorySourceType {
-  if (!sourceType) return "profile_signal";
-  if (sourceType === "cv" || sourceType === "jd" || sourceType === "jd_report" || sourceType === "offer" || sourceType === "offer_report" || sourceType === "interview" || sourceType === "session" || sourceType === "story" || sourceType === "profile" || sourceType === "profile_signal" || sourceType === "reference_resume") {
-    return sourceType;
-  }
-  return "profile_signal";
 }
 
 export function enforceAgentMemoryPolicy(input: {
@@ -471,6 +458,7 @@ function buildEmptyContext(input: {
       structuredFacts: [],
       semanticSnippets: [],
       budgetChars: input.policy.budgetChars,
+      warnings: input.warnings,
     }),
     warnings: input.warnings,
     deniedSources: input.deniedSources,

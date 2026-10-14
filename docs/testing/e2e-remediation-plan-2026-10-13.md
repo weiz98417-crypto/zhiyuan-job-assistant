@@ -172,4 +172,4 @@
 
 D1–D10 已形成共同理解；剩余内容是源码定位、隔离夹具、迁移 dry-run、固定 rubric 校准和逐项验收，不再把可查事实反问用户。根因、接口、数据库和现有配置事实继续由源码与证据核查；若实施中发现新的不可逆产品取舍，再单独开一轮设计问题。
 
-隔离实施证据见 [第一批](spec40-implementation-progress-2026-10-13.md)、[第二批](spec40-second-implementation-progress-2026-10-14.md)和 [第三批](spec40-third-implementation-progress-2026-10-14.md)。各批记录实际外部切片、首次失败和剩余边界；不能据此把原 67 项问题或 392 项验收整体关闭。
+隔离实施证据见 [第一批](spec40-implementation-progress-2026-10-13.md)、[第二批](spec40-second-implementation-progress-2026-10-14.md)、[第三批](spec40-third-implementation-progress-2026-10-14.md)和 [第四批记忆修复](spec40-fourth-implementation-progress-2026-10-14.md)。各批记录实际外部切片、首次失败和剩余边界；不能据此把原 67 项问题或 392 项验收整体关闭。

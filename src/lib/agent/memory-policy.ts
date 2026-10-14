@@ -329,7 +329,7 @@ export function normalizeMemoryStatus(value: unknown): MemoryItemStatus {
   if (raw === "candidate") return "candidate";
   if (raw === "rejected") return "rejected";
   if (raw === "archived" || raw === "disabled" || raw === "deprecated") return "archived";
-  return "active";
+  return raw === "active" ? "active" : "archived";
 }
 
 export function normalizeMemoryVisibility(value: unknown): AgentMemoryVisibility {

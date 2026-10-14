@@ -15,6 +15,7 @@ import type { ExecutionPrincipal } from "@/lib/agent/runtime/durable-agent-run";
 import { getDataRepositories } from "@/lib/data-repositories";
 import { getPostgresPool, withPostgresClient } from "@/lib/postgres";
 import { assertMemoryExtractionGateOpen, assertMemoryGateOpen, assertMemoryWriteGateOpen } from "@/lib/memory/runtime-gates";
+import { memoryFactSuppressionSql } from "@/lib/memory/erasure-sql";
 
 export type FactDecision = "ADD" | "UPDATE" | "DELETE" | "NOOP";
 
@@ -131,7 +132,7 @@ export function decideFactOperationsDeterministic(
   existing: ExistingFact[],
   candidate: FactCandidate,
 ): FactOperation[] {
-  const exact = existing.find((fact) => (candidate.currentPreference || fact.partition === candidate.partition)
+  const exact = existing.find((fact) => fact.partition === candidate.partition
     && fact.canonicalText === candidate.canonicalText);
   if (exact) {
     return [{ decision: "NOOP", candidate, targetFactId: exact.id, reason: "identical canonical fact already open" }];
@@ -255,6 +256,14 @@ export async function writeFactOperations(
           });
           continue;
         }
+        if ((op.decision === "UPDATE" || op.decision === "DELETE") && op.targetFactId) {
+          const target = await client.query(
+            "SELECT partition FROM memory_facts WHERE id=$1 AND user_id=$2 FOR UPDATE",
+            [op.targetFactId, principal.userId],
+          );
+          if (!target.rows[0]) throw new Error(`Open fact #${op.targetFactId} is no longer available`);
+          await assertFactWritableForPrincipal(principal, String(target.rows[0].partition), agentId);
+        }
         const decision = await client.query(
           `INSERT INTO memory_fact_decisions
             (user_id, idempotency_key, source_episode_id, partition, agent_id,
@@ -271,7 +280,7 @@ export async function writeFactOperations(
              WHERE id = $1 AND user_id = $2
                AND ($4::boolean OR partition = $5)
                AND invalid_at IS NULL RETURNING id`,
-            [op.targetFactId, principal.userId, op.candidate.currentPreference === true, op.candidate.partition],
+            [op.targetFactId, principal.userId, op.reason, op.candidate.currentPreference === true, op.candidate.partition],
           );
           if (!invalidated.rowCount) throw new Error(`Open fact #${op.targetFactId} is no longer available`);
         }
@@ -387,18 +396,55 @@ export async function recordFact(
 ): Promise<RecordedFact[]> {
   assertPrincipal(principal);
   if (!options.agentId) throw new Error("Memory fact writes require an agent identity");
+  if (!options.episodeId) throw new Error("Memory fact writes require a source episode");
+  await assertMemoryWriteGateOpen();
+  await assertMemoryGateOpen("read");
   await assertFactWritableForPrincipal(principal, candidate.partition, options.agentId);
-  const existing = await listOpenFacts(principal, {
-    partition: candidate.currentPreference ? undefined : candidate.partition,
-    subject: candidate.subject,
-    agentId: options.agentId,
-    limit: 10,
-    client: options.client,
+  const execute = async (client: PoolClient): Promise<RecordedFact[]> => {
+    const episode = await client.query("SELECT id FROM memory_episodes WHERE id=$1 AND user_id=$2 FOR UPDATE", [options.episodeId, principal.userId]);
+    if (!episode.rowCount) throw new Error("Source episode does not belong to memory principal");
+    const prior = await client.query(
+      `SELECT d.id, d.decision, d.result_fact_id, d.agent_id,
+         (f.invalid_at IS NULL AND f.id IS NOT NULL AND f.partition=$3 AND f.subject=$4
+           AND f.predicate=$5 AND f.canonical_text=$6 AND f.object_json=$7::jsonb) AS same_fact
+       FROM memory_fact_decisions d
+       LEFT JOIN memory_facts f ON f.id=d.result_fact_id AND f.user_id=d.user_id
+       WHERE d.user_id=$1 AND d.source_episode_id=$2`,
+      [principal.userId, options.episodeId, candidate.partition, candidate.subject,
+        candidate.predicate, candidate.canonicalText, JSON.stringify(candidate.object)],
+    );
+    if (prior.rowCount) {
+      const receipt = prior.rows[0];
+      if (prior.rowCount !== 1 || !receipt.same_fact || receipt.agent_id !== options.agentId) {
+        throw new Error("Memory episode was reused with a different or inactive fact");
+      }
+      await assertFactReadableForPrincipal(principal, candidate.partition, options.agentId!);
+      return [{ factId: Number(receipt.result_fact_id), decision: receipt.decision as FactDecision, decisionId: Number(receipt.id) }];
+    }
+    const existing = await listOpenFacts(principal, {
+      partition: candidate.currentPreference ? undefined : candidate.partition,
+      subject: candidate.subject,
+      agentId: options.agentId,
+      limit: 10,
+      client,
+    });
+    const operations = options.useLlmDecision === false
+      ? decideFactOperationsDeterministic(existing, candidate)
+      : await decideFactOperations(existing, candidate);
+    return writeFactOperations(principal, operations, { ...options, client });
+  };
+  if (options.client) return execute(options.client);
+  return withPostgresClient(async (client) => {
+    await client.query("BEGIN");
+    try {
+      const recorded = await execute(client);
+      await client.query("COMMIT");
+      return recorded;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    }
   });
-  const operations = options.useLlmDecision === false
-    ? decideFactOperationsDeterministic(existing, candidate)
-    : await decideFactOperations(existing, candidate);
-  return writeFactOperations(principal, operations, options);
 }
 
 // ── Read path ──
@@ -463,13 +509,7 @@ export async function listFactProvenance(
      LEFT JOIN memory_entity_facts mef ON mef.fact_id = f.id
      LEFT JOIN memory_entities me ON me.id = mef.entity_id AND me.user_id = f.user_id
      WHERE f.id = $1 AND f.user_id = $2 AND f.partition = ANY($3::text[])
-       AND NOT EXISTS (
-         SELECT 1
-         FROM memory_erasure_suppressions s
-         JOIN memory_erasure_requests r ON r.id = s.request_id AND r.user_id = s.user_id
-         WHERE s.user_id = f.user_id AND s.lifted_at IS NULL
-           AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(r.scope_json->'factIds') AS erased_fact(value) WHERE erased_fact.value = f.id::text)
-       )
+       AND NOT ${memoryFactSuppressionSql("f", "e")}
      GROUP BY f.id, e.source_type, e.source_id`,
     [factId, principal.userId, readablePartitions],
   );
@@ -553,7 +593,7 @@ export async function listFactsByEpisode(
  */
 export async function searchFactsHybrid(
   principal: ExecutionPrincipal,
-  input: { queryText: string; queryEmbedding: number[]; partition?: string; limit?: number; agentId?: string; sourceTypes?: string[] },
+  input: { queryText: string; queryEmbedding: number[] | null; partition?: string; limit?: number; agentId?: string; sourceTypes?: string[] },
 ): Promise<Array<{
   factId: number;
   canonicalText: string;
@@ -569,31 +609,35 @@ export async function searchFactsHybrid(
   await assertMemoryGateOpen("read");
   const agentId = input.agentId || "user";
   if (input.partition) await assertFactReadableForPrincipal(principal, input.partition, agentId);
-  const readablePartitions = await listReadablePartitionsForPrincipal(principal, agentId);
+  const readablePartitions = (await listReadablePartitionsForPrincipal(principal, agentId))
+    .filter((partition) => !input.partition || partition === input.partition);
   if (!readablePartitions.length) throw new Error(`Agent ${agentId} has no readable memory partitions`);
   const pool = getPostgresPool();
   const limit = input.limit ?? 8;
-  const vector = `[${input.queryEmbedding.join(",")}]`;
+  const vector = input.queryEmbedding ? `[${input.queryEmbedding.join(",")}]` : null;
+  const salaryQuery = /(?:薪资|工资|月薪|年薪|薪酬|报酬|salary|compensation|pay\s*(?:floor|minimum)|(?:低于|至少|期望|底线).{0,8}(?:\d+(?:\.\d+)?\s*(?:k|万)|[一二三四五六七八九十]+万))/i.test(input.queryText);
   const result = await pool.query(
-    `WITH vector_hits AS (
+    `WITH governed_facts AS (
+       SELECT f.*, e.source_type, e.source_id
+       FROM memory_facts f
+       JOIN memory_episodes e ON e.id=f.source_episode_id AND e.user_id=f.user_id
+       WHERE f.user_id=$2 AND f.invalid_at IS NULL AND f.partition=ANY($5::text[])
+         AND length(btrim(e.source_type)) > 0 AND length(btrim(e.source_id)) > 0
+         AND ($6::text[] IS NULL OR e.source_type=ANY($6::text[]))
+         AND NOT ${memoryFactSuppressionSql("f", "e")}
+     ), vector_hits AS (
        SELECT fact_id, ROW_NUMBER() OVER (ORDER BY embedding <=> $1::vector) AS rank
        FROM memory_fact_chunks
-       JOIN memory_facts vf ON vf.id = memory_fact_chunks.fact_id AND vf.user_id = $2
-       LEFT JOIN memory_episodes ve ON ve.id = vf.source_episode_id AND ve.user_id = vf.user_id
-       WHERE memory_fact_chunks.user_id = $2 AND embedding_status = 'embedded'
-         AND vf.invalid_at IS NULL AND vf.partition = ANY($5::text[])
-         AND ($6::text[] IS NULL OR ve.source_type = ANY($6::text[]))
+       JOIN governed_facts vf ON vf.id = memory_fact_chunks.fact_id
+       WHERE $1::vector IS NOT NULL AND memory_fact_chunks.user_id = $2 AND embedding_status = 'embedded'
      ),
      text_hits AS (
        SELECT f.id AS fact_id,
               ROW_NUMBER() OVER (ORDER BY ts_rank(to_tsvector('simple', c.content), plainto_tsquery('simple', $3)) DESC) AS rank
-       FROM memory_facts f
-       JOIN memory_fact_chunks c ON c.fact_id = f.id
-       LEFT JOIN memory_episodes te ON te.id = f.source_episode_id AND te.user_id = f.user_id
-       WHERE f.user_id = $2 AND f.invalid_at IS NULL
-         AND f.partition = ANY($5::text[])
-         AND ($6::text[] IS NULL OR te.source_type = ANY($6::text[]))
-         AND to_tsvector('simple', c.content) @@ plainto_tsquery('simple', $3)
+       FROM governed_facts f
+       JOIN memory_fact_chunks c ON c.fact_id = f.id AND c.user_id=$2
+       WHERE to_tsvector('simple', c.content) @@ plainto_tsquery('simple', $3)
+         OR (length(btrim($3)) > 0 AND strpos(c.content, btrim($3)) > 0)
      ),
      entity_hits AS (
        SELECT mef.fact_id,
@@ -603,13 +647,18 @@ export async function searchFactsHybrid(
               ) DESC) AS rank
        FROM memory_entity_facts mef
        JOIN memory_entities me ON me.id = mef.entity_id AND me.user_id = $2
-       JOIN memory_facts ef ON ef.id = mef.fact_id AND ef.user_id = $2
-       LEFT JOIN memory_episodes ee ON ee.id = ef.source_episode_id AND ee.user_id = ef.user_id
-       WHERE ef.invalid_at IS NULL
-         AND ef.partition = ANY($5::text[])
-         AND ($6::text[] IS NULL OR ee.source_type = ANY($6::text[]))
-         AND to_tsvector('simple', COALESCE(me.entity_key, '') || ' ' || COALESCE(me.summary, ''))
+       JOIN governed_facts ef ON ef.id = mef.fact_id
+       WHERE to_tsvector('simple', COALESCE(me.entity_key, '') || ' ' || COALESCE(me.summary, ''))
            @@ plainto_tsquery('simple', $3)
+     ),
+     structured_hits AS (
+       SELECT f.id AS fact_id, ROW_NUMBER() OVER (ORDER BY f.valid_at DESC, f.id DESC) AS rank
+       FROM governed_facts f
+       WHERE $7::boolean AND (
+         f.predicate ~* '(salary|compensation|薪资|工资|月薪|年薪|薪酬)'
+         OR f.object_json::text ~* '"(salary(_floor|_minimum|_expectation)?|monthlySalary|annualSalary|compensation|薪资|工资|月薪|年薪)"[[:space:]]*:'
+         OR (f.partition='private' AND f.canonical_text ~* '(薪资|工资|月薪|年薪|薪酬|salary|compensation|(^|[[:space:]])我(期望|不接受低于)[[:space:]]*([0-9]+([.][0-9]+)?|[零〇一二两三四五六七八九十百千]+)[[:space:]]*(k|万|千|元))')
+       )
      ),
      fusion AS (
        SELECT fact_id, SUM(1.0 / (60 + rank)) AS score FROM (
@@ -618,6 +667,8 @@ export async function searchFactsHybrid(
          SELECT fact_id, rank FROM (SELECT fact_id, rank FROM text_hits LIMIT $4) text_limited
          UNION ALL
          SELECT fact_id, rank FROM (SELECT fact_id, rank FROM entity_hits LIMIT $4) entity_limited
+         UNION ALL
+         SELECT fact_id, rank FROM (SELECT fact_id, rank FROM structured_hits LIMIT $4) structured_limited
        ) combined GROUP BY fact_id
      ),
      entity_fusion AS (
@@ -627,22 +678,13 @@ export async function searchFactsHybrid(
      )
      SELECT fusion.fact_id, fusion.score, COALESCE(entity_fusion.entity_score, 0) AS entity_score,
             f.canonical_text, f.confidence, f.importance, f.valid_at,
-            e.source_type, e.source_id
+            f.source_type, f.source_id
      FROM fusion
-     JOIN memory_facts f ON f.id = fusion.fact_id
-     LEFT JOIN memory_episodes e ON e.id = f.source_episode_id AND e.user_id = f.user_id
+     JOIN governed_facts f ON f.id = fusion.fact_id
      LEFT JOIN entity_fusion ON entity_fusion.fact_id = fusion.fact_id
-     WHERE f.user_id = $2 AND f.invalid_at IS NULL
-       AND NOT EXISTS (
-         SELECT 1
-         FROM memory_erasure_suppressions s
-         JOIN memory_erasure_requests r ON r.id = s.request_id AND r.user_id = s.user_id
-         WHERE s.user_id = f.user_id AND s.lifted_at IS NULL
-           AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(r.scope_json->'factIds') AS erased_fact(value) WHERE erased_fact.value = f.id::text)
-       )
      ORDER BY fusion.score DESC
      LIMIT $4`,
-    [vector, principal.userId, input.queryText, limit * 3, readablePartitions, input.sourceTypes?.length ? input.sourceTypes : null],
+    [vector, principal.userId, input.queryText, limit * 3, readablePartitions, input.sourceTypes ?? null, salaryQuery],
   );
   return result.rows.map((row) => ({
     factId: Number(row.fact_id),
@@ -722,7 +764,7 @@ export async function getProfileBlocks(
   principal: ExecutionPrincipal,
   topic?: string,
   agentId = "user",
-  options: { includeReviewDue?: boolean } = {},
+  options: { includeReviewDue?: boolean; sourceTypes?: string[] } = {},
 ): Promise<Array<{ topic: string; subTopic: string; value: Record<string, unknown>; label: string | null; source: string; factIds: number[]; lastConfirmedAt: string | null; reviewDueAt: string | null; reviewDue: boolean }>> {
   assertPrincipal(principal);
   await assertMemoryGateOpen("read");
@@ -734,21 +776,23 @@ export async function getProfileBlocks(
      FROM profile_blocks pb
      LEFT JOIN memory_profile_block_facts pbf ON pbf.profile_block_id = pb.id
      LEFT JOIN memory_facts pf ON pf.id = pbf.fact_id
-       AND pf.user_id = pb.user_id AND pf.invalid_at IS NULL
+       AND pf.user_id = pb.user_id AND pf.partition='private' AND pf.invalid_at IS NULL
+     LEFT JOIN memory_episodes pe ON pe.id=pf.source_episode_id AND pe.user_id=pf.user_id
+       AND length(btrim(pe.source_type))>0 AND length(btrim(pe.source_id))>0
+       AND ($4::text[] IS NULL OR pe.source_type=ANY($4::text[]))
      WHERE pb.user_id = $1 AND ($2::text IS NULL OR pb.topic = $2)
        AND ($3::boolean OR pb.review_due_at IS NULL OR pb.review_due_at > NOW())
        AND NOT EXISTS (
          SELECT 1
-         FROM memory_profile_block_facts pbf
-         JOIN memory_erasure_suppressions s ON s.user_id = $1 AND s.lifted_at IS NULL
-         JOIN memory_erasure_requests r ON r.id = s.request_id AND r.user_id = s.user_id
-         WHERE pbf.profile_block_id = pb.id
-           AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(r.scope_json->'factIds') AS erased_fact(value) WHERE erased_fact.value = pbf.fact_id::text)
+         FROM memory_profile_block_facts linked
+         JOIN memory_facts f ON f.id=linked.fact_id AND f.user_id=pb.user_id
+         JOIN memory_episodes e ON e.id=f.source_episode_id AND e.user_id=f.user_id
+         WHERE linked.profile_block_id=pb.id AND ${memoryFactSuppressionSql("f", "e")}
        )
      GROUP BY pb.id
-     HAVING COUNT(pf.id) > 0
+     HAVING COUNT(pbf.fact_id) > 0 AND COUNT(pf.id)=COUNT(pbf.fact_id) AND COUNT(pe.id)=COUNT(pbf.fact_id)
      ORDER BY pb.topic, pb.sub_topic`,
-    [principal.userId, topic ?? null, options.includeReviewDue === true],
+    [principal.userId, topic ?? null, options.includeReviewDue === true, options.sourceTypes ?? null],
   );
   return result.rows.map((row) => ({
     topic: String(row.topic),
@@ -817,12 +861,6 @@ function normalizeAgentList(value: unknown): string[] {
   return [];
 }
 
-/**
- * Resolve partition ACLs from the per-user memory_partitions table. The
- * static map remains a compatibility fallback for databases created before
- * the M5 partition rows were provisioned; once a user has any explicit row,
- * missing partitions fail closed.
- */
 async function loadPartitionAccessForPrincipal(
   principal: ExecutionPrincipal,
   partition: string,
@@ -830,7 +868,6 @@ async function loadPartitionAccessForPrincipal(
 ): Promise<PartitionAccess> {
   assertPrincipal(principal);
   if (!agentId.trim()) return { readable: false, writable: false };
-  await ensureUserPartitionRows(principal);
   let rows: PartitionRow[];
   try {
     const result = await getPostgresPool().query(
@@ -840,10 +877,9 @@ async function loadPartitionAccessForPrincipal(
     );
     rows = result.rows as PartitionRow[];
   } catch (error) {
-    if ((error as { code?: string })?.code === "42P01") return resolvePartitionAccess(partition, agentId);
+    if ((error as { code?: string })?.code === "42P01") return { readable: false, writable: false };
     throw error;
   }
-  if (rows.length === 0) return resolvePartitionAccess(partition, agentId);
   const row = rows.find((item) => String(item.partition) === partition);
   if (!row) return { readable: false, writable: false };
   const readable = normalizeAgentList(row.readable_agents);
@@ -857,7 +893,6 @@ async function listReadablePartitionsForPrincipal(
 ): Promise<string[]> {
   assertPrincipal(principal);
   if (!agentId.trim()) return [];
-  await ensureUserPartitionRows(principal);
   try {
     const result = await getPostgresPool().query(
       `SELECT partition, readable_agents FROM memory_partitions WHERE user_id = $1`,
@@ -872,26 +907,7 @@ async function listReadablePartitionsForPrincipal(
   } catch (error) {
     if ((error as { code?: string })?.code !== "42P01") throw error;
   }
-  return listReadablePartitions(agentId);
-}
-
-async function ensureUserPartitionRows(principal: ExecutionPrincipal): Promise<void> {
-  const defaults = Object.entries(DEFAULT_PARTITIONS).map(([partition, access]) => ({
-    partition,
-    readable_agents: access.readable,
-    writable_agents: access.writable,
-  }));
-  try {
-    await getPostgresPool().query(
-      `INSERT INTO memory_partitions (user_id, partition, description, readable_agents, writable_agents)
-       SELECT $1, item.partition, 'M5 default partition', item.readable_agents, item.writable_agents
-       FROM jsonb_to_recordset($2::jsonb) AS item(partition text, readable_agents text[], writable_agents text[])
-       ON CONFLICT (user_id, partition) DO NOTHING`,
-      [principal.userId, JSON.stringify(defaults)],
-    );
-  } catch (error) {
-    if ((error as { code?: string })?.code !== "42P01") throw error;
-  }
+  return [];
 }
 
 async function assertFactReadableForPrincipal(

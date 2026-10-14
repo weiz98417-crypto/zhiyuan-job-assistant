@@ -162,6 +162,13 @@ describe("agent long-term memory policies", () => {
     expect(enforced.deniedSources[0]?.reason).toBe("candidate_memory_denied");
   });
 
+  it.each(["invalid", "superseded", "expired", "unknown-status"])("never treats an unavailable %s memory fact as active", status => {
+    const result = enforceAgentMemoryPolicy({ policy: resolveAgentMemoryPolicy("profile_growth"), agentId: "profile", semanticSnippets: [],
+      structuredFacts: [{ label: "obsolete preference", sourceType: "profile_signal", text: "obsolete city marker", memoryType: "profile_preference", visibility: "private", status }] });
+    expect(result.structuredFacts).toEqual([]);
+    expect(result.deniedSources[0]?.reason).toBe("status_denied");
+  });
+
   it("offer evaluation cannot receive unrelated JD memory", () => {
     const policy = resolveAgentMemoryPolicy("offer_evaluation");
     const enforced = enforceAgentMemoryPolicy({

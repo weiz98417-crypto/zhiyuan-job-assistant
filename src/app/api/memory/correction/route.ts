@@ -20,7 +20,7 @@ export async function POST(request: Request) {
     if (!Number.isSafeInteger(targetFactId) || targetFactId <= 0 || !canonicalText || canonicalText.length > 1_000 || !sourceText || sourceText.length > 4_000) {
       return NextResponse.json({ success: false, error: "targetFactId, canonicalText and sourceText are required" }, { status: 400 });
     }
-    const recorded = await correctMemoryFact({ userId: user.userId }, { targetFactId, canonicalText, object, sourceText });
+    const recorded = await correctMemoryFact({ userId: user.userId }, { targetFactId, canonicalText, object, sourceText, confirmedJobUse: body.confirmedJobUse === true });
     return NextResponse.json({ success: true, data: { recorded } });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -32,6 +32,9 @@ export async function POST(request: Request) {
     }
     if (message === "forbidden_secret_or_identity_number") {
       return NextResponse.json({ success: false, error: message }, { status: 422 });
+    }
+    if (message === "sensitive_job_use_confirmation_required") {
+      return NextResponse.json({ success: false, code: message, error: "这条纠正包含求职敏感信息，需要确认仅用于求职筛选和建议。" }, { status: 422 });
     }
     console.error("[memory/correction] failed:", message);
     return NextResponse.json({ success: false, error: "Memory correction failed" }, { status: 500 });

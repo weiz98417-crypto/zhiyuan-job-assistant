@@ -37,11 +37,22 @@ export default function MemoryPage() {
   const [data, setData] = useState<MemoryData>(EMPTY);
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState("");
+  const [readState, setReadState] = useState<"loading" | "ready" | "unavailable">("loading");
 
   const load = useCallback(async () => {
-    const response = await fetch("/api/memory/candidates", { cache: "no-store" });
-    const payload = await response.json().catch(() => ({}));
-    if (response.ok && payload.success) setData({ ...EMPTY, ...payload.data, discovery: { ...EMPTY.discovery, ...(payload.data.discovery || {}) } });
+    setReadState("loading");
+    try {
+      const response = await fetch("/api/memory/candidates", { cache: "no-store" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.success || !Array.isArray(payload.data?.facts) || !Array.isArray(payload.data?.candidates)) {
+        setReadState("unavailable");
+        return;
+      }
+      setData({ ...EMPTY, ...payload.data, discovery: { ...EMPTY.discovery, ...(payload.data.discovery || {}) } });
+      setReadState("ready");
+    } catch {
+      setReadState("unavailable");
+    }
   }, []);
 
   useEffect(() => { void load(); }, [load]);
@@ -135,17 +146,24 @@ export default function MemoryPage() {
     setBusy(`correct:${fact.id}`);
     setMessage("");
     try {
-      const response = await fetch("/api/memory/correction", {
+      const correction = {
+        targetFactId: fact.id,
+        canonicalText: replacement,
+        sourceText,
+        object: { value: replacement },
+      };
+      const submit = (confirmedJobUse = false) => fetch("/api/memory/correction", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          targetFactId: fact.id,
-          canonicalText: replacement,
-          sourceText,
-          object: { value: replacement },
-        }),
+        body: JSON.stringify({ ...correction, confirmedJobUse }),
       });
-      const payload = await response.json().catch(() => ({}));
+      let response = await submit();
+      let payload = await response.json().catch(() => ({}));
+      if (response.status === 422 && payload.code === "sensitive_job_use_confirmation_required") {
+        if (!window.confirm("这条纠正包含薪资、签证或健康等敏感求职信息。确认仅用于你的求职筛选和建议，并保存到私人记忆吗？")) return;
+        response = await submit(true);
+        payload = await response.json().catch(() => ({}));
+      }
       if (!response.ok || !payload.success) throw new Error(payload.error || "纠正未完成");
       setMessage("已写入纠正后的事实，旧事实已失效");
       await load();
@@ -163,6 +181,13 @@ export default function MemoryPage() {
         <p className="mt-2 text-sm text-[var(--color-muted)]">查看来源和状态，分别确认、纠正或清除记忆。未确认的闲聊候选不会影响推荐。</p>
       </header>
       {message && <div role="status" className="rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface)] p-3 text-sm">{message}</div>}
+      {readState === "unavailable" && (
+        <div role="alert" className="space-y-3 rounded-[var(--radius-sm)] border border-amber-300 bg-[var(--color-surface)] p-3 text-sm">
+          <p>记忆读取暂不可用，候选和事实数量尚未确认。请重试后再操作。</p>
+          <button type="button" disabled={busy !== null} onClick={() => void load()} className="rounded-[var(--radius-sm)] border border-[var(--color-border)] px-3 py-1.5">重试读取记忆</button>
+        </div>
+      )}
+      {readState === "loading" && <p role="status" className="text-sm text-[var(--color-muted)]">正在读取记忆…</p>}
 
       <section className="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -170,15 +195,15 @@ export default function MemoryPage() {
             <h2 className="font-medium text-[var(--color-text)]">自动发现记忆候选</h2>
             <p className="mt-1 text-xs text-[var(--color-muted)]">关闭后会立即清除尚未确认的闲聊候选；你仍可单次明确请求“请记住”。</p>
           </div>
-          <button type="button" disabled={busy === "discovery"} onClick={() => void setDiscovery(!data.discovery.enabled)} className="rounded-[var(--radius-sm)] bg-[var(--color-primary)] px-3 py-2 text-sm text-white disabled:opacity-50">
-            {data.discovery.enabled ? "关闭自动发现" : "开启自动发现"}
+          <button type="button" disabled={busy !== null || readState !== "ready"} onClick={() => void setDiscovery(!data.discovery.enabled)} className="rounded-[var(--radius-sm)] bg-[var(--color-primary)] px-3 py-2 text-sm text-white disabled:opacity-50">
+            {readState === "ready" ? (data.discovery.enabled ? "关闭自动发现" : "开启自动发现") : "自动发现状态待确认"}
           </button>
         </div>
       </section>
 
       <section className="space-y-3">
-        <h2 className="font-medium text-[var(--color-text)]">待确认候选（{data.candidates.length}）</h2>
-        {data.candidates.length === 0 ? <Empty text="暂无待确认候选。" /> : data.candidates.map((candidate) => (
+        <h2 className="font-medium text-[var(--color-text)]">待确认候选（{readState === "ready" ? data.candidates.length : readState === "loading" ? "读取中" : "不可用"}）</h2>
+        {readState === "ready" && (data.candidates.length === 0 ? <Empty text="暂无待确认候选。" /> : data.candidates.map((candidate) => (
           <article key={candidate.id} className="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
             <p className="text-sm text-[var(--color-text)]">{candidate.canonicalText}</p>
             {candidate.sensitivity === "job_sensitive" && <p className="mt-2 text-xs text-amber-700">求职敏感内容：确认前会要求你同意仅用于求职辅助。</p>}
@@ -188,12 +213,12 @@ export default function MemoryPage() {
               <button type="button" disabled={busy !== null} onClick={() => void candidateAction(candidate.id, "reject")} className="rounded-[var(--radius-sm)] border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-text-soft)]">拒绝</button>
             </div>
           </article>
-        ))}
+        )))}
       </section>
 
       <section className="space-y-3">
-        <h2 className="font-medium text-[var(--color-text)]">已生效事实（{data.facts.length}）</h2>
-        {data.facts.length === 0 ? <Empty text="暂无可显示的私人事实。" /> : data.facts.map((fact) => (
+        <h2 className="font-medium text-[var(--color-text)]">已生效事实（{readState === "ready" ? data.facts.length : readState === "loading" ? "读取中" : "不可用"}）</h2>
+        {readState === "ready" && (data.facts.length === 0 ? <Empty text="暂无可显示的私人事实。" /> : data.facts.map((fact) => (
           <article key={fact.id} className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
             <div>
               <p className="text-sm text-[var(--color-text)]">{fact.canonicalText}</p>
@@ -204,7 +229,7 @@ export default function MemoryPage() {
               <button type="button" disabled={busy !== null} onClick={() => void eraseFact(fact.id)} className="rounded-[var(--radius-sm)] border border-red-200 px-3 py-1.5 text-xs text-red-600">清除记忆</button>
             </div>
           </article>
-        ))}
+        )))}
       </section>
     </main>
   );

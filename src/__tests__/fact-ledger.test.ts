@@ -11,6 +11,7 @@ import {
   type FactCandidate,
 } from "@/lib/memory/fact-ledger";
 import { MastraSessionMemoryAdapter, SessionMemoryConfigurationError } from "@/lib/memory/postgres-memory";
+import { memoryFactSuppressionSql } from "@/lib/memory/erasure-sql";
 
 function fact(overrides: Partial<ExistingFact> = {}): ExistingFact {
   return {
@@ -126,6 +127,13 @@ describe("memory erasure SQL safety", () => {
     const admission = fs.readFileSync(path.join(process.cwd(), "src", "lib", "memory", "admission.ts"), "utf8");
     const combined = `${source}\n${admission}`;
     expect(combined).not.toMatch(/jsonb_array_elements_text\([^)]*\)\s+id\s+WHERE\s+id\s*=/);
-    expect((combined.match(/AS erased_fact\(value\)/g) || []).length).toBeGreaterThanOrEqual(6);
+    for (const [factAlias, episodeAlias] of [["f", "e"], ["pf", "pe"]] as const) {
+      const suppression = memoryFactSuppressionSql(factAlias, episodeAlias);
+      expect(suppression).toContain("AS erased_fact(value)");
+      expect(suppression).toContain(`erased_fact.value=${factAlias}.id::text`);
+      expect(suppression).toContain(`s.user_id=${factAlias}.user_id`);
+      expect(suppression).toContain(`s.source_type=${episodeAlias}.source_type`);
+      expect(suppression).not.toMatch(/\bWHERE\s+id\s*=/);
+    }
   });
 });

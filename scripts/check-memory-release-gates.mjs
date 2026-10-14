@@ -97,6 +97,18 @@ async function checkDatabase(client, report) {
   const extensionRows = await client.query("SELECT 1 FROM pg_extension WHERE extname='vector'");
   if (extensionRows.rowCount) pass(report.gates, "pgvector");
   else fail(report.gates, "pgvector", "vector extension missing");
+  try {
+    const normalization = await client.query(`SELECT
+      lower(U&'\\0130' COLLATE "und-x-icu") AS dotted_i,
+      lower(U&'\\039F\\03A3' COLLATE "und-x-icu") AS final_sigma`);
+    if (normalization.rows[0]?.dotted_i === "i\u0307" && normalization.rows[0]?.final_sigma === "ος") {
+      pass(report.gates, "memoryErasureNormalization", "und-x-icu with verified Unicode lowercase behavior");
+    } else {
+      fail(report.gates, "memoryErasureNormalization", "ICU lowercase behavior differs from the memory target-key contract");
+    }
+  } catch {
+    fail(report.gates, "memoryErasureNormalization", "und-x-icu is unavailable; governed memory reads must remain closed");
+  }
   const indexRows = await client.query("SELECT indexname FROM pg_indexes WHERE schemaname='public' AND indexname=ANY($1::text[]) AND indexdef ILIKE '% USING hnsw %'", [REQUIRED_INDEXES]);
   const presentIndexes = new Set(indexRows.rows.map((row) => String(row.indexname)));
   for (const index of REQUIRED_INDEXES) {

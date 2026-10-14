@@ -92,15 +92,27 @@ export interface MemoryAdmissionResult extends MemoryAdmissionDecision {
 }
 
 const HISTORICAL_OR_HYPOTHETICAL = /(?:忘记了?(?:我)?曾|忘掉了?(?:我)?曾|曾经|以前|过去|假设|假如|如果|比如|举例|面试回答|岗位描述|职位描述|\bJD\b|\bresume\b)/i;
-const SENSITIVE_JOB_CONTENT = /(?:薪资底线|最低薪资|最低工资|期望薪资|工作许可|工作签证|签证限制|健康限制|疾病|病史|残疾|salary\s*(?:floor|minimum)|work\s*(?:authorization|permit)|medical|health\s*(?:condition|restriction))/i;
+const SALARY_MEMORY_CONTENT = /(?:薪资|薪酬|工资|月薪|年薪|salary|compensation|(?:期望|不接受低于)\s*(?:\d+(?:\.\d+)?|[零〇一二两三四五六七八九十百千]+)\s*[k万千元](?:元)?(?:\s*(?:到|至|[-–~～])\s*(?:\d+(?:\.\d+)?|[零〇一二两三四五六七八九十百千]+)\s*[k万千元](?:元)?)?(?=\s*(?:[，。；;！!？?\n"'}]|\/(?:月|年)|每(?:月|年)|左右|以上|以下|的(?:岗位|工作|职位|机会)|$)))/i;
+const SENSITIVE_JOB_CONTENT = new RegExp(`${SALARY_MEMORY_CONTENT.source}|工作许可|工作签证|签证限制|健康限制|疾病|病史|残疾|work\\s*(?:authorization|permit)|medical|health\\s*(?:condition|restriction)`, "i");
+const CURRENT_USER_PREFERENCE_SOURCES = new Set(["conversation_message", "user_explicit_memory"]);
+const NONCURRENT_PREFERENCE_QUOTE = /(?:引用|引述|示例|例子|去年|前年|当年|曾经|以前|过去|之前|假设|假如|如果|比如|举例|并非|不是我的|不(?:是|再)?(?:我)?(?:的)?(?:期望|希望|想要)|我不要|期望的不是|没有(?:说|表示|要求|期望|希望)|别把|不要把|\b(?:used\s+to|previously|formerly|example|hypothetical|quote[ds]?|my\s+(?:friend|colleague)|(?:do|does|did)\s+not\s+(?:expect|want|prefer)|(?:am|is|was)\s+not\s+(?:expecting|wanting))\b)/i;
+const PERSONAL_SENSITIVE_QUOTE = /^(?:我(?!(?:的)?(?:朋友|同事|同学|家人|客户|老板))|(?:i|my)\b|(?:salary|compensation)(?=\s*\d)|(?:税前|税后)?(?:月薪|年薪|工资|薪资|薪酬)|期望\s*(?:\d|[一二两三四五六七八九十])|不接受低于)/i;
 const FORBIDDEN_SECRET = /(?:密码|password|passcode|api[\s_-]*key|密钥|secret|access[\s_-]*token)\s*["']?\s*(?:是|为|[:：=])\s*["']?[^\s,，。;；"'}]{4,}|\b(?:sk-[A-Za-z0-9_-]{16,}|AKIA[A-Z0-9]{16}|Bearer\s+[A-Za-z0-9._~-]{16,})\b|(?:身份证(?:号|号码)?|identity\s*(?:card|number|no\.?))\s*["']?\s*(?:是|为|[:：=])?\s*["']?\d{17}[\dXx]|\b\d{17}[\dXx]\b/i;
 
 export function containsForbiddenMemoryContent(text: string): boolean {
   return FORBIDDEN_SECRET.test(text);
 }
 
-export function resolveAdmissionPartition(fact: FactCandidate): string {
-  return SENSITIVE_JOB_CONTENT.test(`${fact.predicate}\n${fact.canonicalText}\n${JSON.stringify(fact.object)}`)
+export function containsSensitiveJobMemoryContent(text: string): boolean {
+  return SENSITIVE_JOB_CONTENT.test(text);
+}
+
+export function containsSalaryMemoryContent(text: string): boolean {
+  return SALARY_MEMORY_CONTENT.test(text);
+}
+
+export function resolveAdmissionPartition(fact: FactCandidate, evidenceQuote = ""): string {
+  return SENSITIVE_JOB_CONTENT.test(`${fact.predicate}\n${fact.canonicalText}\n${JSON.stringify(fact.object)}\n${evidenceQuote}`)
     ? "private"
     : fact.partition;
 }
@@ -139,9 +151,15 @@ export function classifyMemoryAdmission(
       : "explicit_request_requires_exact_fact_confirmation" };
   }
   if (input.kind === "current_preference") {
+    if (!CURRENT_USER_PREFERENCE_SOURCES.has(input.sourceType)) {
+      return { outcome: "rejected", reason: "source_not_current_user_preference" };
+    }
+    const quote = evidence.quote.trim();
     if (!evidence.directCurrentIntent || evidence.isQuotation || evidence.isHypothetical
       || evidence.isHistorical || evidence.isInterviewAnswer || evidence.isDocument
-      || evidence.isDerived || HISTORICAL_OR_HYPOTHETICAL.test(content)) {
+      || evidence.isDerived || HISTORICAL_OR_HYPOTHETICAL.test(content)
+      || !quote || /^["'“‘`]/.test(quote) || NONCURRENT_PREFERENCE_QUOTE.test(quote)
+      || (sensitive && !PERSONAL_SENSITIVE_QUOTE.test(quote))) {
       return { outcome: "clarify", reason: "current_preference_intent_ambiguous" };
     }
     if (sensitive && !evidence.confirmedJobUse) {
@@ -281,7 +299,7 @@ export async function admitMemory(input: MemoryAdmissionInput): Promise<MemoryAd
   );
   const admittedFact = {
     ...input.fact,
-    partition: resolveAdmissionPartition(input.fact),
+    partition: resolveAdmissionPartition(input.fact, input.evidence.quote),
     currentPreference: input.kind === "current_preference",
   };
   const source = {
@@ -326,19 +344,30 @@ export async function admitMemory(input: MemoryAdmissionInput): Promise<MemoryAd
     return { ...decision, candidate, reason: candidate.status === "pending" ? decision.reason : "already_resolved" };
   }
   if (decision.outcome === "active") {
-    const episodeId = await recordEpisode(
-      { userId: input.userId },
-      {
-        sourceType: input.sourceType,
-        sourceId: input.sourceId,
-        content: { fact: input.fact.canonicalText, evidence: input.evidence, admissionReason: decision.reason },
-      },
-    );
-    const recorded = await recordFact(
-      { userId: input.userId }, admittedFact,
-      { episodeId, agentId: input.agentId, useLlmDecision: false },
-    );
-    return { ...decision, recorded };
+    const client = await getPostgresPool().connect();
+    try {
+      await client.query("BEGIN");
+      const episodeId = await recordEpisode(
+        { userId: input.userId },
+        {
+          sourceType: input.sourceType,
+          sourceId: input.sourceId,
+          content: { fact: input.fact.canonicalText, evidence: input.evidence, admissionReason: decision.reason },
+        },
+        client,
+      );
+      const recorded = await recordFact(
+        { userId: input.userId }, admittedFact,
+        { episodeId, agentId: input.agentId, useLlmDecision: false, client },
+      );
+      await client.query("COMMIT");
+      return { ...decision, recorded };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
   return decision;
 }
@@ -381,6 +410,23 @@ export async function resolveMemoryCandidate(
         `${candidate.fact.predicate}\n${candidate.fact.canonicalText}\n${JSON.stringify(candidate.fact.object)}\n${candidate.evidence.quote}`,
       );
     if (sensitive && !options.confirmedJobUse) throw new Error("job-seeking use confirmation required");
+    const admittedFact = { ...candidate.fact, partition: sensitive ? "private" : candidate.fact.partition };
+    const confirmedEvidence = sensitive ? {
+      ...candidate.evidence,
+      confirmedJobUse: true,
+      metadata: {
+        ...candidate.evidence.metadata,
+        jobUseConfirmation: {
+          purpose: "job_seeking", userId, candidateId: candidate.id,
+          sourceType: candidate.sourceType, sourceId: candidate.sourceId,
+          fact: {
+            partition: admittedFact.partition, subject: admittedFact.subject, predicate: admittedFact.predicate,
+            object: admittedFact.object, canonicalText: admittedFact.canonicalText,
+          },
+          confirmedAt: new Date().toISOString(),
+        },
+      },
+    } : candidate.evidence;
     const source = {
       sourceType: candidate.sourceType,
       sourceId: candidate.sourceId,
@@ -394,20 +440,21 @@ export async function resolveMemoryCandidate(
       {
         sourceType: candidate.sourceType,
         sourceId: candidate.sourceId,
-        content: { fact: candidate.fact.canonicalText, evidence: candidate.evidence, confirmedByUser: true },
+        content: { fact: candidate.fact.canonicalText, evidence: confirmedEvidence, confirmedByUser: true },
       },
       client,
     );
     const recorded = await recordFact(
-      { userId }, candidate.fact,
+      { userId }, admittedFact,
       { episodeId, agentId: "profile", useLlmDecision: false, client },
     );
     if (suppressed) await liftMemorySuppression(userId, candidate.fact.canonicalText, source, client);
     const updated = await client.query(
       `UPDATE memory_admission_candidates
-       SET status = 'confirmed', fact_id = $3, resolved_at = NOW()
+       SET status = 'confirmed', fact_id = $3, partition = $4, sensitivity = $5, evidence_json = $6::jsonb, resolved_at = NOW()
        WHERE id = $1 AND user_id = $2 RETURNING *`,
-      [id, userId, recorded.find((item) => item.factId > 0)?.factId ?? null],
+      [id, userId, recorded.find((item) => item.factId > 0)?.factId ?? null, admittedFact.partition,
+        sensitive ? "job_sensitive" : candidate.sensitivity, JSON.stringify(confirmedEvidence)],
     );
     await client.query("COMMIT");
     return { candidate: mapCandidate(updated.rows[0]), recorded };

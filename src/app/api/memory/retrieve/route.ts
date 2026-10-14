@@ -4,6 +4,7 @@ import { normalizeMemorySourceFilters, type MemorySourceFilter } from "@/lib/mem
 import { enforceAgentMemoryPolicy } from "@/lib/agent/memory-context";
 import { resolveAgentMemoryPolicy } from "@/lib/agent/memory-policy";
 import { retrieveGovernedMemory } from "@/lib/memory/retrieval";
+import { resolveGovernedFactSourceType } from "@/lib/memory/source-policy";
 
 const ALLOWED_FILTERS = new Set([
   "resume",
@@ -46,7 +47,7 @@ export async function POST(request: Request) {
 
     const policy = resolveAgentMemoryPolicy(task);
     const requestedSourceTypes = normalizeMemorySourceFilters(normalizeSourceTypes(body.sourceTypes));
-    const sourceTypes = requestedSourceTypes.length
+    const sourceTypes = body.sourceTypes !== undefined
       ? policy.allowedSourceTypes.filter((sourceType) => requestedSourceTypes.includes(sourceType))
       : policy.allowedSourceTypes;
     if (policy.semanticTopK <= 0 || sourceTypes.length === 0) {
@@ -54,6 +55,8 @@ export async function POST(request: Request) {
         success: true,
         data: {
           snippets: [],
+          facts: [],
+          profile: [],
           policyId: policy.id,
           task: policy.task,
           deniedSources: [],
@@ -80,7 +83,10 @@ export async function POST(request: Request) {
       success: true,
       data: {
         snippets: enforced.semanticSnippets,
-        facts: governed.facts.filter((fact) => fact.sourceType !== null && policy.allowedSourceTypes.includes(fact.sourceType as typeof policy.allowedSourceTypes[number])),
+        facts: governed.facts.filter((fact) => {
+          const sourceType = resolveGovernedFactSourceType(fact.sourceType);
+          return sourceType !== null && policy.allowedSourceTypes.includes(sourceType);
+        }),
         profile: governed.profile,
         deniedSources: enforced.deniedSources,
         policyId: policy.id,
