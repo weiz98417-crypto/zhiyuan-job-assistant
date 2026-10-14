@@ -2,8 +2,7 @@ import { createHash } from "node:crypto";
 import { getDataRepositories } from "@/lib/data-repositories";
 import { getDatabaseDriver, isPostgresConfigured } from "@/lib/postgres";
 import type { ExecutionPrincipal } from "@/lib/agent/runtime/durable-agent-run";
-import { rebuildInterviewStateFromMessages } from "@/lib/agent/interview-session-state";
-import type { AgentMessage, InterviewSessionState } from "@/types";
+import type { InterviewSessionState } from "@/types";
 import type { DurableRunContextMaterial } from "@/lib/agent/runtime/run-context";
 import { reconcileRunGateMessages } from "@/lib/agent/run-gate-message-status";
 import { getSessionMemoryAdapter, type SessionMemoryMessage } from "@/lib/memory/postgres-memory";
@@ -104,23 +103,9 @@ export async function saveExecutionConversation(
   const sessions = getDataRepositories().sessions;
   const row = await sessions.get(conversationId, principal.userId);
   if (!row) throw new Error("Agent Conversation not found");
-  const currentInterviewState = parseInterviewState(row.interview_state_json ?? row.interviewState);
-  // Spec 27 / ADR-0044：durable 引擎状态存在时，questionGraph 直接从持久化状态投影，
-  // 不再从消息文本正则推断题型（单写者：durable 引擎是面试状态唯一写者）。
-  const { projectDurableInterviewEngineState } = await import("@/lib/agent/interview-session-state");
-  const durableProjection = projectDurableInterviewEngineState(row.interview_state_json ?? row.interviewState);
-  const interviewState = durableProjection
-    ?? rebuildInterviewStateFromMessages(
-      currentInterviewState,
-      messages.flatMap(toAgentMessage),
-    );
-  // 单写者硬规则（eng review S1-6）：durable 引擎状态在场的会话，绝不用有损投影回写
-  // interview_state_json（否则引擎状态被覆盖、下一次 parseInterviewSession 判会话不存在）。
-  const interviewStateWrite = durableProjection ? undefined : interviewState;
   if (!usesDurableSessionMemory()) {
     const updated = await sessions.update(conversationId, principal.userId, {
       messages,
-      ...(interviewStateWrite ? { interviewState: interviewStateWrite } : {}),
     });
     if (!updated) throw new Error("Agent Conversation not found");
     return;
@@ -129,10 +114,6 @@ export async function saveExecutionConversation(
     { userId: principal.userId, conversationId },
     messages.map((message, index) => toSessionMemoryMessage(message, index)),
   );
-  const updated = interviewStateWrite
-    ? await sessions.update(conversationId, principal.userId, { interviewState: interviewStateWrite })
-    : true;
-  if (!updated) throw new Error("Agent Conversation not found");
 }
 
 function usesDurableSessionMemory(): boolean {
@@ -183,16 +164,4 @@ export function parseInterviewState(value: unknown): InterviewSessionState | und
   } catch {
     return undefined;
   }
-}
-
-function toAgentMessage(message: ExecutionConversationMessage): AgentMessage[] {
-  if (message.role !== "user" && message.role !== "assistant" && message.role !== "tool") return [];
-  return [{
-    role: message.role,
-    content: message.content,
-    images: message.images,
-    toolName: message.toolName,
-    toolResult: message.toolResult,
-    timestamp: message.timestamp || new Date().toISOString(),
-  }];
 }

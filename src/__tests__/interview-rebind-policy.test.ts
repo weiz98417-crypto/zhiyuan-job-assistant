@@ -140,6 +140,28 @@ describe("interview material reference classifier", () => {
     expect(resolution.clarificationQuestion).toContain("补充参考");
   });
 
+  it("requires clarification rather than treating an unavailable explicit CV restart as supporting context", () => {
+    const decision = classifyInterviewMaterialReference("用CV-v999从头面试");
+    expect(decision.intent).toBe("restart_as_new_interview");
+    const resolution = resolveInterviewRebindAction(decision, null);
+    expect(resolution.action).toBe("ask_clarification");
+    expect(resolution.materialKind).toBe("resume");
+  });
+
+  it.each([
+    "我在CV-v2写了从头设计SQL自动化流程",
+    "我用简历v2从头设计了职业项目展示",
+    "不要用CV-v999从头面试",
+    "请不要切换到 #23 这份简历",
+  ])("does not pause or rebind for a narrative or negated material change: %s", (content) => {
+    const decision = classifyInterviewMaterialReference(content);
+    const resolution = resolveInterviewRebindAction(decision, null);
+    expect(decision.explicit).toBe(false);
+    expect(resolution.action).not.toBe("ask_clarification");
+    expect(resolution.action).not.toBe("auto_restart_interview");
+    expect(resolution.action).not.toBe("auto_switch_material");
+  });
+
   it("does not silently switch ambiguous another-resume wording even when local resumes exist", () => {
     const decision = classifyInterviewMaterialReference("用另一个简历继续这场面试吧");
     const match = matchInterviewMaterialReference(decision, records);

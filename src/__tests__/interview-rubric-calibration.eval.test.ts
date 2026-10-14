@@ -69,6 +69,62 @@ describe("Spec 26: rubric 模块行为（注入 completion）", () => {
     }
   });
 
+  it("rejects plausible evidence copied from the question or context instead of the answer", async () => {
+    const calls: string[] = [];
+    const result = await scoreAnswerWithRubric({
+      ...baseInput, question: "项目节省了300万元，请介绍你的贡献", context: "简历记载项目节省了300万元。",
+    }, { completion: fakeCompletion(rubricResponse({ evidence: {
+      structure: "我先说了背景，然后讲了我的动作", specificity: "项目节省了300万元",
+      highlight: "我主动推动了跨部门对齐", timing: "控制在两分钟内讲完",
+    } }), calls) });
+    expect(result).toMatchObject({ unscored: true, reason: expect.stringContaining(MISSING_EVIDENCE_VETO) });
+    expect(calls).toHaveLength(2);
+    expect(calls[1]).toContain("specificity");
+  });
+
+  it("rejects commentary attached to a real answer quote and accepts only the exact quote on retry", async () => {
+    const calls: string[] = [];
+    const completion: RubricCompletion = async (request) => {
+      calls.push(request.messages[0].content);
+      return { text: calls.length === 1 ? rubricResponse({ evidence: {
+        structure: "我先说了背景，然后讲了我的动作", specificity: "转化率提升了20%",
+        highlight: "我主动推动了跨部门对齐——说明具备主动性", timing: "控制在两分钟内讲完",
+      } }) : rubricResponse() };
+    };
+    const result = await scoreAnswerWithRubric(baseInput, { completion });
+    expect(calls).toHaveLength(2);
+    expect(calls[1]).toContain(MISSING_EVIDENCE_VETO);
+    expect("unscored" in result).toBe(false);
+    if ("unscored" in result) throw new Error("should be scored after exact citation retry");
+    expect(result.evidence.highlight).toBe("我主动推动了跨部门对齐");
+  });
+
+  it("limits reevaluation to one attempt even when a JSON failure is followed by an invalid citation", async () => {
+    const calls: string[] = [];
+    const completion: RubricCompletion = async (request) => {
+      calls.push(request.messages[0].content);
+      return { text: calls.length === 1 ? "not JSON" : rubricResponse({ evidence: {
+        structure: "我先说了背景，然后讲了我的动作", specificity: "简历中的错误来源",
+        highlight: "我主动推动了跨部门对齐", timing: "控制在两分钟内讲完",
+      } }) };
+    };
+    const result = await scoreAnswerWithRubric(baseInput, { completion });
+    expect(result).toMatchObject({ unscored: true });
+    expect(calls).toHaveLength(2);
+  });
+
+  it.each([
+    { bands: { structure: 5, specificity: 3, highlight: 2, timing: 3 } },
+    { bands: { structure: 1.5, specificity: 3, highlight: 2, timing: 3 } },
+    { overallBand: -1 },
+    { overallBand: "3" },
+  ])("does not turn an invalid rubric band into a valid saved score: %j", async (invalidBands) => {
+    const calls: string[] = [];
+    const result = await scoreAnswerWithRubric(baseInput, { completion: fakeCompletion(rubricResponse(invalidBands), calls) });
+    expect(result).toMatchObject({ unscored: true, reason: expect.stringContaining(MISSING_EVIDENCE_VETO) });
+    expect(calls).toHaveLength(2);
+  });
+
   it("findMissingEvidence：缺引用或缺档位的维度都算 missing（P1-6：缺档位不得静默猜 2 档）", () => {
     const missing = findMissingEvidence({
       bands: { structure: 3, specificity: 2 },

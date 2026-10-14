@@ -28,9 +28,6 @@ vi.mock("@/lib/memory/postgres-memory", () => ({
   }),
 }));
 
-// Regression: ISSUE-ONLINE-004 — durable interview messages did not update interviewState
-// Found by /qa on 2026-08-28
-// Report: .gstack/qa-reports/qa-report-121-43-198-13-2026-08-28.md
 describe("durable interview session persistence regression", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -47,7 +44,7 @@ describe("durable interview session persistence regression", () => {
     sessionMemory.load.mockResolvedValue([]);
   });
 
-  it("rebuilds answered rounds and the next question while saving Worker messages", async () => {
+  it("persists the conversation without inventing interview rounds from legacy messages", async () => {
     const { saveExecutionConversation } = await import("@/lib/agent/runtime/execution-session-service");
 
     await saveExecutionConversation({ userId: "user-1" }, 77, [
@@ -91,10 +88,9 @@ describe("durable interview session persistence regression", () => {
     ]);
 
     const update = boundaries.update.mock.calls.at(-1)?.[2];
-    expect(update.interviewState.transcript.filter((turn: { role: string }) => turn.role === "user")).toHaveLength(1);
-    expect(update.interviewState.questionGraph).toHaveLength(2);
-    expect(update.interviewState.questionGraph.at(-1)?.question).toContain("模型质量阈值");
-    expect(update.interviewState.currentQuestionId).toBe(update.interviewState.questionGraph.at(-1)?.id);
+    expect(update?.interviewState).toBeUndefined();
+    expect(update?.messages).toHaveLength(4);
+    expect(update?.messages.at(-1)?.content).toContain("模型质量阈值");
   });
 
   it("keeps the durable engine as sole writer when its state arrives as serialized JSON", async () => {
@@ -113,5 +109,19 @@ describe("durable interview session persistence regression", () => {
     const update = boundaries.update.mock.calls.at(-1)?.[2];
     expect(update?.interviewState).toBeUndefined();
     expect(boundaries.get.mock.results.length).toBeGreaterThan(0);
+  });
+
+  it("preserves a prepared interview when the Worker persists the first start turn", async () => {
+    const prepared = { status: "active", questionGraph: [], transcript: [], scoreArtifacts: [], rebindHistory: [],
+      planSnapshot: { snapshotId: "prepared-77", source: { resumeId: "cv-a" },
+        jdSnapshot: { company: "甲公司", role: "AI 产品经理", body: "SQL 与产品分析" },
+        resumeSnapshot: { title: "本人简历", body: "负责产品分析" }, mode: "project-review",
+        difficulty: "pressure", focusAreas: ["SQL"], allowFollowUps: false, createdAt: "2026-10-14T01:00:00.000Z" } };
+    boundaries.get.mockResolvedValue({ id: 77, interview_state_json: JSON.stringify(prepared) });
+    const { saveExecutionConversation } = await import("@/lib/agent/runtime/execution-session-service");
+    await saveExecutionConversation({ userId: "user-1" }, 77, [{ id: "start-77", role: "user", content: "开始模拟面试" }]);
+    const update = boundaries.update.mock.calls.at(-1)?.[2];
+    expect(update?.interviewState).toBeUndefined();
+    expect(JSON.parse((await boundaries.get(77, "user-1")).interview_state_json)).toEqual(prepared);
   });
 });

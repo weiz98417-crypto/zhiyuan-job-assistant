@@ -9,6 +9,7 @@ export interface TaskProgram {
   stages: readonly string[];
   successCriteria: readonly string[];
   validators: readonly string[];
+  researchDependency?: "required" | "supporting";
 }
 
 export interface TaskProgramBinding {
@@ -22,7 +23,8 @@ const CONVERSATIONAL_STAGES = ["bind_context", "respond", "wait_or_complete"];
 const DETERMINISTIC_STAGES = ["preflight", "clarify_or_gate", "execute", "verify_read_back", "persist_artifact", "respond"];
 
 export const TASK_PROGRAM_REGISTRY: Record<AgentTaskType, TaskProgram> = {
-  general_chat: program("general_chat", "conversational", CONVERSATIONAL_STAGES, ["answer generated"], ["assistant_response"]),
+  general_chat: { ...program("general_chat", "conversational", CONVERSATIONAL_STAGES, ["answer generated"], ["assistant_response"]),
+    researchDependency: "supporting" },
   career_positioning_guidance: program("career_positioning_guidance", "conversational", CONVERSATIONAL_STAGES, ["guidance framework loaded", "next question or guidance response generated"], ["guidance_response"]),
   resume_query: program("resume_query", "conversational", CONVERSATIONAL_STAGES, ["resume context read", "answer generated"], ["read_only_resume_response"]),
   resume_diagnosis: program("resume_diagnosis", "conversational", CONVERSATIONAL_STAGES, ["answer generated"], ["read_only_resume_diagnosis"]),

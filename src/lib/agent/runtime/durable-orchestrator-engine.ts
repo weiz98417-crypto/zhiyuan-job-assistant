@@ -45,6 +45,9 @@ import {
 } from "@/lib/agent/runtime/run-context";
 import { prepareRunAttachment, type InspectRunImages, type RunAttachmentMaterial } from "@/lib/agent/runtime/run-attachment-material";
 import { projectReadOnlyOfferFacts, renderReadOnlyOfferFacts } from "@/lib/agent/runtime/run-read-only-offer-facts";
+import { executeResearchChild } from "@/lib/agent/runtime/research-execution-engine";
+import type { agentLoopServer } from "@/lib/agent/loop/server-runner";
+import { restoreGovernedHandoff } from "@/lib/agent/runtime/governed-handoff";
 
 type Orchestrate = (input: {
   content: string;
@@ -57,6 +60,7 @@ type Orchestrate = (input: {
   workerId: string;
   fencingToken: number;
   taskContract: AgentTaskContract | null;
+  toolAllowlist?: readonly string[];
   modelRecovery?: ModelRecoveryPolicy;
   frozenToolCall?: { name: string; args: Record<string, unknown> };
   attachmentMaterial?: RunAttachmentMaterial | null;
@@ -76,6 +80,7 @@ export interface DurableOrchestratorExecutionEngineOptions {
   circuitBreaker?: RuntimeCircuitBreaker;
   contextSource?: DurableRunContextSource;
   inspectImages?: InspectRunImages;
+  researchLoop?: typeof agentLoopServer;
 }
 
 interface StoredContractEvaluation {
@@ -118,8 +123,10 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
   }
 
   async execute(input: Parameters<AgentRunExecutionEngine["execute"]>[0]): Promise<AgentRunExecutionResult> {
+    if (input.run.taskType === "delegated_research") return executeResearchChild(this.options.runtime, input, this.options.researchLoop);
     const principal = { userId: input.run.userId };
     const pendingInputs = await this.options.runtime.listPendingInputs(principal, input.run.id);
+    let specialistHandoff = await restoreGovernedHandoff(this.options.runtime, input.run, input.checkpoint, input.signal);
     const durableMaterial = await this.contextSource.load(principal, input.run.id);
     const storedCompletion = readStoredModelCompletion(input.checkpoint?.context.modelCompletion);
     const recoveryAlreadyDecided = Object.keys(asRecord(input.checkpoint?.context.recovery)).length > 0;
@@ -149,7 +156,7 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
       timestamp: item.createdAt,
     }));
     const attachment = await prepareRunAttachment({
-      run: input.run, pendingInputs,
+      run: input.run, pendingInputs: specialistHandoff ? [] : pendingInputs,
       checkpointMaterial: input.checkpoint?.context.attachmentMaterial,
       latestInput: durableMessages.at(-1)?.content || String(input.checkpoint?.context.latestInput || ""),
       inspectImages: this.options.inspectImages, signal: input.signal,
@@ -164,7 +171,7 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
     const checkpointSourceKey = typeof input.checkpoint?.context.jdSourceKey === "string"
       ? input.checkpoint.context.jdSourceKey
       : latestJDSourceKey(runContextMessages(input.checkpoint?.context.messages));
-    const jdScope = originalContract?.taskType === "jd_evaluation"
+    const jdScope = !specialistHandoff && originalContract?.taskType === "jd_evaluation"
       ? resolveJDMatchingScope(durableMessages, checkpointSourceKey, checkpointMatchingScope ?? originalContract.routing?.jdMatchResume)
       : null;
     const jdMatchResume = jdScope?.matchResume;
@@ -175,7 +182,7 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
     const safeContextInputs = jdMatchResume === false
       ? filterJDNoResumeMessages(contextInputs)
       : contextInputs;
-    const effectiveContract = originalContract?.taskType === "jd_evaluation"
+    const effectiveContract = !specialistHandoff && originalContract?.taskType === "jd_evaluation"
       ? {
           ...originalContract,
           ...(jdMatchResume === false
@@ -209,6 +216,7 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
     const checkpointMessages = (jdSourceChanged ? [] : runContextMessages(input.checkpoint?.context.messages))
       .filter((message) => !(message.role === "system" && (
         message.content.startsWith("Durable Run Contract:") || message.content.startsWith("[ATTACHMENT_MATERIAL")
+          || message.content.startsWith("[GOVERNED_HANDOFF]")
       )));
     const contextCheckpointMessages = jdMatchResume === false
       ? filterJDNoResumeMessages(checkpointMessages)
@@ -242,6 +250,10 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
       ],
     });
     const messages: ExecutionConversationMessage[] = rebuiltContext.messages;
+    if (specialistHandoff) {
+      rebuiltContext.plan.specialistHandoff = specialistHandoff;
+      messages.push({ role: "system", content: "[GOVERNED_HANDOFF]\n继续冻结的原目标与 Program；仅使用已授权来源和工具。reason 是用户交接授权，不是研究事实。\n" + JSON.stringify(specialistHandoff) });
+    }
     const checkpointConversationMessages = executionConversationMessages(
       input.checkpoint?.context.conversationMessages,
     );
@@ -285,6 +297,7 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
         jdSourceKey: jdScope?.sourceKey,
         compacted: executionContext.compacted,
         omittedMessageCount: executionContext.omittedCount,
+        ...(specialistHandoff ? { specialistHandoff } : {}),
         ...(Object.keys(recovery).length > 0 ? { recovery } : {}),
       },
       plan: rebuiltContext.plan,
@@ -300,6 +313,15 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
     });
 
     let assistantText = "";
+    const supportingResearchLimitations = new Map<string, string>();
+    for (const recorded of await this.options.runtime.listEvents(principal, input.run.id, 0)) {
+      const event = asRecord(recorded.payload.event);
+      if (event.type !== "tool_result" || event.name !== "delegate_research") continue;
+      const data = asRecord(event.uiPayload);
+      if (typeof data.delegationId !== "string") continue;
+      if (event.success === true) supportingResearchLimitations.delete(data.delegationId);
+      else if (data.dependency === "supporting" && typeof data.limitation === "string") supportingResearchLimitations.set(data.delegationId, data.limitation);
+    }
     const projectedMessages: ExecutionConversationMessage[] = [];
     let eventSequenceCursor = input.run.eventCursor;
     try {
@@ -325,6 +347,10 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
     // ambiguous turn into a clarification contract; both are recorded as
     // events so the UI and the audit trail see the same decision.
     let effectiveAgentId = contract ? taskAgentId(contract.taskType) : input.run.agentId;
+    if (specialistHandoff) {
+      effectiveAgentId = input.run.agentId;
+      rebuiltContext.plan.specialistHandoff = specialistHandoff;
+    }
     let clarificationQuestion: string | null = null;
     const needsPositioningScope = contract?.taskType === "career_positioning_guidance"
       || (isCareerPositioningConfirmation(latestInput) && Boolean(conversationMessages.findLast((message) => message.role === "assistant")?.content.includes("来源证据")));
@@ -334,7 +360,7 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
       content: latestInput,
       includePositioningScene: needsPositioningScope,
     });
-    try {
+    if (!specialistHandoff) try {
       const { resolveIntentEnvelope } = await import("@/lib/agent/intent-envelope");
       const { taskAgentId: envelopeTaskAgentId } = await import("@/lib/agent/guided-session-state");
       const envelope = attachment.envelope || await resolveIntentEnvelope({
@@ -412,7 +438,7 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
     const positioningConfirmation = Boolean(positioningArtifact?.sourceEvidence.length
       && positioningArtifact.sourceEvidence.every((evidence) => displayedPositioning.includes(evidence.evidenceId))
       && displayedPositioning.includes("来源证据"));
-    if (positioningConfirmation) {
+    if (positioningConfirmation && !specialistHandoff) {
       contract = buildContractForTask("profile_update", latestInput, undefined, contract?.routing?.intentConstraints);
       effectiveAgentId = taskAgentId("profile_update");
     }
@@ -454,6 +480,7 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
         jdSourceKey: jdScope?.sourceKey,
         compacted: executionContext.compacted,
         omittedMessageCount: executionContext.omittedCount,
+        ...(specialistHandoff ? { specialistHandoff } : {}),
         ...(Object.keys(recovery).length > 0 ? { recovery } : {}),
       },
       plan: rebuiltContext.plan,
@@ -516,6 +543,7 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
           omittedMessageCount: completedRunContext.omittedCount,
           modelCompletion: completion,
           taskContract: contract,
+          ...(specialistHandoff ? { specialistHandoff } : {}),
           ...(readOnlyFacts ? { readOnlyFacts } : {}),
         },
         plan: rebuiltContext.plan,
@@ -548,6 +576,8 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
       workerId: input.run.ownerId!,
       fencingToken: input.run.fencingToken,
       taskContract: contract,
+      toolAllowlist: specialistHandoff ? (specialistHandoff.allowedTools as string[])
+        .filter((name) => !contract?.routing?.allowedTools || contract.routing.allowedTools.includes(name)) : undefined,
       modelRecovery,
       attachmentMaterial: attachment.envelope?.kind === "resolved" ? attachment.material : undefined,
       interviewState: directives?.interviewState,
@@ -590,6 +620,16 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
           eventSequenceCursor = recordedEvent.sequence;
         }
         if (event.type === "text") assistantText += String(event.content || "");
+        if (event.type === "agent_switch") {
+          const current = await this.options.runtime.getRun(principal, input.run.id);
+          if (current && typeof event.agentId === "string" && event.agentId === current.agentId && current.taskType === contract?.taskType
+            && current.contract && asRecord(current.contract).target === contract?.target) {
+            effectiveAgentId = event.agentId;
+            const handoffCheckpoint = await this.options.runtime.getLatestCheckpoint(principal, input.run.id);
+            specialistHandoff = await restoreGovernedHandoff(this.options.runtime, current, handoffCheckpoint, input.signal);
+            if (specialistHandoff) rebuiltContext.plan.specialistHandoff = specialistHandoff;
+          }
+        }
         if (
           event.type === "interview_state_updated"
           && contract?.taskType === "interview_coaching"
@@ -628,6 +668,13 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
           }
         }
         if (event.type === "tool_result") {
+          if (event.name === "delegate_research") {
+            const data = asRecord(event.data);
+            if (typeof data.delegationId === "string") {
+              if (event.success === true) supportingResearchLimitations.delete(data.delegationId);
+              else if (data.dependency === "supporting" && typeof data.limitation === "string") supportingResearchLimitations.set(data.delegationId, data.limitation);
+            }
+          }
           if (waitingUserRequested && event.success !== true && !waitingUserToolName) {
             waitingUserToolName = String(event.name || "");
           }
@@ -820,6 +867,9 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
     } else if (contractOutcome?.status === "waiting_user" && !assistantText.trim() && contractOutcome.safeMessage) {
       assistantText = contractOutcome.safeMessage;
     }
+    for (const limitation of supportingResearchLimitations.values()) {
+      if (!assistantText.includes(limitation)) assistantText += (assistantText ? "\n\n" : "") + limitation;
+    }
     if (assistantText.trim() && !contractRecoveryPending) {
       projectedMessages.push({
         role: "assistant",
@@ -881,6 +931,7 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
         modelCompletion: completion,
         taskContract: contract,
         attachmentMaterial: attachment.material,
+        ...(specialistHandoff ? { specialistHandoff } : {}),
       },
       plan: rebuiltContext.plan,
       budgets: input.checkpoint?.budgets || input.run.budgets,
@@ -905,19 +956,27 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
     plan: Record<string, unknown>;
     factRefs: Parameters<DurableAgentRunService["saveCheckpoint"]>[0]["factRefs"];
   }) {
+    const principal = { userId: input.input.run.userId };
+    const current = await this.options.runtime.getRun(principal, input.input.run.id);
+    const checkpoint = await this.options.runtime.getLatestCheckpoint(principal, input.input.run.id);
+    const specialistHandoff = current
+      ? await restoreGovernedHandoff(this.options.runtime, current, checkpoint, input.input.signal, false)
+      : null;
+    const contract = specialistHandoff ? current!.contract as AgentTaskContract : input.taskContract;
     return this.options.runtime.saveCheckpoint({
       runId: input.input.run.id,
       workerId: input.input.run.ownerId!,
       fencingToken: input.input.run.fencingToken,
       boundary: "model_interrupted",
-      effectiveTask: input.taskContract ? { contract: input.taskContract, agentId: taskAgentId(input.taskContract.taskType) } : undefined,
+      effectiveTask: contract ? { contract, agentId: specialistHandoff ? current!.agentId : taskAgentId(contract.taskType) } : undefined,
       context: {
         messages: input.executionMessages,
         conversationMessages: input.conversationMessages,
         latestInput: input.latestInput,
         latestInputRequestId: input.latestInputRequestId,
-        taskContract: input.taskContract,
-        attachmentMaterial: input.attachmentMaterial,
+        taskContract: contract,
+        ...(specialistHandoff ? { specialistHandoff } : {}),
+        attachmentMaterial: specialistHandoff ? checkpoint?.context.attachmentMaterial : input.attachmentMaterial,
         jdMatchResume: input.jdMatchResume,
         jdSourceKey: input.jdSourceKey,
         compacted: input.compacted,
@@ -929,9 +988,9 @@ export class DurableOrchestratorExecutionEngine implements AgentRunExecutionEngi
           capturedAt: new Date().toISOString(),
         },
       },
-      plan: input.plan,
-      budgets: input.input.checkpoint?.budgets || input.input.run.budgets,
-      factRefs: input.factRefs,
+      plan: { ...input.plan, ...(specialistHandoff ? { specialistHandoff } : {}) },
+      budgets: checkpoint?.budgets || input.input.run.budgets,
+      factRefs: specialistHandoff ? checkpoint!.factRefs : input.factRefs,
     });
   }
 
@@ -1273,7 +1332,8 @@ function defaultOrchestrate(input: Parameters<Orchestrate>[0]): AsyncIterable<SS
     requestId: input.requestId,
     workerId: input.workerId,
     fencingToken: input.fencingToken,
-    taskContract: input.taskContract,
+    taskContract: input.taskContract && input.toolAllowlist ? { ...input.taskContract,
+      routing: { ...input.taskContract.routing, allowedTools: [...input.toolAllowlist] } } : input.taskContract,
     modelRecovery: input.modelRecovery,
     frozenToolCall: input.frozenToolCall,
     attachmentMaterial: input.attachmentMaterial,

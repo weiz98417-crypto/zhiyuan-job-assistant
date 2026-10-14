@@ -25,6 +25,8 @@ import { enforceToolGovernance } from "@/lib/agent/tool-governance";
 import { executeGovernedRuntimeTool } from "@/lib/agent/runtime/governed-tool-runtime";
 import { extractDsmlToolCalls } from "@/lib/agent/loop/dsml-tool-calls";
 import type { RunAttachmentMaterial } from "@/lib/agent/runtime/run-attachment-material";
+import { ResearchDelegationService, type ResearchDelegationContract } from "@/lib/agent/runtime/research-delegation";
+import { getDurableAgentRuntime } from "@/lib/agent/runtime/runtime-factory";
 
 /* ── Context cap (per-tool) ── */
 const DEFAULT_TOOL_CTX_CAP = 800;
@@ -140,7 +142,7 @@ export function buildRequiredJobDiscoveryToolCall(input: {
 }): NativeToolCall | null {
   if (input.contract?.taskType !== "job_search") return null;
   if (input.successfulTools.has("scan_portals")) return null;
-  if (input.allowedTools?.length && !input.allowedTools.includes("scan_portals")) return null;
+  if (Array.isArray(input.allowedTools) && !input.allowedTools.includes("scan_portals")) return null;
   return {
     id: `forced-job-discovery-confirmation-${Date.now()}`,
     name: "scan_portals",
@@ -238,7 +240,7 @@ export function buildRequiredResumeDraftToolCall(input: {
     "apply_resume_edit_proposal",
     "save_resume_section",
   ].some((toolName) => input.successfulTools.has(toolName))) return null;
-  if (input.allowedTools?.length && !input.allowedTools.includes("optimize_resume_section")) return null;
+  if (Array.isArray(input.allowedTools) && !input.allowedTools.includes("optimize_resume_section")) return null;
 
   return {
     id: `forced-optimize-resume-section-${Date.now()}`,
@@ -371,13 +373,13 @@ export async function* agentLoopServer(opts: {
   let tools = opts.tools;
   let modelPreference = agent?.model;
   const contractToolAllowlist = taskContract?.routing?.allowedTools;
-  let toolWhitelist = contractToolAllowlist?.length
+  let toolWhitelist = Array.isArray(contractToolAllowlist)
     ? [...contractToolAllowlist]
     : agent?.toolNames?.length ? agent.toolNames : undefined;
   const resumeDiagnosis = taskContract?.taskType === "resume_diagnosis";
   const jdWithoutResume = taskContract?.taskType === "jd_evaluation" && taskContract.routing?.jdMatchResume === false;
   const blockedResumeTools = new Set(["read_file", "get_profile"]);
-  const activeSystemPrompt = resumeDiagnosis
+  let activeSystemPrompt = resumeDiagnosis
     ? `${systemPrompt}\n${RESUME_DIAGNOSIS_DIRECTIVE}`
     : jdWithoutResume
       ? `${systemPrompt}\n本轮 JD 分析按用户要求不匹配简历；不要读取简历、画像或长期个人记忆，也不要引用旧报告里的简历匹配结论。只分析当前 JD 本身。`
@@ -657,9 +659,9 @@ export async function* agentLoopServer(opts: {
       }
 
       const paramsKey = JSON.stringify(params);
-      let subagentStartedAt = 0;
-      let subagentMeta: { delegationId: string; agentId: string; goal: string } | null = null;
-      const recent = requiresReadBackVerification(tc.name)
+      let subagentMeta: ResearchDelegationContract | null = null;
+      let collaborationDenial: ToolResult | undefined;
+      const recent = requiresReadBackVerification(tc.name) || tc.name === "delegate_research"
         ? undefined
         : recentCalls.find((c) => c.name === tc.name && c.params === paramsKey);
       let toolResult: ToolResult;
@@ -674,18 +676,27 @@ export async function* agentLoopServer(opts: {
         yield { type: "phase", phase: "executing" };
         yield { type: "tool_call", name: tc.name, params };
 
-        // 0.11.0-B: declared subagent tools emit subagent lifecycle events so
-        // the UI can show who is researching what while the delegation runs.
-        subagentMeta = getTool(tc.name)?.outcome?.subagentOf?.(params) || null;
+        if (tc.name === "delegate_research" && executionContext?.workerId) {
+          try {
+            subagentMeta = await new ResearchDelegationService(getDurableAgentRuntime()).prepare(params, {
+              ...executionContext, allowlist: toolWhitelist || executionContext.allowlist,
+            });
+          } catch (error) {
+            collaborationDenial = { success: false, data: null, error: error instanceof Error ? error.message : "研究授权校验失败",
+              errorCategory: "policy_denied", recoverable: false };
+          }
+        }
         if (subagentMeta) {
           yield {
             type: "subagent.started",
-            delegationId: `${tc.name}-${Date.now()}`,
-            agentId: subagentMeta.agentId,
-            goal: subagentMeta.goal,
+            delegationId: subagentMeta.delegationId,
+            agentId: subagentMeta.targetAgentId,
+            goal: subagentMeta.purpose,
+            dependency: subagentMeta.dependency,
+            sourceArtifactIds: subagentMeta.sourceArtifactIds,
+            constraints: subagentMeta.constraints,
           };
         }
-        subagentStartedAt = subagentMeta ? Date.now() : 0;
 
         const durableExecution = Boolean(
           executionContext?.workerId
@@ -701,7 +712,7 @@ export async function* agentLoopServer(opts: {
                 recoverable: true,
               }
             : undefined;
-          const policyDenial = modeDenial
+          const policyDenial = modeDenial || collaborationDenial
             || enforceToolPolicy({ toolName: tc.name, params, messages: ctx, toolWhitelist, interviewState, interviewRebindAction })
             || enforceToolGovernance({ toolName: tc.name, params, taskContract, agentId: agent?.id })
             || undefined;
@@ -714,9 +725,9 @@ export async function* agentLoopServer(opts: {
             toolName: tc.name,
             args: params,
             allowlist: toolWhitelist || executionContext!.allowlist,
-            requestId: executionContext!.requestId,
+            requestId: subagentMeta?.delegationId || executionContext!.requestId,
             policyDenial,
-            signal: executionContext!.signal,
+            signal: executionContext!.signal || signal,
             taskContract: taskContract || undefined,
           });
           durableRunDirective = outcome.runDirective;
@@ -728,11 +739,12 @@ export async function* agentLoopServer(opts: {
             recoverable: true,
           };
           formatted = formatToolResult(toolResult, tc.name);
-          if (outcome.runDirective !== "continue") {
+          if (subagentMeta && !toolResult.success) durableRunDirective = subagentMeta.dependency === "required" ? "wait_user" : "continue";
+          if (durableRunDirective !== "continue") {
             yield {
               type: "run_directive",
-              directive: outcome.runDirective,
-              reason: outcome.observation?.userSafeSummary,
+              directive: durableRunDirective,
+              reason: toolResult.error || outcome.observation?.userSafeSummary,
             };
           }
           // M1 gap closure: emit the JD persistence completion card for the
@@ -808,15 +820,14 @@ export async function* agentLoopServer(opts: {
       const waitsForUser = outcomeMeta?.waitsForUser
         ? outcomeMeta.waitsForUser(toolResult) === true
         : shouldWaitForUserAfterToolResult(tc.name, toolResult.data);
-      // 0.11.0-B: close the subagent lifecycle opened at tool_call time.
-      if (subagentStartedAt) {
-        const delegationId = `${tc.name}-${subagentStartedAt}`;
+      if (subagentMeta) {
+        const delegationId = subagentMeta.delegationId;
         if (toolResult.success) {
           const d = (toolResult.data && typeof toolResult.data === "object" ? toolResult.data : {}) as Record<string, unknown>;
           yield {
             type: "subagent.finished",
             delegationId,
-            agentId: typeof d.targetAgentId === "string" ? d.targetAgentId : (subagentMeta?.agentId ?? ""),
+            agentId: subagentMeta.targetAgentId,
             findings: typeof d.findings === "string" ? d.findings : "",
             keyPoints: Array.isArray(d.keyPoints) ? d.keyPoints : [],
           };
@@ -824,7 +835,7 @@ export async function* agentLoopServer(opts: {
           yield {
             type: "subagent.error",
             delegationId,
-            agentId: subagentMeta?.agentId ?? "",
+            agentId: subagentMeta.targetAgentId,
             reason: toolResult.error || "委派子任务失败",
           };
         }
@@ -875,6 +886,7 @@ export async function* agentLoopServer(opts: {
       }
 
       if (durableRunDirective === "wait_user") {
+        if (subagentMeta && !toolResult.success) yield { type: "text", content: toolResult.error || "必需研究尚未完成，等待恢复。" };
         yield { type: "done" };
         return;
       }
@@ -926,24 +938,26 @@ export async function* agentLoopServer(opts: {
         && toolResult.data
         && typeof toolResult.data === "object"
         && (toolResult.data as Record<string, unknown>).handoff) as
-        | { agentId: string; toTask?: string; reason?: string }
+        | { agentId: string; goal: string; allowedTools: string[]; sourceRefs: unknown[]; sourceArtifactIds: string[];
+          constraints: Record<string, unknown>; progress: Record<string, unknown>; findings: unknown[] }
         | undefined;
       if (handoff) {
         const nextAgent = getAgentById(handoff.agentId);
         if (nextAgent) {
           agent = nextAgent;
           modelPreference = agent.model;
+          activeSystemPrompt = `${await agent.buildSystemPrompt({ careerDNA: "", agentKnowledge: "", currentMessages: [] })}\n当前主责身份：${agent.name}（${agent.id}）。当前目标和 Program 以原 Run Contract 为准，禁止用专家默认任务替换。\n${JSON.stringify(taskContract)}\n原任务系统约束必须保留：\n${systemPrompt}`;
           const nextAgentToolNames = agent.toolNames?.length ? agent.toolNames : agent.tools.map((t) => t.name);
-          const nextToolNames = contractToolAllowlist?.length
-            ? nextAgentToolNames.filter((name) => contractToolAllowlist.includes(name))
-            : nextAgentToolNames;
+          const nextToolNames = nextAgentToolNames.filter((name) => handoff.allowedTools.includes(name)
+            && executionContext?.allowlist.includes(name)
+            && (contractToolAllowlist === undefined || contractToolAllowlist.includes(name)));
           toolWhitelist = nextToolNames;
           tools = registry.toOpenAITools(nextToolNames, executionContext?.workerId !== undefined)
             .filter((t) => nextToolNames.includes(t.function.name));
           yield { type: "agent_switch", agentId: agent.id, agentName: agent.name };
           ctx.push({
             role: "user",
-            content: `<!-- system:handoff -->主责已交接给 ${agent.name}。交接原因：${handoff.reason || ""}。请以当前主责身份继续完成用户目标。`,
+            content: `<!-- system:handoff -->主责已交接给 ${agent.name}。必须继续同一目标和 Program，保留原系统约束；不得以专家默认任务扩展目标或工具。交接上下文：${JSON.stringify(handoff)}`,
           });
           state.contextSize = estimateTokens(ctx);
           continue;
@@ -964,7 +978,7 @@ export async function* agentLoopServer(opts: {
       }
 
       // Only cache successful / non-degraded results
-      if (toolResult.success && !requiresReadBackVerification(tc.name)) {
+      if (toolResult.success && !requiresReadBackVerification(tc.name) && tc.name !== "delegate_research") {
         recentCalls.push({ name: tc.name, params: paramsKey, result: formatted });
         if (recentCalls.length > 5) recentCalls.shift();
       }
@@ -1001,8 +1015,10 @@ export async function* agentLoopServer(opts: {
           || "【请基于以上工具结果简洁回答。不要扩写成长报告；缺关键信息时只问缺的那一项。】";
         ctx.push({
           role: "user",
-          content: `<!-- tool:${tc.name} result -->\n${llmText}${hint}\n\n${followup}`,
+          content: `<!-- tool:${tc.name} result -->\n${llmText}${hint}\n\n${subagentMeta ? "这是受约束的研究发现，不属于已验证的用户个人事实；保留来源和限制，不写入用户画像。\n" : ""}${followup}`,
         });
+        if (subagentMeta && toolResult.success) yield { type: "subagent.consumed", delegationId: subagentMeta.delegationId,
+          agentId: subagentMeta.targetAgentId, sourceArtifactIds: subagentMeta.sourceArtifactIds };
       }
       state.contextSize = estimateTokens(ctx);
     }

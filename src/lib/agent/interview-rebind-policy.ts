@@ -58,6 +58,7 @@ const SUPPORTING_PATTERN = /参考|补充|结合看|一起看|顺便看|也看�
 const SWITCH_PATTERN = /切换|换成|改用|用这份|用这个|使用这份|使用这个|绑定到|switch|change to/i;
 const RESTART_PATTERN = /重新开始|重开|新开|另开|从头|restart|new interview|start over/i;
 const NEGATED_RESTART_PATTERN = /(?:别|不要|不用|不必|先别|暂时别|先不|暂不).{0,8}(?:重新开始|重开|新开|另开|restart|start over)/i;
+const MATERIAL_CHANGE_DIRECTIVE_PATTERN = /(?:^|[，。；;！？!?])\s*(?:请|麻烦|帮我|你先|现在|然后|接下来|后面|先|这次|并|再)*(?:把|用|使用|切换|换成|改用|绑定到|重新开始|重开|新开|另开|从头|switch|change to|restart|start over)/i;
 const AMBIGUOUS_OTHER_PATTERN = /另一个|另一份|别的|其他|另外|新的|other|another/i;
 const EXPLICIT_ID_PATTERN = /#?\d{1,6}|「[^」]{2,80}」|"[^"]{2,80}"|《[^》]{2,80}》|[\u4e00-\u9fa5A-Za-z0-9][\u4e00-\u9fa5A-Za-z0-9\s·_-]{2,80}/;
 
@@ -101,8 +102,9 @@ export function classifyInterviewMaterialReference(text: string): InterviewMater
     };
   }
 
-  const wantsRestart = RESTART_PATTERN.test(normalized) && !NEGATED_RESTART_PATTERN.test(normalized);
-  const wantsSwitch = SWITCH_PATTERN.test(normalized);
+  const changeDirective = MATERIAL_CHANGE_DIRECTIVE_PATTERN.test(normalized);
+  const wantsRestart = changeDirective && RESTART_PATTERN.test(normalized) && !NEGATED_RESTART_PATTERN.test(normalized);
+  const wantsSwitch = changeDirective && SWITCH_PATTERN.test(normalized);
   const wantsSupport = SUPPORTING_PATTERN.test(normalized);
   const ambiguousOther = AMBIGUOUS_OTHER_PATTERN.test(normalized);
   const namedTarget = hasNamedTarget(normalized);
@@ -301,6 +303,16 @@ export function resolveInterviewRebindAction(
       materialKind: decision.materialKind,
       match,
       reason: "Explicit switch request with a high-confidence local match.",
+    };
+  }
+
+  if (decision.explicit && ["restart_as_new_interview", "switch_active_material"].includes(decision.intent)) {
+    return {
+      action: "ask_clarification",
+      materialKind: decision.materialKind,
+      match: match || undefined,
+      clarificationQuestion: `目标${materialLabel(decision.materialKind)}尚不能唯一核验，请提供具体材料名称或编号；确认前保留原材料和题目。`,
+      reason: "The explicit material change cannot be verified and must not become supporting context.",
     };
   }
 

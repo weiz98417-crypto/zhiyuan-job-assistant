@@ -221,7 +221,7 @@ export async function* orchestrateGen(
       ? agent.tools.map((t) => t.name)
       : registry.getAll().map((t) => t.name);
   const contractTools = ctx.taskContract?.routing?.allowedTools;
-  const effectiveToolNames = contractTools?.length
+  const effectiveToolNames = Array.isArray(contractTools)
     ? toolNames.filter((name) => contractTools.includes(name))
     : toolNames;
   const allTools = registry.toOpenAITools(effectiveToolNames, ctx.durable === true);
@@ -366,7 +366,7 @@ export async function orchestrate(
       ? agent.tools.map((t) => t.name)
       : registry.getAll().map((t) => t.name);
   const contractTools = ctx.taskContract?.routing?.allowedTools;
-  const effectiveToolNames = contractTools?.length
+  const effectiveToolNames = Array.isArray(contractTools)
     ? toolNames.filter((name) => contractTools.includes(name))
     : toolNames;
   const allTools = registry.toOpenAITools(effectiveToolNames);

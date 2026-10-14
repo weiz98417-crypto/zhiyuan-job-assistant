@@ -377,11 +377,11 @@ describe("durable interview session checkpoints", () => {
     });
   });
 
-  it("keeps question-only formatting across answers and reload without changing the source or counting the instruction", async () => {
+  it.each(["以后只问问题", "只问问题，不要解释", "请接下来只问一题，不要点评"])("keeps question-only formatting for %s across answers and reload without counting the instruction", async (instruction) => {
     const principal = { userId: "user-1" };
     await handleInterviewSessionTurnForAgent(principal, { company: "甲公司", role: "AI 产品经理", jdText: "JD-A", cvText: "CV-A" });
     const initial = structuredClone((await boundaries.sessions.get(42, principal.userId)).interview_state_json);
-    await handleInterviewSessionTurnForAgent(principal, { sessionId: "42", answer: "以后只问问题", requestKey: "format-only" });
+    await handleInterviewSessionTurnForAgent(principal, { sessionId: "42", answer: instruction, requestKey: "format-only" });
     const next = await handleInterviewSessionTurnForAgent(principal, {
       sessionId: "42", answer: "我负责SQL自动化，调研业务流程后编写脚本并推动上线，周报从5小时降到2小时，团队每周节省3小时。上线后我持续收集用户反馈，保留回滚方案并验证数据准确性。", requestKey: "format-answer-1",
     });
@@ -390,7 +390,7 @@ describe("durable interview session checkpoints", () => {
     expect(row.interview_state_json.sourceBinding).toEqual(initial.sourceBinding);
     expect(next.message).toBe(next.question);
     expect(next.previousFeedback).toBeTruthy();
-    expect(row.interview_state_json.answers.map((answer: { answer: string }) => answer.answer)).not.toContain("以后只问问题");
+    expect(row.interview_state_json.answers.map((answer: { answer: string }) => answer.answer)).not.toContain(instruction);
     const events = [];
     for await (const event of agentLoopServer({
       systemPrompt: "继续面试", messages: [{ role: "user", content: "下一题" }],

@@ -77,6 +77,11 @@ export function projectDurableUiEvent(
       delegationId: safeIdentifier(event.delegationId),
       agentId: safeIdentifier(event.agentId),
       goal: safeText(event.goal, 500),
+      dependency: event.dependency === "supporting" ? "supporting" : "required",
+      sourceArtifactIds: safeSourceIds(event.sourceArtifactIds),
+      constraints: { readOnly: record(event.constraints).readOnly === true,
+        noUserInteraction: record(event.constraints).noUserInteraction === true,
+        noPersonalMemoryWrite: record(event.constraints).noPersonalMemoryWrite === true },
     };
   }
   if (type === "subagent.finished") {
@@ -98,6 +103,8 @@ export function projectDurableUiEvent(
       reason: safeText(event.reason, 500),
     };
   }
+  if (type === "subagent.consumed") return { type, delegationId: safeIdentifier(event.delegationId),
+    agentId: safeIdentifier(event.agentId), sourceArtifactIds: safeSourceIds(event.sourceArtifactIds) };
   if (type === "messages.snapshot") {
     return { type, items: Array.isArray(event.items) ? event.items : [] };
   }
@@ -142,6 +149,10 @@ function safeIdentifier(value: unknown): string {
 
 function safeText(value: unknown, max: number): string {
   return typeof value === "string" ? value.slice(0, max) : "";
+}
+
+function safeSourceIds(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string").slice(0, 30).map(safeIdentifier) : [];
 }
 
 export function safeAssistantText(content: string): string {

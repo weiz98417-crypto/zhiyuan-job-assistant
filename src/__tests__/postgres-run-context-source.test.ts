@@ -54,7 +54,8 @@ describe("Postgres Run Context source", () => {
     const material = await source.load({ userId: "user-1" }, "run-1");
 
     expect(material).toEqual({
-      completedToolFacts: [{ toolName: "read_file", summary: "已读取简历版本 v3" }],
+      completedToolFacts: [{ toolName: "read_file", summary: "已读取简历版本 v3", sourceRef: {
+        type: "tool_attempt", id: "attempt-1", version: "verified", hash: "args-hash" } }],
       recoveryObservations: [{
         toolName: "apply_resume_edit_proposal",
         summary: "工具尝试状态为 reconciling/unknown：工具执行结果尚未确认，需要先对账",

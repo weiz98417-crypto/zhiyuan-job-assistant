@@ -21,8 +21,8 @@
       "kind": "prompt",
       "lang": "zh",
       "source": "spec-26 (rubric adapted from LuJie CareerKit, Apache-2.0)",
-      "version": "1.0.0",
-      "lastReviewed": "2026-10-03",
+      "version": "1.0.2",
+      "lastReviewed": "2026-10-14",
       "consumers": [
         "src/lib/server/interview-rubric.ts"
       ]

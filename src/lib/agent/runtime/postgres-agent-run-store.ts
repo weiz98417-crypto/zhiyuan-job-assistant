@@ -139,6 +139,25 @@ export class PostgresAgentRunStore implements AgentRunStore {
             )
             AND candidate.wake_at <= $1
             AND (
+              candidate.task_type <> 'delegated_research'
+              OR candidate.status = 'cancel_requested'
+              OR (
+                candidate.runtime_mode = 'worker_readonly'
+                AND candidate.session_id IS NULL
+                AND candidate.contract_json->>'kind' = 'governed-research/v1'
+                AND candidate.contract_json->>'parentRunId' = candidate.parent_run_id
+                AND EXISTS (
+                  SELECT 1 FROM agent_runs parent
+                  WHERE parent.id = candidate.parent_run_id
+                    AND parent.user_id = candidate.user_id
+                    AND parent.legacy = FALSE
+                    AND parent.status IN ('running', 'recovering')
+                    AND parent.owner_id IS NOT NULL
+                    AND parent.lease_expires_at > $1
+                )
+              )
+            )
+            AND (
               candidate.status = 'queued'
               OR (candidate.status = 'cancel_requested' AND candidate.owner_id IS NULL)
               OR (
@@ -154,6 +173,28 @@ export class PostgresAgentRunStore implements AgentRunStore {
                 AND active.legacy = FALSE
                 AND active.status IN ('running', 'recovering', 'verifying', 'cancel_requested')
                 AND active.lease_expires_at > $1
+                AND NOT (
+                  candidate.task_type = 'delegated_research'
+                  AND candidate.runtime_mode = 'worker_readonly'
+                  AND candidate.session_id IS NULL
+                  AND candidate.contract_json->>'kind' = 'governed-research/v1'
+                  AND candidate.contract_json->>'parentRunId' = candidate.parent_run_id
+                  AND EXISTS (
+                    SELECT 1 FROM agent_runs parent
+                    WHERE parent.id = candidate.parent_run_id
+                      AND parent.user_id = candidate.user_id
+                      AND parent.legacy = FALSE
+                      AND parent.status IN ('running', 'recovering')
+                      AND parent.owner_id IS NOT NULL
+                      AND parent.lease_expires_at > $1
+                  )
+                  AND (
+                    active.id = candidate.parent_run_id
+                    OR (active.parent_run_id = candidate.parent_run_id
+                      AND active.task_type = 'delegated_research'
+                      AND active.runtime_mode = 'worker_readonly')
+                  )
+                )
             )
           ORDER BY candidate.wake_at ASC, candidate.created_at ASC
           FOR UPDATE SKIP LOCKED

@@ -47,9 +47,10 @@ export type SSEEvent =
   // 0.11.0-B event dialect (AG-UI aligned)
   | { type: "step.started"; step: string; criteriaDone: number; criteriaTotal: number }
   | { type: "step.finished"; step: string; criteriaDone: number; criteriaTotal: number }
-  | { type: "subagent.started"; delegationId: string; agentId: string; goal: string }
+  | { type: "subagent.started"; delegationId: string; agentId: string; goal: string; dependency?: "required" | "supporting"; sourceArtifactIds?: string[]; constraints?: Record<string, unknown> }
   | { type: "subagent.finished"; delegationId: string; agentId: string; findings?: string; keyPoints?: unknown[] }
   | { type: "subagent.error"; delegationId: string; agentId: string; reason?: string }
+  | { type: "subagent.consumed"; delegationId: string; agentId: string; sourceArtifactIds: string[] }
   | { type: "messages.snapshot"; items: Array<Record<string, unknown>> }
   | { type: "done"; company?: string; role?: string; archetype?: string; overallScore?: number; blocks?: Record<string, unknown>; jdText?: string }
   // Stream evaluation events (from /api/evaluate/stream)

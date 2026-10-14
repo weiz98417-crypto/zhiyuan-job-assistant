@@ -17,7 +17,7 @@ export function classifyInterviewControl(content: string): InterviewControl | un
   if (/^(?:请|帮我)?(?:结束|结束面试|结束模拟面试|结束模拟|复盘|总结|做个复盘|面试复盘|finish|recap|summary)$/.test(text)) return "finish";
   if (/^(?:请|帮我)?(?:取消|取消面试|取消模拟面试|放弃面试|cancel)$/.test(text)) return "cancel";
   if (/^(?:请|帮我)?(?:提示|给个提示|给我提示|示范|给个示范|给我示范|给个示例|给我示例|给个示范答案|换个问法|换问法|那你给|你给|hint|help)$/.test(text)) return "help";
-  if (/^(?:以后|接下来|后面|请)?(?:只问问题|只问一题|只出一道题|格式短一点|格式简短一点|不要解释|不要这些格式|问题简短一点)$/.test(text)) return "format";
+  if (/^(?:请)?(?:以后|接下来|后面)?(?:只问问题|只问一题|只出一道题|格式短一点|格式简短一点|不要解释|不要这些格式|问题简短一点)(?:不要解释|不要点评|不要示范|不要这些格式)?$/.test(text)) return "format";
   return undefined;
 }
 

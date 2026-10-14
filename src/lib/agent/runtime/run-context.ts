@@ -11,7 +11,7 @@ export interface RunContextMessage {
 }
 
 export interface DurableRunContextMaterial {
-  completedToolFacts: Array<{ toolName: string; summary: string }>;
+  completedToolFacts: Array<{ toolName: string; summary: string; sourceRef?: AgentRunFactReference }>;
   recoveryObservations: Array<{ toolName: string; summary: string }>;
   evidence: Array<{ type: string; content: string }>;
   gates: Array<{

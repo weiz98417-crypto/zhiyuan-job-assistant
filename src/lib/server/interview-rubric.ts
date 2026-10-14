@@ -12,7 +12,7 @@ import { parseLlmJsonObject } from "@/lib/llm-json";
 import { loadRegistryText } from "@/lib/agent/knowledge/registry/loader";
 import { COACH_MODES, type AnswerScore, type CoachMode } from "@/types";
 
-export const INTERVIEW_SCORING_VERSION = "interview-rubric-v1";
+export const INTERVIEW_SCORING_VERSION = "interview-rubric-v2";
 
 export type RubricState = "does_not_know" | "did_not_articulate" | "not_on_resume" | "none";
 export type RubricBand = 0 | 1 | 2 | 3 | 4;
@@ -82,15 +82,19 @@ export function bandToFiveScale(band: RubricBand): number {
 export function findMissingEvidence(parsed: {
   bands?: unknown;
   evidence?: unknown;
-}): string[] {
+  overallBand?: unknown;
+}, answer?: string): string[] {
   const bands = (parsed.bands && typeof parsed.bands === "object" ? parsed.bands : {}) as Record<string, unknown>;
   const evidence = (parsed.evidence && typeof parsed.evidence === "object" ? parsed.evidence : {}) as Record<string, string>;
-  return DIMENSIONS.filter((dimension) => {
+  const missing: string[] = DIMENSIONS.filter((dimension) => {
     const band = bands[dimension];
-    if (typeof band !== "number" || !Number.isFinite(band)) return true; // 缺档或非数值 → veto
+    if (typeof band !== "number" || !Number.isInteger(band) || band < 0 || band > 4) return true;
     const quote = evidence[dimension];
-    return typeof quote !== "string" || quote.trim().length < 2;
+    return typeof quote !== "string" || quote.trim().length < 2 || answer !== undefined && !answer.includes(quote);
   });
+  if (parsed.overallBand !== undefined && (typeof parsed.overallBand !== "number"
+    || !Number.isInteger(parsed.overallBand) || parsed.overallBand < 0 || parsed.overallBand > 4)) missing.push("overallBand");
+  return missing;
 }
 
 function normalizeBand(value: unknown): RubricBand {
@@ -217,27 +221,32 @@ export async function scoreAnswerWithRubric(
   const mode: CoachMode = input.mode && input.mode in COACH_MODES ? input.mode : "behavioral";
 
   let parsed = await callRubricOnce(input, mode, options.completion);
+  let reevaluated = false;
   if (!parsed) {
     // 解析失败与缺引用同属可重试暂态（间歇性 ~15%，eng review 校准实测）：重试一次
     parsed = await callRubricOnce(input, mode, options.completion,
       "上一轮返回无法解析为合法 JSON。严格输出单个 JSON 对象：不要 markdown 围栏外的任何文本，字符串值内的双引号必须转义，不要在被截断处停止。");
+    reevaluated = true;
     if (!parsed) {
       return { unscored: true, reason: "重试后仍无法解析为 JSON", scoringVersion: INTERVIEW_SCORING_VERSION };
     }
   }
-  let missing = findMissingEvidence(parsed);
+  let missing = findMissingEvidence(parsed, input.answer);
   if (missing.length > 0) {
+    if (reevaluated) {
+      return { unscored: true, reason: `重评后仍缺有效引用或档位（${MISSING_EVIDENCE_VETO}）：${missing.join("、")}`, scoringVersion: INTERVIEW_SCORING_VERSION };
+    }
     // veto 路径：作废重评一次（仅一次）
     parsed = await callRubricOnce(
       input,
       mode,
       options.completion,
-      `上一轮评分被判无效（${MISSING_EVIDENCE_VETO}）：以下维度没有引用回答原文——${missing.join("、")}。每个维度的 evidence 字段必须逐字摘抄回答片段，否则本次评分作废。`,
+      `上一轮评分被判无效（${MISSING_EVIDENCE_VETO}）：以下维度缺少有效回答原文引用或档位——${missing.join("、")}。每个 evidence 字段仅能包含回答中逐字连续的片段，不加引号、点评、解释或省略号，不引用题目、简历、上下文或长期记忆。评价放在 review 中，否则本次评分作废。`,
     );
     if (!parsed) {
       return { unscored: true, reason: `重评后仍无法解析（${MISSING_EVIDENCE_VETO}）`, scoringVersion: INTERVIEW_SCORING_VERSION };
     }
-    missing = findMissingEvidence(parsed);
+    missing = findMissingEvidence(parsed, input.answer);
     if (missing.length > 0) {
       return { unscored: true, reason: `重评后仍缺证据引用（${MISSING_EVIDENCE_VETO}）：${missing.join("、")}`, scoringVersion: INTERVIEW_SCORING_VERSION };
     }

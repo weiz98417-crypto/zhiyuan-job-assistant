@@ -49,6 +49,8 @@ export class PostgresRunContextSource implements DurableRunContextSource {
         completedToolFacts: attempts.rows.map((row) => ({
           toolName: String(row.tool_name || ""),
           summary: attemptSummary(row),
+          sourceRef: { type: "tool_attempt", id: String(row.id || ""), version: String(row.effect_state || "succeeded"),
+            hash: String(row.args_hash || "") || undefined },
         })),
         recoveryObservations: recoveryAttempts.rows.map((row) => ({
           toolName: String(row.tool_name || "unknown"),

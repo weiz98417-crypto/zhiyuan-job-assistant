@@ -144,9 +144,9 @@ const SAFE_PAYLOAD_FIELDS: Record<string, readonly string[]> = {
   role_preference: ["role", "reason", "evidence", "confidence", "status", "readBackVerified"],
   export_artifact: ["artifactId", "downloadUrl", "filename", "size", "sha256", "readBackVerified", "version", "hash"],
   download: ["artifactId", "downloadUrl", "filename", "size", "sha256", "readBackVerified", "version", "hash"],
-  handoff: ["agentId", "fromTask", "toTask", "reason"],
-  handoff_denied: ["reason"],
-  delegation: ["delegationId", "agentId", "goal", "state", "findings", "keyPoints"],
+  handoff: ["handoffId", "runId", "agentId", "fromTask", "toTask", "goal", "sourceArtifactIds", "constraints", "findings", "readBackVerified"],
+  handoff_denied: ["reason", "state", "admissionRequired"],
+  delegation: ["delegationId", "childRunId", "agentId", "goal", "state", "findings", "keyPoints", "dependency", "sourceArtifactIds", "constraints", "limitations", "limitation", "readBackVerified"],
   delegation_denied: ["reason"],
 };
 

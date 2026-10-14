@@ -25,6 +25,7 @@
     "check:postgres": "node scripts/check-postgres.mjs",
     "check:postgres-cutover": "node scripts/check-postgres-cutover.mjs",
     "check:agent-runtime": "node scripts/check-agent-runtime-preflight.mjs",
+    "check:e2e-remediation": "node scripts/check-e2e-remediation-gate.mjs",
     "check:jd-eval-partials": "node scripts/check-jd-eval-partials.mjs",
     "backup:postgres": "node scripts/backup-postgres.mjs",
     "restore:postgres": "node scripts/restore-postgres.mjs",

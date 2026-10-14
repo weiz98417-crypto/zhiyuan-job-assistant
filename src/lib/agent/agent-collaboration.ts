@@ -120,7 +120,7 @@ export function validateDelegation(input: {
   if (DELEGATION_FORBIDDEN_TASKS.includes(card.baseTask)) {
     return { allowed: false, reason: `委派目标 ${input.targetAgentId} 的主任务是写操作，研究委派只允许只读`, effectiveTools: [] };
   }
-  const allowlist = input.agentAllowlist && input.agentAllowlist.length > 0
+  const allowlist = input.agentAllowlist !== undefined
     ? new Set(input.agentAllowlist)
     : null;
   const effectiveTools = card.readonlyResearchTools.filter((tool) => !allowlist || allowlist.has(tool));
